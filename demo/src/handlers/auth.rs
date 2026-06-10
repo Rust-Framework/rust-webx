@@ -150,10 +150,17 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
 #[async_trait]
 impl IRequestHandler<AuthMeRequest, UserView> for AuthMeHandler {
     async fn handle(&self, _: AuthMeRequest) -> Result<UserView> {
-        // The endpoint-level #[authorize] guarantees the user is authenticated.
-        // take_current_user() is set by StubEndpoint::handle before dispatching.
-        let (user_id, _) =
-            lrwf::take_current_user().ok_or_else(|| Error::Http("Not authenticated".into()))?;
+        unreachable!("handle_with_claims is always called by the dispatcher")
+    }
+
+    async fn handle_with_claims(
+        &self,
+        _: AuthMeRequest,
+        claims: Option<&dyn IClaims>,
+    ) -> Result<UserView> {
+        let user_id = claims
+            .map(|c| c.subject().to_string())
+            .ok_or_else(|| Error::Http("Not authenticated".into()))?;
 
         let user = find_user_by_id(&user_id).ok_or_else(|| Error::Http("User not found".into()))?;
 

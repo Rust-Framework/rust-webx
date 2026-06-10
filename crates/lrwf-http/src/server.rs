@@ -43,7 +43,7 @@ pub struct Host {
     provider: Arc<ServiceProvider>,
     pub options: AppOptions,
     pipeline: Arc<MiddlewarePipeline>,
-    router: Arc<tokio::sync::RwLock<Router>>,
+    router: Arc<Router>,
     mode: AppMode,
     #[allow(dead_code)]
     spa_root: Option<String>,
@@ -255,6 +255,7 @@ impl HostBuilder {
                 std::collections::HashMap<String, String>,
                 std::collections::HashMap<String, String>,
                 Arc<ServiceProvider>,
+                Option<Box<dyn lrwf_core::auth::IClaims>>,
             ) -> std::pin::Pin<
                 Box<
                     dyn std::future::Future<
@@ -325,7 +326,7 @@ impl HostBuilder {
             tracing::info!("{} route(s) registered", route_count);
         }
 
-        let router = Arc::new(tokio::sync::RwLock::new(router));
+        let router = Arc::new(router);
 
         Host {
             provider,
@@ -509,11 +510,10 @@ impl IHost for Host {
     }
 }
 
-fn make_router_handler(router: Arc<tokio::sync::RwLock<Router>>) -> HandlerFn {
+fn make_router_handler(router: Arc<Router>) -> HandlerFn {
     Arc::new(move |ctx: &mut dyn IHttpContext| {
         let router = Arc::clone(&router);
         Box::pin(async move {
-            let router = router.read().await;
             match router.match_route(ctx).await? {
                 Some((endpoint, params, pattern)) => {
                     drop(router);
@@ -540,7 +540,7 @@ fn make_router_handler(router: Arc<tokio::sync::RwLock<Router>>) -> HandlerFn {
 async fn handle_request(
     req: Request<Incoming>,
     pipeline: Arc<MiddlewarePipeline>,
-    router: Arc<tokio::sync::RwLock<Router>>,
+    router: Arc<Router>,
     max_body_size: usize,
 ) -> std::result::Result<hyper::Response<Full<Bytes>>, std::convert::Infallible> {
     let mut ctx = HttpContext::new(req, max_body_size).await;
@@ -590,7 +590,7 @@ async fn serve_http(
     addr: String,
     shutdown: std::sync::Arc<tokio::sync::Notify>,
     pipeline: Arc<MiddlewarePipeline>,
-    router: Arc<tokio::sync::RwLock<Router>>,
+    router: Arc<Router>,
     mode: AppMode,
     max_body_size: usize,
 ) {
@@ -685,7 +685,7 @@ async fn serve_https(
     acceptor: TlsAcceptor,
     shutdown: std::sync::Arc<tokio::sync::Notify>,
     pipeline: Arc<MiddlewarePipeline>,
-    router: Arc<tokio::sync::RwLock<Router>>,
+    router: Arc<Router>,
     mode: AppMode,
     max_body_size: usize,
 ) {

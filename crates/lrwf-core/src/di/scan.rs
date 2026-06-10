@@ -97,6 +97,7 @@ pub struct RouteDispatch {
         route_params: std::collections::HashMap<String, String>,
         query_params: std::collections::HashMap<String, String>,
         provider: std::sync::Arc<lrdi::ServiceProvider>,
+        claims: Option<Box<dyn crate::auth::IClaims>>,
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = crate::error::Result<ResponseData>> + Send>,
     >,

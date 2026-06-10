@@ -110,6 +110,15 @@ impl IClaims for JwtClaims {
     fn claims(&self) -> &HashMap<String, String> {
         &self.raw
     }
+
+    fn clone_box(&self) -> Box<dyn IClaims> {
+        Box::new(Self {
+            sub: self.sub.clone(),
+            roles: self.roles.clone(),
+            permissions: self.permissions.clone(),
+            raw: self.raw.clone(),
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------

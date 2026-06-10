@@ -32,7 +32,7 @@ pub use lrwf_http::authz::{resource_auth_middleware, ResourceAuthorization};
 pub use lrwf_http::context::{HttpContext, HttpRequest, HttpResponse};
 pub use lrwf_http::cors::{CorsConfig, CorsMiddleware};
 pub use lrwf_http::endpoint::{
-    take_current_user, ControllerEndpoint, RequestEndpoint, StaticHtmlEndpoint, StaticJsonEndpoint,
+    ControllerEndpoint, RequestEndpoint, StaticHtmlEndpoint, StaticJsonEndpoint,
 };
 pub use lrwf_http::pipeline::{HandlerFn, MiddlewarePipeline};
 pub use lrwf_http::rate_limit::{RateLimitMiddleware, RateLimiter};

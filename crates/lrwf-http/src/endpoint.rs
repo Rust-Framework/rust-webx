@@ -6,23 +6,7 @@ use lrwf_core::error::Result;
 use lrwf_core::http::IHttpContext;
 use lrwf_core::routing::IEndpoint;
 use serde_json;
-use std::sync::{Arc, Mutex, OnceLock};
-
-/// Per-request storage: the JWT auth middleware sets this, and the dispatch
-/// function reads it before calling the handler.  Both run in the same
-/// async task (StubEndpoint::handle), so there is no concurrent access
-/// from other requests.
-static CURRENT_USER: OnceLock<Mutex<Option<(String, String)>>> = OnceLock::new();
-
-pub(crate) fn set_current_user(id: &str, role: &str) {
-    let lock = CURRENT_USER.get_or_init(|| Mutex::new(None));
-    *lock.lock().unwrap() = Some((id.to_string(), role.to_string()));
-}
-
-pub fn take_current_user() -> Option<(String, String)> {
-    let lock = CURRENT_USER.get_or_init(|| Mutex::new(None));
-    lock.lock().unwrap().take()
-}
+use std::sync::Arc;
 
 /// Endpoint that wraps a boxed async handler.
 #[allow(clippy::type_complexity)]
@@ -78,6 +62,7 @@ pub struct StubEndpoint {
             std::collections::HashMap<String, String>,
             std::collections::HashMap<String, String>,
             Arc<ServiceProvider>,
+            Option<Box<dyn lrwf_core::auth::IClaims>>,
         ) -> std::pin::Pin<
             Box<dyn std::future::Future<Output = Result<lrwf_core::di::scan::ResponseData>> + Send>,
         >,
@@ -97,13 +82,9 @@ impl IEndpoint for StubEndpoint {
             let route_params = ctx.request().route_params().clone();
             let query_params = ctx.request().query().clone();
 
-            // Forward the JWT auth info (set by middleware) to the handler.
-            if let Some(claims) = ctx.claims() {
-                set_current_user(
-                    claims.subject(),
-                    claims.roles().first().map(|s| s.as_str()).unwrap_or(""),
-                );
-            }
+            // Extract claims from the context so they can be forwarded explicitly
+            // to the handler via the dispatch function (fearless concurrency).
+            let claims = ctx.claims().map(|c| c.clone_box());
 
             // ── Authorization check (declared on route via #[authorize]) ──
             if !self.auth_required_role.is_empty() {
@@ -163,8 +144,14 @@ impl IEndpoint for StubEndpoint {
                 }
             }
 
-            let response =
-                dispatch(body_bytes, route_params, query_params, Arc::clone(provider)).await?;
+            let response = dispatch(
+                body_bytes,
+                route_params,
+                query_params,
+                Arc::clone(provider),
+                claims,
+            )
+            .await?;
 
             ctx.response_mut().set_status(response.status);
             ctx.response_mut()

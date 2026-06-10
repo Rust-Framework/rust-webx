@@ -12,6 +12,7 @@
 //! }
 //! ```
 
+use crate::auth::IClaims;
 use crate::error::Result;
 use crate::mediator::{IEventRequest, IRequest};
 
@@ -33,7 +34,18 @@ where
     T: IRequest<R> + Send + 'static,
     R: serde::Serialize + Send + 'static,
 {
+    /// Handle the request without claims (backward-compatible default).
     async fn handle(&self, req: T) -> Result<R>;
+
+    /// Handle the request with optional authentication claims.
+    ///
+    /// The default implementation delegates to `handle`, so existing handlers
+    /// continue to work without modification. Override this method when you
+    /// need access to the authenticated user's identity.
+    async fn handle_with_claims(&self, req: T, claims: Option<&dyn IClaims>) -> Result<R> {
+        let _ = claims;
+        self.handle(req).await
+    }
 }
 
 /// Handles a single `IEventRequest`, performing side effects.

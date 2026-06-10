@@ -24,6 +24,15 @@ pub trait IClaims: Send + Sync {
 
     /// Raw claims map (key-value pairs from the token).
     fn claims(&self) -> &HashMap<String, String>;
+
+    /// Clone the claims into a new boxed trait object.
+    fn clone_box(&self) -> Box<dyn IClaims>;
+}
+
+impl Clone for Box<dyn IClaims> {
+    fn clone(&self) -> Self {
+        self.clone_box()
+    }
 }
 
 /// Authentication scheme interface.

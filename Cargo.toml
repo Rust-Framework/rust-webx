@@ -49,6 +49,7 @@ uuid = { version = "1", features = ["v4"] }
 rustls = "0.23"
 tokio-rustls = "0.26"
 rustls-pemfile = "2"
+criterion = "0.5"
 
 [profile.release]
 opt-level = 3

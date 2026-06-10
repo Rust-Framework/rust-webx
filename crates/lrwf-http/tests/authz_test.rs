@@ -34,6 +34,14 @@ impl IClaims for MockClaims {
     fn claims(&self) -> &HashMap<String, String> {
         unreachable!("claims() not used in authz tests")
     }
+
+    fn clone_box(&self) -> Box<dyn IClaims> {
+        Box::new(MockClaims {
+            sub: self.sub.clone(),
+            roles: self.roles.clone(),
+            permissions: self.permissions.clone(),
+        })
+    }
 }
 
 #[tokio::test]

@@ -215,6 +215,7 @@ fn generate_dispatch_fn(
             route_params: ::std::collections::HashMap<String, String>,
             _query_params: ::std::collections::HashMap<String, String>,
             provider: ::std::sync::Arc<::lrdi::ServiceProvider>,
+            claims: Option<Box<dyn ::lrwf::IClaims>>,
         ) -> ::std::pin::Pin<Box<dyn ::std::future::Future<Output = ::lrwf::Result<::lrwf::ResponseData>> + Send>> {
             Box::pin(async move {
                 // Construct the request from HTTP data
@@ -227,7 +228,7 @@ fn generate_dispatch_fn(
                         format!("No handler registered for {}", stringify!(#ty))
                     ))?;
 
-                let result = handler.handle(request).await?;
+                let result = handler.handle_with_claims(request, claims.as_deref()).await?;
                 let json_bytes = ::serde_json::to_vec(&result).unwrap_or_default();
 
                 Ok(::lrwf::ResponseData {

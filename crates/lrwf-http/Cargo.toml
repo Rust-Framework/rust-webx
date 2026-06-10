@@ -1,0 +1,22 @@
+[package]
+name = "lrwf-http"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "LRWF HTTP layer: Host builder, middleware pipeline, Trie-based router, hyper integration"
+
+[dependencies]
+lrwf-core.workspace = true
+lrwf-openapi.workspace = true
+lrdi.workspace = true
+jsonwebtoken.workspace = true
+async-trait.workspace = true
+tokio = { workspace = true, features = ["net", "rt", "macros", "fs"] }
+hyper.workspace = true
+http-body-util.workspace = true
+hyper-util = { workspace = true, features = ["tokio", "server-auto"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+inventory.workspace = true
+tracing = "0.1"

@@ -126,7 +126,7 @@ fn default_max_age() -> u32 {
 /// TLS is activated automatically when the `App.Urls` array
 /// contains one or more `https://` entries. The certificate
 /// and key paths are read from this section.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct TlsSection {
     /// Path to TLS certificate PEM file.
     #[serde(default, rename = "CertPath")]
@@ -134,15 +134,6 @@ pub struct TlsSection {
     /// Path to TLS private key PEM file.
     #[serde(default, rename = "KeyPath")]
     pub key_path: String,
-}
-
-impl Default for TlsSection {
-    fn default() -> Self {
-        Self {
-            cert_path: String::new(),
-            key_path: String::new(),
-        }
-    }
 }
 
 /// Standard application options loaded from appsettings.json.

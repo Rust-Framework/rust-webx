@@ -18,6 +18,6 @@ async fn main() {
         })
         .build();
 
-    // Address read from appsettings.json → App.Address. No manual passing needed.
+    // Addresses read from appsettings.json → App.Urls. No manual passing needed.
     host.run().await.expect("Server failed");
 }

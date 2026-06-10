@@ -26,7 +26,6 @@ use crate::router::Router;
 use lrwf_core::di::scan::{HandlerRegistration, RouteEntry};
 use lrwf_openapi::{generate_openapi_spec, APIUI_HTML};
 
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::task::JoinSet;
@@ -397,7 +396,8 @@ impl Host {
             Arc::clone(&self.router),
             self.mode,
             self.options.app.max_body_size,
-        ).await
+        ).await;
+        Ok(())
     }
 }
 
@@ -680,7 +680,7 @@ fn build_tls_acceptor(cert_path: &str, key_path: &str) -> Result<TlsAcceptor> {
     let cert_file = File::open(cert_path)
         .map_err(|e| lrwf_core::error::Error::Http(format!("Cannot open cert '{}': {}", cert_path, e)))?;
     let mut cert_reader = BufReader::new(cert_file);
-    let certs: Vec<CertificateDer> = certs(&mut cert_reader).into_iter().filter_map(|r| r.ok()).collect();
+    let certs: Vec<CertificateDer> = certs(&mut cert_reader).filter_map(|r| r.ok()).collect();
     if certs.is_empty() {
         return Err(lrwf_core::error::Error::Http(format!("No valid certs in '{}'", cert_path)));
     }
@@ -689,12 +689,12 @@ fn build_tls_acceptor(cert_path: &str, key_path: &str) -> Result<TlsAcceptor> {
         .map_err(|e| lrwf_core::error::Error::Http(format!("Cannot open key '{}': {}", key_path, e)))?;
     let mut key_reader = BufReader::new(key_file);
     let key = pkcs8_private_keys(&mut key_reader)
-        .into_iter().filter_map(|r| r.ok()).map(PrivateKeyDer::from).next()
+        .filter_map(|r| r.ok()).map(PrivateKeyDer::from).next()
         .or_else(|| {
-            let key_file2 = File::open(key_path).map(|f| BufReader::new(f)).ok()?;
+            let key_file2 = File::open(key_path).map(BufReader::new).ok()?;
             let mut kr2 = key_file2;
             let rsa_keys: Vec<PrivateKeyDer> = rsa_private_keys(&mut kr2)
-                .into_iter().filter_map(|r| r.ok()).map(PrivateKeyDer::from).collect();
+                .filter_map(|r| r.ok()).map(PrivateKeyDer::from).collect();
             rsa_keys.into_iter().next()
         })
         .ok_or_else(|| lrwf_core::error::Error::Http(format!("No valid private key in '{}'", key_path)))?;

@@ -26,18 +26,36 @@ impl<T> IAppOptions for T where T: for<'de> Deserialize<'de> + Default + Send + 
 // ---------------------------------------------------------------------------
 
 /// Top-level application section.
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct AppSection {
     /// Application display name.
     #[serde(default, rename = "Name")]
     pub name: String,
-    /// Listen address (e.g., "0.0.0.0:5000").
-    #[serde(default = "default_address", rename = "Address")]
-    pub address: String,
+    /// Listen addresses as full URLs (e.g., "http://0.0.0.0:5000").
+    /// ASP.NET Core compatible. Default: ["http://0.0.0.0:5000"].
+    #[serde(default = "default_urls", rename = "Urls")]
+    pub urls: Vec<String>,
+    /// Maximum request body size in bytes. Default: 10 MB.
+    #[serde(default = "default_max_body_size", rename = "MaxBodySize")]
+    pub max_body_size: usize,
 }
 
-fn default_address() -> String {
-    "0.0.0.0:5000".to_string()
+impl Default for AppSection {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            urls: default_urls(),
+            max_body_size: default_max_body_size(),
+        }
+    }
+}
+
+fn default_urls() -> Vec<String> {
+    vec!["http://0.0.0.0:5000".to_string()]
+}
+
+fn default_max_body_size() -> usize {
+    10 * 1024 * 1024 // 10 MB
 }
 
 /// JWT authentication section.
@@ -93,20 +111,38 @@ fn default_cors_methods() -> Vec<String> {
         "PATCH".to_string(),
         "OPTIONS".to_string(),
     ]
-    .into_iter()
-    .map(String::from)
-    .collect()
 }
 
 fn default_cors_headers() -> Vec<String> {
     vec!["Content-Type".to_string(), "Authorization".to_string()]
-        .into_iter()
-        .map(String::from)
-        .collect()
 }
 
 fn default_max_age() -> u32 {
     86400
+}
+
+/// TLS (Transport Layer Security) section.
+///
+/// TLS is activated automatically when the `App.Urls` array
+/// contains one or more `https://` entries. The certificate
+/// and key paths are read from this section.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TlsSection {
+    /// Path to TLS certificate PEM file.
+    #[serde(default, rename = "CertPath")]
+    pub cert_path: String,
+    /// Path to TLS private key PEM file.
+    #[serde(default, rename = "KeyPath")]
+    pub key_path: String,
+}
+
+impl Default for TlsSection {
+    fn default() -> Self {
+        Self {
+            cert_path: String::new(),
+            key_path: String::new(),
+        }
+    }
 }
 
 /// Standard application options loaded from appsettings.json.
@@ -124,13 +160,19 @@ pub struct AppOptions {
     /// CORS settings.
     #[serde(default, rename = "Cors")]
     pub cors: CorsSection,
+    /// TLS settings.
+    #[serde(default, rename = "Tls")]
+    pub tls: TlsSection,
 }
 
 // ---------------------------------------------------------------------------
 // Config loading helpers
 // ---------------------------------------------------------------------------
 
-/// Load the merged appsettings JSON (base + Development overlay).
+/// Load the merged appsettings JSON (base + Development overlay + env overrides).
+///
+/// Environment variables prefixed with `APP__` override the corresponding JSON values.
+/// For example, `APP__App__Address=0.0.0.0:8080` overrides `{"App": {"Address": "..."}}`.
 pub fn load_appsettings(mode: AppMode) -> Option<serde_json::Value> {
     let mut base = read_json_file("appsettings.json")?;
 
@@ -140,7 +182,49 @@ pub fn load_appsettings(mode: AppMode) -> Option<serde_json::Value> {
         }
     }
 
+    // Apply environment variable overrides (APP__Section__Key pattern)
+    apply_env_overrides(&mut base);
+
     Some(base)
+}
+
+/// Apply environment variable overrides following the `APP__Section__Key` pattern.
+fn apply_env_overrides(config: &mut serde_json::Value) {
+    for (key, value) in std::env::vars() {
+        if let Some(path) = key.strip_prefix("APP__") {
+            // Split by double underscore to get path segments
+            let segments: Vec<&str> = path.split("__").collect();
+            if segments.is_empty() {
+                continue;
+            }
+            set_json_value(config, &segments, &value);
+        }
+    }
+}
+
+/// Set a value in a JSON object following the given path segments.
+fn set_json_value(obj: &mut serde_json::Value, segments: &[&str], value: &str) {
+    if segments.is_empty() {
+        return;
+    }
+
+    let key = segments[0];
+
+    if let serde_json::Value::Object(map) = obj {
+        if segments.len() == 1 {
+            // Leaf: set the value, attempting to parse as JSON first
+            let parsed = serde_json::from_str(value).unwrap_or(serde_json::Value::String(value.to_string()));
+            map.insert(key.to_string(), parsed);
+        } else if let Some(child) = map.get_mut(key) {
+            // Recurse into child
+            set_json_value(child, &segments[1..], value);
+        } else {
+            // Create intermediate objects as needed
+            let mut child = serde_json::json!({});
+            set_json_value(&mut child, &segments[1..], value);
+            map.insert(key.to_string(), child);
+        }
+    }
 }
 
 /// Bind a section of the config JSON to a deserializable type.

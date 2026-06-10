@@ -1,8 +1,8 @@
 //! API discovery UI — interactive Swagger-like explorer page.
 //!
-//! A single-page HTML/CSS/JS application served at `/api/docs`.
+//! A single-page HTML/CSS/JS application served at `/api/openapi.html`.
 //! Fetches `/api/openapi.json` and renders endpoints grouped by tag
-//! with expandable detail cards.
+//! with expandable detail cards and a "Try it out" request builder.
 
 /// The embedded HTML for the API docs UI.
 pub const APIUI_HTML: &str = r##"<!DOCTYPE html>
@@ -54,6 +54,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#0d1117;color:#c9
 .param-required{color:#f85149;font-weight:700;font-size:.75rem}
 .body-example{background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:.75rem;overflow-x:auto}
 .body-example pre{font-family:'SFMono-Regular',Consolas,monospace;font-size:.8rem;color:#e6edf3;white-space:pre-wrap;word-break:break-all}
+.ep-description{font-size:.85rem;color:#8b949e;margin-bottom:.75rem;line-height:1.6;padding:.5rem .75rem;background:#0d1117;border-radius:6px;border:1px solid #21262d}
 .resp-list{list-style:none}
 .resp-item{display:flex;align-items:center;gap:.5rem;padding:.35rem 0;font-size:.85rem}
 .resp-status{display:inline-block;min-width:36px;padding:1px 6px;border-radius:4px;font-size:.75rem;font-weight:600;text-align:center}
@@ -64,6 +65,31 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#0d1117;color:#c9
 .copy-btn{display:inline-block;padding:2px 10px;font-size:.75rem;color:#58a6ff;background:#1b3a4a;border:1px solid #30363d;border-radius:4px;cursor:pointer;margin-top:.5rem;transition:background .15s}
 .copy-btn:hover{background:#1f4050}
 .copy-btn.copied{background:#1b3a2d;color:#3fb950;border-color:#3fb950}
+.try-btn{display:inline-block;padding:2px 10px;font-size:.75rem;color:#d29922;background:#3a2d1b;border:1px solid #5a4622;border-radius:4px;cursor:pointer;margin-top:.5rem;margin-left:.5rem;transition:background .15s}
+.try-btn:hover{background:#4a3d2b}
+.try-btn.active{background:#d29922;color:#0d1117;border-color:#d29922}
+.try-panel{display:none;margin-top:.75rem;padding:.75rem;background:#0a0e14;border:1px solid #21262d;border-radius:6px}
+.try-panel.open{display:block}
+.try-panel .path-builder{font-family:'SFMono-Regular',Consolas,monospace;font-size:.85rem;color:#e6edf3;margin-bottom:.75rem;padding:.5rem .75rem;background:#12171f;border-radius:4px;display:flex;flex-wrap:wrap;align-items:center;gap:2px}
+.try-panel .path-builder span{color:#8b949e}
+.try-panel .path-builder input{font-family:'SFMono-Regular',Consolas,monospace;font-size:.8rem;background:#0d1117;color:#e6edf3;border:1px solid #30363d;border-radius:3px;padding:2px 6px;min-width:80px;outline:none;transition:border-color .15s}
+.try-panel .path-builder input:focus{border-color:#58a6ff}
+.try-panel .body-input{margin-bottom:.75rem}
+.try-panel .body-input textarea{width:100%;min-width:100%;max-width:100%;min-height:80px;height:120px;resize:vertical;font-family:'SFMono-Regular',Consolas,monospace;font-size:.8rem;background:#0d1117;color:#e6edf3;border:1px solid #30363d;border-radius:4px;padding:.5rem .75rem;outline:none;transition:border-color .15s;line-height:1.5;tab-size:2}
+.try-panel .body-input textarea:focus{border-color:#58a6ff}
+.try-panel .body-input label{display:block;font-size:.7rem;font-weight:600;color:#8b949e;text-transform:uppercase;margin-bottom:.35rem;letter-spacing:.5px}
+.try-panel .send-btn{display:inline-block;padding:4px 16px;font-size:.75rem;font-weight:600;color:#fff;background:#238636;border:1px solid #2ea043;border-radius:4px;cursor:pointer;transition:background .15s}
+.try-panel .send-btn:hover{background:#2ea043}
+.try-panel .send-btn:disabled{opacity:.5;cursor:not-allowed}
+.resp-area{display:none;margin-top:.75rem;padding:.75rem;background:#0a0e14;border:1px solid #21262d;border-radius:6px}
+.resp-area.open{display:block}
+.resp-area .status{font-size:1.5rem;font-weight:700;margin-bottom:.5rem;padding-bottom:.5rem;border-bottom:1px solid #21262d}
+.resp-area .status.s2xx{color:#3fb950}
+.resp-area .status.s4xx{color:#d29922}
+.resp-area .status.s5xx{color:#f85149}
+.resp-area .body{font-family:'SFMono-Regular',Consolas,monospace;font-size:.8rem;color:#e6edf3;white-space:pre-wrap;word-break:break-all;background:#0d1117;padding:.5rem .75rem;border-radius:4px;max-height:400px;overflow-y:auto;line-height:1.5}
+.resp-area .loading-text{color:#8b949e;font-size:.85rem}
+.resp-area .error-text{color:#f85149;font-size:.85rem}
 .loading{text-align:center;padding:3rem 0;color:#8b949e}
 .error{text-align:center;padding:2rem;background:#3a1b1b;border-radius:6px;color:#f85149}
 .empty{text-align:center;padding:3rem 0;color:#8b949e}
@@ -119,6 +145,73 @@ function statusClass(code){
   return's5xx';
 }
 
+function hasBodyMethod(method){
+  return method==='POST'||method==='PUT'||method==='PATCH';
+}
+
+function extractPathParams(path){
+  var re=/\{(\w+)\}/g;
+  var params=[];
+  var match;
+  while((match=re.exec(path))!==null){
+    params.push(match[1]);
+  }
+  return params;
+}
+
+function buildPathBuilderHTML(path){
+  var parts=[];
+  var last=0;
+  var re=/\{(\w+)\}/g;
+  var match;
+  while((match=re.exec(path))!==null){
+    if(match.index>last){
+      parts.push('<span>'+h(path.slice(last,match.index))+'</span>');
+    }
+    parts.push('<input type="text" class="path-param" data-param="'+h(match[1])+'" placeholder="'+h(match[1])+'" value="">');
+    last=re.lastIndex;
+  }
+  if(last<path.length){
+    parts.push('<span>'+h(path.slice(last))+'</span>');
+  }
+  if(parts.length===0){
+    parts.push('<span>'+h(path)+'</span>');
+  }
+  return parts.join('');
+}
+
+function buildTryPanelHTML(epId,method,path,params,requestBody){
+  var pathParams=extractPathParams(path);
+  var hasBody=hasBodyMethod(method);
+  var html='';
+  html+='<div class="try-panel" id="try-'+epId+'">';
+
+  if(pathParams.length>0){
+    html+='<div class="path-builder">'+buildPathBuilderHTML(path)+'</div>';
+  }
+
+  if(hasBody){
+    var bodyExample=requestBody||buildBodyExample(params);
+    html+='<div class="body-input">';
+    html+='<label>Request Body (JSON)</label>';
+    html+='<textarea class="try-body" id="req-body-'+epId+'">'+h(bodyExample)+'</textarea>';
+    html+='</div>';
+  }
+
+  html+='<button class="send-btn" onclick="executeRequest(\''+epId+'\',\''+h(method)+'\',\''+h(path)+'\')">Send</button>';
+  html+='<div class="resp-area" id="resp-'+epId+'">';
+  html+='<div class="status" id="status-'+epId+'"></div>';
+  html+='<div class="body" id="resp-body-'+epId+'"></div>';
+  html+='</div>';
+  html+='</div>';
+  return html;
+}
+
+function buildDescriptionHTML(description){
+  if(!description)return'';
+  return'<div class="ep-description">'+h(description).replace(/\n/g,'<br>')+'</div>';
+}
+
 fetch('/api/openapi.json')
 .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
 .then(function(spec){
@@ -145,6 +238,7 @@ fetch('/api/openapi.json')
           method:method.toUpperCase(),
           path:path,
           summary:op.summary||'',
+          description:op.description||'',
           operationId:op.operationId||'',
           parameters:safeParams(op.parameters),
           requestBody:op.requestBody||null,
@@ -178,6 +272,8 @@ fetch('/api/openapi.json')
       html+='</div>';
       html+='<div class="ep-detail" id="'+epId+'">';
 
+      html+=buildDescriptionHTML(ep.description);
+
       if(ep.parameters.length>0){
         html+='<div class="ep-section"><div class="ep-section-title">Parameters</div>';
         html+='<table class="param-table"><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th></tr>';
@@ -208,7 +304,9 @@ fetch('/api/openapi.json')
         html+='</ul></div>';
       }
 
-      html+='<button class="copy-btn" onclick="var t=this;navigator.clipboard.writeText('+JSON.stringify(buildCurl(ep.method,ep.path,ep.parameters))+').then(function(){t.textContent=\\'Copied!\\';t.classList.add(\\'copied\\');setTimeout(function(){t.textContent=\\'Copy curl\\';t.classList.remove(\\'copied\\')},2000)}).catch(function(){t.textContent=\\'Error\\'})">Copy curl</button>';
+      html+='<button class="copy-btn" data-curl="'+h(buildCurl(ep.method,ep.path,ep.parameters))+'">Copy curl</button>';
+      html+='<button class="try-btn" data-ep="'+epId+'">Try it</button>';
+      html+=buildTryPanelHTML(epId,ep.method,ep.path,ep.parameters,ep.requestBody);
       html+='</div></div>';
     }
 
@@ -216,11 +314,115 @@ fetch('/api/openapi.json')
   }
 
   content.innerHTML=html;
+
+  // --- Event Delegation ---
+  content.addEventListener('click',function(e){
+    // Copy-curl button
+    var btn=e.target.closest('.copy-btn');
+    if(btn){
+      var curl=btn.getAttribute('data-curl');
+      if(!curl)return;
+      navigator.clipboard.writeText(curl).then(function(){
+        btn.textContent='Copied!';
+        btn.classList.add('copied');
+        setTimeout(function(){
+          btn.textContent='Copy curl';
+          btn.classList.remove('copied');
+        },2000);
+      }).catch(function(){
+        btn.textContent='Error';
+      });
+      return;
+    }
+
+    // Try-it button
+    var tryBtn=e.target.closest('.try-btn');
+    if(tryBtn){
+      var epId=tryBtn.getAttribute('data-ep');
+      var panel=document.getElementById('try-'+epId);
+      if(!panel)return;
+      var isOpen=panel.classList.contains('open');
+      if(isOpen){
+        panel.classList.remove('open');
+        tryBtn.classList.remove('active');
+        tryBtn.textContent='Try it';
+      }else{
+        panel.classList.add('open');
+        tryBtn.classList.add('active');
+        tryBtn.textContent='Hide';
+      }
+      return;
+    }
+  });
 })
 .catch(function(e){
   content.innerHTML='<div class="error">Failed to load API spec: '+h(e.message)+'</div>';
 });
 })();
+
+// Global request execution function
+function executeRequest(epId,method,path){
+  var panel=document.getElementById('try-'+epId);
+  var respArea=document.getElementById('resp-'+epId);
+  var statusEl=document.getElementById('status-'+epId);
+  var bodyEl=document.getElementById('resp-body-'+epId);
+  var sendBtn=panel?panel.querySelector('.send-btn'):null;
+
+  respArea.classList.add('open');
+  statusEl.textContent='';
+  statusEl.className='status';
+  bodyEl.textContent='Sending...';
+  bodyEl.className='body';
+
+  if(sendBtn)sendBtn.disabled=true;
+
+  // Build URL by replacing path parameters
+  var url=path;
+  var pathInputs=panel?panel.querySelectorAll('.path-param'):[];
+  for(var i=0;i<pathInputs.length;i++){
+    var input=pathInputs[i];
+    var paramName=input.getAttribute('data-param');
+    var value=input.value.trim();
+    if(!value)value=paramName;
+    url=url.replace('{'+paramName+'}',encodeURIComponent(value));
+  }
+
+  var fetchOpts={method:method,headers:{}};
+
+  // Check for body
+  if(method==='POST'||method==='PUT'||method==='PATCH'){
+    var textarea=document.getElementById('req-body-'+epId);
+    if(textarea&&textarea.value.trim()){
+      fetchOpts.headers['Content-Type']='application/json';
+      fetchOpts.body=textarea.value;
+    }
+  }
+
+  fetch(url,fetchOpts)
+  .then(function(resp){
+    var sc=resp.status>=200&&resp.status<300?'s2xx':resp.status>=400&&resp.status<500?'s4xx':'s5xx';
+    statusEl.textContent=resp.status+' '+resp.statusText;
+    statusEl.className='status '+sc;
+    return resp.text().then(function(txt){return{status:resp.status,body:txt};});
+  })
+  .then(function(result){
+    var display=result.body;
+    try{
+      var parsed=JSON.parse(result.body);
+      display=JSON.stringify(parsed,null,2);
+    }catch(e){}
+    bodyEl.textContent=display;
+    bodyEl.className='body';
+    if(sendBtn)sendBtn.disabled=false;
+  })
+  .catch(function(err){
+    statusEl.textContent='Error';
+    statusEl.className='status s5xx';
+    bodyEl.textContent=err.message||'Request failed';
+    bodyEl.className='body error-text';
+    if(sendBtn)sendBtn.disabled=false;
+  });
+}
 </script>
 </body>
 </html>

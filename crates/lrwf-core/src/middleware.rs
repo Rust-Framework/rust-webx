@@ -14,9 +14,17 @@ use crate::http::IHttpContext;
 /// Analogous to ASP.NET Core's IMiddleware.
 #[async_trait::async_trait]
 pub trait IMiddleware: Send + Sync {
-    /// Process an HTTP request.
+    /// Process an HTTP request (before hook).
     ///
     /// Return `Ok(())` to continue the pipeline, or set the response
     /// status to short-circuit further processing.
     async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<()>;
+
+    /// Called after the final handler has executed.
+    ///
+    /// Middleware post-processing, logging, response modification.
+    /// Default: no-op.
+    async fn after(&self, _ctx: &mut dyn IHttpContext) -> Result<()> {
+        Ok(())
+    }
 }

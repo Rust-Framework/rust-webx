@@ -1,4 +1,22 @@
 //! HTTP abstraction traits: IHttpContext, IHttpRequest, IHttpResponse.
+//!
+//! This module defines the core interfaces for HTTP request/response handling
+//! in the LRWF framework. All types are defined as traits to enable testability
+//! and middleware composition.
+//!
+//! # Traits
+//!
+//! - [`IHttpContext`] — The central context for a single HTTP request, providing
+//!   access to request, response, and authentication claims.
+//! - [`IHttpRequest`] — Read-only access to the incoming HTTP request.
+//! - [`IHttpResponse`] — Mutable access to the outgoing HTTP response.
+//! - [`IClaimsExt`] — Extension for storing/retrieving authentication claims.
+//! - [`FromHttpContext`] — Build a request struct from HTTP request data.
+//!
+//! # Helpers
+//!
+//! - [`read_json_body`] — Deserialize JSON from the request body.
+//! - [`write_json_response`] — Serialize a value as JSON into the response.
 
 use crate::auth::IClaims;
 use crate::error::Result;
@@ -112,8 +130,34 @@ pub async fn read_json_body<T: serde::de::DeserializeOwned>(
     req: &dyn IHttpRequest,
 ) -> Result<T> {
     let bytes = req.body_bytes().await?;
-    serde_json::from_slice(&bytes).map_err(|e| crate::error::Error::Serialization(e))
+    serde_json::from_slice(&bytes).map_err(crate::error::Error::Serialization)
 }
 
 /// Type alias for JSON responses in controller methods.
 pub type Json<T> = T;
+
+/// Trait for constructing a request struct from the HTTP context.
+///
+/// Implemented automatically by the `#[get]`, `#[post]`, `#[put]`, `#[delete]`
+/// proc macros for request types. Custom implementations are also supported.
+///
+/// # Automatic implementation
+///
+/// For POST/PUT/PATCH routes, the macro will attempt `serde_json::from_slice`
+/// on the request body. For GET/DELETE routes with path parameters, the macro
+/// will extract parameters from `ctx.request().route_params()` by field name.
+///
+/// # Manual implementation
+///
+/// ```ignore
+/// #[async_trait::async_trait]
+/// impl FromHttpContext for MyRequest {
+///     async fn from_http_context(ctx: &dyn IHttpContext) -> Result<Self> {
+///         // custom construction logic
+///     }
+/// }
+/// ```
+#[async_trait::async_trait]
+pub trait FromHttpContext: Sized + Send + 'static {
+    async fn from_http_context(ctx: &dyn IHttpContext) -> Result<Self>;
+}

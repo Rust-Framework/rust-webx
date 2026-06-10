@@ -11,7 +11,7 @@ lrwf-openapi.workspace = true
 lrdi.workspace = true
 jsonwebtoken.workspace = true
 async-trait.workspace = true
-tokio = { workspace = true, features = ["net", "rt", "macros", "fs"] }
+tokio = { workspace = true, features = ["net", "rt", "rt-multi-thread", "macros", "fs", "signal"] }
 hyper.workspace = true
 http-body-util.workspace = true
 hyper-util = { workspace = true, features = ["tokio", "server-auto"] }
@@ -19,4 +19,12 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 inventory.workspace = true
-tracing = "0.1"
+uuid.workspace = true
+tracing = { version = "0.1", features = ["log"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+rustls.workspace = true
+tokio-rustls.workspace = true
+rustls-pemfile.workspace = true
+
+[dev-dependencies]
+reqwest = { version = "0.12", features = ["json"] }

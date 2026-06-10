@@ -36,18 +36,31 @@ impl MiddlewarePipeline {
         self.middlewares.push(middleware);
     }
 
-    /// Execute all middlewares in order, then the final handler.
+    /// Execute middleware onion: invoke forward, final handler, after hooks reverse.
     pub async fn execute(
         &self,
         ctx: &mut dyn IHttpContext,
         final_handler: HandlerFn,
     ) -> Result<()> {
-        // Run each middleware in sequence
+        // Forward pass: invoke each middleware
         for middleware in &self.middlewares {
             middleware.invoke(ctx).await?;
         }
 
-        // After all middlewares, call the final handler (router)
-        final_handler(ctx).await
+        // Run the final handler (router)
+        final_handler(ctx).await?;
+
+        // Reverse pass: after hooks
+        for middleware in self.middlewares.iter().rev() {
+            middleware.after(ctx).await?;
+        }
+
+        Ok(())
+    }
+}
+
+impl Default for MiddlewarePipeline {
+    fn default() -> Self {
+        Self::new()
     }
 }

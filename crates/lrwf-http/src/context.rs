@@ -2,7 +2,7 @@
 
 use hyper::body::{Bytes, Incoming};
 use hyper::Request;
-use http_body_util::{BodyExt, Full};
+use http_body_util::Full;
 use lrwf_core::auth::IClaims;
 use lrwf_core::error::Result;
 use lrwf_core::http::{IClaimsExt, IHttpContext, IHttpRequest, IHttpResponse};
@@ -22,8 +22,14 @@ pub struct HttpContext {
 
 impl HttpContext {
     /// Create a new HttpContext by eagerly reading the request body.
-    pub async fn new(req: Request<Incoming>) -> Self {
-        let (parts, body) = req.into_parts();
+    ///
+    /// Reads the body in chunks using [`BodyExt::frame`], tracking total size.
+    /// When `max_body_size` is exceeded, the context is built with a 413
+    /// Payload Too Large response pre-set.
+    pub async fn new(req: Request<Incoming>, max_body_size: usize) -> Self {
+        use http_body_util::BodyExt;
+
+        let (parts, mut body) = req.into_parts();
         let method = parts.method.to_string();
         let path = parts.uri.path().to_string();
 
@@ -39,15 +45,31 @@ impl HttpContext {
         let query_params = parts
             .uri
             .query()
-            .map(|q| parse_query_string(q))
+            .map(parse_query_string)
             .unwrap_or_default();
 
-        // Eagerly read body bytes
-        let body_bytes = body
-            .collect()
-            .await
-            .map(|b| b.to_bytes().to_vec())
-            .unwrap_or_default();
+        // Read body in chunks, tracking total size
+        let mut body_bytes = Vec::new();
+        let mut total_size: usize = 0;
+        let mut payload_too_large = false;
+
+        while let Some(frame_result) = body.frame().await {
+            match frame_result {
+                Ok(frame) => {
+                    if let Some(data) = frame.data_ref() {
+                        total_size = total_size.saturating_add(data.len());
+                        if total_size > max_body_size {
+                            payload_too_large = true;
+                            break;
+                        }
+                        body_bytes.extend_from_slice(data);
+                    }
+                }
+                Err(_) => {
+                    break;
+                }
+            }
+        }
 
         let req = HttpRequest {
             method,
@@ -59,7 +81,22 @@ impl HttpContext {
             body_bytes,
         };
 
-        let resp = HttpResponse::new(200);
+        let mut resp = HttpResponse::new(200);
+
+        if payload_too_large {
+            resp.set_status(413);
+            let error_body = serde_json::json!({
+                "error": "Request body exceeds maximum allowed size",
+                "status": 413
+            });
+            if let Ok(json) = serde_json::to_vec(&error_body) {
+                resp.body = Some(json);
+            }
+            resp.headers.insert(
+                "content-type".to_string(),
+                "application/json".to_string(),
+            );
+        }
 
         Self {
             req,
@@ -188,7 +225,14 @@ impl HttpResponse {
             builder = builder.header(key.as_str(), value.as_str());
         }
         let body_bytes = self.body.unwrap_or_default();
-        builder.body(Full::new(Bytes::from(body_bytes))).unwrap()
+        builder
+            .body(Full::new(Bytes::from(body_bytes)))
+            .unwrap_or_else(|_| {
+                hyper::Response::builder()
+                    .status(hyper::StatusCode::INTERNAL_SERVER_ERROR)
+                    .body(Full::new(Bytes::from("Internal Server Error")))
+                    .unwrap()
+            })
     }
 }
 

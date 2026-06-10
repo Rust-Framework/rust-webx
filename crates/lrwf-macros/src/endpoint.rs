@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, GenericArgument, ItemImpl, PathArguments, Type};
+use syn::{parse_macro_input, Attribute, Expr, GenericArgument, ItemImpl, Lit, Meta, PathArguments, Type};
 
 // =====================================================================
 // Generic #[endpoint(HttpMethod, "/path")] — full form
@@ -59,7 +59,7 @@ fn parse_shortcut_attr(attr: &str) -> String {
     if s.is_empty() { "/".to_string() } else { s.trim_matches('"').trim_matches('\'').to_string() }
 }
 
-/// Generate a RouteEntry from an `impl IRequest<Response> for Name` block.
+/// Generate a RouteEntry AND a RouteDispatch from an `impl IRequest<Response> for Name` block.
 fn emit_endpoint(attr: TokenStream, item: TokenStream) -> TokenStream {
     let item_impl = parse_macro_input!(item as ItemImpl);
     let self_ty = &item_impl.self_ty;
@@ -68,9 +68,18 @@ fn emit_endpoint(attr: TokenStream, item: TokenStream) -> TokenStream {
     let req_type_name = extract_type_name(self_ty);
     let method_ident = format_ident!("{}", method_str);
 
-    let rsp_type = extract_response_type(&item_impl).unwrap_or_else(|| "unknown".to_string());
+    let rsp_type_str = extract_response_type(&item_impl).unwrap_or_else(|| "()".to_string());
     let summary = generate_summary(&req_type_name);
 
+    // Extract doc comments (/// ...) from the impl block for OpenAPI description
+    let description = extract_doc_comments(&item_impl.attrs);
+
+    // Parse response type back to a Type for use in generated code
+    let rsp_type: syn::Type = syn::parse_str(&rsp_type_str).unwrap_or_else(|_| {
+        syn::parse_str("()").unwrap()
+    });
+
+    // Parameter metadata for OpenAPI
     let mut params_tokens: Vec<proc_macro2::TokenStream> = extract_path_params(&path_str)
         .into_iter()
         .map(|name| {
@@ -84,7 +93,8 @@ fn emit_endpoint(attr: TokenStream, item: TokenStream) -> TokenStream {
         })
         .collect();
 
-    if method_str == "Post" || method_str == "Put" || method_str == "Patch" {
+    let is_body_method = method_str == "Post" || method_str == "Put" || method_str == "Patch";
+    if is_body_method {
         params_tokens.push(quote! {
             ::lrwf::ParamMeta {
                 name: "body",
@@ -94,22 +104,125 @@ fn emit_endpoint(attr: TokenStream, item: TokenStream) -> TokenStream {
         });
     }
 
+    // Generate FromHttpContext impl for the request type
+    let path_params: Vec<String> = extract_path_params(&path_str);
+
+    // Generate dispatch function
+    let dispatch_fn = generate_dispatch_fn(self_ty, &rsp_type, &req_type_name, &path_params, is_body_method);
+
+    let dispatch_fn_name = format_ident!("__lrwf_dispatch_{}", req_type_name.replace("::", "_"));
+
     let expanded = quote! {
         #item_impl
+
+        #dispatch_fn
+
+        ::inventory::submit! {
+            ::lrwf::RouteDispatch {
+                handler_type: #req_type_name,
+                dispatch: #dispatch_fn_name,
+            }
+        }
 
         ::inventory::submit! {
             ::lrwf::RouteEntry::request(
                 ::lrwf::HttpMethod::#method_ident,
                 #path_str,
                 #req_type_name,
-                #rsp_type,
+                #rsp_type_str,
                 #summary,
+                #description,
                 &[#(#params_tokens),*],
             )
         }
     };
 
     TokenStream::from(expanded)
+}
+
+/// Generate the dispatch function that runs the full request lifecycle.
+fn generate_dispatch_fn(
+    ty: &Type,
+    rsp_type: &syn::Type,
+    type_name: &str,
+    path_params: &[String],
+    is_body: bool,
+) -> proc_macro2::TokenStream {
+    let fn_name = format_ident!("__lrwf_dispatch_{}", type_name.replace("::", "_"));
+
+    // Generate request construction code
+    let build_request = if is_body && !path_params.is_empty() {
+        // PUT/PATCH with both body and path params: deserialize from body, then override path params
+        let overrides: Vec<proc_macro2::TokenStream> = path_params
+            .iter()
+            .map(|name| {
+                let ident = format_ident!("{}", name);
+                let name_str = name.as_str();
+                quote! {
+                    #ident: route_params.get(#name_str).cloned().unwrap_or(req.#ident),
+                }
+            })
+            .collect();
+        quote! {{
+            let mut req: #ty = ::serde_json::from_slice(&body_bytes)
+                .map_err(|e| ::lrwf::Error::Serialization(e))?;
+            req = #ty { #(#overrides)* ..req };
+            req
+        }}
+    } else if is_body {
+        // POST with body only
+        quote! {
+            ::serde_json::from_slice(&body_bytes).map_err(|e| ::lrwf::Error::Serialization(e))?
+        }
+    } else if !path_params.is_empty() {
+        // GET/DELETE with path params
+        let field_assignments: Vec<proc_macro2::TokenStream> = path_params
+            .iter()
+            .map(|name| {
+                let ident = format_ident!("{}", name);
+                let name_str = name.as_str();
+                quote! {
+                    #ident: route_params.get(#name_str).cloned().unwrap_or_default()
+                }
+            })
+            .collect();
+        quote! {
+            #ty { #(#field_assignments),* }
+        }
+    } else {
+        // No params
+        quote! { #ty {} }
+    };
+
+    quote! {
+        fn #fn_name(
+            body_bytes: Vec<u8>,
+            route_params: ::std::collections::HashMap<String, String>,
+            _query_params: ::std::collections::HashMap<String, String>,
+            provider: ::std::sync::Arc<::lrdi::ServiceProvider>,
+        ) -> ::std::pin::Pin<Box<dyn ::std::future::Future<Output = ::lrwf::Result<::lrwf::ResponseData>> + Send>> {
+            Box::pin(async move {
+                // Construct the request from HTTP data
+                let request: #ty = #build_request;
+
+                // Resolve handler from DI container
+                let handler = provider
+                    .get_service::<dyn ::lrwf::IRequestHandler<#ty, #rsp_type>>()
+                    .ok_or_else(|| ::lrwf::Error::Di(
+                        format!("No handler registered for {}", stringify!(#ty))
+                    ))?;
+
+                let result = handler.handle(request).await?;
+                let json_bytes = ::serde_json::to_vec(&result).unwrap_or_default();
+
+                Ok(::lrwf::ResponseData {
+                    status: 200,
+                    content_type: "application/json".to_string(),
+                    body: json_bytes,
+                })
+            })
+        }
+    }
 }
 
 /// Extract the response type from `impl IRequest<UserModel> for GetUserRequest`.
@@ -133,11 +246,36 @@ fn extract_response_type(item_impl: &ItemImpl) -> Option<String> {
 
 fn type_to_string(ty: &Type) -> String {
     match ty {
-        Type::Path(tp) => tp.path.segments.iter()
-            .map(|s| s.ident.to_string())
-            .collect::<Vec<_>>()
-            .join("::"),
+        Type::Path(tp) => {
+            let mut result = String::new();
+            let segments: Vec<String> = tp.path.segments.iter()
+                .map(|s| s.ident.to_string())
+                .collect();
+            result.push_str(&segments.join("::"));
+
+            // Handle generic type arguments (e.g., Vec<UserModel>)
+            if let Some(last_seg) = tp.path.segments.last() {
+                if let PathArguments::AngleBracketed(args) = &last_seg.arguments {
+                    let gen_args: Vec<String> = args.args.iter().filter_map(|a| {
+                        match a {
+                            GenericArgument::Type(t) => Some(type_to_string(t)),
+                            _ => None,
+                        }
+                    }).collect();
+                    if !gen_args.is_empty() {
+                        result.push('<');
+                        result.push_str(&gen_args.join(", "));
+                        result.push('>');
+                    }
+                }
+            }
+
+            result
+        }
         Type::Tuple(t) if t.elems.is_empty() => "()".to_string(),
+        Type::Reference(r) => {
+            format!("&{}", type_to_string(&r.elem))
+        }
         _ => format!("{}", quote! { #ty }),
     }
 }
@@ -212,4 +350,33 @@ fn generate_summary(type_name: &str) -> String {
         result.push(c.to_ascii_lowercase());
     }
     result
+}
+
+/// Extract `///` doc comments from a list of attributes.
+///
+/// Rust converts each `///` line into a separate `#[doc = "..."]` attribute.
+/// This function collects all such attributes, trims whitespace from each line,
+/// and joins multi-line comments with a single space.
+///
+/// Returns the joined description string, or an empty string if no doc comments exist.
+fn extract_doc_comments(attrs: &[Attribute]) -> String {
+    let lines: Vec<String> = attrs
+        .iter()
+        .filter(|attr| attr.path().is_ident("doc"))
+        .filter_map(|attr| {
+            match &attr.meta {
+                Meta::NameValue(nv) => {
+                    if let Expr::Lit(el) = &nv.value {
+                        if let Lit::Str(ls) = &el.lit {
+                            return Some(ls.value().trim().to_string());
+                        }
+                    }
+                    None
+                }
+                _ => None,
+            }
+        })
+        .collect();
+
+    lines.join("\n")
 }

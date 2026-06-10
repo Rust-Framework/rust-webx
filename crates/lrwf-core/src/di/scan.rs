@@ -45,6 +45,9 @@ pub struct RouteEntry {
     /// Human-readable summary for OpenAPI docs (e.g., "Get user by ID").
     pub summary: &'static str,
 
+    /// Optional long-form description from `///` doc comments on the impl block.
+    pub description: &'static str,
+
     /// OpenAPI parameter metadata: path params, body params, etc.
     pub params: &'static [ParamMeta],
 
@@ -75,6 +78,39 @@ pub struct HandlerRegistration {
 
 inventory::collect!(HandlerRegistration);
 
+/// A dispatch function registered at compile time via the endpoint macros.
+///
+/// Each `#[get]`, `#[post]`, etc. macro generates one of these with a
+/// function that constructs the request from `IHttpContext`, calls the
+/// mediator, and writes the JSON response.
+pub struct RouteDispatch {
+    /// The handler type name (used to match RouteEntry).
+    pub handler_type: &'static str,
+    /// Boxed async dispatch function.
+    /// Takes request data and writes JSON response via the mediator.
+    #[allow(clippy::type_complexity)]
+    pub dispatch: fn(
+        body_bytes: Vec<u8>,
+        route_params: std::collections::HashMap<String, String>,
+        query_params: std::collections::HashMap<String, String>,
+        provider: std::sync::Arc<lrdi::ServiceProvider>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = crate::error::Result<ResponseData>> + Send>>,
+}
+
+/// Response data produced by a dispatch function.
+#[derive(Debug)]
+pub struct ResponseData {
+    pub status: u16,
+    pub content_type: String,
+    pub body: Vec<u8>,
+}
+
+inventory::collect!(RouteDispatch);
+
+// SAFETY: RouteDispatch is only used at startup, single-threaded context.
+unsafe impl Sync for RouteDispatch {}
+unsafe impl Send for RouteDispatch {}
+
 impl RouteEntry {
     /// Create a new request-based route entry.
     pub const fn request(
@@ -83,6 +119,7 @@ impl RouteEntry {
         handler_type: &'static str,
         rsp_type: &'static str,
         summary: &'static str,
+        description: &'static str,
         params: &'static [ParamMeta],
     ) -> Self {
         Self {
@@ -91,6 +128,7 @@ impl RouteEntry {
             handler_type,
             rsp_type,
             summary,
+            description,
             params,
             source: RouteSource::RequestEndpoint,
         }
@@ -103,6 +141,7 @@ impl RouteEntry {
         handler_type: &'static str,
         rsp_type: &'static str,
         summary: &'static str,
+        description: &'static str,
         params: &'static [ParamMeta],
     ) -> Self {
         Self {
@@ -111,6 +150,7 @@ impl RouteEntry {
             handler_type,
             rsp_type,
             summary,
+            description,
             params,
             source: RouteSource::ControllerMethod,
         }

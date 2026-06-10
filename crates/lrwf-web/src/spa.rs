@@ -21,9 +21,14 @@ pub struct SpaMiddleware {
 
 impl SpaMiddleware {
     /// Create a new SPA middleware with default index "index.html".
+    ///
+    /// The `root` path is resolved relative to the current working directory.
+    /// If the directory doesn't exist at that path, the middleware searches
+    /// upward through ancestor directories and their immediate subdirectories,
+    /// matching the strategy used by [`config::load_appsettings`].
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self {
-            root: root.into(),
+            root: resolve_spa_root(root.into()),
             index: "index.html".to_string(),
         }
     }
@@ -61,8 +66,7 @@ impl IMiddleware for SpaMiddleware {
                 match tokio::fs::read(&index_path).await {
                     Ok(data) => {
                         ctx.response_mut().set_status(HttpStatus::OK);
-                        ctx.response_mut()
-                            .set_header("content-type", "text/html");
+                        ctx.response_mut().set_header("content-type", "text/html");
                         ctx.response_mut().write_bytes(data).await?;
                     }
                     Err(_) => {
@@ -91,7 +95,10 @@ impl SpaMiddleware {
         // check against the configured root.
         match candidate.canonicalize() {
             Ok(resolved) => {
-                let root_canonical = self.root.canonicalize().unwrap_or_else(|_| self.root.clone());
+                let root_canonical = self
+                    .root
+                    .canonicalize()
+                    .unwrap_or_else(|_| self.root.clone());
                 if resolved.starts_with(&root_canonical) {
                     resolved
                 } else {
@@ -117,9 +124,7 @@ impl SpaMiddleware {
 fn is_safe_subpath(root: &Path, candidate: &Path) -> bool {
     // Normalize both paths by stripping "." and ".." components.
     let normalized = normalize_path(candidate);
-    let root_abs = root
-        .canonicalize()
-        .unwrap_or_else(|_| root.to_path_buf());
+    let root_abs = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
 
     // If the candidate is absolute, check it starts with the absolute root.
     if normalized.is_absolute() {
@@ -160,10 +165,7 @@ fn normalize_path(path: &Path) -> PathBuf {
 
 /// Detect MIME type from file extension.
 fn mime_type(path: &Path) -> &'static str {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     match ext {
         "html" | "htm" => "text/html",
         "js" | "mjs" => "application/javascript",
@@ -184,4 +186,37 @@ fn mime_type(path: &Path) -> &'static str {
         "zip" => "application/zip",
         _ => "application/octet-stream",
     }
+}
+
+/// Resolve a SPA root path by first checking as-is, then walking up
+/// from cwd and checking each ancestor's immediate subdirectories.
+///
+/// This mirrors the strategy used by `config::load_appsettings` so that
+/// `use_spa("wwwroot")` works whether the user runs from `demo/` or from
+/// the workspace root (`lrwf/`).
+fn resolve_spa_root(root: PathBuf) -> PathBuf {
+    // If the path is already absolute or exists, use it directly.
+    if root.is_absolute() || root.exists() {
+        return root;
+    }
+
+    // Walk up from cwd; at each ancestor check immediate subdirectories.
+    if let Ok(cwd) = std::env::current_dir() {
+        let mut dir = Some(cwd.as_path());
+        while let Some(d) = dir {
+            if let Ok(entries) = std::fs::read_dir(d) {
+                for entry in entries.flatten() {
+                    if entry.path().is_dir() {
+                        let candidate = entry.path().join(&root);
+                        if candidate.exists() {
+                            return candidate;
+                        }
+                    }
+                }
+            }
+            dir = d.parent();
+        }
+    }
+
+    root
 }

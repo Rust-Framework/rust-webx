@@ -1,0 +1,183 @@
+/* =========================================================================
+   LRWF Demo — SPA Styles
+   ========================================================================= */
+
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background: linear-gradient(135deg, #0d1117 0%, #161b22 100%);
+    color: #c9d1d9;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+}
+
+/* ── Card ── */
+
+.card {
+    background: #21262d;
+    border: 1px solid #30363d;
+    border-radius: 16px;
+    padding: 3rem;
+    max-width: 520px;
+    width: 100%;
+    text-align: center;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.logo {
+    font-size: 2.5rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, #58a6ff, #bc8cff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 0.5rem;
+}
+
+.subtitle {
+    color: #8b949e;
+    font-size: 0.95rem;
+    margin-bottom: 2rem;
+}
+
+h1 {
+    font-size: 1.8rem;
+    margin-bottom: 0.25rem;
+    color: #f0f6fc;
+}
+
+/* ── Navigation links ── */
+
+.links {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-top: 2rem;
+}
+
+.link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.875rem 1.25rem;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 10px;
+    color: #58a6ff;
+    text-decoration: none;
+    font-size: 0.95rem;
+    transition: all 0.15s ease;
+    cursor: pointer;
+}
+
+.link:hover {
+    background: #1c2333;
+    border-color: #58a6ff;
+    transform: translateY(-1px);
+}
+
+.link .icon {
+    font-size: 1.2rem;
+    opacity: 0.7;
+}
+
+.badge {
+    display: inline-block;
+    padding: 0.2rem 0.6rem;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: #1a3a5c;
+    color: #58a6ff;
+}
+
+/* ── Content area (SPA pages) ── */
+
+#app {
+    margin-top: 2rem;
+    text-align: left;
+    width: 100%;
+}
+
+.page {
+    animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.page h2 {
+    font-size: 1.3rem;
+    margin-bottom: 1rem;
+    color: #f0f6fc;
+}
+
+.page pre {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 1rem;
+    overflow-x: auto;
+    font-size: 0.85rem;
+    color: #7ee787;
+}
+
+.page table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+}
+
+.page th,
+.page td {
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid #30363d;
+    text-align: left;
+}
+
+.page th {
+    color: #8b949e;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+}
+
+.page td {
+    color: #c9d1d9;
+}
+
+/* ── Footer ── */
+
+.footer {
+    margin-top: 2rem;
+    color: #484f58;
+    font-size: 0.8rem;
+}
+
+/* ── Loading spinner ── */
+
+.spinner {
+    display: inline-block;
+    width: 24px;
+    height: 24px;
+    border: 3px solid #30363d;
+    border-top-color: #58a6ff;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}

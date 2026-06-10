@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LRWF Demo — Cloud API Service</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: linear-gradient(135deg, #0d1117 0%, #161b22 100%);
+      color: #c9d1d9;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .card {
+      background: #21262d;
+      border: 1px solid #30363d;
+      border-radius: 16px;
+      padding: 3rem;
+      max-width: 480px;
+      width: 90%;
+      text-align: center;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    }
+    .logo {
+      font-size: 2.5rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, #58a6ff, #bc8cff);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 0.5rem;
+    }
+    .subtitle {
+      color: #8b949e;
+      font-size: 0.95rem;
+      margin-bottom: 2rem;
+    }
+    h1 { font-size: 1.8rem; margin-bottom: 0.25rem; color: #f0f6fc; }
+    .links {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      margin-top: 2rem;
+    }
+    .link {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.875rem 1.25rem;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      color: #58a6ff;
+      text-decoration: none;
+      font-size: 0.95rem;
+      transition: all 0.15s ease;
+    }
+    .link:hover {
+      background: #1c2333;
+      border-color: #58a6ff;
+      transform: translateY(-1px);
+    }
+    .link .icon {
+      font-size: 1.2rem;
+      opacity: 0.7;
+    }
+    .badge {
+      display: inline-block;
+      padding: 0.2rem 0.6rem;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      background: #1a3a5c;
+      color: #58a6ff;
+    }
+    .footer {
+      margin-top: 2rem;
+      color: #484f58;
+      font-size: 0.8rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">LRWF</div>
+    <h1>Cloud API Service</h1>
+    <p class="subtitle">Rust WebApi Framework — Clean Architecture Demo</p>
+    <div class="links">
+      <a class="link" href="/api/docs">
+        <span>API Documentation</span>
+        <span class="icon">&#8594;</span>
+      </a>
+      <a class="link" href="/openapi.json">
+        <span>OpenAPI Specification</span>
+        <span class="icon">&#8594;</span>
+      </a>
+      <a class="link" href="/api/users">
+        <span>Users API</span>
+        <span class="badge">GET</span>
+      </a>
+    </div>
+    <p class="footer">Built with LRWF &middot; Rust</p>
+  </div>
+</body>
+</html>

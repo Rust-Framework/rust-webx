@@ -2,8 +2,8 @@ use lrwf::*;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::domain::user::UserModel;
 use crate::contracts::user::*;
+use crate::domain::user::UserModel;
 
 // =========================================================================
 // In-memory UserRepository
@@ -25,7 +25,10 @@ impl UserRepository {
     }
 
     fn list(&self) -> Vec<UserModel> {
-        self.users.lock().map(|g| g.values().cloned().collect()).unwrap_or_default()
+        self.users
+            .lock()
+            .map(|g| g.values().cloned().collect())
+            .unwrap_or_default()
     }
 
     fn get(&self, id: &str) -> Option<UserModel> {
@@ -44,19 +47,56 @@ impl UserRepository {
             id: id.clone(),
             name: name.to_string(),
             email: email.to_string(),
+            password_hash: String::new(),
             role: "user".to_string(),
             created_at: now_string(),
         };
-        self.users.lock().map(|mut g| { g.insert(id, user.clone()); }).ok();
+        self.users
+            .lock()
+            .map(|mut g| {
+                g.insert(id, user.clone());
+            })
+            .ok();
         user
     }
 
-    fn update(
+    fn create_with_password(
         &self,
-        id: &str,
-        name: Option<&str>,
-        email: Option<&str>,
-    ) -> Option<UserModel> {
+        name: &str,
+        email: &str,
+        password_hash: &str,
+        role: &str,
+    ) -> UserModel {
+        let id = format!(
+            "{:x}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        let user = UserModel {
+            id: id.clone(),
+            name: name.to_string(),
+            email: email.to_string(),
+            password_hash: password_hash.to_string(),
+            role: role.to_string(),
+            created_at: now_string(),
+        };
+        self.users
+            .lock()
+            .map(|mut g| {
+                g.insert(id, user.clone());
+            })
+            .ok();
+        user
+    }
+
+    fn find_by_email(&self, email: &str) -> Option<UserModel> {
+        let users = self.users.lock().ok()?;
+        users.values().find(|u| u.email == email).cloned()
+    }
+
+    fn update(&self, id: &str, name: Option<&str>, email: Option<&str>) -> Option<UserModel> {
         let mut users = self.users.lock().ok()?;
         if let Some(user) = users.get_mut(id) {
             if let Some(n) = name {
@@ -72,7 +112,10 @@ impl UserRepository {
     }
 
     fn delete(&self, id: &str) -> bool {
-        self.users.lock().map(|mut g| g.remove(id).is_some()).unwrap_or(false)
+        self.users
+            .lock()
+            .map(|mut g| g.remove(id).is_some())
+            .unwrap_or(false)
     }
 }
 
@@ -92,9 +135,11 @@ fn init_repo() {
     let _ = REPO.set(Arc::new(UserRepository::new()));
 }
 
-fn repo() -> &'static Arc<UserRepository> {
+pub fn repo() -> &'static Arc<UserRepository> {
     REPO.get().unwrap_or_else(|| {
-        tracing::warn!("[LRWF Demo] UserRepository accessed before initialization; auto-initializing.");
+        tracing::warn!(
+            "[LRWF Demo] UserRepository accessed before initialization; auto-initializing."
+        );
         let _ = REPO.set(Arc::new(UserRepository::new()));
         REPO.get().expect("UserRepository initialization failed")
     })
@@ -142,10 +187,7 @@ impl IRequestHandler<GetUserRequest, UserModel> for GetUserHandler {
 impl IRequestHandler<CreateUserRequest, UserModel> for CreateUserHandler {
     async fn handle(&self, req: CreateUserRequest) -> Result<UserModel> {
         let user = repo().create(&req.name, &req.email);
-        tracing::info!(
-            "[Event] User created: {} (id: {})",
-            user.name, user.id
-        );
+        tracing::info!("[Event] User created: {} (id: {})", user.name, user.id);
         Ok(user)
     }
 }
@@ -207,7 +249,11 @@ pub struct UserEventLogger;
 #[async_trait]
 impl IEventHandler<UserCreatedEvent> for UserEventLogger {
     async fn handle(&self, event: UserCreatedEvent) -> Result<()> {
-        tracing::info!("* [Event] User created: {} ({})", event.user_name, event.user_id);
+        tracing::info!(
+            "* [Event] User created: {} ({})",
+            event.user_name,
+            event.user_id
+        );
         Ok(())
     }
 }

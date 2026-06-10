@@ -103,8 +103,15 @@ pub trait IHttpRequest: Send {
 /// Methods are non-generic to maintain dyn-compatibility.
 #[async_trait::async_trait]
 pub trait IHttpResponse: Send {
+    /// Get the current HTTP status code.
+    fn status(&self) -> u16;
     fn set_status(&mut self, code: u16);
     fn set_header(&mut self, key: &str, value: &str);
+
+    /// Whether a response body has been written.
+    fn has_body(&self) -> bool {
+        false
+    }
 
     /// Write raw bytes as the response body.
     async fn write_bytes(&mut self, data: Vec<u8>) -> Result<()>;
@@ -126,9 +133,7 @@ pub async fn write_json_response<T: serde::Serialize + Send>(
 }
 
 /// Helper: read JSON from the request body.
-pub async fn read_json_body<T: serde::de::DeserializeOwned>(
-    req: &dyn IHttpRequest,
-) -> Result<T> {
+pub async fn read_json_body<T: serde::de::DeserializeOwned>(req: &dyn IHttpRequest) -> Result<T> {
     let bytes = req.body_bytes().await?;
     serde_json::from_slice(&bytes).map_err(crate::error::Error::Serialization)
 }

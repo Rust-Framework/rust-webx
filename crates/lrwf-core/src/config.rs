@@ -204,7 +204,8 @@ fn set_json_value(obj: &mut serde_json::Value, segments: &[&str], value: &str) {
     if let serde_json::Value::Object(map) = obj {
         if segments.len() == 1 {
             // Leaf: set the value, attempting to parse as JSON first
-            let parsed = serde_json::from_str(value).unwrap_or(serde_json::Value::String(value.to_string()));
+            let parsed =
+                serde_json::from_str(value).unwrap_or(serde_json::Value::String(value.to_string()));
             map.insert(key.to_string(), parsed);
         } else if let Some(child) = map.get_mut(key) {
             // Recurse into child
@@ -243,8 +244,42 @@ pub fn bind_root<T: for<'de> Deserialize<'de> + Default>(config: &serde_json::Va
 // ---------------------------------------------------------------------------
 
 fn read_json_file(path: impl AsRef<Path>) -> Option<serde_json::Value> {
-    let content = std::fs::read_to_string(path.as_ref()).ok()?;
-    serde_json::from_str(&content).ok()
+    let path = path.as_ref();
+
+    /// Try to read and parse a JSON file at the given path.
+    fn try_read(path: &Path) -> Option<serde_json::Value> {
+        let content = std::fs::read_to_string(path).ok()?;
+        serde_json::from_str(&content).ok()
+    }
+
+    // 1. Try as-is (relative to current working directory)
+    if let Some(value) = try_read(path) {
+        return Some(value);
+    }
+
+    // 2. Walk up from cwd; at each ancestor, check its immediate
+    //    subdirectories.  This handles cargo workspace layouts where
+    //    config files live in a member crate (e.g.
+    //    workspace_root/demo/appsettings.json) and `cargo run` is
+    //    invoked from the workspace root.
+    if let Ok(cwd) = std::env::current_dir() {
+        let mut dir = Some(cwd.as_path());
+        while let Some(d) = dir {
+            if let Ok(entries) = std::fs::read_dir(d) {
+                for entry in entries.flatten() {
+                    if entry.path().is_dir() {
+                        let candidate = entry.path().join(path);
+                        if let Some(value) = try_read(&candidate) {
+                            return Some(value);
+                        }
+                    }
+                }
+            }
+            dir = d.parent();
+        }
+    }
+
+    None
 }
 
 fn merge_json(base: &mut serde_json::Value, overlay: serde_json::Value) {

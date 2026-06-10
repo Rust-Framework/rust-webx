@@ -4,11 +4,11 @@
 //! are caught and converted to well-formed HTTP error responses using
 //! `Error::status_code()`.
 
+use http_body_util::Full;
 use hyper::body::{Bytes, Incoming};
 use hyper::service::service_fn;
 use hyper::Request;
 use hyper_util::rt::TokioIo;
-use http_body_util::Full;
 use lrdi::{ServiceCollection, ServiceProvider};
 use lrwf_core::app::IHost;
 use lrwf_core::config::{self, AppOptions};
@@ -25,14 +25,15 @@ use crate::pipeline::{HandlerFn, MiddlewarePipeline};
 use crate::router::Router;
 use lrwf_core::di::scan::{HandlerRegistration, RouteEntry};
 use lrwf_openapi::{generate_openapi_spec, APIUI_HTML};
+use lrwf_web::SpaMiddleware;
 
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::ServerConfig;
+use rustls_pemfile::{certs, pkcs8_private_keys, rsa_private_keys};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::task::JoinSet;
 use tokio_rustls::TlsAcceptor;
-use rustls::ServerConfig;
-use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-use rustls_pemfile::{certs, pkcs8_private_keys, rsa_private_keys};
 
 pub struct Host {
     #[allow(dead_code)]
@@ -61,12 +62,15 @@ pub struct HostAppBuilder {
 
 impl HostAppBuilder {
     fn new() -> Self {
-        Self { options_modifiers: Vec::new() }
+        Self {
+            options_modifiers: Vec::new(),
+        }
     }
 
     #[allow(non_snake_case)]
     pub fn useOptions<F>(&mut self, f: F)
-    where F: FnOnce(&mut AppOptions) + Send + 'static,
+    where
+        F: FnOnce(&mut AppOptions) + Send + 'static,
     {
         self.options_modifiers.push(Box::new(f));
     }
@@ -84,18 +88,21 @@ impl HostBuilder {
     }
 
     pub fn register<F>(mut self, f: F) -> Self
-    where F: FnOnce(ServiceCollection) -> ServiceCollection + Send + 'static,
+    where
+        F: FnOnce(ServiceCollection) -> ServiceCollection + Send + 'static,
     {
         self.service_configs.push(Box::new(f));
         self
     }
 
     pub fn configure<F>(mut self, f: F) -> Self
-    where F: FnOnce(&mut HostAppBuilder) + Send + 'static,
+    where
+        F: FnOnce(&mut HostAppBuilder) + Send + 'static,
     {
         let mut builder = HostAppBuilder::new();
         f(&mut builder);
-        self.options_modifiers.append(&mut builder.options_modifiers);
+        self.options_modifiers
+            .append(&mut builder.options_modifiers);
         self
     }
 
@@ -141,7 +148,10 @@ impl HostBuilder {
         }
 
         let provider = Arc::new(svc.build().unwrap_or_else(|e| {
-            panic!("Failed to build ServiceProvider: {}. Check your DI registrations.", e);
+            panic!(
+                "Failed to build ServiceProvider: {}. Check your DI registrations.",
+                e
+            );
         }));
 
         let mut pipeline = MiddlewarePipeline::new();
@@ -150,8 +160,8 @@ impl HostBuilder {
             pipeline.add_middleware(mw);
         }
 
-        let appsettings = config::load_appsettings(self.mode)
-            .unwrap_or_else(|| serde_json::json!({}));
+        let appsettings =
+            config::load_appsettings(self.mode).unwrap_or_else(|| serde_json::json!({}));
         let mut options: AppOptions = config::bind_root(&appsettings);
         for modifier in self.options_modifiers {
             modifier(&mut options);
@@ -168,6 +178,10 @@ impl HostBuilder {
             }
         });
         pipeline.add_middleware(Arc::new(CorsMiddleware::new(cors)));
+
+        if let Some(ref spa_root) = self.spa_root {
+            pipeline.add_middleware(Arc::new(SpaMiddleware::new(spa_root.clone())));
+        }
 
         // Users can register additional middleware here, e.g.:
         // pipeline.add_middleware(Arc::new(RequestIdMiddleware::new()));
@@ -198,16 +212,21 @@ impl HostBuilder {
 
         // Build dispatch map: handler_type → dispatch function
         #[allow(clippy::type_complexity)]
-        let mut dispatch_map: std::collections::HashMap<&'static str, fn(
-            Vec<u8>,
-            std::collections::HashMap<String, String>,
-            std::collections::HashMap<String, String>,
-            Arc<ServiceProvider>,
-        ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = lrwf_core::error::Result<
-                lrwf_core::di::scan::ResponseData
-            >> + Send>,
-        >> = std::collections::HashMap::new();
+        let mut dispatch_map: std::collections::HashMap<
+            &'static str,
+            fn(
+                Vec<u8>,
+                std::collections::HashMap<String, String>,
+                std::collections::HashMap<String, String>,
+                Arc<ServiceProvider>,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = lrwf_core::error::Result<lrwf_core::di::scan::ResponseData>,
+                        > + Send,
+                >,
+            >,
+        > = std::collections::HashMap::new();
 
         for dispatch in inventory::iter::<lrwf_core::di::scan::RouteDispatch> {
             dispatch_map.insert(dispatch.handler_type, dispatch.dispatch);
@@ -227,14 +246,24 @@ impl HostBuilder {
 
         let openapi_spec = generate_openapi_spec("LRWF API", "1.0.0");
         let openapi_bytes = serde_json::to_vec(&openapi_spec).unwrap_or_default();
-        router.register(HttpMethod::Get, "/api/openapi.json",
-            Arc::new(StaticJsonEndpoint { body: openapi_bytes }));
-        router.register(HttpMethod::Get, "/api/openapi.html",
-            Arc::new(StaticHtmlEndpoint { body: APIUI_HTML }));
+        router.register(
+            HttpMethod::Get,
+            "/api/openapi.json",
+            Arc::new(StaticJsonEndpoint {
+                body: openapi_bytes,
+            }),
+        );
+        router.register(
+            HttpMethod::Get,
+            "/api/openapi.html",
+            Arc::new(StaticHtmlEndpoint { body: APIUI_HTML }),
+        );
 
         // Health check endpoints for monitoring / container orchestration
-        let health_json = serde_json::to_vec(&serde_json::json!({"status":"ok"})).unwrap_or_default();
-        let health_endpoint: Arc<dyn IEndpoint> = Arc::new(StaticJsonEndpoint { body: health_json });
+        let health_json =
+            serde_json::to_vec(&serde_json::json!({"status":"ok"})).unwrap_or_default();
+        let health_endpoint: Arc<dyn IEndpoint> =
+            Arc::new(StaticJsonEndpoint { body: health_json });
         router.register(HttpMethod::Get, "/health", Arc::clone(&health_endpoint));
         router.register(HttpMethod::Get, "/healthz", health_endpoint);
 
@@ -260,7 +289,14 @@ impl HostBuilder {
 
         let router = Arc::new(tokio::sync::RwLock::new(router));
 
-        Host { provider, options, pipeline, router, mode: self.mode, spa_root: self.spa_root }
+        Host {
+            provider,
+            options,
+            pipeline,
+            router,
+            mode: self.mode,
+            spa_root: self.spa_root,
+        }
     }
 }
 
@@ -271,9 +307,13 @@ impl Default for HostBuilder {
 }
 
 impl Host {
-    pub fn builder() -> HostBuilder { HostBuilder::new() }
+    pub fn builder() -> HostBuilder {
+        HostBuilder::new()
+    }
 
-    pub fn options(&self) -> &AppOptions { &self.options }
+    pub fn options(&self) -> &AppOptions {
+        &self.options
+    }
 
     /// Start the server on all URLs configured in AppOptions.app.Urls.
     ///
@@ -303,9 +343,12 @@ impl Host {
             match scheme {
                 "http" => http_addrs.push(addr),
                 "https" => https_addrs.push(addr),
-                other => return Err(lrwf_core::error::Error::Http(
-                    format!("Unsupported URL scheme '{}' in '{}'", other, url)
-                )),
+                other => {
+                    return Err(lrwf_core::error::Error::Http(format!(
+                        "Unsupported URL scheme '{}' in '{}'",
+                        other, url
+                    )))
+                }
             }
         }
 
@@ -313,7 +356,7 @@ impl Host {
             let tls = &self.options.tls;
             if tls.cert_path.is_empty() || tls.key_path.is_empty() {
                 return Err(lrwf_core::error::Error::Http(
-                    "HTTPS URLs require Tls.CertPath and Tls.KeyPath".into()
+                    "HTTPS URLs require Tls.CertPath and Tls.KeyPath".into(),
                 ));
             }
             Some(build_tls_acceptor(&tls.cert_path, &tls.key_path)?)
@@ -325,8 +368,15 @@ impl Host {
         if self.mode == AppMode::Development {
             tracing::info!("");
             for url in &urls {
-                tracing::info!("  Listening on {}{}", url,
-                    if url.starts_with("https") { format!(" (OpenAPI  {}/api/openapi.html)", url) } else { String::new() });
+                tracing::info!(
+                    "  Listening on {}{}",
+                    url,
+                    if url.starts_with("https") {
+                        format!(" (OpenAPI  {}/api/openapi.html)", url)
+                    } else {
+                        String::new()
+                    }
+                );
             }
         } else {
             tracing::info!("Listening on {} url(s)", urls.len());
@@ -376,7 +426,15 @@ impl Host {
                 let p = Arc::clone(&pipeline);
                 let r = Arc::clone(&router);
                 let a = tls_acceptor.clone();
-                handles.push(tokio::spawn(serve_https(addr, a, n, p, r, mode, max_body_size)));
+                handles.push(tokio::spawn(serve_https(
+                    addr,
+                    a,
+                    n,
+                    p,
+                    r,
+                    mode,
+                    max_body_size,
+                )));
             }
         }
 
@@ -396,14 +454,17 @@ impl Host {
             Arc::clone(&self.router),
             self.mode,
             self.options.app.max_body_size,
-        ).await;
+        )
+        .await;
         Ok(())
     }
 }
 
 #[async_trait::async_trait]
 impl IHost for Host {
-    async fn run(&self, addr: &str) -> Result<()> { self.run_at(addr).await }
+    async fn run(&self, addr: &str) -> Result<()> {
+        self.run_at(addr).await
+    }
     async fn stop(&self) -> Result<()> {
         tracing::info!("Stop requested.");
         Ok(())
@@ -426,7 +487,11 @@ fn make_router_handler(router: Arc<tokio::sync::RwLock<Router>>) -> HandlerFn {
                 }
                 None => {
                     drop(router);
-                    write_error_response(ctx, 404, "Not Found").await;
+                    // Don't overwrite if a middleware (e.g. SPA) already
+                    // wrote a response body (static file, index.html fallback).
+                    if !ctx.response().has_body() {
+                        write_error_response(ctx, 404, "Not Found").await;
+                    }
                     Ok(())
                 }
             }
@@ -454,9 +519,11 @@ async fn handle_request(
 
 async fn write_error_response(ctx: &mut dyn IHttpContext, status: u16, message: &str) {
     ctx.response_mut().set_status(status);
-    ctx.response_mut().set_header("content-type", "application/json");
+    ctx.response_mut()
+        .set_header("content-type", "application/json");
     let body = serde_json::json!({ "error": message, "status": status });
-    let _ = ctx.response_mut()
+    let _ = ctx
+        .response_mut()
         .write_bytes(serde_json::to_vec(&body).unwrap_or_default())
         .await;
 }
@@ -473,9 +540,10 @@ fn parse_url(url: &str) -> Result<(&str, String)> {
     } else if let Some(rest) = url.strip_prefix("http://") {
         Ok(("http", rest.to_string()))
     } else {
-        Err(lrwf_core::error::Error::Http(
-            format!("Invalid URL '{}'. Use http://host:port or https://host:port", url)
-        ))
+        Err(lrwf_core::error::Error::Http(format!(
+            "Invalid URL '{}'. Use http://host:port or https://host:port",
+            url
+        )))
     }
 }
 
@@ -527,16 +595,23 @@ async fn serve_http(
                         let result = handle_request(req, pipeline, router, max_body_size).await;
                         let elapsed = start.elapsed();
                         if mode == AppMode::Development {
-                            let status = result.as_ref().map(|r| r.status().as_u16()).unwrap_or(500);
-                            tracing::info!("[{}] {} → {} ({:.0}ms)", method, path, status,
-                                elapsed.as_secs_f64() * 1000.0);
+                            let status =
+                                result.as_ref().map(|r| r.status().as_u16()).unwrap_or(500);
+                            tracing::info!(
+                                "[{}] {} → {} ({:.0}ms)",
+                                method,
+                                path,
+                                status,
+                                elapsed.as_secs_f64() * 1000.0
+                            );
                         }
                         result
                     }
                 });
 
                 if let Err(err) = hyper::server::conn::http1::Builder::new()
-                    .serve_connection(io, svc_fn).await
+                    .serve_connection(io, svc_fn)
+                    .await
                 {
                     tracing::error!("Connection error: {}", err);
                 }
@@ -615,19 +690,27 @@ async fn serve_https(
                                 let start = Instant::now();
                                 let method = req.method().to_string();
                                 let path = req.uri().path().to_string();
-                                let result = handle_request(req, pipeline, router, max_body_size).await;
+                                let result =
+                                    handle_request(req, pipeline, router, max_body_size).await;
                                 let elapsed = start.elapsed();
                                 if mode == AppMode::Development {
-                                    let status = result.as_ref().map(|r| r.status().as_u16()).unwrap_or(500);
-                                    tracing::info!("[{}] {} → {} ({:.0}ms)", method, path, status,
-                                        elapsed.as_secs_f64() * 1000.0);
+                                    let status =
+                                        result.as_ref().map(|r| r.status().as_u16()).unwrap_or(500);
+                                    tracing::info!(
+                                        "[{}] {} → {} ({:.0}ms)",
+                                        method,
+                                        path,
+                                        status,
+                                        elapsed.as_secs_f64() * 1000.0
+                                    );
                                 }
                                 result
                             }
                         });
 
                         if let Err(err) = hyper::server::conn::http1::Builder::new()
-                            .serve_connection(io, svc_fn).await
+                            .serve_connection(io, svc_fn)
+                            .await
                         {
                             tracing::error!("TLS connection error: {}", err);
                         }
@@ -668,36 +751,47 @@ async fn serve_https(
 
 /// Build a TLS acceptor from PEM certificate and key files.
 fn build_tls_acceptor(cert_path: &str, key_path: &str) -> Result<TlsAcceptor> {
-    use std::io::BufReader;
     use std::fs::File;
+    use std::io::BufReader;
 
     if cert_path.is_empty() || key_path.is_empty() {
         return Err(lrwf_core::error::Error::Http(
-            "TLS certificate or key path not configured.".into()
+            "TLS certificate or key path not configured.".into(),
         ));
     }
 
-    let cert_file = File::open(cert_path)
-        .map_err(|e| lrwf_core::error::Error::Http(format!("Cannot open cert '{}': {}", cert_path, e)))?;
+    let cert_file = File::open(cert_path).map_err(|e| {
+        lrwf_core::error::Error::Http(format!("Cannot open cert '{}': {}", cert_path, e))
+    })?;
     let mut cert_reader = BufReader::new(cert_file);
     let certs: Vec<CertificateDer> = certs(&mut cert_reader).filter_map(|r| r.ok()).collect();
     if certs.is_empty() {
-        return Err(lrwf_core::error::Error::Http(format!("No valid certs in '{}'", cert_path)));
+        return Err(lrwf_core::error::Error::Http(format!(
+            "No valid certs in '{}'",
+            cert_path
+        )));
     }
 
-    let key_file = File::open(key_path)
-        .map_err(|e| lrwf_core::error::Error::Http(format!("Cannot open key '{}': {}", key_path, e)))?;
+    let key_file = File::open(key_path).map_err(|e| {
+        lrwf_core::error::Error::Http(format!("Cannot open key '{}': {}", key_path, e))
+    })?;
     let mut key_reader = BufReader::new(key_file);
     let key = pkcs8_private_keys(&mut key_reader)
-        .filter_map(|r| r.ok()).map(PrivateKeyDer::from).next()
+        .filter_map(|r| r.ok())
+        .map(PrivateKeyDer::from)
+        .next()
         .or_else(|| {
             let key_file2 = File::open(key_path).map(BufReader::new).ok()?;
             let mut kr2 = key_file2;
             let rsa_keys: Vec<PrivateKeyDer> = rsa_private_keys(&mut kr2)
-                .filter_map(|r| r.ok()).map(PrivateKeyDer::from).collect();
+                .filter_map(|r| r.ok())
+                .map(PrivateKeyDer::from)
+                .collect();
             rsa_keys.into_iter().next()
         })
-        .ok_or_else(|| lrwf_core::error::Error::Http(format!("No valid private key in '{}'", key_path)))?;
+        .ok_or_else(|| {
+            lrwf_core::error::Error::Http(format!("No valid private key in '{}'", key_path))
+        })?;
 
     let config = ServerConfig::builder()
         .with_no_client_auth()

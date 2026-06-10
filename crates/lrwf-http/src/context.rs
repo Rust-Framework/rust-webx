@@ -1,8 +1,8 @@
 //! HttpContext — Runtime implementation of IHttpContext, IHttpRequest, IHttpResponse.
 
+use http_body_util::Full;
 use hyper::body::{Bytes, Incoming};
 use hyper::Request;
-use http_body_util::Full;
 use lrwf_core::auth::IClaims;
 use lrwf_core::error::Result;
 use lrwf_core::http::{IClaimsExt, IHttpContext, IHttpRequest, IHttpResponse};
@@ -92,10 +92,8 @@ impl HttpContext {
             if let Ok(json) = serde_json::to_vec(&error_body) {
                 resp.body = Some(json);
             }
-            resp.headers.insert(
-                "content-type".to_string(),
-                "application/json".to_string(),
-            );
+            resp.headers
+                .insert("content-type".to_string(), "application/json".to_string());
         }
 
         Self {
@@ -121,7 +119,9 @@ impl IClaimsExt for HttpContext {
         // because set_claims requires &mut self and can't be called concurrently
         // with any &self method, so the RefCell's contents are stable for the
         // duration of &self.
-        borrowed.as_ref().map(|b| unsafe { &*(&**b as *const dyn IClaims) })
+        borrowed
+            .as_ref()
+            .map(|b| unsafe { &*(&**b as *const dyn IClaims) })
     }
 }
 
@@ -238,6 +238,14 @@ impl HttpResponse {
 
 #[async_trait::async_trait]
 impl IHttpResponse for HttpResponse {
+    fn status(&self) -> u16 {
+        self.status
+    }
+
+    fn has_body(&self) -> bool {
+        self.body.is_some()
+    }
+
     fn set_status(&mut self, code: u16) {
         self.status = code;
     }

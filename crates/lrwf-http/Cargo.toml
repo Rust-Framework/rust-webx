@@ -7,6 +7,7 @@ description = "LRWF HTTP layer: Host builder, middleware pipeline, Trie-based ro
 
 [dependencies]
 lrwf-core.workspace = true
+lrwf-web.workspace = true
 lrwf-openapi.workspace = true
 lrdi.workspace = true
 jsonwebtoken.workspace = true

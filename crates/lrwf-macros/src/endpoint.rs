@@ -221,12 +221,14 @@ fn generate_dispatch_fn(
                 // Construct the request from HTTP data
                 let request: #ty = #build_request;
 
-                // Resolve handler from DI container
-                let handler = provider
-                    .get_service::<dyn ::lrwf::IRequestHandler<#ty, #rsp_type>>()
-                    .ok_or_else(|| ::lrwf::Error::Di(
-                        format!("No handler registered for {}", stringify!(#ty))
-                    ))?;
+                // Resolve handler from DI container once, then cache in a static
+                // OnceLock to eliminate per-request DI lookup overhead.
+                static HANDLER: ::std::sync::OnceLock<::std::sync::Arc<dyn ::lrwf::IRequestHandler<#ty, #rsp_type>>> = ::std::sync::OnceLock::new();
+                let handler = HANDLER.get_or_init(|| {
+                    provider
+                        .get_service::<dyn ::lrwf::IRequestHandler<#ty, #rsp_type>>()
+                        .unwrap_or_else(|| panic!("No handler registered for {}", stringify!(#ty)))
+                });
 
                 let result = handler.handle_with_claims(request, claims.as_deref()).await?;
                 let json_bytes = ::serde_json::to_vec(&result).unwrap_or_default();

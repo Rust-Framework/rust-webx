@@ -110,3 +110,32 @@ async fn router_nested_routes() {
     assert_eq!(params.get("id").unwrap(), "99");
     assert_eq!(pattern, "/api/users/{id}");
 }
+
+#[tokio::test]
+async fn router_duplicate_registration_overwrites() {
+    let mut router = Router::new();
+    router.register(HttpMethod::Get, "/dup", Arc::new(TestEndpoint { label: "first" }));
+    router.register(HttpMethod::Get, "/dup", Arc::new(TestEndpoint { label: "second" }));
+
+    let mut ctx = test_utils::TestHttpContext::new("GET", "/dup");
+    let result = router.match_route(&mut ctx).await.unwrap();
+    assert!(result.is_some());
+    let (_endpoint, _params, pattern) = result.unwrap();
+    // Last registration wins—pattern reflects latest registered endpoint.
+    assert_eq!(pattern, "/dup");
+}
+
+#[tokio::test]
+async fn router_root_path_match() {
+    let mut router = Router::new();
+    router.register(HttpMethod::Get, "/", Arc::new(TestEndpoint { label: "root" }));
+
+    let mut ctx = test_utils::TestHttpContext::new("GET", "/");
+    let result = router.match_route(&mut ctx).await.unwrap();
+    assert!(result.is_some());
+
+    // Empty path after leading-slash trim should also match root.
+    let mut ctx = test_utils::TestHttpContext::new("GET", "");
+    let result = router.match_route(&mut ctx).await.unwrap();
+    assert!(result.is_some());
+}

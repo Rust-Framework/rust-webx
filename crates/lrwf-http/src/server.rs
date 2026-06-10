@@ -47,6 +47,7 @@ pub struct Host {
     mode: AppMode,
     #[allow(dead_code)]
     spa_root: Option<String>,
+    shutdown: Arc<tokio::sync::Notify>,
 }
 
 #[allow(clippy::type_complexity)]
@@ -335,7 +336,21 @@ impl HostBuilder {
             router,
             mode: self.mode,
             spa_root: self.spa_root,
+            shutdown: Arc::new(tokio::sync::Notify::new()),
         }
+    }
+}
+
+/// Handle for a running server, allowing programmatic graceful shutdown.
+pub struct ServerHandle {
+    shutdown: Arc<tokio::sync::Notify>,
+}
+
+impl ServerHandle {
+    /// Signal the server to stop accepting new connections and begin
+    /// draining existing ones.
+    pub fn shutdown(self) {
+        self.shutdown.notify_waiters();
     }
 }
 

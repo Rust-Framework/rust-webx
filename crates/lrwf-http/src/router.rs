@@ -62,11 +62,9 @@ impl IRouter for Router {
             if segment.starts_with('{') && segment.ends_with('}') {
                 // Dynamic parameter segment
                 let param_name = segment[1..segment.len() - 1].to_string();
-                if node.param_child.is_none() {
-                    node.param_child = Some(Box::new(RouteNode::new()));
-                }
+                let child = node.param_child.get_or_insert_with(|| Box::new(RouteNode::new()));
                 node.param_name = Some(param_name);
-                node = node.param_child.as_mut().unwrap();
+                node = child.as_mut();
             } else {
                 // Static segment
                 node = node
@@ -98,6 +96,12 @@ impl IRouter for Router {
         }
 
         Ok(None)
+    }
+}
+
+impl Default for Router {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

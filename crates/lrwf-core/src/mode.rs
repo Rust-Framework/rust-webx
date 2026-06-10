@@ -4,16 +4,11 @@
 //! and built-in request logging.
 
 /// Controls how the framework behaves at startup and at runtime.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AppMode {
     /// Full startup banner, per-request console logging, verbose diagnostics.
+    #[default]
     Development,
     /// Minimal one-line startup message, no framework-initiated console logging.
     Production,
-}
-
-impl Default for AppMode {
-    fn default() -> Self {
-        AppMode::Development
-    }
 }

@@ -6,7 +6,6 @@
 use lrwf_core::error::Result;
 use lrwf_core::http::IHttpContext;
 use lrwf_core::middleware::IMiddleware;
-use std::sync::Arc;
 
 /// CORS configuration loaded from appsettings.json.
 #[derive(Debug, Clone)]
@@ -70,7 +69,7 @@ impl IMiddleware for CorsMiddleware {
             .config
             .origins
             .iter()
-            .find(|o| *o == "*" || origin.map_or(false, |orig| *o == orig))
+            .find(|o| *o == "*" || origin.is_some_and(|orig| *o == orig))
             .cloned();
 
         if let Some(ref origin_value) = allowed {

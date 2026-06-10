@@ -17,7 +17,7 @@ pub fn handler_impl(item: TokenStream) -> TokenStream {
 
     let handler_ty_name = extract_type_name(handler_ty);
     let fn_name = format_ident!("__lrwf_regfn_{}", handler_ty_name.replace("::", "_"));
-    let static_name = format_ident!("__LRWF_HANDLER_{}", handler_ty_name.replace("::", "_"));
+    let _static_name = format_ident!("__LRWF_HANDLER_{}", handler_ty_name.replace("::", "_"));
 
     let default_type = syn::parse_str::<Type>("()").unwrap();
     let req_ty = req_ty_opt.unwrap_or(&default_type);

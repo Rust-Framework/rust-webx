@@ -46,6 +46,10 @@ pub fn generate_openapi_spec(title: &str, version: &str) -> JsonValue {
             "tags": [tag],
         });
 
+        if !entry.description.is_empty() {
+            operation["description"] = json!(entry.description);
+        }
+
         if !parameters.is_empty() {
             operation["parameters"] = json!(parameters);
         }
@@ -122,13 +126,17 @@ fn build_responses(rsp_type: &str) -> JsonValue {
     })
 }
 
-/// Extract a tag name from a path.
-/// e.g., "/api/users/{id}" → "Users"
+/// Extract a tag name from a path for controller-style grouping.
+///
+/// Uses the last non-parameter segment as the tag, so routes like
+/// `/api/users/{id}` and `/api/users` both map to tag `"Users"`.
+///
+/// e.g., "/api/users/{id}" → "Users", "/health" → "Health"
 fn extract_tag(path: &str) -> String {
     let tag = path
         .trim_start_matches('/')
         .split('/')
-        .find(|s| !s.starts_with('{') && !s.is_empty())
+        .rfind(|s| !s.starts_with('{') && !s.is_empty())
         .unwrap_or("default");
     titlecase(tag)
 }

@@ -4,12 +4,12 @@
 // --- Core traits ---
 pub use lrwf_core::app::{IApplicationBuilder, IHost};
 pub use lrwf_core::auth::{IAuthenticationHandler, IAuthorizationPolicy, IClaims};
-pub use lrwf_core::config::{bind_config, bind_root, load_appsettings, AppOptions, AppSection, CorsSection, JwtSection, IAppOptions};
+pub use lrwf_core::config::{bind_config, bind_root, load_appsettings, AppOptions, AppSection, CorsSection, JwtSection, TlsSection, IAppOptions};
 pub use lrwf_core::error::{Error, Result};
 pub use lrwf_core::handler::{IEventHandler, IRequestHandler};
 pub use lrwf_core::http::{
     read_json_body, write_json_response, HttpStatus, IClaimsExt, IHttpContext, IHttpRequest,
-    IHttpResponse, Json,
+    IHttpResponse, Json, FromHttpContext,
 };
 pub use lrwf_core::mediator::{IEventRequest, IMediator, IRequest};
 pub use lrwf_core::middleware::IMiddleware;
@@ -19,7 +19,7 @@ pub use lrwf_core::routing::{HttpMethod, IEndpoint, IRouter, RouteMeta};
 
 // --- DI extensions ---
 pub use lrwf_core::di::ext::{should_scan_endpoints, is_mediator_active, IServiceCollectionExt};
-pub use lrwf_core::di::scan::{HandlerRegistration, ParamMeta, RouteEntry, RouteSource};
+pub use lrwf_core::di::scan::{HandlerRegistration, ParamMeta, RouteEntry, RouteSource, RouteDispatch, ResponseData};
 
 // --- HTTP layer ---
 pub use lrwf_http::auth_jwt::{JwtAuth, JwtClaims, jwt_middleware};
@@ -30,8 +30,12 @@ pub use lrwf_http::endpoint::{
     ControllerEndpoint, RequestEndpoint, StaticHtmlEndpoint, StaticJsonEndpoint,
 };
 pub use lrwf_http::pipeline::{HandlerFn, MiddlewarePipeline};
+pub use lrwf_http::rate_limit::{RateLimitMiddleware, RateLimiter};
+pub use lrwf_http::request_id::RequestIdMiddleware;
 pub use lrwf_http::router::Router;
+pub use lrwf_http::security_headers::SecurityHeadersMiddleware;
 pub use lrwf_http::server::{Host, HostAppBuilder, HostBuilder};
+pub use lrwf_http::timing::TimingMiddleware;
 
 // --- Mediator ---
 pub use lrwf_core::mediator_impl::Mediator;

@@ -19,3 +19,16 @@ hyper.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 inventory.workspace = true
+jsonwebtoken.workspace = true
+
+[[example]]
+name = "hello_request"
+path = "../../examples/hello_request.rs"
+
+[[example]]
+name = "crud_controller"
+path = "../../examples/crud_controller.rs"
+
+[[example]]
+name = "auth_example"
+path = "../../examples/auth_example.rs"

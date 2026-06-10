@@ -39,7 +39,7 @@ pub use lrwf_http::rate_limit::{RateLimitMiddleware, RateLimiter};
 pub use lrwf_http::request_id::RequestIdMiddleware;
 pub use lrwf_http::router::Router;
 pub use lrwf_http::security_headers::SecurityHeadersMiddleware;
-pub use lrwf_http::server::{Host, HostAppBuilder, HostBuilder};
+pub use lrwf_http::server::{Host, HostAppBuilder, HostBuilder, Server, ServerHandle};
 pub use lrwf_http::timing::TimingMiddleware;
 
 // --- Mediator ---

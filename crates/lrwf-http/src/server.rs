@@ -354,6 +354,38 @@ impl ServerHandle {
     }
 }
 
+/// A fully built server that owns its runtime lifecycle.
+///
+/// Created via `Host::into_server()`. Provides a graceful shutdown
+/// handle alongside the `run()` method.
+///
+/// ```ignore
+/// let server = Host::builder().build().into_server();
+/// let handle = server.handle();
+/// tokio::spawn(async move { server.run().await });
+/// handle.shutdown();
+/// ```
+pub struct Server {
+    host: Host,
+}
+
+impl Server {
+    /// Start listening on all configured URLs.
+    pub async fn run(self) -> Result<()> {
+        self.host.run().await
+    }
+
+    /// Start listening on a single address (convenience).
+    pub async fn run_at(self, addr: &str) -> Result<()> {
+        self.host.run_at(addr).await
+    }
+
+    /// Obtain a shutdown handle before starting.
+    pub fn handle(&self) -> ServerHandle {
+        self.host.server_handle()
+    }
+}
+
 impl Default for HostBuilder {
     fn default() -> Self {
         Self::new()
@@ -436,7 +468,7 @@ impl Host {
             tracing::info!("Listening on {} url(s)", urls.len());
         }
 
-        let notify = std::sync::Arc::new(tokio::sync::Notify::new());
+        let notify = Arc::clone(&self.shutdown);
 
         let shutdown_notify = std::sync::Arc::clone(&notify);
         tokio::spawn(async move {
@@ -500,7 +532,7 @@ impl Host {
 
     /// Start the server at a single explicit address (convenience wrapper).
     pub async fn run_at(&self, addr: &str) -> Result<()> {
-        let notify = std::sync::Arc::new(tokio::sync::Notify::new());
+        let notify = Arc::clone(&self.shutdown);
         serve_http(
             addr.to_string(),
             notify,
@@ -511,6 +543,32 @@ impl Host {
         )
         .await;
         Ok(())
+    }
+
+    /// Return a `ServerHandle` that can be used to signal graceful shutdown
+    /// from application code (e.g., integration tests, health checks).
+    ///
+    /// ```ignore
+    /// let host = Host::builder().build();
+    /// let handle = host.server_handle();
+    /// tokio::spawn(async move { host.run().await });
+    /// // ... later:
+    /// handle.shutdown();
+    /// ```
+    pub fn server_handle(&self) -> ServerHandle {
+        ServerHandle {
+            shutdown: Arc::clone(&self.shutdown),
+        }
+    }
+
+    /// Consume the host and return a `Server` that owns the runtime lifecycle.
+    ///
+    /// The returned `Server` can be `.run().await`-ed and provides a
+    /// handle for graceful shutdown.
+    pub fn into_server(self) -> Server {
+        Server {
+            host: self,
+        }
     }
 }
 

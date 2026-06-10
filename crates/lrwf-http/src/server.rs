@@ -11,6 +11,7 @@ use hyper::Request;
 use hyper_util::rt::TokioIo;
 use lrdi::{ServiceCollection, ServiceProvider};
 use lrwf_core::app::IHost;
+use lrwf_core::auth::IAuthorizationPolicy;
 use lrwf_core::config::{self, AppOptions};
 use lrwf_core::error::Result;
 use lrwf_core::http::IHttpContext;
@@ -18,11 +19,13 @@ use lrwf_core::middleware::IMiddleware;
 use lrwf_core::mode::AppMode;
 use lrwf_core::routing::{HttpMethod, IEndpoint, IRouter};
 
+use crate::auth_jwt::{init_jwt_secret, jwt_middleware, JwtAuth};
 use crate::context::HttpContext;
 use crate::cors::{CorsConfig, CorsMiddleware};
 use crate::endpoint::{StaticHtmlEndpoint, StaticJsonEndpoint, StubEndpoint};
 use crate::pipeline::{HandlerFn, MiddlewarePipeline};
 use crate::router::Router;
+use jsonwebtoken::{DecodingKey, Validation};
 use lrwf_core::di::scan::{HandlerRegistration, RouteEntry};
 use lrwf_openapi::{generate_openapi_spec, APIUI_HTML};
 use lrwf_web::SpaMiddleware;
@@ -53,6 +56,8 @@ pub struct HostBuilder {
     spa_root: Option<String>,
     options_modifiers: Vec<Box<dyn FnOnce(&mut AppOptions) + Send>>,
     cors_config: Option<CorsConfig>,
+    use_auth: bool,
+    authorization_policy: Option<Arc<dyn IAuthorizationPolicy>>,
 }
 
 #[allow(clippy::type_complexity)]
@@ -84,6 +89,8 @@ impl HostBuilder {
             spa_root: None,
             options_modifiers: Vec::new(),
             cors_config: None,
+            use_auth: false,
+            authorization_policy: None,
         }
     }
 
@@ -118,6 +125,19 @@ impl HostBuilder {
 
     pub fn use_cors(mut self, config: CorsConfig) -> Self {
         self.cors_config = Some(config);
+        self
+    }
+
+    pub fn use_auth(mut self) -> Self {
+        self.use_auth = true;
+        self
+    }
+
+    /// Register a dynamic authorization policy (`IAuthorizationPolicy`).
+    /// Checked at runtime per-request, after the static `#[authorize]` check.
+    /// Supports `ResourceAuthorization` or a custom DB-backed implementation.
+    pub fn use_authorization(mut self, policy: Arc<dyn IAuthorizationPolicy>) -> Self {
+        self.authorization_policy = Some(policy);
         self
     }
 
@@ -183,6 +203,22 @@ impl HostBuilder {
             pipeline.add_middleware(Arc::new(SpaMiddleware::new(spa_root.clone())));
         }
 
+        if self.use_auth {
+            let secret = options.jwt.secret.clone();
+            if !secret.is_empty() {
+                let jwt_auth = Arc::new(JwtAuth::new(
+                    DecodingKey::from_secret(secret.as_bytes()),
+                    Validation::default(),
+                ));
+                pipeline.add_middleware(Arc::new(jwt_middleware(jwt_auth)));
+                init_jwt_secret(&secret);
+            } else {
+                tracing::warn!(
+                    "use_auth() enabled but no JWT secret configured. Set jwt.secret in appsettings.json or JWT_SECRET env var."
+                );
+            }
+        }
+
         // Users can register additional middleware here, e.g.:
         // pipeline.add_middleware(Arc::new(RequestIdMiddleware::new()));
         // pipeline.add_middleware(Arc::new(TimingMiddleware::new()));
@@ -240,6 +276,8 @@ impl HostBuilder {
                 handler_type: entry.handler_type,
                 dispatch_fn: dispatch_map.get(entry.handler_type).copied(),
                 provider: Some(Arc::clone(&provider)),
+                auth_required_role: entry.required_role,
+                policy: self.authorization_policy.clone(),
             });
             router.register(entry.method, entry.path, stub);
         }

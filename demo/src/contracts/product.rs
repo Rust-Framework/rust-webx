@@ -28,6 +28,7 @@ pub struct CreateProductRequest {
 /// Add a new product to the catalog
 /// Requires name and price in the request body
 #[post("/api/products")]
+#[authorize(role = "admin")]
 impl IRequest<ProductModel> for CreateProductRequest {}
 
 #[derive(serde::Deserialize)]
@@ -40,6 +41,7 @@ pub struct UpdateProductRequest {
 /// Update an existing product's name or price
 /// Only provided fields will be changed; omitted fields are left unchanged
 #[put("/api/products/{id}")]
+#[authorize(role = "admin")]
 impl IRequest<ProductModel> for UpdateProductRequest {}
 
 pub struct DeleteProductRequest {
@@ -48,6 +50,7 @@ pub struct DeleteProductRequest {
 
 /// Remove a product from the catalog permanently
 #[delete("/api/products/{id}")]
+#[authorize(role = "admin")]
 impl IRequest<String> for DeleteProductRequest {}
 
 // ── Domain model (re-exported for convenience) ──

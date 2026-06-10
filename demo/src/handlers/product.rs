@@ -12,7 +12,9 @@ struct ProductRepository {
 
 impl ProductRepository {
     fn new() -> Self {
-        let repo = Self { products: Mutex::new(HashMap::new()) };
+        let repo = Self {
+            products: Mutex::new(HashMap::new()),
+        };
         // Seed data
         repo.create("Widget", 9.99);
         repo.create("Gadget", 24.50);
@@ -21,7 +23,10 @@ impl ProductRepository {
     }
 
     fn list(&self) -> Vec<ProductModel> {
-        self.products.lock().map(|g| g.values().cloned().collect()).unwrap_or_default()
+        self.products
+            .lock()
+            .map(|g| g.values().cloned().collect())
+            .unwrap_or_default()
     }
 
     fn get(&self, id: &str) -> Option<ProductModel> {
@@ -29,7 +34,8 @@ impl ProductRepository {
     }
 
     fn create(&self, name: &str, price: f64) -> ProductModel {
-        let id = format!("{:x}",
+        let id = format!(
+            "{:x}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_nanos())
@@ -41,15 +47,24 @@ impl ProductRepository {
             price,
             created_at: now_string(),
         };
-        self.products.lock().map(|mut g| { g.insert(id, product.clone()); }).ok();
+        self.products
+            .lock()
+            .map(|mut g| {
+                g.insert(id, product.clone());
+            })
+            .ok();
         product
     }
 
     fn update(&self, id: &str, name: Option<&str>, price: Option<f64>) -> Option<ProductModel> {
         let mut products = self.products.lock().ok()?;
         if let Some(p) = products.get_mut(id) {
-            if let Some(n) = name { p.name = n.to_string(); }
-            if let Some(pr) = price { p.price = pr; }
+            if let Some(n) = name {
+                p.name = n.to_string();
+            }
+            if let Some(pr) = price {
+                p.price = pr;
+            }
             Some(p.clone())
         } else {
             None
@@ -57,7 +72,10 @@ impl ProductRepository {
     }
 
     fn delete(&self, id: &str) -> bool {
-        self.products.lock().map(|mut g| g.remove(id).is_some()).unwrap_or(false)
+        self.products
+            .lock()
+            .map(|mut g| g.remove(id).is_some())
+            .unwrap_or(false)
     }
 }
 

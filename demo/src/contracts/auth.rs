@@ -46,4 +46,5 @@ pub struct AuthMeRequest;
 
 /// Returns the current user's info based on the JWT token claims.
 #[get("/api/auth/me")]
+#[authorize]
 impl IRequest<UserView> for AuthMeRequest {}

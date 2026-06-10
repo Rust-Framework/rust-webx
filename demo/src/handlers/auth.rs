@@ -1,40 +1,29 @@
 use bcrypt::{hash, verify, DEFAULT_COST};
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{encode, EncodingKey, Header};
 use lrwf::*;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use serde::Serialize;
 
 use crate::contracts::auth::*;
 use crate::domain::user::UserModel;
 
 // =========================================================================
-// JWT helpers
+// JWT helpers  (encoding secret is set by use_auth() at startup)
 // =========================================================================
 
-static JWT_SECRET: OnceLock<String> = OnceLock::new();
-
-/// Initialise the JWT secret from app configuration.
-/// Must be called once at startup.
-pub fn init_jwt_secret(secret: &str) {
-    let _ = JWT_SECRET.set(secret.to_string());
-}
-
-fn jwt_secret() -> &'static str {
-    JWT_SECRET.get().expect("JWT secret not initialised")
-}
-
 /// Custom JWT payload for our application.
-#[derive(Debug, Serialize, Deserialize)]
+/// Fields match the framework's `RawClaims` so `use_auth()` middleware can
+/// extract roles without a custom handler.
+#[derive(Debug, Serialize, serde::Deserialize)]
 struct AppJwtClaims {
     /// Subject (user id)
     sub: String,
-    /// User name
+    /// User display name (custom claim)
     name: String,
-    /// User email
+    /// User email (custom claim)
     email: String,
-    /// User role
-    role: String,
+    /// User roles — required by framework JwtAuth
+    #[serde(default)]
+    roles: Vec<String>,
     /// Issued-at timestamp
     iat: u64,
     /// Expiration timestamp (24 h)
@@ -51,7 +40,7 @@ fn create_token(user: &UserModel) -> Result<String> {
         sub: user.id.clone(),
         name: user.name.clone(),
         email: user.email.clone(),
-        role: user.role.clone(),
+        roles: vec![user.role.clone()],
         iat: now,
         exp: now + 86_400, // 24 hours
     };
@@ -59,7 +48,7 @@ fn create_token(user: &UserModel) -> Result<String> {
     encode(
         &Header::default(),
         &claims,
-        &EncodingKey::from_secret(jwt_secret().as_bytes()),
+        &EncodingKey::from_secret(lrwf::jwt_secret().as_bytes()),
     )
     .map_err(|e| Error::Http(format!("Token creation failed: {}", e)))
 }
@@ -70,10 +59,7 @@ fn create_token(user: &UserModel) -> Result<String> {
 
 /// Find a user by email. Returns the user if found.
 pub fn find_user_by_email(email: &str) -> Option<UserModel> {
-    // Access the same static REPO from user.rs
-    // We create a local finder that iterates the repo
-    let users = crate::handlers::user::repo().list();
-    users.into_iter().find(|u| u.email == email)
+    crate::handlers::user::repo().find_by_email(email)
 }
 
 /// Find a user by id.
@@ -164,23 +150,10 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
 #[async_trait]
 impl IRequestHandler<AuthMeRequest, UserView> for AuthMeHandler {
     async fn handle(&self, _: AuthMeRequest) -> Result<UserView> {
-        // The JWT middleware has already stored claims in the context.
-        // For handler access, we extract from the HTTP context.
-        // Since IRequestHandler doesn't have direct access to IHttpContext,
-        // we use the mediator's context injection. For now, get user from
-        // the token's sub claim stored in a thread-local / static.
-        //
-        // Actually, the #[handler] macro + mediator pipeline injects
-        // IHttpContext as a method parameter when the request struct
-        // implements FromHttpContext. But AuthMeRequest is a simple struct
-        // with no fields.
-        //
-        // The simplest approach: use a thread-local set by the middleware.
-
-        let user_id = CURRENT_USER_ID.with(|id| id.borrow().clone());
-        if user_id.is_empty() {
-            return Err(Error::Http("Not authenticated".into()));
-        }
+        // The endpoint-level #[authorize] guarantees the user is authenticated.
+        // take_current_user() is set by StubEndpoint::handle before dispatching.
+        let (user_id, _) =
+            lrwf::take_current_user().ok_or_else(|| Error::Http("Not authenticated".into()))?;
 
         let user = find_user_by_id(&user_id).ok_or_else(|| Error::Http("User not found".into()))?;
 
@@ -195,101 +168,18 @@ impl IRequestHandler<AuthMeRequest, UserView> for AuthMeHandler {
 }
 
 // =========================================================================
-// Thread-local for passing current user ID from middleware to handler
+// Seed admin user
 // =========================================================================
 
-thread_local! {
-    static CURRENT_USER_ID: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
-}
-
-/// Set the current user ID for the duration of request handling.
-/// Called by the auth middleware before invoking the handler.
-pub fn set_current_user_id(id: &str) {
-    CURRENT_USER_ID.with(|cell| *cell.borrow_mut() = id.to_string());
-}
-
-// =========================================================================
-// JWT Authentication Middleware
-// =========================================================================
-
-/// Middleware that validates JWT Bearer tokens and stores claims.
-pub struct JwtAuthzMiddleware;
-
-#[async_trait]
-impl IMiddleware for JwtAuthzMiddleware {
-    async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<()> {
-        // Skip OPTIONS preflight
-        if ctx.request().method().to_uppercase() == "OPTIONS" {
-            return Ok(());
-        }
-
-        // Try to extract and validate Bearer token
-        let token = match ctx.request().header("authorization") {
-            Some(h) => h.strip_prefix("Bearer ").map(|t| t.trim().to_string()),
-            None => None,
-        };
-
-        if let Some(token) = token {
-            if !token.is_empty() {
-                // Decode and validate
-                match decode::<AppJwtClaims>(
-                    &token,
-                    &DecodingKey::from_secret(jwt_secret().as_bytes()),
-                    &Validation::default(),
-                ) {
-                    Ok(data) => {
-                        let claims = data.claims;
-                        // Store in the HTTP context for downstream middleware
-                        let jwt_claims = JwtClaims::new(&claims.sub, &claims.role);
-                        ctx.set_claims(Box::new(jwt_claims));
-                        // Store in thread-local for the handler
-                        set_current_user_id(&claims.sub);
-                    }
-                    Err(e) => {
-                        return Err(Error::Http(format!("Invalid token: {}", e)));
-                    }
-                }
-            }
-        }
-
-        Ok(())
-    }
-}
-
-/// Simple IClaims implementation backed by JWT data.
-pub struct JwtClaims {
-    sub: String,
-    roles: Vec<String>,
-    claims_map: HashMap<String, String>,
-}
-
-impl JwtClaims {
-    fn new(sub: &str, role: &str) -> Self {
-        let mut claims_map = HashMap::new();
-        claims_map.insert("sub".into(), sub.to_string());
-        claims_map.insert("role".into(), role.to_string());
-        Self {
-            sub: sub.to_string(),
-            roles: vec![role.to_string()],
-            claims_map,
-        }
-    }
-}
-
-impl IClaims for JwtClaims {
-    fn subject(&self) -> &str {
-        &self.sub
+/// Ensure a default admin user exists in the repository.
+/// Called once at startup.
+pub fn ensure_admin_user() {
+    let existing = find_user_by_email("admin@lrwf.dev");
+    if existing.is_some() {
+        return;
     }
 
-    fn roles(&self) -> &[String] {
-        &self.roles
-    }
-
-    fn permissions(&self) -> &[String] {
-        &[]
-    }
-
-    fn claims(&self) -> &HashMap<String, String> {
-        &self.claims_map
-    }
+    let hashed = bcrypt::hash("admin123", DEFAULT_COST).expect("Failed to hash admin password");
+    crate::handlers::user::repo().create_with_password("Admin", "admin@lrwf.dev", &hashed, "admin");
+    tracing::info!("[Auth] Default admin created: admin@lrwf.dev / admin123");
 }

@@ -159,6 +159,28 @@ pub fn from_query(_attr: TokenStream, item: TokenStream) -> TokenStream {
 // Declaration macros
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Authorization attribute (declarative, handled by emit_endpoint)
+// ---------------------------------------------------------------------------
+
+/// Declares authorization requirements on a route.
+///
+/// ```ignore
+/// #[get("/api/users")]
+/// #[authorize(role = "admin")]
+/// impl IRequest<Vec<UserModel>> for ListUsersRequest {}
+///
+/// #[get("/api/auth/me")]
+/// #[authorize]
+/// impl IRequest<UserView> for AuthMeRequest {}
+/// ```
+#[proc_macro_attribute]
+pub fn authorize(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    // Pass through — the attribute is read by emit_endpoint inside
+    // the route macro (get, post, etc.) via item_impl.attrs.
+    item
+}
+
 /// One-shot macro to generate a Request struct, its IRequest impl with
 /// route metadata, and parameter binding code.
 ///

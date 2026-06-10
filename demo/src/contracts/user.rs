@@ -1,5 +1,5 @@
-use lrwf::*;
 use crate::domain::user::UserModel;
+use lrwf::*;
 
 // ── IRequest definitions — the API contract ──
 
@@ -13,6 +13,7 @@ pub struct ListUsersRequest;
 
 /// Returns a list of all registered users
 #[get("/api/users")]
+#[authorize(role = "admin")]
 impl IRequest<Vec<UserModel>> for ListUsersRequest {}
 
 pub struct GetUserRequest {
@@ -21,6 +22,7 @@ pub struct GetUserRequest {
 
 /// Get a single user by their unique ID
 #[get("/api/users/{id}")]
+#[authorize(role = "admin")]
 impl IRequest<UserModel> for GetUserRequest {}
 
 #[derive(serde::Deserialize)]
@@ -31,6 +33,7 @@ pub struct CreateUserRequest {
 
 /// Create a new user with name and email address
 #[post("/api/users")]
+#[authorize(role = "admin")]
 impl IRequest<UserModel> for CreateUserRequest {}
 
 #[derive(serde::Deserialize)]
@@ -42,6 +45,7 @@ pub struct UpdateUserRequest {
 
 /// Update an existing user's name and/or email
 #[put("/api/users/{id}")]
+#[authorize(role = "admin")]
 impl IRequest<UserModel> for UpdateUserRequest {}
 
 pub struct DeleteUserRequest {
@@ -50,6 +54,7 @@ pub struct DeleteUserRequest {
 
 /// Delete a user by their unique ID
 #[delete("/api/users/{id}")]
+#[authorize(role = "admin")]
 impl IRequest<String> for DeleteUserRequest {}
 
 // ── IEventRequest definitions — events are contracts too ──

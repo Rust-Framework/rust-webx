@@ -1,6 +1,8 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, Attribute, Expr, GenericArgument, ItemImpl, Lit, Meta, PathArguments, Type};
+use syn::{
+    parse_macro_input, Attribute, Expr, GenericArgument, ItemImpl, Lit, Meta, PathArguments, Type,
+};
 
 // =====================================================================
 // Generic #[endpoint(HttpMethod, "/path")] — full form
@@ -56,7 +58,11 @@ pub fn request_macro_impl(input: TokenStream) -> TokenStream {
 
 fn parse_shortcut_attr(attr: &str) -> String {
     let s = attr.trim();
-    if s.is_empty() { "/".to_string() } else { s.trim_matches('"').trim_matches('\'').to_string() }
+    if s.is_empty() {
+        "/".to_string()
+    } else {
+        s.trim_matches('"').trim_matches('\'').to_string()
+    }
 }
 
 /// Generate a RouteEntry AND a RouteDispatch from an `impl IRequest<Response> for Name` block.
@@ -75,9 +81,11 @@ fn emit_endpoint(attr: TokenStream, item: TokenStream) -> TokenStream {
     let description = extract_doc_comments(&item_impl.attrs);
 
     // Parse response type back to a Type for use in generated code
-    let rsp_type: syn::Type = syn::parse_str(&rsp_type_str).unwrap_or_else(|_| {
-        syn::parse_str("()").unwrap()
-    });
+    let rsp_type: syn::Type =
+        syn::parse_str(&rsp_type_str).unwrap_or_else(|_| syn::parse_str("()").unwrap());
+
+    // Extract required_role from #[authorize] or #[authorize(role = "...")]
+    let required_role = extract_required_role(&item_impl.attrs);
 
     // Parameter metadata for OpenAPI
     let mut params_tokens: Vec<proc_macro2::TokenStream> = extract_path_params(&path_str)
@@ -108,7 +116,13 @@ fn emit_endpoint(attr: TokenStream, item: TokenStream) -> TokenStream {
     let path_params: Vec<String> = extract_path_params(&path_str);
 
     // Generate dispatch function
-    let dispatch_fn = generate_dispatch_fn(self_ty, &rsp_type, &req_type_name, &path_params, is_body_method);
+    let dispatch_fn = generate_dispatch_fn(
+        self_ty,
+        &rsp_type,
+        &req_type_name,
+        &path_params,
+        is_body_method,
+    );
 
     let dispatch_fn_name = format_ident!("__lrwf_dispatch_{}", req_type_name.replace("::", "_"));
 
@@ -133,6 +147,7 @@ fn emit_endpoint(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #summary,
                 #description,
                 &[#(#params_tokens),*],
+                #required_role,
             )
         }
     };
@@ -248,7 +263,10 @@ fn type_to_string(ty: &Type) -> String {
     match ty {
         Type::Path(tp) => {
             let mut result = String::new();
-            let segments: Vec<String> = tp.path.segments.iter()
+            let segments: Vec<String> = tp
+                .path
+                .segments
+                .iter()
                 .map(|s| s.ident.to_string())
                 .collect();
             result.push_str(&segments.join("::"));
@@ -256,12 +274,14 @@ fn type_to_string(ty: &Type) -> String {
             // Handle generic type arguments (e.g., Vec<UserModel>)
             if let Some(last_seg) = tp.path.segments.last() {
                 if let PathArguments::AngleBracketed(args) = &last_seg.arguments {
-                    let gen_args: Vec<String> = args.args.iter().filter_map(|a| {
-                        match a {
+                    let gen_args: Vec<String> = args
+                        .args
+                        .iter()
+                        .filter_map(|a| match a {
                             GenericArgument::Type(t) => Some(type_to_string(t)),
                             _ => None,
-                        }
-                    }).collect();
+                        })
+                        .collect();
                     if !gen_args.is_empty() {
                         result.push('<');
                         result.push_str(&gen_args.join(", "));
@@ -296,7 +316,11 @@ fn parse_endpoint_attr(attr: &str) -> (String, String) {
     if let Some(idx) = s.find(',') {
         let raw_method = s[..idx].trim();
         let method = map_method_name(raw_method).to_string();
-        let path = s[idx + 1..].trim().trim_matches('"').trim_matches('\'').to_string();
+        let path = s[idx + 1..]
+            .trim()
+            .trim_matches('"')
+            .trim_matches('\'')
+            .to_string();
         (method, path)
     } else {
         ("Get".to_string(), "/".to_string())
@@ -352,6 +376,29 @@ fn generate_summary(type_name: &str) -> String {
     result
 }
 
+/// Extract required_role from `#[authorize]` or `#[authorize(role = "admin")]` attributes.
+fn extract_required_role(attrs: &[Attribute]) -> proc_macro2::TokenStream {
+    for attr in attrs {
+        if attr.path().is_ident("authorize") {
+            match &attr.meta {
+                Meta::List(list) => {
+                    // Parse `role = "admin"` from inside the parens
+                    let tokens_str = list.tokens.to_string();
+                    if let Some(role_val) = tokens_str.trim().strip_prefix("role = \"") {
+                        if let Some(end) = role_val.find('"') {
+                            let role = &role_val[..end];
+                            return quote! { #role };
+                        }
+                    }
+                }
+                Meta::Path(_) => return quote! { "authenticated" },
+                _ => {}
+            }
+        }
+    }
+    quote! { "" }
+}
+
 /// Extract `///` doc comments from a list of attributes.
 ///
 /// Rust converts each `///` line into a separate `#[doc = "..."]` attribute.
@@ -363,18 +410,16 @@ fn extract_doc_comments(attrs: &[Attribute]) -> String {
     let lines: Vec<String> = attrs
         .iter()
         .filter(|attr| attr.path().is_ident("doc"))
-        .filter_map(|attr| {
-            match &attr.meta {
-                Meta::NameValue(nv) => {
-                    if let Expr::Lit(el) = &nv.value {
-                        if let Lit::Str(ls) = &el.lit {
-                            return Some(ls.value().trim().to_string());
-                        }
+        .filter_map(|attr| match &attr.meta {
+            Meta::NameValue(nv) => {
+                if let Expr::Lit(el) = &nv.value {
+                    if let Lit::Str(ls) = &el.lit {
+                        return Some(ls.value().trim().to_string());
                     }
-                    None
                 }
-                _ => None,
+                None
             }
+            _ => None,
         })
         .collect();
 

@@ -1,10 +1,28 @@
 //! Endpoint — IEndpoint implementations for dual-mode dispatch.
 
+use lrdi::ServiceProvider;
+use lrwf_core::auth::IAuthorizationPolicy;
 use lrwf_core::error::Result;
 use lrwf_core::http::IHttpContext;
 use lrwf_core::routing::IEndpoint;
-use lrdi::ServiceProvider;
-use std::sync::Arc;
+use serde_json;
+use std::sync::{Arc, Mutex, OnceLock};
+
+/// Per-request storage: the JWT auth middleware sets this, and the dispatch
+/// function reads it before calling the handler.  Both run in the same
+/// async task (StubEndpoint::handle), so there is no concurrent access
+/// from other requests.
+static CURRENT_USER: OnceLock<Mutex<Option<(String, String)>>> = OnceLock::new();
+
+pub(crate) fn set_current_user(id: &str, role: &str) {
+    let lock = CURRENT_USER.get_or_init(|| Mutex::new(None));
+    *lock.lock().unwrap() = Some((id.to_string(), role.to_string()));
+}
+
+pub fn take_current_user() -> Option<(String, String)> {
+    let lock = CURRENT_USER.get_or_init(|| Mutex::new(None));
+    lock.lock().unwrap().take()
+}
 
 /// Endpoint that wraps a boxed async handler.
 #[allow(clippy::type_complexity)]
@@ -31,9 +49,9 @@ impl RequestEndpoint {
     where
         F: for<'a> Fn(
                 &'a mut dyn IHttpContext,
-            )
-                -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'a>>
-            + Send
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<()>> + Send + 'a>,
+            > + Send
             + Sync
             + 'static,
     {
@@ -65,6 +83,10 @@ pub struct StubEndpoint {
         >,
     >,
     pub provider: Option<Arc<ServiceProvider>>,
+    pub auth_required_role: &'static str,
+    /// Dynamic authorization policy (from `IAuthorizationPolicy`).
+    /// Checked after static `#[authorize]` and before handler dispatch.
+    pub policy: Option<Arc<dyn IAuthorizationPolicy>>,
 }
 
 #[async_trait::async_trait]
@@ -75,10 +97,78 @@ impl IEndpoint for StubEndpoint {
             let route_params = ctx.request().route_params().clone();
             let query_params = ctx.request().query().clone();
 
-            let response = dispatch(body_bytes, route_params, query_params, Arc::clone(provider)).await?;
+            // Forward the JWT auth info (set by middleware) to the handler.
+            if let Some(claims) = ctx.claims() {
+                set_current_user(
+                    claims.subject(),
+                    claims.roles().first().map(|s| s.as_str()).unwrap_or(""),
+                );
+            }
+
+            // ── Authorization check (declared on route via #[authorize]) ──
+            if !self.auth_required_role.is_empty() {
+                match ctx.claims() {
+                    None => {
+                        // No authenticated user at all
+                        ctx.response_mut().set_status(401);
+                        ctx.response_mut()
+                            .set_header("content-type", "application/json");
+                        ctx.response_mut()
+                            .write_bytes(
+                                serde_json::to_vec(&serde_json::json!({
+                                    "error": "Authentication required",
+                                    "status": 401
+                                }))
+                                .unwrap_or_default(),
+                            )
+                            .await?;
+                        return Ok(());
+                    }
+                    Some(claims) => {
+                        if self.auth_required_role != "authenticated"
+                            && !claims
+                                .roles()
+                                .iter()
+                                .any(|r| r.as_str() == self.auth_required_role)
+                        {
+                            ctx.response_mut().set_status(403);
+                            ctx.response_mut()
+                                .set_header("content-type", "application/json");
+                            ctx.response_mut()
+                                .write_bytes(
+                                    serde_json::to_vec(&serde_json::json!({
+                                        "error": "Forbidden: insufficient permissions",
+                                        "status": 403,
+                                        "required_role": self.auth_required_role,
+                                    }))
+                                    .unwrap_or_default(),
+                                )
+                                .await?;
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+
+            // ── Dynamic authorization policy check (IAuthorizationPolicy) ──
+            // Only runs when the route is protected by #[authorize].
+            // Available AFTER routing (route_pattern is set by the router).
+            if !self.auth_required_role.is_empty() {
+                if let Some(ref policy) = self.policy {
+                    if let Some(claims) = ctx.claims() {
+                        let resource_key = ctx.request().route_pattern().unwrap_or(self.path);
+                        let method = ctx.request().method();
+                        policy.authorize(claims, resource_key, method).await?;
+                    }
+                }
+            }
+
+            let response =
+                dispatch(body_bytes, route_params, query_params, Arc::clone(provider)).await?;
 
             ctx.response_mut().set_status(response.status);
-            ctx.response_mut().set_header("content-type", &response.content_type);
+            ctx.response_mut()
+                .set_header("content-type", &response.content_type);
             ctx.response_mut().write_bytes(response.body).await?;
             return Ok(());
         }
@@ -120,9 +210,9 @@ impl ControllerEndpoint {
     where
         F: for<'a> Fn(
                 &'a mut dyn IHttpContext,
-            )
-                -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'a>>
-            + Send
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<()>> + Send + 'a>,
+            > + Send
             + Sync
             + 'static,
     {

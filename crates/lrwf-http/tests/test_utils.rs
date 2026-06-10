@@ -61,7 +61,9 @@ impl IClaimsExt for TestHttpContext {
 
     fn claims(&self) -> Option<&dyn IClaims> {
         let borrowed = self.claims.borrow();
-        borrowed.as_ref().map(|b| unsafe { &*(&**b as *const dyn IClaims) })
+        borrowed
+            .as_ref()
+            .map(|b| unsafe { &*(&**b as *const dyn IClaims) })
     }
 }
 
@@ -149,6 +151,14 @@ struct TestHttpResponse {
 
 #[async_trait::async_trait]
 impl IHttpResponse for TestHttpResponse {
+    fn status(&self) -> u16 {
+        self.status
+    }
+
+    fn has_body(&self) -> bool {
+        self.body.is_some()
+    }
+
     fn set_status(&mut self, code: u16) {
         self.status = code;
     }

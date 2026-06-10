@@ -4,12 +4,15 @@
 // --- Core traits ---
 pub use lrwf_core::app::{IApplicationBuilder, IHost};
 pub use lrwf_core::auth::{IAuthenticationHandler, IAuthorizationPolicy, IClaims};
-pub use lrwf_core::config::{bind_config, bind_root, load_appsettings, AppOptions, AppSection, CorsSection, JwtSection, TlsSection, IAppOptions};
+pub use lrwf_core::config::{
+    bind_config, bind_root, load_appsettings, AppOptions, AppSection, CorsSection, IAppOptions,
+    JwtSection, TlsSection,
+};
 pub use lrwf_core::error::{Error, Result};
 pub use lrwf_core::handler::{IEventHandler, IRequestHandler};
 pub use lrwf_core::http::{
-    read_json_body, write_json_response, HttpStatus, IClaimsExt, IHttpContext, IHttpRequest,
-    IHttpResponse, Json, FromHttpContext,
+    read_json_body, write_json_response, FromHttpContext, HttpStatus, IClaimsExt, IHttpContext,
+    IHttpRequest, IHttpResponse, Json,
 };
 pub use lrwf_core::mediator::{IEventRequest, IMediator, IRequest};
 pub use lrwf_core::middleware::IMiddleware;
@@ -18,16 +21,18 @@ pub use lrwf_core::pipeline::{IPipelineBehavior, IServiceResolver};
 pub use lrwf_core::routing::{HttpMethod, IEndpoint, IRouter, RouteMeta};
 
 // --- DI extensions ---
-pub use lrwf_core::di::ext::{should_scan_endpoints, is_mediator_active, IServiceCollectionExt};
-pub use lrwf_core::di::scan::{HandlerRegistration, ParamMeta, RouteEntry, RouteSource, RouteDispatch, ResponseData};
+pub use lrwf_core::di::ext::{is_mediator_active, should_scan_endpoints, IServiceCollectionExt};
+pub use lrwf_core::di::scan::{
+    HandlerRegistration, ParamMeta, ResponseData, RouteDispatch, RouteEntry, RouteSource,
+};
 
 // --- HTTP layer ---
-pub use lrwf_http::auth_jwt::{JwtAuth, JwtClaims, jwt_middleware};
-pub use lrwf_http::authz::{ResourceAuthorization, resource_auth_middleware};
+pub use lrwf_http::auth_jwt::{init_jwt_secret, jwt_middleware, jwt_secret, JwtAuth, JwtClaims};
+pub use lrwf_http::authz::{resource_auth_middleware, ResourceAuthorization};
 pub use lrwf_http::context::{HttpContext, HttpRequest, HttpResponse};
 pub use lrwf_http::cors::{CorsConfig, CorsMiddleware};
 pub use lrwf_http::endpoint::{
-    ControllerEndpoint, RequestEndpoint, StaticHtmlEndpoint, StaticJsonEndpoint,
+    take_current_user, ControllerEndpoint, RequestEndpoint, StaticHtmlEndpoint, StaticJsonEndpoint,
 };
 pub use lrwf_http::pipeline::{HandlerFn, MiddlewarePipeline};
 pub use lrwf_http::rate_limit::{RateLimitMiddleware, RateLimiter};
@@ -48,19 +53,15 @@ pub use lrwf_openapi::{generate_openapi_spec, APIUI_HTML};
 
 // --- Macros ---
 pub use lrwf_macros::{
-    controller, endpoint,
-    get, post, put, delete,
-    from_body, from_query, from_route,
-    handler,
-    http_delete, http_get, http_post, http_put,
-    request,
+    authorize, controller, delete, endpoint, from_body, from_query, from_route, get, handler,
+    http_delete, http_get, http_post, http_put, post, put, request,
 };
 
 // --- Re-export lrdi (for manual registration and module blocks) ---
 pub use lrdi;
+pub use lrdi::inject;
 pub use lrdi_macros;
 pub use lrdi_macros::module;
-pub use lrdi::inject;
 
 // --- Re-export common dependencies ---
 pub use async_trait::async_trait;

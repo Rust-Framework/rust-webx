@@ -53,6 +53,9 @@ pub struct RouteEntry {
 
     /// Source kind: "request" for IRequest endpoints, "controller" for controller methods.
     pub source: RouteSource,
+
+    /// "" = public, "authenticated" = any valid JWT, otherwise specific role name.
+    pub required_role: &'static str,
 }
 
 /// Distinguishes between IRequest-based and Controller-based endpoints.
@@ -94,7 +97,9 @@ pub struct RouteDispatch {
         route_params: std::collections::HashMap<String, String>,
         query_params: std::collections::HashMap<String, String>,
         provider: std::sync::Arc<lrdi::ServiceProvider>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = crate::error::Result<ResponseData>> + Send>>,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = crate::error::Result<ResponseData>> + Send>,
+    >,
 }
 
 /// Response data produced by a dispatch function.
@@ -121,6 +126,7 @@ impl RouteEntry {
         summary: &'static str,
         description: &'static str,
         params: &'static [ParamMeta],
+        required_role: &'static str,
     ) -> Self {
         Self {
             method,
@@ -131,6 +137,7 @@ impl RouteEntry {
             description,
             params,
             source: RouteSource::RequestEndpoint,
+            required_role,
         }
     }
 
@@ -143,6 +150,7 @@ impl RouteEntry {
         summary: &'static str,
         description: &'static str,
         params: &'static [ParamMeta],
+        required_role: &'static str,
     ) -> Self {
         Self {
             method,
@@ -153,6 +161,7 @@ impl RouteEntry {
             description,
             params,
             source: RouteSource::ControllerMethod,
+            required_role,
         }
     }
 }

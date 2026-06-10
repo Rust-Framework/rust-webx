@@ -9,7 +9,7 @@ use crate::domain::user::UserModel;
 // In-memory UserRepository
 // =========================================================================
 
-struct UserRepository {
+pub struct UserRepository {
     users: Mutex<HashMap<String, UserModel>>,
 }
 
@@ -31,11 +31,11 @@ impl UserRepository {
             .unwrap_or_default()
     }
 
-    fn get(&self, id: &str) -> Option<UserModel> {
+    pub fn get(&self, id: &str) -> Option<UserModel> {
         self.users.lock().ok()?.get(id).cloned()
     }
 
-    fn create(&self, name: &str, email: &str) -> UserModel {
+    pub fn create(&self, name: &str, email: &str) -> UserModel {
         let id = format!(
             "{:x}",
             std::time::SystemTime::now()
@@ -60,7 +60,7 @@ impl UserRepository {
         user
     }
 
-    fn create_with_password(
+    pub fn create_with_password(
         &self,
         name: &str,
         email: &str,
@@ -91,12 +91,12 @@ impl UserRepository {
         user
     }
 
-    fn find_by_email(&self, email: &str) -> Option<UserModel> {
+    pub fn find_by_email(&self, email: &str) -> Option<UserModel> {
         let users = self.users.lock().ok()?;
         users.values().find(|u| u.email == email).cloned()
     }
 
-    fn update(&self, id: &str, name: Option<&str>, email: Option<&str>) -> Option<UserModel> {
+    pub fn update(&self, id: &str, name: Option<&str>, email: Option<&str>) -> Option<UserModel> {
         let mut users = self.users.lock().ok()?;
         if let Some(user) = users.get_mut(id) {
             if let Some(n) = name {
@@ -111,7 +111,7 @@ impl UserRepository {
         }
     }
 
-    fn delete(&self, id: &str) -> bool {
+    pub fn delete(&self, id: &str) -> bool {
         self.users
             .lock()
             .map(|mut g| g.remove(id).is_some())
@@ -226,10 +226,17 @@ impl IRequestHandler<InfoRequest, String> for InfoHandler {
             "name": "LRWF Demo API",
             "version": env!("CARGO_PKG_VERSION"),
             "users": repo().list().len(),
+            "auth": {
+                "register": "POST /api/auth/register",
+                "login": "POST /api/auth/login",
+                "me": "GET /api/auth/me"
+            },
             "endpoints": [
                 "GET /api/info",
-                "GET /api/users", "GET /api/users/{id}", "POST /api/users", "PUT /api/users/{id}", "DELETE /api/users/{id}",
-                "GET /api/products", "GET /api/products/{id}", "POST /api/products", "PUT /api/products/{id}", "DELETE /api/products/{id}",
+                "GET /api/users (admin)", "GET /api/users/{id} (admin)",
+                "POST /api/users (admin)", "PUT /api/users/{id} (admin)", "DELETE /api/users/{id} (admin)",
+                "GET /api/products", "GET /api/products/{id}",
+                "POST /api/products (admin)", "PUT /api/products/{id} (admin)", "DELETE /api/products/{id} (admin)",
                 "GET /health",
                 "GET /api/openapi.json", "GET /api/openapi.html"
             ]

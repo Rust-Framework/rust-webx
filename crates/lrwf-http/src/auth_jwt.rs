@@ -24,7 +24,7 @@ use lrwf_core::http::IHttpContext;
 use lrwf_core::middleware::IMiddleware;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 // ---------------------------------------------------------------------------
 // JwtClaims — IClaims implementation backed by JWT payload
@@ -141,9 +141,7 @@ impl IAuthenticationHandler for JwtAuth {
         // Extract token synchronously — avoids holding &dyn IHttpContext
         // across any async boundary, keeping the future Send.
         let token = match ctx.request().header("authorization") {
-            Some(h) => h
-                .strip_prefix("Bearer ")
-                .map(|t| t.trim().to_string()),
+            Some(h) => h.strip_prefix("Bearer ").map(|t| t.trim().to_string()),
             None => return Ok(None),
         };
 
@@ -187,4 +185,32 @@ impl IMiddleware for AuthMiddleware {
 /// stores the resulting claims in the HTTP context for downstream use.
 pub fn jwt_middleware(handler: Arc<dyn IAuthenticationHandler>) -> impl IMiddleware {
     AuthMiddleware { handler }
+}
+
+// ---------------------------------------------------------------------------
+// Global JWT encoding secret (for token creation in handlers)
+// ---------------------------------------------------------------------------
+
+static JWT_ENCODING_SECRET: OnceLock<String> = OnceLock::new();
+
+/// Initialize the global JWT encoding secret from the configured secret.
+/// This is called automatically by `.use_auth()` on the `HostBuilder`,
+/// but can also be called manually if needed.
+///
+/// # Panics
+/// Panics if called more than once (it is intended to be set once at startup).
+pub fn init_jwt_secret(secret: &str) {
+    JWT_ENCODING_SECRET
+        .set(secret.to_owned())
+        .expect("init_jwt_secret has already been called");
+}
+
+/// Retrieve the global JWT encoding secret previously set via [`init_jwt_secret`].
+///
+/// # Panics
+/// Panics if [`init_jwt_secret`] has not been called yet.
+pub fn jwt_secret() -> &'static str {
+    JWT_ENCODING_SECRET
+        .get()
+        .expect("init_jwt_secret must be called before jwt_secret")
 }

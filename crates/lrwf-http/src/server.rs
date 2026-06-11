@@ -11,7 +11,6 @@ use hyper::Request;
 use hyper_util::rt::TokioIo;
 use lrdi::{ServiceCollection, ServiceProvider};
 use lrwf_core::app::IHost;
-use lrwf_core::auth::IAuthorizationPolicy;
 use lrwf_core::config::{self, AppOptions};
 use lrwf_core::error::Result;
 use lrwf_core::http::IHttpContext;
@@ -20,6 +19,7 @@ use lrwf_core::mode::AppMode;
 use lrwf_core::routing::{HttpMethod, IEndpoint, IRouter};
 
 use crate::auth_jwt::{init_jwt_secret, jwt_middleware, JwtAuth};
+use crate::authz::collect_authorizers;
 use crate::context::HttpContext;
 use crate::cors::{CorsConfig, CorsMiddleware};
 use crate::endpoint::{StaticHtmlEndpoint, StaticJsonEndpoint, StubEndpoint};
@@ -63,7 +63,6 @@ pub struct HostBuilder {
     options_modifiers: Vec<Box<dyn FnOnce(&mut AppOptions) + Send>>,
     cors_config: Option<CorsConfig>,
     use_auth: bool,
-    authorization_policy: Option<Arc<dyn IAuthorizationPolicy>>,
 }
 
 #[allow(clippy::type_complexity)]
@@ -96,7 +95,6 @@ impl HostBuilder {
             options_modifiers: Vec::new(),
             cors_config: None,
             use_auth: false,
-            authorization_policy: None,
         }
     }
 
@@ -136,14 +134,6 @@ impl HostBuilder {
 
     pub fn use_auth(mut self) -> Self {
         self.use_auth = true;
-        self
-    }
-
-    /// Register a dynamic authorization policy (`IAuthorizationPolicy`).
-    /// Checked at runtime per-request, after the static `#[authorize]` check.
-    /// Supports `ResourceAuthorization` or a custom DB-backed implementation.
-    pub fn use_authorization(mut self, policy: Arc<dyn IAuthorizationPolicy>) -> Self {
-        self.authorization_policy = Some(policy);
         self
     }
 
@@ -309,7 +299,7 @@ impl HostBuilder {
                 handler_type: entry.handler_type,
                 dispatch_fn: dispatch_map.get(entry.handler_type).copied(),
                 auth_required_role: entry.required_role,
-                policy: self.authorization_policy.clone(),
+                authorizers: collect_authorizers(provider.as_ref()),
             });
             router.register(entry.method, entry.path, stub);
         }
@@ -368,6 +358,17 @@ impl HostBuilder {
             }
             if route_count > 0 {
                 tracing::info!("    Routes:   {} registered", route_count);
+            }
+            let banner_urls = if options.app.urls.is_empty() {
+                vec!["http://localhost:5000".to_string()]
+            } else {
+                options.app.urls.iter()
+                    .map(|u| u.replace("0.0.0.0", "localhost"))
+                    .collect::<Vec<_>>()
+            };
+            for url in &banner_urls {
+                tracing::info!("    OpenAPI:  {}/api/openapi.html", url);
+                tracing::info!("    OpenAPI:  {}/api/openapi.json", url);
             }
             tracing::info!("  ─────────────────────────────────────────────────");
             tracing::info!("");
@@ -504,15 +505,8 @@ impl Host {
         if self.mode == AppMode::Development {
             tracing::info!("");
             for url in &urls {
-                tracing::info!(
-                    "  Listening on {}{}",
-                    url,
-                    if url.starts_with("https") {
-                        format!(" (OpenAPI  {}/api/openapi.html)", url)
-                    } else {
-                        String::new()
-                    }
-                );
+                let display_url = url.replace("0.0.0.0", "localhost");
+                tracing::info!("  Listening on {}", display_url);
             }
         } else {
             tracing::info!("Listening on {} url(s)", urls.len());

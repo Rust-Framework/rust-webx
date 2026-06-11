@@ -27,6 +27,37 @@ pub trait IClaims: Send + Sync {
 
     /// Clone the claims into a new boxed trait object.
     fn clone_box(&self) -> Box<dyn IClaims>;
+
+    // ── Convenience helpers (default implementations) ──
+
+    /// Check whether a specific role is assigned.
+    ///
+    /// ```ignore
+    /// if claims.has_role("admin") { ... }
+    /// ```
+    fn has_role(&self, role: &str) -> bool {
+        self.roles().iter().any(|r| r == role)
+    }
+
+    /// Alias for `subject()` — returns the user identifier.
+    fn get_userid(&self) -> &str {
+        self.subject()
+    }
+
+    /// Read the display name from the raw claims map (key `"name"`).
+    /// Returns `None` when absent.
+    fn get_username(&self) -> Option<&str> {
+        self.claims().get("name").map(|s| s.as_str())
+    }
+
+    /// Read the tenant identifier from the raw claims map (key `"tenant_id"`).
+    /// Returns `None` when absent.
+    fn get_tenantid(&self) -> Option<&str> {
+        self.claims()
+            .get("tenant_id")
+            .or_else(|| self.claims().get("tenant"))
+            .map(|s| s.as_str())
+    }
 }
 
 impl Clone for Box<dyn IClaims> {
@@ -65,4 +96,31 @@ pub trait IAuthorizationPolicy: Send + Sync {
     /// Returns `Ok(())` if authorized, or an `Err` if forbidden.
     async fn authorize(&self, claims: &dyn IClaims, resource_key: &str, method: &str)
         -> Result<()>;
+}
+
+/// Dynamic authorizer interface — pluggable authorization for protected routes.
+///
+/// Implement this trait and register it in the DI container:
+///
+/// ```ignore
+/// svc.singleton::<dyn IDynamicAuthorizer>(|_| Arc::new(MyAuthorizer::default()))
+/// ```
+///
+/// The framework automatically detects registered `IDynamicAuthorizer` implementations
+/// and invokes them on every route that has `#[authorize]`.
+/// If no implementations are registered, authorization is pass-through (no dynamic checks).
+///
+/// # Method
+///
+/// * `authorize` — receives the user's claims, matched route pattern, and HTTP method.
+///   Returns `Ok(())` if allowed, or `Err` with details if denied.
+#[async_trait::async_trait]
+pub trait IDynamicAuthorizer: Send + Sync {
+    /// Validate whether the authenticated user can access the resource.
+    async fn authorize(
+        &self,
+        claims: &dyn IClaims,
+        route_pattern: &str,
+        method: &str,
+    ) -> Result<()>;
 }

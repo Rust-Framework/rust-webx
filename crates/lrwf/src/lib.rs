@@ -3,7 +3,7 @@
 
 // --- Core traits ---
 pub use lrwf_core::app::{IApplicationBuilder, IHost};
-pub use lrwf_core::auth::{IAuthenticationHandler, IAuthorizationPolicy, IClaims};
+pub use lrwf_core::auth::{IAuthenticationHandler, IAuthorizationPolicy, IClaims, IDynamicAuthorizer};
 pub use lrwf_core::cache::{
     cache_ext::DistributedCacheExtensions,
     options::DistributedCacheEntryOptions,
@@ -36,7 +36,7 @@ pub use lrwf_core::di::scan::{
 
 // --- HTTP layer ---
 pub use lrwf_http::auth_jwt::{init_jwt_secret, jwt_middleware, jwt_secret, JwtAuth, JwtClaims};
-pub use lrwf_http::authz::{resource_auth_middleware, ResourceAuthorization};
+pub use lrwf_http::authz::{collect_authorizers, resource_auth_middleware, AuthorizerSet, ResourceAuthorization};
 pub use lrwf_http::compression::{compress_gzip, CompressionConfig};
 pub use lrwf_http::context::{HttpContext, HttpRequest, HttpResponse};
 pub use lrwf_http::cors::{CorsConfig, CorsMiddleware};

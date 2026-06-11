@@ -1,8 +1,11 @@
 //! Resource-based authorization module for the LRWF framework.
 //!
-//! Provides `ResourceAuthorization` — an `IAuthorizationPolicy` that checks
-//! whether a user's roles or permissions grant access to a specific
-//! resource (identified by the matched route pattern).
+//! Provides:
+//! - `ResourceAuthorization` — an `IAuthorizationPolicy` that checks
+//!   whether a user's roles or permissions grant access to a specific
+//!   resource (identified by the matched route pattern).
+//! - `AuthorizerSet` — collects all `IDynamicAuthorizer` instances from DI
+//!   and runs them in sequence on protected routes.
 //!
 //! # Example
 //!
@@ -16,8 +19,30 @@
 //!
 //! let middleware = resource_auth_middleware(Arc::new(policy));
 //! ```
+//!
+//! # Dynamic authorizer (preferred)
+//!
+//! ```ignore
+//! use lrwf_core::auth::{IClaims, IDynamicAuthorizer};
+//!
+//! #[derive(Default)]
+//! struct RoleAuthorizer;
+//!
+//! #[async_trait::async_trait]
+//! impl IDynamicAuthorizer for RoleAuthorizer {
+//!     async fn authorize(&self, claims: &dyn IClaims, pattern: &str, method: &str) -> Result<()> {
+//!         // your custom logic
+//!         Ok(())
+//!     }
+//! }
+//! ```
+//!
+//! Then register in DI:
+//! ```ignore
+//! svc.singleton::<dyn IDynamicAuthorizer>(|_| Arc::new(RoleAuthorizer::default()))
+//! ```
 
-use lrwf_core::auth::{IAuthorizationPolicy, IClaims};
+use lrwf_core::auth::{IAuthorizationPolicy, IClaims, IDynamicAuthorizer};
 use lrwf_core::error::Result;
 use lrwf_core::http::IHttpContext;
 use lrwf_core::middleware::IMiddleware;
@@ -154,4 +179,58 @@ impl IMiddleware for ResourceAuthMiddleware {
 /// claims (set by the auth middleware) to enforce the policy.
 pub fn resource_auth_middleware(policy: Arc<dyn IAuthorizationPolicy>) -> impl IMiddleware {
     ResourceAuthMiddleware { policy }
+}
+
+// ---------------------------------------------------------------------------
+// AuthorizerSet — dynamic authorizer collection
+// ---------------------------------------------------------------------------
+
+/// A set of `IDynamicAuthorizer` instances collected from the DI container.
+///
+/// Created automatically in `HostBuilder::build()` when one or more
+/// `IDynamicAuthorizer` implementations are registered. If none are registered,
+/// this is `None` and no dynamic authorization checks run.
+#[derive(Clone)]
+pub struct AuthorizerSet {
+    authorizers: Vec<Arc<dyn IDynamicAuthorizer>>,
+}
+
+impl AuthorizerSet {
+    /// Create a new set from a vector of authorizers.
+    pub fn new(authorizers: Vec<Arc<dyn IDynamicAuthorizer>>) -> Self {
+        Self { authorizers }
+    }
+
+    /// Run all registered authorizers in sequence.
+    ///
+    /// Returns `Ok(())` if ALL authorizers pass. Returns the first `Err` if any denies.
+    pub async fn authorize(
+        &self,
+        claims: &dyn IClaims,
+        route_pattern: &str,
+        method: &str,
+    ) -> Result<()> {
+        for authorizer in &self.authorizers {
+            authorizer.authorize(claims, route_pattern, method).await?;
+        }
+        Ok(())
+    }
+
+    /// Returns `true` if there are no authorizers registered.
+    pub fn is_empty(&self) -> bool {
+        self.authorizers.is_empty()
+    }
+}
+
+/// Result from collecting `IDynamicAuthorizer` instances from DI.
+/// `None` means no authorizers are registered (pass-through mode).
+pub fn collect_authorizers(
+    provider: &lrdi::ServiceProvider,
+) -> Option<Arc<AuthorizerSet>> {
+    let authorizers: Vec<Arc<dyn IDynamicAuthorizer>> = provider.get_all();
+    if authorizers.is_empty() {
+        None
+    } else {
+        Some(Arc::new(AuthorizerSet::new(authorizers)))
+    }
 }

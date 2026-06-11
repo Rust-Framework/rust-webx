@@ -4,7 +4,10 @@ use lrwf_core::middleware::IMiddleware;
 use lrwf_http::cors::{CorsConfig, CorsMiddleware};
 
 fn find_header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
-    headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str())
+    headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(name))
+        .map(|(_, v)| v.as_str())
 }
 
 #[tokio::test]
@@ -17,13 +20,18 @@ async fn cors_wildcard_sets_star_origin() {
     middleware.invoke(&mut ctx).await.unwrap();
 
     let (_status, headers, _body) = ctx.into_response_parts();
-    assert_eq!(find_header(&headers, "access-control-allow-origin").unwrap(), "*");
+    assert_eq!(
+        find_header(&headers, "access-control-allow-origin").unwrap(),
+        "*"
+    );
 }
 
 #[tokio::test]
 async fn cors_exact_origin_match() {
-    let mut config = CorsConfig::default();
-    config.origins = vec!["https://myapp.com".to_string()];
+    let config = CorsConfig {
+        origins: vec!["https://myapp.com".to_string()],
+        ..Default::default()
+    };
 
     let middleware = CorsMiddleware::new(config);
     let mut ctx = test_utils::TestHttpContext::new("GET", "/api/data")
@@ -40,8 +48,10 @@ async fn cors_exact_origin_match() {
 
 #[tokio::test]
 async fn cors_disallowed_origin_no_header() {
-    let mut config = CorsConfig::default();
-    config.origins = vec!["https://myapp.com".to_string()];
+    let config = CorsConfig {
+        origins: vec!["https://myapp.com".to_string()],
+        ..Default::default()
+    };
 
     let middleware = CorsMiddleware::new(config);
     let mut ctx = test_utils::TestHttpContext::new("GET", "/api/data")
@@ -50,8 +60,10 @@ async fn cors_disallowed_origin_no_header() {
     middleware.invoke(&mut ctx).await.unwrap();
 
     let (_status, headers, _body) = ctx.into_response_parts();
-    assert!(find_header(&headers, "access-control-allow-origin").is_none(),
-        "Disallowed origin should NOT get CORS header");
+    assert!(
+        find_header(&headers, "access-control-allow-origin").is_none(),
+        "Disallowed origin should NOT get CORS header"
+    );
 }
 
 #[tokio::test]
@@ -72,8 +84,10 @@ async fn cors_preflight_options_request() {
 
 #[tokio::test]
 async fn cors_no_origin_header_no_cors_response() {
-    let mut config = CorsConfig::default();
-    config.origins = vec!["https://specific.com".to_string()];
+    let config = CorsConfig {
+        origins: vec!["https://specific.com".to_string()],
+        ..Default::default()
+    };
 
     let middleware = CorsMiddleware::new(config);
     let mut ctx = test_utils::TestHttpContext::new("GET", "/api/data");
@@ -81,14 +95,18 @@ async fn cors_no_origin_header_no_cors_response() {
     middleware.invoke(&mut ctx).await.unwrap();
 
     let (_status, headers, _body) = ctx.into_response_parts();
-    assert!(find_header(&headers, "access-control-allow-origin").is_none(),
-        "Request without Origin should not get CORS for non-wildcard config");
+    assert!(
+        find_header(&headers, "access-control-allow-origin").is_none(),
+        "Request without Origin should not get CORS for non-wildcard config"
+    );
 }
 
 #[tokio::test]
 async fn cors_credentials_allowed() {
-    let mut config = CorsConfig::default();
-    config.allow_credentials = true;
+    let config = CorsConfig {
+        allow_credentials: true,
+        ..Default::default()
+    };
 
     let middleware = CorsMiddleware::new(config);
     let mut ctx = test_utils::TestHttpContext::new("GET", "/api/data")

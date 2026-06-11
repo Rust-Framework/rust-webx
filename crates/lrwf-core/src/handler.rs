@@ -18,11 +18,10 @@ use crate::mediator::{IEventRequest, IRequest};
 
 /// Handles a single `IRequest<R>`, producing its associated response `R`.
 ///
-/// Register in DI as: `dyn IRequestHandler<GetUserRequest, UserModel>`
+/// Register via `#[handler]` proc macro for compile-time collection,
+/// or use `register_handlers!` for manual DI registration.
 ///
 /// ```ignore
-/// struct GetUserHandler { db: Arc<dyn IUserRepository> }
-///
 /// #[async_trait]
 /// impl IRequestHandler<GetUserRequest, UserModel> for GetUserHandler {
 ///     async fn handle(&self, req: GetUserRequest) -> Result<UserModel> { ... }
@@ -34,14 +33,10 @@ where
     T: IRequest<R> + Send + 'static,
     R: serde::Serialize + Send + 'static,
 {
-    /// Handle the request without claims (backward-compatible default).
+    /// Handle the request without claims.
     async fn handle(&self, req: T) -> Result<R>;
 
     /// Handle the request with optional authentication claims.
-    ///
-    /// The default implementation delegates to `handle`, so existing handlers
-    /// continue to work without modification. Override this method when you
-    /// need access to the authenticated user's identity.
     async fn handle_with_claims(&self, req: T, claims: Option<&dyn IClaims>) -> Result<R> {
         let _ = claims;
         self.handle(req).await
@@ -51,8 +46,6 @@ where
 /// Handles a single `IEventRequest`, performing side effects.
 ///
 /// ```ignore
-/// struct SendWelcomeEmailHandler { email: Arc<dyn IEmailService> }
-///
 /// #[async_trait]
 /// impl IEventHandler<UserCreatedEvent> for SendWelcomeEmailHandler {
 ///     async fn handle(&self, event: UserCreatedEvent) -> Result<()> { ... }

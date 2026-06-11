@@ -20,7 +20,8 @@ fn error_status_code_routing_maps_to_404() {
 
 #[test]
 fn error_status_code_serialization_maps_to_400() {
-    let err = Error::Serialization(serde_json::from_str::<serde_json::Value>("invalid").unwrap_err());
+    let err =
+        Error::Serialization(serde_json::from_str::<serde_json::Value>("invalid").unwrap_err());
     assert_eq!(err.status_code(), 400);
 }
 

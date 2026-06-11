@@ -93,7 +93,8 @@ async fn pipeline_middleware_can_modify_context() {
     pipeline.execute(&mut ctx, final_handler).await.unwrap();
 
     let (_status, headers, _body) = ctx.into_response_parts();
-    let x_powered = headers.iter()
+    let x_powered = headers
+        .iter()
         .find(|(k, _)| k == "x-powered-by")
         .map(|(_, v)| v.as_str());
     assert_eq!(x_powered, Some("lrwf-test"));
@@ -163,9 +164,18 @@ async fn pipeline_after_hooks_executed_in_reverse_order() {
         }
     }
 
-    let mw_a = Arc::new(OrderMiddleware { name: "A", order: Arc::clone(&order) });
-    let mw_b = Arc::new(OrderMiddleware { name: "B", order: Arc::clone(&order) });
-    let mw_c = Arc::new(OrderMiddleware { name: "C", order: Arc::clone(&order) });
+    let mw_a = Arc::new(OrderMiddleware {
+        name: "A",
+        order: Arc::clone(&order),
+    });
+    let mw_b = Arc::new(OrderMiddleware {
+        name: "B",
+        order: Arc::clone(&order),
+    });
+    let mw_c = Arc::new(OrderMiddleware {
+        name: "C",
+        order: Arc::clone(&order),
+    });
 
     let mut pipeline = MiddlewarePipeline::new();
     pipeline.add_middleware(mw_a);
@@ -213,10 +223,16 @@ async fn pipeline_short_circuit_on_invoke_error() {
     });
 
     let result = pipeline.execute(&mut ctx, final_handler).await;
-    assert!(result.is_err(), "Error from invoke should short-circuit the pipeline");
+    assert!(
+        result.is_err(),
+        "Error from invoke should short-circuit the pipeline"
+    );
     // Body must NOT be written — the final handler never ran.
     let (_status, _headers, body) = ctx.into_response_parts();
-    assert!(body.is_none(), "final handler should be skipped on short-circuit");
+    assert!(
+        body.is_none(),
+        "final handler should be skipped on short-circuit"
+    );
 }
 
 #[tokio::test]
@@ -231,7 +247,8 @@ async fn pipeline_after_hooks_skipped_on_final_handler_error() {
             Ok(())
         }
         async fn after(&self, _ctx: &mut dyn IHttpContext) -> LrwfResult<()> {
-            self.after_ran.store(true, std::sync::atomic::Ordering::SeqCst);
+            self.after_ran
+                .store(true, std::sync::atomic::Ordering::SeqCst);
             Ok(())
         }
     }
@@ -247,7 +264,9 @@ async fn pipeline_after_hooks_skipped_on_final_handler_error() {
 
     let final_handler: HandlerFn = Arc::new(move |_ctx: &mut dyn IHttpContext| {
         Box::pin(async move {
-            Err(lrwf_core::error::Error::Internal("final handler error".into()))
+            Err(lrwf_core::error::Error::Internal(
+                "final handler error".into(),
+            ))
         })
     });
 

@@ -1,7 +1,7 @@
 // lrwf-openapi — OpenAPI specification generation and API docs UI.
 
-mod openapi;
 mod apiui;
+mod openapi;
 
-pub use openapi::generate_openapi_spec;
 pub use apiui::APIUI_HTML;
+pub use openapi::generate_openapi_spec;

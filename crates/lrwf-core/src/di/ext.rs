@@ -1,8 +1,8 @@
 //! IServiceCollectionExt — Extension trait for lrdi ServiceCollection.
 
-use lrdi::{ServiceCollection, ServiceLifetime};
 use crate::middleware::IMiddleware;
 use crate::pipeline::IPipelineBehavior;
+use lrdi::{ServiceCollection, ServiceLifetime};
 use std::sync::Arc;
 
 /// Extension methods for `lrdi::ServiceCollection` to enable

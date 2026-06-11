@@ -34,10 +34,7 @@ impl Default for CorsConfig {
                 "PATCH".to_string(),
                 "OPTIONS".to_string(),
             ],
-            headers: vec![
-                "Content-Type".to_string(),
-                "Authorization".to_string(),
-            ],
+            headers: vec!["Content-Type".to_string(), "Authorization".to_string()],
             allow_credentials: false,
             max_age: 86400,
         }
@@ -101,10 +98,8 @@ impl IMiddleware for CorsMiddleware {
                 "access-control-allow-headers",
                 &self.config.headers.join(", "),
             );
-            ctx.response_mut().set_header(
-                "access-control-max-age",
-                &self.config.max_age.to_string(),
-            );
+            ctx.response_mut()
+                .set_header("access-control-max-age", &self.config.max_age.to_string());
         } else {
             // For normal requests, expose headers
             if let Some(ref expose) = allowed {

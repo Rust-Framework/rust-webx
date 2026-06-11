@@ -158,7 +158,7 @@ fn emit_endpoint(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Generate the dispatch function that runs the full request lifecycle.
 fn generate_dispatch_fn(
     ty: &Type,
-    rsp_type: &syn::Type,
+    _rsp_type: &syn::Type,
     type_name: &str,
     path_params: &[String],
     is_body: bool,
@@ -167,7 +167,6 @@ fn generate_dispatch_fn(
 
     // Generate request construction code
     let build_request = if is_body && !path_params.is_empty() {
-        // PUT/PATCH with both body and path params: deserialize from body, then override path params
         let overrides: Vec<proc_macro2::TokenStream> = path_params
             .iter()
             .map(|name| {
@@ -185,12 +184,10 @@ fn generate_dispatch_fn(
             req
         }}
     } else if is_body {
-        // POST with body only
         quote! {
             ::serde_json::from_slice(&body_bytes).map_err(|e| ::lrwf::Error::Serialization(e))?
         }
     } else if !path_params.is_empty() {
-        // GET/DELETE with path params
         let field_assignments: Vec<proc_macro2::TokenStream> = path_params
             .iter()
             .map(|name| {
@@ -205,7 +202,6 @@ fn generate_dispatch_fn(
             #ty { #(#field_assignments),* }
         }
     } else {
-        // No params
         quote! { #ty {} }
     };
 
@@ -214,30 +210,24 @@ fn generate_dispatch_fn(
             body_bytes: Vec<u8>,
             route_params: ::std::collections::HashMap<String, String>,
             _query_params: ::std::collections::HashMap<String, String>,
-            provider: ::std::sync::Arc<::lrdi::ServiceProvider>,
             claims: Option<Box<dyn ::lrwf::IClaims>>,
         ) -> ::std::pin::Pin<Box<dyn ::std::future::Future<Output = ::lrwf::Result<::lrwf::ResponseData>> + Send>> {
             Box::pin(async move {
-                // Construct the request from HTTP data
                 let request: #ty = #build_request;
 
-                // Resolve handler from DI container once, then cache in a static
-                // OnceLock to eliminate per-request DI lookup overhead.
-                static HANDLER: ::std::sync::OnceLock<::std::sync::Arc<dyn ::lrwf::IRequestHandler<#ty, #rsp_type>>> = ::std::sync::OnceLock::new();
-                let handler = HANDLER.get_or_init(|| {
-                    provider
-                        .get_service::<dyn ::lrwf::IRequestHandler<#ty, #rsp_type>>()
-                        .unwrap_or_else(|| panic!("No handler registered for {}", stringify!(#ty)))
-                });
+                // Get the handler cache (initialized at Host::build() time)
+                let cache = ::lrwf::HandlerCache::get_or_init();
 
-                let result = handler.handle_with_claims(request, claims.as_deref()).await?;
-                let json_bytes = ::serde_json::to_vec(&result).unwrap_or_default();
+                // Find the handler entry matching this request type
+                let entry = cache.get(#type_name)
+                    .ok_or_else(|| ::lrwf::Error::Di(
+                        format!("No handler registered for request type '{}'", #type_name)
+                    ))?;
 
-                Ok(::lrwf::ResponseData {
-                    status: 200,
-                    content_type: "application/json".to_string(),
-                    body: json_bytes,
-                })
+                // Call through the type-erased bridge — the handler's native async fn
+                // is called inside, avoiding #[async_trait] Box::pin overhead per request.
+                let request_boxed: Box<dyn ::std::any::Any + Send> = Box::new(request);
+                (entry.call)(&entry.handler, request_boxed, claims).await
             })
         }
     }

@@ -1,4 +1,4 @@
-//! auth_example — JWT Bearer authentication + resource-based authorization.
+//! auth_example 鈥?JWT Bearer authentication + resource-based authorization.
 //!
 //! Demonstrates:
 //!   - JWT token generation (via `jsonwebtoken` crate)
@@ -10,25 +10,25 @@
 //! # Test flow
 //!
 //! ```bash
-//! # Public — no auth required
+//! # Public 鈥?no auth required
 //! curl http://localhost:5000/api/public
 //!
-//! # Protected — needs a valid token
+//! # Protected 鈥?needs a valid token
 //! curl -H "Authorization: Bearer <admin-token>" http://localhost:5000/api/users
 //!
-//! # Forbidden — user token on admin-only route
+//! # Forbidden 鈥?user token on admin-only route
 //! curl -H "Authorization: Bearer <user-token>" http://localhost:5000/api/admin
 //! ```
 //!
 //! The server prints test tokens to stdout at startup for convenience.
 
-use lrwf::*;
 use jsonwebtoken::{encode, EncodingKey, Header};
+use lrwf::*;
 use serde::Serialize;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-// ── Request / Response contracts ──────────────────────────────────────────
+// 鈹€鈹€ Request / Response contracts 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 struct PublicRequest;
 
@@ -45,17 +45,20 @@ struct AdminRequest;
 #[get("/api/admin")]
 impl IRequest<String> for AdminRequest {}
 
-// ── Handlers ──────────────────────────────────────────────────────────────
+// 鈹€鈹€ Handlers 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
-#[derive(Default)] struct PublicHandler;
-#[derive(Default)] struct UsersHandler;
-#[derive(Default)] struct AdminHandler;
+#[derive(Default)]
+struct PublicHandler;
+#[derive(Default)]
+struct UsersHandler;
+#[derive(Default)]
+struct AdminHandler;
 
 #[handler]
 #[async_trait]
 impl IRequestHandler<PublicRequest, String> for PublicHandler {
     async fn handle(&self, _req: PublicRequest) -> Result<String> {
-        Ok("This is a public endpoint — no authentication required.".into())
+        Ok("This is a public endpoint 鈥?no authentication required.".into())
     }
 }
 
@@ -75,7 +78,7 @@ impl IRequestHandler<AdminRequest, String> for AdminHandler {
     }
 }
 
-// ── JWT helper ───────────────────────────────────────────────────────────
+// 鈹€鈹€ JWT helper 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 #[derive(Serialize)]
 struct TokenClaims {
@@ -85,7 +88,12 @@ struct TokenClaims {
     exp: usize,
 }
 
-fn generate_token(sub: &str, roles: Vec<String>, permissions: Vec<String>, secret: &[u8]) -> String {
+fn generate_token(
+    sub: &str,
+    roles: Vec<String>,
+    permissions: Vec<String>,
+    secret: &[u8],
+) -> String {
     let exp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -107,32 +115,22 @@ fn generate_token(sub: &str, roles: Vec<String>, permissions: Vec<String>, secre
     .expect("Failed to encode JWT")
 }
 
-// ── Main ──────────────────────────────────────────────────────────────────
+// 鈹€鈹€ Main 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 #[tokio::main]
 async fn main() {
     let secret = b"demo-secret-key-change-in-production";
 
     // Generate test tokens for manual curl testing
-    let admin_token = generate_token(
-        "admin",
-        vec!["admin".into()],
-        vec![],
-        secret,
-    );
-    let user_token = generate_token(
-        "alice",
-        vec!["user".into()],
-        vec![],
-        secret,
-    );
+    let admin_token = generate_token("admin", vec!["admin".into()], vec![], secret);
+    let user_token = generate_token("alice", vec!["user".into()], vec![], secret);
 
-    println!("══════════════════════════════════════");
-    println!("  Auth example — test tokens");
-    println!("══════════════════════════════════════");
+    println!("鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲");
+    println!("  Auth example 鈥?test tokens");
+    println!("鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲");
     println!("  Admin token:  Bearer {}", admin_token);
     println!("  User  token:  Bearer {}", user_token);
-    println!("══════════════════════════════════════");
+    println!("鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲");
 
     // Build JWT auth handler
     use jsonwebtoken::{DecodingKey, Validation};
@@ -142,10 +140,12 @@ async fn main() {
     ));
 
     // Build authorization policy
-    let authz_policy: Arc<dyn IAuthorizationPolicy> = Arc::new(ResourceAuthorization::new()
-        .allow_role("/api/users", "user")
-        .allow_role("/api/users", "admin")
-        .allow_role("/api/admin", "admin"));
+    let authz_policy: Arc<dyn IAuthorizationPolicy> = Arc::new(
+        ResourceAuthorization::new()
+            .allow_role("/api/users", "user")
+            .allow_role("/api/users", "admin")
+            .allow_role("/api/admin", "admin"),
+    );
 
     let ah = Arc::clone(&auth_handler);
     let ap = Arc::clone(&authz_policy);
@@ -153,10 +153,7 @@ async fn main() {
     Host::builder()
         .mode(AppMode::Development)
         .register(move |svc| {
-            svc
-                .singleton::<dyn IMiddleware>(move |_| {
-                    Arc::new(jwt_middleware(Arc::clone(&ah)))
-                })
+            svc.singleton::<dyn IMiddleware>(move |_| Arc::new(jwt_middleware(Arc::clone(&ah))))
                 .singleton::<dyn IMiddleware>(move |_| {
                     Arc::new(resource_auth_middleware(Arc::clone(&ap)))
                 })

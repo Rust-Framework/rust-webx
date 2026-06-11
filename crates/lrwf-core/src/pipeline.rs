@@ -9,13 +9,11 @@ use std::sync::Arc;
 /// Type-erased continuation function for pipeline behaviors.
 ///
 /// Carries a boxed request and the service resolver for DI lookups.
-pub type BoxedNextFn = Box<
-    dyn FnOnce(Box<dyn Any + Send>, Arc<dyn IServiceResolver>) -> BoxedPipelineFuture + Send,
->;
+pub type BoxedNextFn =
+    Box<dyn FnOnce(Box<dyn Any + Send>, Arc<dyn IServiceResolver>) -> BoxedPipelineFuture + Send>;
 
 /// Boxed future returned by a pipeline behavior step.
-pub type BoxedPipelineFuture =
-    Pin<Box<dyn Future<Output = Result<Box<dyn Any + Send>>> + Send>>;
+pub type BoxedPipelineFuture = Pin<Box<dyn Future<Output = Result<Box<dyn Any + Send>>> + Send>>;
 
 /// Service resolver trait for DI lookups within pipeline behaviors.
 ///

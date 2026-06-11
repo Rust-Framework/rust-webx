@@ -29,8 +29,8 @@ lrwf-web = { path = "crates/lrwf-web" }
 lrwf-openapi = { path = "crates/lrwf-openapi" }
 
 # External dependencies
-lrdi = "0.1"
-lrdi-macros = "0.1"
+lrdi = "0.2.6"
+lrdi-macros = "0.2.6"
 async-trait = "0.1"
 tokio = { version = "1", features = ["full"] }
 hyper = { version = "1", features = ["full"] }

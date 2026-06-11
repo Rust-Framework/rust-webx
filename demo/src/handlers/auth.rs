@@ -1,17 +1,18 @@
+//! Auth handlers — auto-registered via `#[lrdi::inject_attr]` + `#[handler(inject)]`.
+
+use std::sync::Arc;
+
 use bcrypt::{hash, verify, DEFAULT_COST};
 use jsonwebtoken::{encode, EncodingKey, Header};
 use lref::provider::DbValue;
-use lref::query::QueryBuilder;
 use lrwf::*;
 use serde::Serialize;
 
 use crate::contracts::auth::*;
+use crate::domain::db_context::AppDbContext;
 use crate::domain::user::{UserEntity, UserModel};
 
-// =========================================================================
-// JWT helpers
-// =========================================================================
-
+// JWT
 #[derive(Debug, Serialize, serde::Deserialize)]
 struct AppJwtClaims {
     sub: String,
@@ -28,7 +29,6 @@ fn create_token(user: &UserModel) -> Result<String> {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-
     let claims = AppJwtClaims {
         sub: user.id.clone(),
         name: user.name.clone(),
@@ -37,7 +37,6 @@ fn create_token(user: &UserModel) -> Result<String> {
         iat: now,
         exp: now + 86_400,
     };
-
     encode(
         &Header::default(),
         &claims,
@@ -46,57 +45,52 @@ fn create_token(user: &UserModel) -> Result<String> {
     .map_err(|e| Error::Http(format!("Token creation failed: {}", e)))
 }
 
-fn qb() -> QueryBuilder<UserEntity> {
-    QueryBuilder::<UserEntity>::with_provider(
-        "users",
-        crate::handlers::startup::provider_dyn(),
-    )
+#[lrdi::inject_attr(singleton, as = dyn IRequestHandler<RegisterRequest, AuthResponse>)]
+pub struct RegisterHandler {
+    ctx: Arc<AppDbContext>,
 }
 
-fn find_user_by_email(email: &str) -> Option<UserEntity> {
-    let rt = tokio::runtime::Handle::current();
-    let qb = qb()
-        .filter_column("email", "=", DbValue::String(email.to_string()));
-    rt.block_on(qb.first_or_default())
-        .ok()
-        .flatten()
+#[lrdi::inject_attr(singleton, as = dyn IRequestHandler<LoginRequest, AuthResponse>)]
+pub struct LoginHandler {
+    ctx: Arc<AppDbContext>,
 }
 
-// =========================================================================
-// IRequestHandler implementations
-// =========================================================================
+#[lrdi::inject_attr(singleton, as = dyn IRequestHandler<AuthMeRequest, UserView>)]
+pub struct AuthMeHandler {
+    ctx: Arc<AppDbContext>,
+}
 
-#[derive(Default)]
-pub struct RegisterHandler;
-
-#[derive(Default)]
-pub struct LoginHandler;
-
-#[derive(Default)]
-pub struct AuthMeHandler;
-
-#[handler]
+#[handler(inject)]
 #[async_trait]
 impl IRequestHandler<RegisterRequest, AuthResponse> for RegisterHandler {
     async fn handle(&self, req: RegisterRequest) -> Result<AuthResponse> {
-        if find_user_by_email(&req.email).is_some() {
+        let exists = self
+            .ctx
+            .set::<UserEntity>()
+            .filter_column("email", "=", DbValue::String(req.email.clone()))
+            .first_or_default()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?;
+        if exists.is_some() {
             return Err(Error::Http("Email already registered".into()));
         }
 
-        let hashed = hash(&req.password, DEFAULT_COST)
-            .map_err(|e| Error::Http(format!("Password hash failed: {}", e)))?;
-
+        let hashed =
+            hash(&req.password, DEFAULT_COST).map_err(|e| Error::Http(format!("Hash: {}", e)))?;
         let id = uuid();
         let now = now_secs();
         let sql = format!(
-            "INSERT INTO users (id, name, email, password_hash, role, created_at) VALUES ('{}', '{}', '{}', '{}', 'user', '{}')",
+            "INSERT INTO users (id, name, email, password_hash, role, created_at) \
+             VALUES ('{}', '{}', '{}', '{}', 'user', '{}')",
             id,
             req.name.replace('\'', "''"),
             req.email.replace('\'', "''"),
             hashed.replace('\'', "''"),
             now
         );
-        crate::handlers::startup::exec(&sql).await
+        self.ctx
+            .execute(&sql)
+            .await
             .map_err(|e| Error::Internal(format!("Failed to create user: {}", e)))?;
 
         let model = UserModel {
@@ -105,12 +99,10 @@ impl IRequestHandler<RegisterRequest, AuthResponse> for RegisterHandler {
             email: req.email.clone(),
             password_hash: hashed,
             role: "user".to_string(),
-            created_at: now.clone(),
+            created_at: now,
         };
         let token = create_token(&model)?;
-
         tracing::info!("[Auth] User registered: {} ({})", model.name, model.id);
-
         Ok(AuthResponse {
             token,
             user: UserView {
@@ -124,17 +116,18 @@ impl IRequestHandler<RegisterRequest, AuthResponse> for RegisterHandler {
     }
 }
 
-#[handler]
+#[handler(inject)]
 #[async_trait]
 impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
     async fn handle(&self, req: LoginRequest) -> Result<AuthResponse> {
-        let user = qb()
+        let user = self
+            .ctx
+            .set::<UserEntity>()
             .filter_column("email", "=", DbValue::String(req.email.clone()))
             .first_or_default()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?
             .ok_or_else(|| Error::Http("Invalid email or password".into()))?;
-
         if user.password_hash.is_empty()
             || !verify(&req.password, &user.password_hash)
                 .map_err(|_| Error::Http("Authentication error".into()))?
@@ -144,9 +137,7 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
 
         let model = UserModel::from(user);
         let token = create_token(&model)?;
-
         tracing::info!("[Auth] User logged in: {} ({})", model.name, model.id);
-
         Ok(AuthResponse {
             token,
             user: UserView {
@@ -160,13 +151,12 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
     }
 }
 
-#[handler]
+#[handler(inject)]
 #[async_trait]
 impl IRequestHandler<AuthMeRequest, UserView> for AuthMeHandler {
     async fn handle(&self, _: AuthMeRequest) -> Result<UserView> {
         unreachable!("handle_with_claims is always called by the dispatcher")
     }
-
     async fn handle_with_claims(
         &self,
         _: AuthMeRequest,
@@ -175,14 +165,14 @@ impl IRequestHandler<AuthMeRequest, UserView> for AuthMeHandler {
         let user_id = claims
             .map(|c| c.subject().to_string())
             .ok_or_else(|| Error::Http("Not authenticated".into()))?;
-
-        let user = qb()
+        let user = self
+            .ctx
+            .set::<UserEntity>()
             .filter_column("id", "=", DbValue::String(user_id))
             .first_or_default()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?
             .ok_or_else(|| Error::Http("User not found".into()))?;
-
         Ok(UserView {
             id: user.id,
             name: user.name,
@@ -200,7 +190,6 @@ fn uuid() -> String {
         .map(|d| format!("{:x}", d.as_nanos()))
         .unwrap_or_else(|_| "0".to_string())
 }
-
 fn now_secs() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()

@@ -12,7 +12,24 @@
 use crate::routing::HttpMethod;
 use std::any::Any;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+
+// ─── Global Service Provider (for DI-based handler construction) ───
+
+static GLOBAL_PROVIDER: OnceLock<Arc<lrdi::ServiceProvider>> = OnceLock::new();
+
+/// Set the global service provider. Called once at `Host::build()` time.
+pub fn set_global_provider(provider: Arc<lrdi::ServiceProvider>) {
+    GLOBAL_PROVIDER.set(provider).ok();
+}
+
+/// Get the global service provider. Used by `#[handler]` factories
+/// when the handler struct has `#[inject_attr]` for DI-based construction.
+pub fn global_provider() -> &'static Arc<lrdi::ServiceProvider> {
+    GLOBAL_PROVIDER
+        .get()
+        .expect("Global provider not initialized")
+}
 
 /// Metadata about a request parameter for OpenAPI generation.
 #[derive(Debug, Clone)]
@@ -192,7 +209,6 @@ pub struct HandlerCache {
     pub entries: HashMap<&'static str, Arc<HandlerEntry>>,
 }
 
-use std::sync::OnceLock;
 static HANDLER_CACHE: OnceLock<HandlerCache> = OnceLock::new();
 
 impl HandlerCache {

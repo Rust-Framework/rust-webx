@@ -4,20 +4,21 @@ mod common;
 mod contracts;
 mod domain;
 mod handlers;
+mod startup;
 
 #[tokio::main]
 async fn main() {
+    // 1. Initialize database — returns Arc<AppDbContext>
+    let ctx = startup::initialize().await;
+
+    // 2. Build host — register AppDbContext, handlers are auto-registered via #[inject_attr]
     let host = Host::builder()
         .mode(AppMode::Development)
         .use_spa("wwwroot")
         .use_auth()
-        .register(common::register_common_services)
+        .register(move |svc| svc.instance(ctx))
         .use_memory_cache()
         .build();
 
-    // Ensure database tables and seed data exist
-    handlers::startup::initialize().await;
-
-    // Read URLs from appsettings.json, auto-start
     host.run().await.expect("Server failed");
 }

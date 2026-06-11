@@ -51,11 +51,11 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
         quote! {
             let provider = ::lrwf::global_provider();
             let handler: ::std::sync::Arc<#handler_ty> = #constructor_fn(provider.as_ref() as &dyn lrdi::IServiceResolver);
-            handler as ::std::sync::Arc<dyn ::std::any::Any + Send + Sync>
+            ::std::sync::Arc::new(handler) as ::std::sync::Arc<dyn ::std::any::Any + Send + Sync>
         }
     } else {
         quote! {
-            ::std::sync::Arc::new(<#handler_ty>::default()) as ::std::sync::Arc<dyn ::std::any::Any + Send + Sync>
+            ::std::sync::Arc::new(::std::sync::Arc::new(<#handler_ty>::default())) as ::std::sync::Arc<dyn ::std::any::Any + Send + Sync>
         }
     };
 

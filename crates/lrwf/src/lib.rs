@@ -3,7 +3,9 @@
 
 // --- Core traits ---
 pub use lrwf_core::app::{IApplicationBuilder, IHost};
-pub use lrwf_core::auth::{IAuthenticationHandler, IAuthorizationPolicy, IClaims, IDynamicAuthorizer};
+pub use lrwf_core::auth::{
+    IAuthenticationHandler, IAuthorizationPolicy, IClaims, IDynamicAuthorizer,
+};
 pub use lrwf_core::cache::{
     cache_ext::DistributedCacheExtensions,
     options::DistributedCacheEntryOptions,
@@ -30,13 +32,15 @@ pub use lrwf_core::routing::{HttpMethod, IEndpoint, IRouter, RouteMeta};
 // --- DI extensions ---
 pub use lrwf_core::di::ext::{is_mediator_active, should_scan_endpoints, IServiceCollectionExt};
 pub use lrwf_core::di::scan::{
-    HandlerCache, HandlerEntry, HandlerRegistration, ParamMeta, ResponseData, RouteDispatch,
-    RouteEntry, RouteSource,
+    global_provider, set_global_provider, HandlerCache, HandlerEntry, HandlerRegistration,
+    ParamMeta, ResponseData, RouteDispatch, RouteEntry, RouteSource,
 };
 
 // --- HTTP layer ---
 pub use lrwf_http::auth_jwt::{init_jwt_secret, jwt_middleware, jwt_secret, JwtAuth, JwtClaims};
-pub use lrwf_http::authz::{collect_authorizers, resource_auth_middleware, AuthorizerSet, ResourceAuthorization};
+pub use lrwf_http::authz::{
+    collect_authorizers, resource_auth_middleware, AuthorizerSet, ResourceAuthorization,
+};
 pub use lrwf_http::compression::{compress_gzip, CompressionConfig};
 pub use lrwf_http::context::{HttpContext, HttpRequest, HttpResponse};
 pub use lrwf_http::cors::{CorsConfig, CorsMiddleware};
@@ -69,11 +73,12 @@ pub use lrwf_macros::{
     http_delete, http_get, http_post, http_put, post, put, request,
 };
 
-// --- Re-export lrdi (for manual registration and module blocks) ---
+// --- Re-export lrdi (for manual registration, #[inject] auto-registration, and module blocks) ---
 pub use lrdi;
 pub use lrdi::inject;
+pub use lrdi::inject_attr;
 pub use lrdi_macros;
-pub use lrdi_macros::module;
+pub use lrdi_macros::{module, Inject};
 
 // --- Re-export common dependencies ---
 pub use async_trait::async_trait;

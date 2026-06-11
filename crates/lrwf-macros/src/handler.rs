@@ -8,9 +8,25 @@ use syn::{parse_macro_input, GenericArgument, ItemImpl, PathArguments, Type};
 /// so the handler can be dispatched without `#[async_trait]` overhead.
 ///
 /// The handler struct MUST implement `Default`.
-pub fn handler_impl(item: TokenStream) -> TokenStream {
+///
+/// # DI injection
+///
+/// Use `#[handler(inject)]` when the handler struct has `#[lrdi::inject_attr]`:
+///
+/// ```ignore
+/// #[lrdi::inject_attr(singleton, as = dyn IRequestHandler<MyReq, MyRsp>)]
+/// pub struct MyHandler { ctx: Arc<AppDbContext> }
+///
+/// #[handler(inject)]
+/// #[async_trait]
+/// impl IRequestHandler<MyReq, MyRsp> for MyHandler { ... }
+/// ```
+pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     let item_impl = parse_macro_input!(item as ItemImpl);
     let handler_ty = &item_impl.self_ty;
+
+    // Check for #[handler(inject)] — signals DI-based construction via #[inject_attr]
+    let use_inject = !attr.is_empty();
 
     // Extract T (request type) and R (response type) from IRequestHandler<T, R>
     let (req_ty_opt, rsp_ty_opt) = extract_handler_types(&item_impl);
@@ -28,12 +44,27 @@ pub fn handler_impl(item: TokenStream) -> TokenStream {
     // Generate call bridge function
     let call_fn = format_ident!("__lrwf_call_{}", handler_ty_name.replace("::", "_"));
 
+    // Choose factory body: DI injection vs Default
+    let factory_body = if use_inject {
+        let constructor_fn =
+            format_ident!("__rdi_construct_{}", handler_ty_name.replace("::", "_"));
+        quote! {
+            let provider = ::lrwf::global_provider();
+            let handler: ::std::sync::Arc<#handler_ty> = #constructor_fn(provider.as_ref() as &dyn lrdi::IServiceResolver);
+            handler as ::std::sync::Arc<dyn ::std::any::Any + Send + Sync>
+        }
+    } else {
+        quote! {
+            ::std::sync::Arc::new(<#handler_ty>::default()) as ::std::sync::Arc<dyn ::std::any::Any + Send + Sync>
+        }
+    };
+
     let expanded = quote! {
         #item_impl
 
         #[doc(hidden)]
         fn #factory_fn() -> ::std::sync::Arc<dyn ::std::any::Any + Send + Sync> {
-            ::std::sync::Arc::new(<#handler_ty>::default())
+            #factory_body
         }
 
         #[doc(hidden)]

@@ -1,18 +1,15 @@
-//! Common services — includes the dynamic authorizer and auto-registration.
+//! Common services — auto-registered via `#[lrdi::inject_attr]`.
 //!
-//! To use, call `register_common_services` in the `register()` closure:
-//!
-//! ```ignore
-//! .register(|svc| common::register_common_services(svc))
-//! ```
+//! Services annotated with `#[lrdi::inject_attr]` are collected at compile time
+//! by `ServiceCollection::from_injected()` in `Host::build()`. No manual
+//! `.register()` call is needed.
 
 use lrwf::*;
-use std::sync::Arc;
-
-use lrdi::ServiceCollection;
 
 /// Role-based authorizer — allows admin users to access admin routes.
-#[derive(Default)]
+///
+/// Auto-registered as `dyn IDynamicAuthorizer` singleton via lrdi 0.2.5.
+#[lrdi::inject_attr(singleton, as = dyn IDynamicAuthorizer)]
 pub struct RoleAuthorizer;
 
 #[async_trait]
@@ -23,28 +20,15 @@ impl IDynamicAuthorizer for RoleAuthorizer {
         route_pattern: &str,
         _method: &str,
     ) -> Result<()> {
-        // Routes under /api/auth/ are accessible by any authenticated user
         if route_pattern.starts_with("/api/auth/") {
             return Ok(());
         }
-
-        // All other protected routes require admin role
         if claims.has_role("admin") {
             return Ok(());
         }
-
         Err(Error::Http(format!(
             "Forbidden: admin role required for '{}'",
             route_pattern
         )))
     }
-}
-
-/// Auto-registration helper. Call inside `Host::builder().register(...)`:
-///
-/// ```ignore
-/// .register(common::register_common_services)
-/// ```
-pub fn register_common_services(svc: ServiceCollection) -> ServiceCollection {
-    svc.singleton::<dyn IDynamicAuthorizer>(|_| Arc::new(RoleAuthorizer::default()))
 }

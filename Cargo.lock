@@ -1059,19 +1059,20 @@ checksum = "953f07c43838f8e6f9758cab68bf5bed85465e7587ebe0b823f1bcd81978ad3a"
 
 [[package]]
 name = "lrdi"
-version = "0.1.4"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ad0e9cdc981c4a46db2a230f680993671f07e0fc6b6573c2c133024690dbb10"
+checksum = "a6bbc7e79d6d430c2e977bd0bbed2e7ddc6ea9bd3dd986e8cd2d0aab3607c87d"
 dependencies = [
+ "inventory",
  "lrdi-macros",
  "thiserror 1.0.69",
 ]
 
 [[package]]
 name = "lrdi-macros"
-version = "0.1.4"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8882c0e93f47ee3164a45f00a6be531f408c91a7aed696c1d5e60a9bf434a36c"
+checksum = "cfb71ba388ba2743af3c59bdb73d11f4119a986a750b8030e8af0251f7a94610"
 dependencies = [
  "proc-macro2",
  "quote",

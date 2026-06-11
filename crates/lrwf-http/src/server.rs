@@ -180,15 +180,10 @@ impl HostBuilder {
                 .try_init();
         }
 
-        let mut svc = ServiceCollection::new();
+        let mut svc = ServiceCollection::from_injected();
         for cfg in self.service_configs {
             svc = cfg(svc);
         }
-
-        // Initialize the global handler cache from inventory registrations.
-        // Handlers registered via #[handler] are collected into HandlerCache,
-        // replacing the old lrdi DI-based approach.
-        lrwf_core::di::scan::HandlerCache::init_global();
 
         let provider = Arc::new(svc.build().unwrap_or_else(|e| {
             panic!(
@@ -196,6 +191,15 @@ impl HostBuilder {
                 e
             );
         }));
+
+        // Set the global provider so #[handler] factories can resolve DI dependencies.
+        lrwf_core::di::scan::set_global_provider(Arc::clone(&provider));
+
+        // Initialize the global handler cache from inventory registrations.
+        // Handlers registered via #[handler] are collected into HandlerCache.
+        // If a handler struct also has #[inject_attr], its factory will resolve
+        // dependencies via the global provider set above.
+        lrwf_core::di::scan::HandlerCache::init_global();
 
         let mut pipeline = MiddlewarePipeline::new();
         let middlewares: Vec<Arc<dyn IMiddleware>> = provider.get_all::<dyn IMiddleware>();
@@ -362,7 +366,10 @@ impl HostBuilder {
             let banner_urls = if options.app.urls.is_empty() {
                 vec!["http://localhost:5000".to_string()]
             } else {
-                options.app.urls.iter()
+                options
+                    .app
+                    .urls
+                    .iter()
                     .map(|u| u.replace("0.0.0.0", "localhost"))
                     .collect::<Vec<_>>()
             };

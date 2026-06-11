@@ -101,8 +101,8 @@ pub fn delete(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// }
 /// ```
 #[proc_macro_attribute]
-pub fn handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    handler::handler_impl(item)
+pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
+    handler::handler_impl(attr, item)
 }
 
 // ---------------------------------------------------------------------------

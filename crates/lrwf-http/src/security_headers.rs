@@ -40,7 +40,10 @@ impl IMiddleware for SecurityHeadersMiddleware {
         resp.set_header("referrer-policy", "strict-origin-when-cross-origin");
 
         // Permissions policy (disable sensitive features)
-        resp.set_header("permissions-policy", "camera=(), microphone=(), geolocation=()");
+        resp.set_header(
+            "permissions-policy",
+            "camera=(), microphone=(), geolocation=()",
+        );
 
         // Cache control for API responses
         resp.set_header("cache-control", "no-store");

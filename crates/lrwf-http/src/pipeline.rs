@@ -15,8 +15,7 @@ use std::sync::Arc;
 pub type HandlerFn = Arc<
     dyn for<'a> Fn(
             &'a mut dyn IHttpContext,
-        )
-            -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>
+        ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>
         + Send
         + Sync,
 >;

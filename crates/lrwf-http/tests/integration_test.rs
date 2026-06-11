@@ -1,6 +1,6 @@
-/// Integration tests for LRWF host.
-///
-/// These tests spin up a minimal LRWF host and verify full HTTP cycles.
+//! Integration tests for LRWF host.
+//!
+//! These tests spin up a minimal LRWF host and verify full HTTP cycles.
 
 use std::net::TcpListener;
 
@@ -25,7 +25,7 @@ async fn integration_404_for_unregistered_route() {
 
     let client = reqwest::Client::new();
     let resp = client
-        .get(&format!("http://127.0.0.1:{}/nonexistent", port))
+        .get(format!("http://127.0.0.1:{}/nonexistent", port))
         .send()
         .await
         .unwrap();
@@ -33,7 +33,8 @@ async fn integration_404_for_unregistered_route() {
     assert_eq!(resp.status().as_u16(), 404);
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["status"], 404);
-    assert!(body["error"].as_str().unwrap().contains("Not Found"));
+    assert_eq!(body["title"], "Not Found");
+    assert!(body["detail"].as_str().unwrap().contains("Not Found"));
 }
 
 #[tokio::test]
@@ -43,13 +44,18 @@ async fn integration_health_check_openapi_available() {
 
     let client = reqwest::Client::new();
     let resp = client
-        .get(&format!("http://127.0.0.1:{}/api/openapi.html", port))
+        .get(format!("http://127.0.0.1:{}/api/openapi.html", port))
         .send()
         .await
         .unwrap();
 
     assert_eq!(resp.status().as_u16(), 200);
-    let content_type = resp.headers().get("content-type").unwrap().to_str().unwrap();
+    let content_type = resp
+        .headers()
+        .get("content-type")
+        .unwrap()
+        .to_str()
+        .unwrap();
     assert!(content_type.contains("text/html"));
 }
 
@@ -60,7 +66,7 @@ async fn integration_openapi_json_available() {
 
     let client = reqwest::Client::new();
     let resp = client
-        .get(&format!("http://127.0.0.1:{}/api/openapi.json", port))
+        .get(format!("http://127.0.0.1:{}/api/openapi.json", port))
         .send()
         .await
         .unwrap();

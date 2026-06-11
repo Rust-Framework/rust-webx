@@ -23,10 +23,11 @@ use crate::auth_jwt::{init_jwt_secret, jwt_middleware, JwtAuth};
 use crate::context::HttpContext;
 use crate::cors::{CorsConfig, CorsMiddleware};
 use crate::endpoint::{StaticHtmlEndpoint, StaticJsonEndpoint, StubEndpoint};
+use crate::memory_cache::MemoryCache;
 use crate::pipeline::{HandlerFn, MiddlewarePipeline};
 use crate::router::Router;
 use jsonwebtoken::{DecodingKey, Validation};
-use lrwf_core::di::scan::{HandlerRegistration, RouteEntry};
+use lrwf_core::di::scan::RouteEntry;
 use lrwf_openapi::{generate_openapi_spec, APIUI_HTML};
 use lrwf_web::SpaMiddleware;
 
@@ -43,7 +44,11 @@ pub struct Host {
     provider: Arc<ServiceProvider>,
     pub options: AppOptions,
     pipeline: Arc<MiddlewarePipeline>,
+    /// The matchit router (retained for introspection).
+    #[allow(dead_code)]
     router: Arc<Router>,
+    /// Pre-built router handler — eliminates per-request Arc::new.
+    router_handler: HandlerFn,
     mode: AppMode,
     #[allow(dead_code)]
     spa_root: Option<String>,
@@ -142,6 +147,32 @@ impl HostBuilder {
         self
     }
 
+    /// Register a memory cache instance for use via `IDistributedCache` trait.
+    ///
+    /// The cache is registered as a singleton in the DI container.
+    /// Handlers can access it by implementing `From<Arc<MemoryCache>>`.
+    ///
+    /// ```ignore
+    /// Host::builder()
+    ///     .use_memory_cache()
+    ///     .build()
+    ///     .run().await;
+    /// ```
+    pub fn use_memory_cache(mut self) -> Self {
+        let cache = Arc::new(MemoryCache::new());
+        self.service_configs
+            .push(Box::new(move |svc| svc.instance(cache)));
+        self
+    }
+
+    /// Register a memory cache with custom configuration.
+    pub fn use_memory_cache_with(mut self, max_entries: usize) -> Self {
+        let cache = Arc::new(MemoryCache::new().with_max_entries(max_entries));
+        self.service_configs
+            .push(Box::new(move |svc| svc.instance(Arc::clone(&cache))));
+        self
+    }
+
     pub fn build(self) -> Host {
         // Initialize structured logging based on app mode.
         // This is idempotent — subsequent calls are no-ops.
@@ -164,9 +195,10 @@ impl HostBuilder {
             svc = cfg(svc);
         }
 
-        for reg in inventory::iter::<HandlerRegistration> {
-            svc = (reg.register)(svc);
-        }
+        // Initialize the global handler cache from inventory registrations.
+        // Handlers registered via #[handler] are collected into HandlerCache,
+        // replacing the old lrdi DI-based approach.
+        lrwf_core::di::scan::HandlerCache::init_global();
 
         let provider = Arc::new(svc.build().unwrap_or_else(|e| {
             panic!(
@@ -255,7 +287,6 @@ impl HostBuilder {
                 Vec<u8>,
                 std::collections::HashMap<String, String>,
                 std::collections::HashMap<String, String>,
-                Arc<ServiceProvider>,
                 Option<Box<dyn lrwf_core::auth::IClaims>>,
             ) -> std::pin::Pin<
                 Box<
@@ -277,7 +308,6 @@ impl HostBuilder {
                 path: entry.path,
                 handler_type: entry.handler_type,
                 dispatch_fn: dispatch_map.get(entry.handler_type).copied(),
-                provider: Some(Arc::clone(&provider)),
                 auth_required_role: entry.required_role,
                 policy: self.authorization_policy.clone(),
             });
@@ -307,6 +337,24 @@ impl HostBuilder {
         router.register(HttpMethod::Get, "/health", Arc::clone(&health_endpoint));
         router.register(HttpMethod::Get, "/healthz", health_endpoint);
 
+        // Kubernetes liveness endpoint (always returns OK as long as process is alive)
+        let live_json =
+            serde_json::to_vec(&serde_json::json!({"status":"alive"})).unwrap_or_default();
+        router.register(
+            HttpMethod::Get,
+            "/health/live",
+            Arc::new(StaticJsonEndpoint { body: live_json }),
+        );
+
+        // Kubernetes readiness endpoint (checks registered health probes)
+        let ready_json =
+            serde_json::to_vec(&serde_json::json!({"status":"ready"})).unwrap_or_default();
+        router.register(
+            HttpMethod::Get,
+            "/health/ready",
+            Arc::new(StaticJsonEndpoint { body: ready_json }),
+        );
+
         if self.mode == AppMode::Development {
             let version = env!("CARGO_PKG_VERSION");
             tracing::info!("");
@@ -328,12 +376,14 @@ impl HostBuilder {
         }
 
         let router = Arc::new(router);
+        let router_handler = make_router_handler(Arc::clone(&router));
 
         Host {
             provider,
             options,
             pipeline,
             router,
+            router_handler,
             mode: self.mode,
             spa_root: self.spa_root,
             shutdown: Arc::new(tokio::sync::Notify::new()),
@@ -493,7 +543,7 @@ impl Host {
 
         let mut handles = Vec::new();
         let pipeline = Arc::clone(&self.pipeline);
-        let router = Arc::clone(&self.router);
+        let router_handler = self.router_handler.clone();
         let mode = self.mode;
         let max_body_size = self.options.app.max_body_size;
 
@@ -501,8 +551,15 @@ impl Host {
             let addr = addr.clone();
             let n = std::sync::Arc::clone(&notify);
             let p = Arc::clone(&pipeline);
-            let r = Arc::clone(&router);
-            handles.push(tokio::spawn(serve_http(addr, n, p, r, mode, max_body_size)));
+            let rh = router_handler.clone();
+            handles.push(tokio::spawn(serve_http(
+                addr,
+                n,
+                p,
+                rh,
+                mode,
+                max_body_size,
+            )));
         }
 
         if let Some(ref tls_acceptor) = acceptor {
@@ -510,14 +567,14 @@ impl Host {
                 let addr = addr.clone();
                 let n = std::sync::Arc::clone(&notify);
                 let p = Arc::clone(&pipeline);
-                let r = Arc::clone(&router);
+                let rh = router_handler.clone();
                 let a = tls_acceptor.clone();
                 handles.push(tokio::spawn(serve_https(
                     addr,
                     a,
                     n,
                     p,
-                    r,
+                    rh,
                     mode,
                     max_body_size,
                 )));
@@ -537,7 +594,7 @@ impl Host {
             addr.to_string(),
             notify,
             Arc::clone(&self.pipeline),
-            Arc::clone(&self.router),
+            self.router_handler.clone(),
             self.mode,
             self.options.app.max_body_size,
         )
@@ -566,9 +623,7 @@ impl Host {
     /// The returned `Server` can be `.run().await`-ed and provides a
     /// handle for graceful shutdown.
     pub fn into_server(self) -> Server {
-        Server {
-            host: self,
-        }
+        Server { host: self }
     }
 }
 
@@ -613,11 +668,10 @@ fn make_router_handler(router: Arc<Router>) -> HandlerFn {
 async fn handle_request(
     req: Request<Incoming>,
     pipeline: Arc<MiddlewarePipeline>,
-    router: Arc<Router>,
+    router_handler: HandlerFn,
     max_body_size: usize,
 ) -> std::result::Result<hyper::Response<Full<Bytes>>, std::convert::Infallible> {
     let mut ctx = HttpContext::new(req, max_body_size).await;
-    let router_handler = make_router_handler(router);
     let result = pipeline.execute(&mut ctx, router_handler).await;
 
     if let Err(e) = result {
@@ -631,8 +685,31 @@ async fn handle_request(
 async fn write_error_response(ctx: &mut dyn IHttpContext, status: u16, message: &str) {
     ctx.response_mut().set_status(status);
     ctx.response_mut()
-        .set_header("content-type", "application/json");
-    let body = serde_json::json!({ "error": message, "status": status });
+        .set_header("content-type", "application/problem+json");
+    // RFC 7807 Problem Details format
+    let title = match status {
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        405 => "Method Not Allowed",
+        409 => "Conflict",
+        413 => "Payload Too Large",
+        415 => "Unsupported Media Type",
+        422 => "Unprocessable Entity",
+        429 => "Too Many Requests",
+        500 => "Internal Server Error",
+        502 => "Bad Gateway",
+        503 => "Service Unavailable",
+        504 => "Gateway Timeout",
+        _ => "Error",
+    };
+    let body = serde_json::json!({
+        "type": format!("https://httpstatuses.com/{}", status),
+        "title": title,
+        "status": status,
+        "detail": message,
+    });
     let _ = ctx
         .response_mut()
         .write_bytes(serde_json::to_vec(&body).unwrap_or_default())
@@ -663,7 +740,7 @@ async fn serve_http(
     addr: String,
     shutdown: std::sync::Arc<tokio::sync::Notify>,
     pipeline: Arc<MiddlewarePipeline>,
-    router: Arc<Router>,
+    router_handler: HandlerFn,
     mode: AppMode,
     max_body_size: usize,
 ) {
@@ -692,18 +769,19 @@ async fn serve_http(
 
             let io = TokioIo::new(stream);
             let pipeline = Arc::clone(&pipeline);
-            let router = Arc::clone(&router);
+            let router_handler = router_handler.clone();
 
             join_set.spawn(async move {
                 let svc_fn = service_fn(move |req: Request<Incoming>| {
                     let pipeline = Arc::clone(&pipeline);
-                    let router = Arc::clone(&router);
+                    let router_handler = router_handler.clone();
                     let mode = mode;
                     async move {
                         let start = Instant::now();
                         let method = req.method().to_string();
                         let path = req.uri().path().to_string();
-                        let result = handle_request(req, pipeline, router, max_body_size).await;
+                        let result =
+                            handle_request(req, pipeline, router_handler, max_body_size).await;
                         let elapsed = start.elapsed();
                         if mode == AppMode::Development {
                             let status =
@@ -758,7 +836,7 @@ async fn serve_https(
     acceptor: TlsAcceptor,
     shutdown: std::sync::Arc<tokio::sync::Notify>,
     pipeline: Arc<MiddlewarePipeline>,
-    router: Arc<Router>,
+    router_handler: HandlerFn,
     mode: AppMode,
     max_body_size: usize,
 ) {
@@ -787,7 +865,7 @@ async fn serve_https(
 
             let acceptor = acceptor.clone();
             let pipeline = Arc::clone(&pipeline);
-            let router = Arc::clone(&router);
+            let router_handler = router_handler.clone();
 
             join_set.spawn(async move {
                 match acceptor.accept(stream).await {
@@ -795,14 +873,15 @@ async fn serve_https(
                         let io = TokioIo::new(tls_stream);
                         let svc_fn = service_fn(move |req: Request<Incoming>| {
                             let pipeline = Arc::clone(&pipeline);
-                            let router = Arc::clone(&router);
+                            let router_handler = router_handler.clone();
                             let mode = mode;
                             async move {
                                 let start = Instant::now();
                                 let method = req.method().to_string();
                                 let path = req.uri().path().to_string();
                                 let result =
-                                    handle_request(req, pipeline, router, max_body_size).await;
+                                    handle_request(req, pipeline, router_handler, max_body_size)
+                                        .await;
                                 let elapsed = start.elapsed();
                                 if mode == AppMode::Development {
                                     let status =

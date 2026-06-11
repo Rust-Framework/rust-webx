@@ -3,5 +3,5 @@
 pub mod ext;
 pub mod scan;
 
-pub use ext::{should_scan_endpoints, is_mediator_active, IServiceCollectionExt};
+pub use ext::{is_mediator_active, should_scan_endpoints, IServiceCollectionExt};
 pub use scan::*;

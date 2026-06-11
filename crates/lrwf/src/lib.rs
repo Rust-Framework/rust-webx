@@ -4,6 +4,11 @@
 // --- Core traits ---
 pub use lrwf_core::app::{IApplicationBuilder, IHost};
 pub use lrwf_core::auth::{IAuthenticationHandler, IAuthorizationPolicy, IClaims};
+pub use lrwf_core::cache::{
+    cache_ext::DistributedCacheExtensions,
+    options::DistributedCacheEntryOptions,
+    trait_def::{CacheError, IDistributedCache},
+};
 pub use lrwf_core::config::{
     bind_config, bind_root, load_appsettings, AppOptions, AppSection, CorsSection, IAppOptions,
     JwtSection, TlsSection,
@@ -17,26 +22,33 @@ pub use lrwf_core::http::{
 pub use lrwf_core::mediator::{IEventRequest, IMediator, IRequest};
 pub use lrwf_core::middleware::IMiddleware;
 pub use lrwf_core::mode::AppMode;
+pub use lrwf_core::pagination::{PagedRequest, PagedResponse};
 pub use lrwf_core::pipeline::{IPipelineBehavior, IServiceResolver};
+pub use lrwf_core::problem::{FieldError, ProblemDetails};
 pub use lrwf_core::routing::{HttpMethod, IEndpoint, IRouter, RouteMeta};
 
 // --- DI extensions ---
 pub use lrwf_core::di::ext::{is_mediator_active, should_scan_endpoints, IServiceCollectionExt};
 pub use lrwf_core::di::scan::{
-    HandlerRegistration, ParamMeta, ResponseData, RouteDispatch, RouteEntry, RouteSource,
+    HandlerCache, HandlerEntry, HandlerRegistration, ParamMeta, ResponseData, RouteDispatch,
+    RouteEntry, RouteSource,
 };
 
 // --- HTTP layer ---
 pub use lrwf_http::auth_jwt::{init_jwt_secret, jwt_middleware, jwt_secret, JwtAuth, JwtClaims};
 pub use lrwf_http::authz::{resource_auth_middleware, ResourceAuthorization};
+pub use lrwf_http::compression::{compress_gzip, CompressionConfig};
 pub use lrwf_http::context::{HttpContext, HttpRequest, HttpResponse};
 pub use lrwf_http::cors::{CorsConfig, CorsMiddleware};
 pub use lrwf_http::endpoint::{
     ControllerEndpoint, RequestEndpoint, StaticHtmlEndpoint, StaticJsonEndpoint,
 };
+pub use lrwf_http::health::{HealthCheckFn, HealthCheckRegistry, HealthStatus};
+pub use lrwf_http::memory_cache::MemoryCache;
 pub use lrwf_http::pipeline::{HandlerFn, MiddlewarePipeline};
 pub use lrwf_http::rate_limit::{RateLimitMiddleware, RateLimiter};
 pub use lrwf_http::request_id::RequestIdMiddleware;
+pub use lrwf_http::request_tracing::RequestTracing;
 pub use lrwf_http::router::Router;
 pub use lrwf_http::security_headers::SecurityHeadersMiddleware;
 pub use lrwf_http::server::{Host, HostAppBuilder, HostBuilder, Server, ServerHandle};

@@ -10,6 +10,9 @@
 //! macro output to runtime routing.
 
 use crate::routing::HttpMethod;
+use std::any::Any;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Metadata about a request parameter for OpenAPI generation.
 #[derive(Debug, Clone)]
@@ -73,10 +76,24 @@ inventory::collect!(RouteEntry);
 
 /// Handler registration collected at compile time.
 /// Each `#[handler]` annotation submits one of these to inventory.
+///
+/// After Phase 2, this stores a type-erased factory + call bridge
+/// instead of registering into lrdi DI as `dyn IRequestHandler`.
 pub struct HandlerRegistration {
-    /// Function that registers this handler into a ServiceCollection.
-    /// Takes ownership, calls `.singleton(...)`, and returns the updated collection.
-    pub register: fn(svc: lrdi::ServiceCollection) -> lrdi::ServiceCollection,
+    /// Request type name (e.g., "hello_request::HelloRequest") — used to match RouteDispatch.
+    pub req_type_name: &'static str,
+    /// Creates the concrete handler, wrapped in dyn Any.
+    pub factory: fn() -> std::sync::Arc<dyn std::any::Any + Send + Sync>,
+    /// Type-erased call bridge: receives the already-constructed request via Box<dyn Any>,
+    /// calls native async fn, returns serialized response.
+    #[allow(clippy::type_complexity)]
+    pub call: fn(
+        handler: &std::sync::Arc<dyn std::any::Any + Send + Sync>,
+        request: Box<dyn std::any::Any + Send>,
+        claims: Option<Box<dyn crate::auth::IClaims>>,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = crate::error::Result<ResponseData>> + Send>,
+    >,
 }
 
 inventory::collect!(HandlerRegistration);
@@ -84,19 +101,15 @@ inventory::collect!(HandlerRegistration);
 /// A dispatch function registered at compile time via the endpoint macros.
 ///
 /// Each `#[get]`, `#[post]`, etc. macro generates one of these with a
-/// function that constructs the request from `IHttpContext`, calls the
-/// mediator, and writes the JSON response.
+/// function that constructs the request, looks up the handler, and
+/// calls through the HandlerCache call bridge.
 pub struct RouteDispatch {
-    /// The handler type name (used to match RouteEntry).
     pub handler_type: &'static str,
-    /// Boxed async dispatch function.
-    /// Takes request data and writes JSON response via the mediator.
     #[allow(clippy::type_complexity)]
     pub dispatch: fn(
         body_bytes: Vec<u8>,
         route_params: std::collections::HashMap<String, String>,
         query_params: std::collections::HashMap<String, String>,
-        provider: std::sync::Arc<lrdi::ServiceProvider>,
         claims: Option<Box<dyn crate::auth::IClaims>>,
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = crate::error::Result<ResponseData>> + Send>,
@@ -119,6 +132,7 @@ unsafe impl Send for RouteDispatch {}
 
 impl RouteEntry {
     /// Create a new request-based route entry.
+    #[allow(clippy::too_many_arguments)]
     pub const fn request(
         method: HttpMethod,
         path: &'static str,
@@ -143,6 +157,7 @@ impl RouteEntry {
     }
 
     /// Create a new controller-based route entry.
+    #[allow(clippy::too_many_arguments)]
     pub const fn controller(
         method: HttpMethod,
         path: &'static str,
@@ -165,4 +180,67 @@ impl RouteEntry {
             required_role,
         }
     }
+}
+
+// ─── Handler Cache ───────────────────────────────────────────────────
+
+/// Runtime cache of compiled handler registrations.
+///
+/// Built at startup from `HandlerRegistration` inventory items.
+/// Maps request type name → handler entry (factory + call bridge).
+pub struct HandlerCache {
+    pub entries: HashMap<&'static str, Arc<HandlerEntry>>,
+}
+
+use std::sync::OnceLock;
+static HANDLER_CACHE: OnceLock<HandlerCache> = OnceLock::new();
+
+impl HandlerCache {
+    /// Build the cache from all `HandlerRegistration` inventory items.
+    pub fn build() -> Self {
+        let mut entries = HashMap::new();
+        for reg in inventory::iter::<HandlerRegistration> {
+            let handler = (reg.factory)();
+            entries.insert(
+                reg.req_type_name,
+                Arc::new(HandlerEntry {
+                    handler,
+                    call: reg.call,
+                }),
+            );
+        }
+        Self { entries }
+    }
+
+    /// Initialize the global cache. Called once at host build time.
+    pub fn init_global() {
+        let cache = Self::build();
+        HANDLER_CACHE.set(cache).ok();
+    }
+
+    /// Get a reference to the global handler cache.
+    /// Must be called after `init_global()`.
+    pub fn get_or_init() -> &'static HandlerCache {
+        HANDLER_CACHE.get_or_init(Self::build)
+    }
+
+    /// Look up a handler entry by request type name.
+    pub fn get(&self, req_type_name: &str) -> Option<&Arc<HandlerEntry>> {
+        self.entries.get(req_type_name)
+    }
+}
+
+/// A single compiled handler entry in the cache.
+pub struct HandlerEntry {
+    /// The concrete handler instance (type-erased).
+    pub handler: Arc<dyn Any + Send + Sync>,
+    /// Type-erased call bridge.
+    #[allow(clippy::type_complexity)]
+    pub call: fn(
+        handler: &Arc<dyn Any + Send + Sync>,
+        request: Box<dyn Any + Send>,
+        claims: Option<Box<dyn crate::auth::IClaims>>,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = crate::error::Result<ResponseData>> + Send>,
+    >,
 }

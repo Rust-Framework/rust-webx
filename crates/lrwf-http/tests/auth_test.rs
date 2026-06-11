@@ -36,7 +36,12 @@ fn create_test_token(secret: &[u8], sub: &str, roles: &[&str], permissions: &[&s
         permissions: permissions.iter().map(|s| s.to_string()).collect(),
         exp: now_plus_seconds(3600),
     };
-    jsonwebtoken::encode(&Header::default(), &claims, &EncodingKey::from_secret(secret)).unwrap()
+    jsonwebtoken::encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(secret),
+    )
+    .unwrap()
 }
 
 fn create_expired_token(secret: &[u8]) -> String {
@@ -46,7 +51,12 @@ fn create_expired_token(secret: &[u8]) -> String {
         permissions: vec![],
         exp: now_minus_seconds(3600),
     };
-    jsonwebtoken::encode(&Header::default(), &claims, &EncodingKey::from_secret(secret)).unwrap()
+    jsonwebtoken::encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(secret),
+    )
+    .unwrap()
 }
 
 #[tokio::test]
@@ -83,8 +93,8 @@ async fn auth_empty_token_returns_none() {
     let secret = b"test-secret-key";
     let auth = JwtAuth::new(DecodingKey::from_secret(secret), Validation::default());
 
-    let mut ctx = test_utils::TestHttpContext::new("GET", "/")
-        .with_header("authorization", "Bearer ");
+    let mut ctx =
+        test_utils::TestHttpContext::new("GET", "/").with_header("authorization", "Bearer ");
 
     let result = auth.authenticate(&mut ctx).await.unwrap();
     assert!(result.is_none(), "Empty Bearer token should return None");
@@ -107,13 +117,19 @@ async fn auth_wrong_secret_key_fails() {
     let secret = b"real-secret";
     let wrong_secret = b"wrong-secret";
     let token = create_test_token(secret, "user-1", &[], &[]);
-    let auth = JwtAuth::new(DecodingKey::from_secret(wrong_secret), Validation::default());
+    let auth = JwtAuth::new(
+        DecodingKey::from_secret(wrong_secret),
+        Validation::default(),
+    );
 
     let mut ctx = test_utils::TestHttpContext::new("GET", "/")
         .with_header("authorization", &format!("Bearer {}", token));
 
     let result = auth.authenticate(&mut ctx).await;
-    assert!(result.is_err(), "Token signed with different key should fail");
+    assert!(
+        result.is_err(),
+        "Token signed with different key should fail"
+    );
 }
 
 #[tokio::test]
@@ -139,7 +155,10 @@ async fn auth_bearer_prefix_case_sensitive() {
         .with_header("authorization", &format!("bearer {}", token));
 
     let result = auth.authenticate(&mut ctx).await.unwrap();
-    assert!(result.is_none(), "Lowercase 'bearer' should not be recognized");
+    assert!(
+        result.is_none(),
+        "Lowercase 'bearer' should not be recognized"
+    );
 }
 
 #[tokio::test]
@@ -152,7 +171,10 @@ async fn auth_token_with_extra_whitespace_handled() {
         .with_header("authorization", &format!("Bearer  {}", token));
 
     let result = auth.authenticate(&mut ctx).await;
-    assert!(result.is_ok(), "Token with extra whitespace after Bearer should work");
+    assert!(
+        result.is_ok(),
+        "Token with extra whitespace after Bearer should work"
+    );
     let claims = result.unwrap();
     assert!(claims.is_some());
 }

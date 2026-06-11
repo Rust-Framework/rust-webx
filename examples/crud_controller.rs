@@ -43,18 +43,24 @@ impl ItemRepository {
     }
 
     fn create(&self, name: &str, desc: &str) -> ItemModel {
-        let id = format!("{:x}", std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0));
+        let id = format!(
+            "{:x}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
         let item = ItemModel {
             id: id.clone(),
             name: name.into(),
             description: desc.into(),
         };
-        self.items.lock().map(|mut m| {
-            m.insert(id, item.clone());
-        }).ok();
+        self.items
+            .lock()
+            .map(|mut m| {
+                m.insert(id, item.clone());
+            })
+            .ok();
         item
     }
 
@@ -78,8 +84,7 @@ impl ItemRepository {
     }
 }
 
-static REPO: std::sync::LazyLock<ItemRepository> =
-    std::sync::LazyLock::new(ItemRepository::new);
+static REPO: std::sync::LazyLock<ItemRepository> = std::sync::LazyLock::new(ItemRepository::new);
 
 // ── LoggingMiddleware ─────────────────────────────────────────────────────
 
@@ -90,11 +95,7 @@ struct LoggingMiddleware;
 #[async_trait]
 impl IMiddleware for LoggingMiddleware {
     async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<()> {
-        println!(
-            "[LOG] {} {}",
-            ctx.request().method(),
-            ctx.request().path()
-        );
+        println!("[LOG] {} {}", ctx.request().method(), ctx.request().path());
         Ok(())
     }
 }
@@ -141,11 +142,16 @@ impl IRequest<String> for DeleteItemRequest {}
 
 // ── Handlers ──────────────────────────────────────────────────────────────
 
-#[derive(Default)] struct ListItemsHandler;
-#[derive(Default)] struct GetItemHandler;
-#[derive(Default)] struct CreateItemHandler;
-#[derive(Default)] struct UpdateItemHandler;
-#[derive(Default)] struct DeleteItemHandler;
+#[derive(Default)]
+struct ListItemsHandler;
+#[derive(Default)]
+struct GetItemHandler;
+#[derive(Default)]
+struct CreateItemHandler;
+#[derive(Default)]
+struct UpdateItemHandler;
+#[derive(Default)]
+struct DeleteItemHandler;
 
 #[handler]
 #[async_trait]
@@ -200,9 +206,7 @@ async fn main() {
     Host::builder()
         .mode(AppMode::Development)
         .register(|svc| {
-            svc.singleton::<dyn IMiddleware>(|_| {
-                std::sync::Arc::new(LoggingMiddleware::default())
-            })
+            svc.singleton::<dyn IMiddleware>(|_| std::sync::Arc::new(LoggingMiddleware))
         })
         .configure(|app| {
             app.useOptions(|o| {

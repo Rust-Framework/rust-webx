@@ -4,8 +4,8 @@ use syn::{parse_macro_input, GenericArgument, ItemImpl, PathArguments, Type};
 
 /// `#[handler]` proc macro attribute — placed on `impl IRequestHandler<T, R> for Handler` blocks.
 ///
-/// Generates compile-time inventory registration so the handler is auto-registered
-/// into the DI container without any manual `register_handlers!` or `.singleton()` calls.
+/// Generates compile-time inventory registration with a type-erased call bridge
+/// so the handler can be dispatched without `#[async_trait]` overhead.
 ///
 /// The handler struct MUST implement `Default`.
 pub fn handler_impl(item: TokenStream) -> TokenStream {
@@ -16,26 +16,55 @@ pub fn handler_impl(item: TokenStream) -> TokenStream {
     let (req_ty_opt, rsp_ty_opt) = extract_handler_types(&item_impl);
 
     let handler_ty_name = extract_type_name(handler_ty);
-    let fn_name = format_ident!("__lrwf_regfn_{}", handler_ty_name.replace("::", "_"));
-    let _static_name = format_ident!("__LRWF_HANDLER_{}", handler_ty_name.replace("::", "_"));
 
     let default_type = syn::parse_str::<Type>("()").unwrap();
     let req_ty = req_ty_opt.unwrap_or(&default_type);
-    let rsp_ty = rsp_ty_opt.unwrap_or(&default_type);
+    let _rsp_ty = rsp_ty_opt.unwrap_or(&default_type);
+
+    let req_ty_name = type_to_string(req_ty);
+
+    // Generate factory function
+    let factory_fn = format_ident!("__lrwf_factory_{}", handler_ty_name.replace("::", "_"));
+    // Generate call bridge function
+    let call_fn = format_ident!("__lrwf_call_{}", handler_ty_name.replace("::", "_"));
 
     let expanded = quote! {
         #item_impl
 
         #[doc(hidden)]
-        fn #fn_name(svc: ::lrdi::ServiceCollection) -> ::lrdi::ServiceCollection {
-            svc.singleton::<dyn ::lrwf::IRequestHandler<#req_ty, #rsp_ty>>(
-                |_| ::std::sync::Arc::new(<#handler_ty>::default()),
-            )
+        fn #factory_fn() -> ::std::sync::Arc<dyn ::std::any::Any + Send + Sync> {
+            ::std::sync::Arc::new(<#handler_ty>::default())
+        }
+
+        #[doc(hidden)]
+        fn #call_fn(
+            handler: &::std::sync::Arc<dyn ::std::any::Any + Send + Sync>,
+            request: Box<dyn ::std::any::Any + Send>,
+            _claims: Option<Box<dyn ::lrwf::IClaims>>,
+        ) -> ::std::pin::Pin<Box<dyn ::std::future::Future<Output = ::lrwf::Result<::lrwf::ResponseData>> + Send>> {
+            let handler = ::std::sync::Arc::clone(handler);
+            Box::pin(async move {
+                let h = handler
+                    .downcast_ref::<::std::sync::Arc<#handler_ty>>()
+                    .expect("Handler downcast failed");
+                let req = *request
+                    .downcast::<#req_ty>()
+                    .expect("Request downcast failed");
+                let result = h.handle_with_claims(req, _claims.as_deref()).await?;
+                let json_bytes = ::serde_json::to_vec(&result).unwrap_or_default();
+                Ok(::lrwf::ResponseData {
+                    status: 200,
+                    content_type: "application/json".to_string(),
+                    body: json_bytes,
+                })
+            })
         }
 
         ::inventory::submit! {
             ::lrwf::HandlerRegistration {
-                register: #fn_name as fn(::lrdi::ServiceCollection) -> ::lrdi::ServiceCollection,
+                req_type_name: #req_ty_name,
+                factory: #factory_fn as fn() -> ::std::sync::Arc<dyn ::std::any::Any + Send + Sync>,
+                call: #call_fn,
             }
         }
     };
@@ -79,5 +108,18 @@ fn extract_type_name(ty: &Type) -> String {
             .collect::<Vec<_>>()
             .join("_"),
         _ => "UnknownType".to_string(),
+    }
+}
+
+fn type_to_string(ty: &Type) -> String {
+    match ty {
+        Type::Path(tp) => tp
+            .path
+            .segments
+            .iter()
+            .map(|s| s.ident.to_string())
+            .collect::<Vec<_>>()
+            .join("::"),
+        _ => format!("{}", quote! { #ty }),
     }
 }

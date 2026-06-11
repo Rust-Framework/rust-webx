@@ -63,10 +63,6 @@ pub trait IAuthorizationPolicy: Send + Sync {
     /// * `method` — the HTTP method.
     ///
     /// Returns `Ok(())` if authorized, or an `Err` if forbidden.
-    async fn authorize(
-        &self,
-        claims: &dyn IClaims,
-        resource_key: &str,
-        method: &str,
-    ) -> Result<()>;
+    async fn authorize(&self, claims: &dyn IClaims, resource_key: &str, method: &str)
+        -> Result<()>;
 }

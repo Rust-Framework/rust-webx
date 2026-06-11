@@ -49,7 +49,7 @@ pub trait IMediator: Send + Sync {
     async fn send<T, R>(&self, req: T) -> Result<R>
     where
         T: IRequest<R> + Send + 'static,
-        R: serde::Serialize + Send + 'static;
+        R: serde::Serialize + serde::de::DeserializeOwned + Send + 'static;
 
     /// Publish an event to all registered handlers.
     async fn publish<T: IEventRequest>(&self, event: T) -> Result<()>;

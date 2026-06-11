@@ -46,22 +46,26 @@ impl IClaims for MockClaims {
 
 #[tokio::test]
 async fn authz_user_with_allowed_role_is_authorized() {
-    let policy = lrwf_http::authz::ResourceAuthorization::new()
-        .allow_role("/api/admin", "admin");
+    let policy = lrwf_http::authz::ResourceAuthorization::new().allow_role("/api/admin", "admin");
 
     let claims = MockClaims::new("user-1", &["admin"], &[]);
     let result = policy.authorize(&claims, "/api/admin", "GET").await;
-    assert!(result.is_ok(), "Admin user should be authorized for /api/admin");
+    assert!(
+        result.is_ok(),
+        "Admin user should be authorized for /api/admin"
+    );
 }
 
 #[tokio::test]
 async fn authz_user_without_role_is_denied() {
-    let policy = lrwf_http::authz::ResourceAuthorization::new()
-        .allow_role("/api/admin", "admin");
+    let policy = lrwf_http::authz::ResourceAuthorization::new().allow_role("/api/admin", "admin");
 
     let claims = MockClaims::new("user-2", &["user"], &[]);
     let result = policy.authorize(&claims, "/api/admin", "GET").await;
-    assert!(result.is_err(), "Non-admin user should be denied for /api/admin");
+    assert!(
+        result.is_err(),
+        "Non-admin user should be denied for /api/admin"
+    );
 }
 
 #[tokio::test]
@@ -125,9 +129,21 @@ async fn authz_different_paths_independent() {
     let admin_claims = MockClaims::new("admin", &["admin", "user"], &[]);
 
     // user can access /api/public but not /api/private
-    assert!(policy.authorize(&user_claims, "/api/public", "GET").await.is_ok());
-    assert!(policy.authorize(&user_claims, "/api/private", "GET").await.is_err());
+    assert!(policy
+        .authorize(&user_claims, "/api/public", "GET")
+        .await
+        .is_ok());
+    assert!(policy
+        .authorize(&user_claims, "/api/private", "GET")
+        .await
+        .is_err());
     // admin (with both admin and user roles) can access both
-    assert!(policy.authorize(&admin_claims, "/api/public", "GET").await.is_ok());
-    assert!(policy.authorize(&admin_claims, "/api/private", "GET").await.is_ok());
+    assert!(policy
+        .authorize(&admin_claims, "/api/public", "GET")
+        .await
+        .is_ok());
+    assert!(policy
+        .authorize(&admin_claims, "/api/private", "GET")
+        .await
+        .is_ok());
 }

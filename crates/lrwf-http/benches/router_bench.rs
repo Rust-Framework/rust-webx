@@ -87,8 +87,7 @@ fn bench_router_dynamic_multi_param(c: &mut Criterion) {
     c.bench_function("router_dynamic_param_multi", |b| {
         b.iter(|| {
             rt.block_on(async {
-                let mut ctx =
-                    TestHttpContext::new("GET", "/api/users/42/posts/99");
+                let mut ctx = TestHttpContext::new("GET", "/api/users/42/posts/99");
                 let result = router.match_route(&mut ctx).await.unwrap();
                 black_box(result);
             })
@@ -157,17 +156,36 @@ struct TestHttpRequest {
 
 #[async_trait::async_trait]
 impl lrwf_core::http::IHttpRequest for TestHttpRequest {
-    fn method(&self) -> &str { &self.method }
-    fn path(&self) -> &str { &self.path }
-    fn header(&self, name: &str) -> Option<&str> { self.headers.get(name).map(|s| s.as_str()) }
-    fn query(&self) -> &HashMap<String, String> { &self.query_params }
-    fn route_params(&self) -> &HashMap<String, String> { &self.route_params }
-    fn route_params_mut(&mut self) -> &mut HashMap<String, String> { &mut self.route_params }
-    fn route_pattern(&self) -> Option<&str> { self.route_pattern.as_deref() }
-    fn route_pattern_mut(&mut self) -> &mut Option<String> { &mut self.route_pattern }
-    async fn body_bytes(&self) -> lrwf_core::error::Result<Vec<u8>> { Ok(self.body_bytes.clone()) }
+    fn method(&self) -> &str {
+        &self.method
+    }
+    fn path(&self) -> &str {
+        &self.path
+    }
+    fn header(&self, name: &str) -> Option<&str> {
+        self.headers.get(name).map(|s| s.as_str())
+    }
+    fn query(&self) -> &HashMap<String, String> {
+        &self.query_params
+    }
+    fn route_params(&self) -> &HashMap<String, String> {
+        &self.route_params
+    }
+    fn route_params_mut(&mut self) -> &mut HashMap<String, String> {
+        &mut self.route_params
+    }
+    fn route_pattern(&self) -> Option<&str> {
+        self.route_pattern.as_deref()
+    }
+    fn route_pattern_mut(&mut self) -> &mut Option<String> {
+        &mut self.route_pattern
+    }
+    async fn body_bytes(&self) -> lrwf_core::error::Result<Vec<u8>> {
+        Ok(self.body_bytes.clone())
+    }
     async fn body_text(&self) -> lrwf_core::error::Result<String> {
-        String::from_utf8(self.body_bytes.clone()).map_err(|e| lrwf_core::error::Error::Http(e.to_string()))
+        String::from_utf8(self.body_bytes.clone())
+            .map_err(|e| lrwf_core::error::Error::Http(e.to_string()))
     }
 }
 
@@ -179,9 +197,15 @@ struct TestHttpResponse {
 
 #[async_trait::async_trait]
 impl lrwf_core::http::IHttpResponse for TestHttpResponse {
-    fn status(&self) -> u16 { self.status }
-    fn has_body(&self) -> bool { self.body.is_some() }
-    fn set_status(&mut self, code: u16) { self.status = code; }
+    fn status(&self) -> u16 {
+        self.status
+    }
+    fn has_body(&self) -> bool {
+        self.body.is_some()
+    }
+    fn set_status(&mut self, code: u16) {
+        self.status = code;
+    }
     fn set_header(&mut self, key: &str, value: &str) {
         self.headers.push((key.to_string(), value.to_string()));
     }
@@ -229,15 +253,25 @@ impl lrwf_core::http::IClaimsExt for TestHttpContext {
     }
     fn claims(&self) -> Option<&dyn lrwf_core::auth::IClaims> {
         let borrowed = self.claims.borrow();
-        borrowed.as_ref().map(|b| unsafe { &*(&**b as *const dyn lrwf_core::auth::IClaims) })
+        borrowed
+            .as_ref()
+            .map(|b| unsafe { &*(&**b as *const dyn lrwf_core::auth::IClaims) })
     }
 }
 
 impl IHttpContext for TestHttpContext {
-    fn request(&self) -> &dyn lrwf_core::http::IHttpRequest { &self.req }
-    fn request_mut(&mut self) -> &mut dyn lrwf_core::http::IHttpRequest { &mut self.req }
-    fn response(&self) -> &dyn lrwf_core::http::IHttpResponse { &self.resp }
-    fn response_mut(&mut self) -> &mut dyn lrwf_core::http::IHttpResponse { &mut self.resp }
+    fn request(&self) -> &dyn lrwf_core::http::IHttpRequest {
+        &self.req
+    }
+    fn request_mut(&mut self) -> &mut dyn lrwf_core::http::IHttpRequest {
+        &mut self.req
+    }
+    fn response(&self) -> &dyn lrwf_core::http::IHttpResponse {
+        &self.resp
+    }
+    fn response_mut(&mut self) -> &mut dyn lrwf_core::http::IHttpResponse {
+        &mut self.resp
+    }
 }
 
 criterion_group!(

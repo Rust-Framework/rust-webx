@@ -84,7 +84,13 @@ pub trait IRouter: Send + Sync {
     async fn match_route(
         &self,
         ctx: &mut dyn IHttpContext,
-    ) -> Result<Option<(Arc<dyn IEndpoint>, std::collections::HashMap<String, String>, String)>>;
+    ) -> Result<
+        Option<(
+            Arc<dyn IEndpoint>,
+            std::collections::HashMap<String, String>,
+            String,
+        )>,
+    >;
 }
 
 use std::sync::Arc;

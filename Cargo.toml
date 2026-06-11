@@ -15,7 +15,7 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-authors = ["lusid2026"]
+authors = ["Start"]
 repository = "https://gitcode.com/rf2026/lrwf"
 description = "LRWF — A Rust WebApi framework inspired by ASP.NET Core, built on DI + Mediator pattern"
 

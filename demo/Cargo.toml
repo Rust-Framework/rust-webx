@@ -2,10 +2,12 @@
 name = "lrwf-demo"
 version = "0.1.0"
 edition = "2021"
-description = "LRWF Demo — Best-practice cloud service project structure"
+description = "LRWF Demo — Best-practice cloud service project structure with lref ORM"
 
 [dependencies]
 lrwf = { path = "../crates/lrwf" }
+lref = "0.1"
+lref-provider-sqlite = "0.1"
 lrdi = "0.1"
 async-trait = "0.1"
 tokio = { version = "1", features = ["full"] }

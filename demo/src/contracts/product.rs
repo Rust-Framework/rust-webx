@@ -1,5 +1,6 @@
 //! Product controller — demonstrates a controller-style module with doc comments.
 
+use crate::domain::product::ProductModel;
 use lrwf::*;
 
 // ── IRequest definitions ──
@@ -52,13 +53,3 @@ pub struct DeleteProductRequest {
 #[delete("/api/products/{id}")]
 #[authorize(role = "admin")]
 impl IRequest<String> for DeleteProductRequest {}
-
-// ── Domain model (re-exported for convenience) ──
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ProductModel {
-    pub id: String,
-    pub name: String,
-    pub price: f64,
-    pub created_at: String,
-}

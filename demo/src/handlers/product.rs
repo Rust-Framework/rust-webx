@@ -1,103 +1,11 @@
+use lref::provider::DbValue;
+use lref::query::QueryBuilder;
 use lrwf::*;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::contracts::product::*;
+use crate::domain::product::{ProductEntity, ProductModel};
 
-// ── In-memory ProductRepository ──
-
-struct ProductRepository {
-    products: Mutex<HashMap<String, ProductModel>>,
-}
-
-impl ProductRepository {
-    fn new() -> Self {
-        let repo = Self {
-            products: Mutex::new(HashMap::new()),
-        };
-        // Seed data
-        repo.create("Widget", 9.99);
-        repo.create("Gadget", 24.50);
-        repo.create("Thingamajig", 3.75);
-        repo
-    }
-
-    fn list(&self) -> Vec<ProductModel> {
-        self.products
-            .lock()
-            .map(|g| g.values().cloned().collect())
-            .unwrap_or_default()
-    }
-
-    fn get(&self, id: &str) -> Option<ProductModel> {
-        self.products.lock().ok()?.get(id).cloned()
-    }
-
-    fn create(&self, name: &str, price: f64) -> ProductModel {
-        let id = format!(
-            "{:x}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        );
-        let product = ProductModel {
-            id: id.clone(),
-            name: name.to_string(),
-            price,
-            created_at: now_string(),
-        };
-        self.products
-            .lock()
-            .map(|mut g| {
-                g.insert(id, product.clone());
-            })
-            .ok();
-        product
-    }
-
-    fn update(&self, id: &str, name: Option<&str>, price: Option<f64>) -> Option<ProductModel> {
-        let mut products = self.products.lock().ok()?;
-        if let Some(p) = products.get_mut(id) {
-            if let Some(n) = name {
-                p.name = n.to_string();
-            }
-            if let Some(pr) = price {
-                p.price = pr;
-            }
-            Some(p.clone())
-        } else {
-            None
-        }
-    }
-
-    fn delete(&self, id: &str) -> bool {
-        self.products
-            .lock()
-            .map(|mut g| g.remove(id).is_some())
-            .unwrap_or(false)
-    }
-}
-
-fn now_string() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    format!("{}", ts)
-}
-
-static REPO: OnceLock<Arc<ProductRepository>> = OnceLock::new();
-
-fn repo() -> &'static Arc<ProductRepository> {
-    REPO.get().unwrap_or_else(|| {
-        let _ = REPO.set(Arc::new(ProductRepository::new()));
-        REPO.get().expect("ProductRepository initialization failed")
-    })
-}
-
-// ── IRequestHandler implementations ──
+// ── IRequestHandler implementations — backed by lref ORM (SQLite) ──
 
 #[derive(Default)]
 pub struct ListProductsHandler;
@@ -114,11 +22,22 @@ pub struct UpdateProductHandler;
 #[derive(Default)]
 pub struct DeleteProductHandler;
 
+fn qb() -> QueryBuilder<ProductEntity> {
+    QueryBuilder::<ProductEntity>::with_provider(
+        "products",
+        crate::handlers::startup::provider_dyn(),
+    )
+}
+
 #[handler]
 #[async_trait]
 impl IRequestHandler<ListProductsRequest, Vec<ProductModel>> for ListProductsHandler {
     async fn handle(&self, _: ListProductsRequest) -> Result<Vec<ProductModel>> {
-        Ok(repo().list())
+        let entities = qb()
+            .to_list()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?;
+        Ok(entities.into_iter().map(ProductModel::from).collect())
     }
 }
 
@@ -126,9 +45,13 @@ impl IRequestHandler<ListProductsRequest, Vec<ProductModel>> for ListProductsHan
 #[async_trait]
 impl IRequestHandler<GetProductRequest, ProductModel> for GetProductHandler {
     async fn handle(&self, req: GetProductRequest) -> Result<ProductModel> {
-        repo()
-            .get(&req.id)
-            .ok_or_else(|| Error::NotFound(format!("Product not found: {}", req.id)))
+        let entity = qb()
+            .filter_column("id", "=", DbValue::String(req.id.clone()))
+            .first_or_default()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?
+            .ok_or_else(|| Error::NotFound(format!("Product not found: {}", req.id)))?;
+        Ok(ProductModel::from(entity))
     }
 }
 
@@ -136,9 +59,17 @@ impl IRequestHandler<GetProductRequest, ProductModel> for GetProductHandler {
 #[async_trait]
 impl IRequestHandler<CreateProductRequest, ProductModel> for CreateProductHandler {
     async fn handle(&self, req: CreateProductRequest) -> Result<ProductModel> {
-        let product = repo().create(&req.name, req.price);
-        tracing::info!("Product created: {} (id: {})", product.name, product.id);
-        Ok(product)
+        let id = uuid();
+        let now = now_secs();
+        let sql = format!(
+            "INSERT INTO products (id, name, price, created_at) VALUES ('{}', '{}', {}, '{}')",
+            id, req.name.replace('\'', "''"), req.price, now
+        );
+        crate::handlers::startup::exec(&sql).await
+            .map_err(|e| Error::Internal(format!("Failed to create product: {}", e)))?;
+        let model = ProductModel { id, name: req.name, price: req.price, created_at: now };
+        tracing::info!("Product created: {} (id: {})", model.name, model.id);
+        Ok(model)
     }
 }
 
@@ -146,9 +77,44 @@ impl IRequestHandler<CreateProductRequest, ProductModel> for CreateProductHandle
 #[async_trait]
 impl IRequestHandler<UpdateProductRequest, ProductModel> for UpdateProductHandler {
     async fn handle(&self, req: UpdateProductRequest) -> Result<ProductModel> {
-        repo()
-            .update(&req.id, req.name.as_deref(), req.price)
-            .ok_or_else(|| Error::NotFound(format!("Product not found: {}", req.id)))
+        let existing = qb()
+            .filter_column("id", "=", DbValue::String(req.id.clone()))
+            .first_or_default()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?
+            .ok_or_else(|| Error::NotFound(format!("Product not found: {}", req.id)))?;
+
+        let new_name = req.name.clone().unwrap_or(existing.name.clone());
+        let new_price = req.price.unwrap_or(existing.price);
+
+        let mut set_parts: Vec<String> = Vec::new();
+        if req.name.is_some() {
+            set_parts.push(format!("name = '{}'", new_name.replace('\'', "''")));
+        }
+        if req.price.is_some() {
+            set_parts.push(format!("price = {}", new_price));
+        }
+        if set_parts.is_empty() {
+            return Ok(ProductModel {
+                id: existing.id.clone(),
+                name: existing.name.clone(),
+                price: existing.price,
+                created_at: existing.created_at,
+            });
+        }
+        let sql = format!(
+            "UPDATE products SET {} WHERE id = '{}'",
+            set_parts.join(", "),
+            req.id
+        );
+        crate::handlers::startup::exec(&sql).await
+            .map_err(|e| Error::Internal(format!("Failed to update product: {}", e)))?;
+        Ok(ProductModel {
+            id: req.id,
+            name: new_name,
+            price: new_price,
+            created_at: existing.created_at,
+        })
     }
 }
 
@@ -156,11 +122,26 @@ impl IRequestHandler<UpdateProductRequest, ProductModel> for UpdateProductHandle
 #[async_trait]
 impl IRequestHandler<DeleteProductRequest, String> for DeleteProductHandler {
     async fn handle(&self, req: DeleteProductRequest) -> Result<String> {
-        if repo().delete(&req.id) {
-            tracing::info!("Product deleted: {}", req.id);
-            Ok(format!("Product {} deleted", req.id))
-        } else {
-            Err(Error::NotFound(format!("Product not found: {}", req.id)))
-        }
+        let sql = format!("DELETE FROM products WHERE id = '{}'", req.id);
+        crate::handlers::startup::exec(&sql).await
+            .map_err(|e| Error::Internal(e.to_string()))?;
+        tracing::info!("Product deleted: {}", req.id);
+        Ok(format!("Product {} deleted", req.id))
     }
+}
+
+fn uuid() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| format!("{:x}", d.as_nanos()))
+        .unwrap_or_else(|_| "0".to_string())
+}
+
+fn now_secs() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs().to_string())
+        .unwrap_or_else(|_| "0".to_string())
 }

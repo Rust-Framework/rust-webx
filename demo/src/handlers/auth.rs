@@ -1,32 +1,25 @@
 use bcrypt::{hash, verify, DEFAULT_COST};
 use jsonwebtoken::{encode, EncodingKey, Header};
+use lref::provider::DbValue;
+use lref::query::QueryBuilder;
 use lrwf::*;
 use serde::Serialize;
 
 use crate::contracts::auth::*;
-use crate::domain::user::UserModel;
+use crate::domain::user::{UserEntity, UserModel};
 
 // =========================================================================
-// JWT helpers  (encoding secret is set by use_auth() at startup)
+// JWT helpers
 // =========================================================================
 
-/// Custom JWT payload for our application.
-/// Fields match the framework's `RawClaims` so `use_auth()` middleware can
-/// extract roles without a custom handler.
 #[derive(Debug, Serialize, serde::Deserialize)]
 struct AppJwtClaims {
-    /// Subject (user id)
     sub: String,
-    /// User display name (custom claim)
     name: String,
-    /// User email (custom claim)
     email: String,
-    /// User roles — required by framework JwtAuth
     #[serde(default)]
     roles: Vec<String>,
-    /// Issued-at timestamp
     iat: u64,
-    /// Expiration timestamp (24 h)
     exp: u64,
 }
 
@@ -42,7 +35,7 @@ fn create_token(user: &UserModel) -> Result<String> {
         email: user.email.clone(),
         roles: vec![user.role.clone()],
         iat: now,
-        exp: now + 86_400, // 24 hours
+        exp: now + 86_400,
     };
 
     encode(
@@ -53,18 +46,20 @@ fn create_token(user: &UserModel) -> Result<String> {
     .map_err(|e| Error::Http(format!("Token creation failed: {}", e)))
 }
 
-// =========================================================================
-// In-memory credential store (shared with UserRepository)
-// =========================================================================
-
-/// Find a user by email. Returns the user if found.
-pub fn find_user_by_email(email: &str) -> Option<UserModel> {
-    crate::handlers::user::repo().find_by_email(email)
+fn qb() -> QueryBuilder<UserEntity> {
+    QueryBuilder::<UserEntity>::with_provider(
+        "users",
+        crate::handlers::startup::provider_dyn(),
+    )
 }
 
-/// Find a user by id.
-pub fn find_user_by_id(id: &str) -> Option<UserModel> {
-    crate::handlers::user::repo().get(id)
+fn find_user_by_email(email: &str) -> Option<UserEntity> {
+    let rt = tokio::runtime::Handle::current();
+    let qb = qb()
+        .filter_column("email", "=", DbValue::String(email.to_string()));
+    rt.block_on(qb.first_or_default())
+        .ok()
+        .flatten()
 }
 
 // =========================================================================
@@ -84,31 +79,46 @@ pub struct AuthMeHandler;
 #[async_trait]
 impl IRequestHandler<RegisterRequest, AuthResponse> for RegisterHandler {
     async fn handle(&self, req: RegisterRequest) -> Result<AuthResponse> {
-        // Check if email already exists
         if find_user_by_email(&req.email).is_some() {
             return Err(Error::Http("Email already registered".into()));
         }
 
-        // Hash password
         let hashed = hash(&req.password, DEFAULT_COST)
             .map_err(|e| Error::Http(format!("Password hash failed: {}", e)))?;
 
-        // Create user with role "user" by default
-        let user = crate::handlers::user::repo()
-            .create_with_password(&req.name, &req.email, &hashed, "user");
+        let id = uuid();
+        let now = now_secs();
+        let sql = format!(
+            "INSERT INTO users (id, name, email, password_hash, role, created_at) VALUES ('{}', '{}', '{}', '{}', 'user', '{}')",
+            id,
+            req.name.replace('\'', "''"),
+            req.email.replace('\'', "''"),
+            hashed.replace('\'', "''"),
+            now
+        );
+        crate::handlers::startup::exec(&sql).await
+            .map_err(|e| Error::Internal(format!("Failed to create user: {}", e)))?;
 
-        let token = create_token(&user)?;
+        let model = UserModel {
+            id: id.clone(),
+            name: req.name.clone(),
+            email: req.email.clone(),
+            password_hash: hashed,
+            role: "user".to_string(),
+            created_at: now.clone(),
+        };
+        let token = create_token(&model)?;
 
-        tracing::info!("[Auth] User registered: {} ({})", user.name, user.id);
+        tracing::info!("[Auth] User registered: {} ({})", model.name, model.id);
 
         Ok(AuthResponse {
             token,
             user: UserView {
-                id: user.id,
-                name: user.name,
-                email: user.email,
-                role: user.role,
-                created_at: user.created_at,
+                id: model.id,
+                name: model.name,
+                email: model.email,
+                role: model.role,
+                created_at: model.created_at,
             },
         })
     }
@@ -118,10 +128,13 @@ impl IRequestHandler<RegisterRequest, AuthResponse> for RegisterHandler {
 #[async_trait]
 impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
     async fn handle(&self, req: LoginRequest) -> Result<AuthResponse> {
-        let user = find_user_by_email(&req.email)
+        let user = qb()
+            .filter_column("email", "=", DbValue::String(req.email.clone()))
+            .first_or_default()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?
             .ok_or_else(|| Error::Http("Invalid email or password".into()))?;
 
-        // If user has no password (seed user) or password doesn't match
         if user.password_hash.is_empty()
             || !verify(&req.password, &user.password_hash)
                 .map_err(|_| Error::Http("Authentication error".into()))?
@@ -129,18 +142,19 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
             return Err(Error::Http("Invalid email or password".into()));
         }
 
-        let token = create_token(&user)?;
+        let model = UserModel::from(user);
+        let token = create_token(&model)?;
 
-        tracing::info!("[Auth] User logged in: {} ({})", user.name, user.id);
+        tracing::info!("[Auth] User logged in: {} ({})", model.name, model.id);
 
         Ok(AuthResponse {
             token,
             user: UserView {
-                id: user.id,
-                name: user.name,
-                email: user.email,
-                role: user.role,
-                created_at: user.created_at,
+                id: model.id,
+                name: model.name,
+                email: model.email,
+                role: model.role,
+                created_at: model.created_at,
             },
         })
     }
@@ -162,7 +176,12 @@ impl IRequestHandler<AuthMeRequest, UserView> for AuthMeHandler {
             .map(|c| c.subject().to_string())
             .ok_or_else(|| Error::Http("Not authenticated".into()))?;
 
-        let user = find_user_by_id(&user_id).ok_or_else(|| Error::Http("User not found".into()))?;
+        let user = qb()
+            .filter_column("id", "=", DbValue::String(user_id))
+            .first_or_default()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?
+            .ok_or_else(|| Error::Http("User not found".into()))?;
 
         Ok(UserView {
             id: user.id,
@@ -174,19 +193,18 @@ impl IRequestHandler<AuthMeRequest, UserView> for AuthMeHandler {
     }
 }
 
-// =========================================================================
-// Seed admin user
-// =========================================================================
+fn uuid() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| format!("{:x}", d.as_nanos()))
+        .unwrap_or_else(|_| "0".to_string())
+}
 
-/// Ensure a default admin user exists in the repository.
-/// Called once at startup.
-pub fn ensure_admin_user() {
-    let existing = find_user_by_email("admin@lrwf.dev");
-    if existing.is_some() {
-        return;
-    }
-
-    let hashed = bcrypt::hash("admin123", DEFAULT_COST).expect("Failed to hash admin password");
-    crate::handlers::user::repo().create_with_password("Admin", "admin@lrwf.dev", &hashed, "admin");
-    tracing::info!("[Auth] Default admin created: admin@lrwf.dev / admin123");
+fn now_secs() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs().to_string())
+        .unwrap_or_else(|_| "0".to_string())
 }

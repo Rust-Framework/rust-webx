@@ -1,11 +1,12 @@
 //! Endpoint — IEndpoint implementations for dual-mode dispatch.
 
-use lrwf_core::auth::IAuthorizationPolicy;
 use lrwf_core::error::Result;
 use lrwf_core::http::IHttpContext;
 use lrwf_core::routing::IEndpoint;
 use serde_json;
 use std::sync::Arc;
+
+use crate::authz::AuthorizerSet;
 
 /// Endpoint that wraps a boxed async handler.
 #[allow(clippy::type_complexity)]
@@ -66,9 +67,10 @@ pub struct StubEndpoint {
         >,
     >,
     pub auth_required_role: &'static str,
-    /// Dynamic authorization policy (from `IAuthorizationPolicy`).
+    /// Dynamic authorizers (from `IDynamicAuthorizer` DI registrations).
     /// Checked after static `#[authorize]` and before handler dispatch.
-    pub policy: Option<Arc<dyn IAuthorizationPolicy>>,
+    /// When `None`, no dynamic authorization checks run (pass-through).
+    pub authorizers: Option<Arc<AuthorizerSet>>,
 }
 
 #[async_trait::async_trait]
@@ -127,13 +129,15 @@ impl IEndpoint for StubEndpoint {
                 }
             }
 
-            // ── Dynamic authorization policy check (IAuthorizationPolicy) ──
+            // ── Dynamic authorization via IDynamicAuthorizer ──
             if !self.auth_required_role.is_empty() {
-                if let Some(ref policy) = self.policy {
-                    if let Some(claims) = ctx.claims() {
-                        let resource_key = ctx.request().route_pattern().unwrap_or(self.path);
-                        let method = ctx.request().method();
-                        policy.authorize(claims, resource_key, method).await?;
+                if let Some(ref authorizers) = self.authorizers {
+                    if !authorizers.is_empty() {
+                        if let Some(claims) = ctx.claims() {
+                            let resource_key = ctx.request().route_pattern().unwrap_or(self.path);
+                            let method = ctx.request().method();
+                            authorizers.authorize(claims, resource_key, method).await?;
+                        }
                     }
                 }
             }

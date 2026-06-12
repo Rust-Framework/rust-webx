@@ -1,4 +1,9 @@
+use std::sync::Arc;
+
+use lref::db_context::{DbContext, DbContextOptionsBuilder};
+use lref_provider_sqlite::DbContextOptionsBuilderExt as _;
 use lrwf::*;
+use tokio::sync::Mutex;
 
 mod common;
 mod contracts;
@@ -8,15 +13,27 @@ mod startup;
 
 #[tokio::main]
 async fn main() {
-    // 1. Initialize database — returns Arc<AppDbContext>
-    let ctx = startup::initialize().await;
+    // Configure DbContext — EF Core 风格
+    //   services.AddDbContext<AppDbContext>(o => {
+    //       o.UseSqlite("...").AddInterceptor(new AuditInterceptor());
+    //   })
+    let mut opts_builder = DbContextOptionsBuilder::new();
+    opts_builder
+        .use_sqlite("lrwf_demo.db")
+        .add_interceptor(common::AuditInterceptor);
 
-    // 2. Build host — register AppDbContext, handlers are auto-registered via #[inject_attr]
+    let options = Arc::new(opts_builder.build());
+
     let host = Host::builder()
         .mode(AppMode::Development)
+        .register(move |svc| {
+            svc.singleton::<Mutex<DbContext>>(move |_resolver| {
+                let ctx = DbContext::from_options(&options).expect("Failed to create DbContext");
+                Arc::new(Mutex::new(ctx))
+            })
+        })
         .use_spa("wwwroot")
         .use_auth()
-        .register(move |svc| svc.instance(ctx))
         .use_memory_cache()
         .build();
 

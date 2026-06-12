@@ -4,12 +4,12 @@ use std::sync::Arc;
 
 use bcrypt::{hash, verify, DEFAULT_COST};
 use jsonwebtoken::{encode, EncodingKey, Header};
-use lref::provider::DbValue;
+use lref::{db_context::DbContext, prelude::*, provider::DbValue};
 use lrwf::*;
 use serde::Serialize;
+use tokio::sync::Mutex;
 
 use crate::contracts::auth::*;
-use crate::domain::db_context::AppDbContext;
 use crate::domain::user::{UserEntity, UserModel};
 
 // JWT
@@ -29,17 +29,16 @@ fn create_token(user: &UserModel) -> Result<String> {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let claims = AppJwtClaims {
-        sub: user.id.clone(),
-        name: user.name.clone(),
-        email: user.email.clone(),
-        roles: vec![user.role.clone()],
-        iat: now,
-        exp: now + 86_400,
-    };
     encode(
         &Header::default(),
-        &claims,
+        &AppJwtClaims {
+            sub: user.id.clone(),
+            name: user.name.clone(),
+            email: user.email.clone(),
+            roles: vec![user.role.clone()],
+            iat: now,
+            exp: now + 86_400,
+        },
         &EncodingKey::from_secret(lrwf::jwt_secret().as_bytes()),
     )
     .map_err(|e| Error::Http(format!("Token creation failed: {}", e)))
@@ -47,27 +46,32 @@ fn create_token(user: &UserModel) -> Result<String> {
 
 #[lrdi::inject_attr(singleton, as = dyn IRequestHandler<RegisterRequest, AuthResponse>)]
 pub struct RegisterHandler {
-    ctx: Arc<AppDbContext>,
+    ctx: Arc<Mutex<DbContext>>,
 }
 
 #[lrdi::inject_attr(singleton, as = dyn IRequestHandler<LoginRequest, AuthResponse>)]
 pub struct LoginHandler {
-    ctx: Arc<AppDbContext>,
+    ctx: Arc<Mutex<DbContext>>,
 }
 
 #[lrdi::inject_attr(singleton, as = dyn IRequestHandler<AuthMeRequest, UserView>)]
 pub struct AuthMeHandler {
-    ctx: Arc<AppDbContext>,
+    ctx: Arc<Mutex<DbContext>>,
 }
 
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<RegisterRequest, AuthResponse> for RegisterHandler {
     async fn handle(&self, req: RegisterRequest) -> Result<AuthResponse> {
-        let exists = self
-            .ctx
-            .set::<UserEntity>()
-            .filter_column("email", "=", DbValue::String(req.email.clone()))
+        let query = {
+            let mut ctx = self.ctx.lock().await;
+            ctx.set::<UserEntity>().query().filter_column(
+                "email",
+                "=",
+                DbValue::String(req.email.clone()),
+            )
+        };
+        let exists = query
             .first_or_default()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?;
@@ -77,8 +81,17 @@ impl IRequestHandler<RegisterRequest, AuthResponse> for RegisterHandler {
 
         let hashed =
             hash(&req.password, DEFAULT_COST).map_err(|e| Error::Http(format!("Hash: {}", e)))?;
-        let id = uuid();
-        let now = now_secs();
+        let id = format!(
+            "{:x}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs().to_string())
+            .unwrap_or_else(|_| "0".to_string());
         let sql = format!(
             "INSERT INTO users (id, name, email, password_hash, role, created_at) \
              VALUES ('{}', '{}', '{}', '{}', 'user', '{}')",
@@ -88,10 +101,13 @@ impl IRequestHandler<RegisterRequest, AuthResponse> for RegisterHandler {
             hashed.replace('\'', "''"),
             now
         );
-        self.ctx
-            .execute(&sql)
-            .await
-            .map_err(|e| Error::Internal(format!("Failed to create user: {}", e)))?;
+        {
+            let ctx = self.ctx.lock().await;
+            ctx.provider()
+                .execute_migration_command(&sql)
+                .await
+                .map_err(|e| Error::Internal(format!("Failed to create user: {}", e)))?;
+        }
 
         let model = UserModel {
             id: id.clone(),
@@ -120,10 +136,15 @@ impl IRequestHandler<RegisterRequest, AuthResponse> for RegisterHandler {
 #[async_trait]
 impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
     async fn handle(&self, req: LoginRequest) -> Result<AuthResponse> {
-        let user = self
-            .ctx
-            .set::<UserEntity>()
-            .filter_column("email", "=", DbValue::String(req.email.clone()))
+        let query = {
+            let mut ctx = self.ctx.lock().await;
+            ctx.set::<UserEntity>().query().filter_column(
+                "email",
+                "=",
+                DbValue::String(req.email.clone()),
+            )
+        };
+        let user = query
             .first_or_default()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?
@@ -165,10 +186,13 @@ impl IRequestHandler<AuthMeRequest, UserView> for AuthMeHandler {
         let user_id = claims
             .map(|c| c.subject().to_string())
             .ok_or_else(|| Error::Http("Not authenticated".into()))?;
-        let user = self
-            .ctx
-            .set::<UserEntity>()
-            .filter_column("id", "=", DbValue::String(user_id))
+        let query = {
+            let mut ctx = self.ctx.lock().await;
+            ctx.set::<UserEntity>()
+                .query()
+                .filter_column("id", "=", DbValue::String(user_id))
+        };
+        let user = query
             .first_or_default()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?
@@ -181,19 +205,4 @@ impl IRequestHandler<AuthMeRequest, UserView> for AuthMeHandler {
             created_at: user.created_at,
         })
     }
-}
-
-fn uuid() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| format!("{:x}", d.as_nanos()))
-        .unwrap_or_else(|_| "0".to_string())
-}
-fn now_secs() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs().to_string())
-        .unwrap_or_else(|_| "0".to_string())
 }

@@ -1081,11 +1081,12 @@ dependencies = [
 
 [[package]]
 name = "lref"
-version = "0.1.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41128e020f774ceb8a040b3af0f59dcbdf5fce04188a523b6417af2e901d0afc"
+checksum = "dc906dd962a51d8f870d318c7e3f6843278d9d7ffea276356220f5d8919a4645"
 dependencies = [
  "async-trait",
+ "lrdi",
  "lref-macros",
  "pin-project-lite",
  "thiserror 2.0.18",
@@ -1094,9 +1095,9 @@ dependencies = [
 
 [[package]]
 name = "lref-macros"
-version = "0.1.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ccf50925c933c664c31f11b421b0f82550ce3568dfbf8960902bba815a522dc"
+checksum = "c3e2062de452d466c673691b0e8247c53ff7a81f061744ffa0fce1d4e6afd6ff"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1105,9 +1106,9 @@ dependencies = [
 
 [[package]]
 name = "lref-provider-sqlite"
-version = "0.1.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4938f9d6a77939cdf4d861caa666606b551fbc83185b44c8948be9dc009da439"
+checksum = "fadb8116b1c39d1b5881b99e0040ddcb0c1b088a57fc4fc9ec88624dbc4cd835"
 dependencies = [
  "async-trait",
  "lref",

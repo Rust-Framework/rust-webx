@@ -21,12 +21,12 @@ description = "LRWF — A Rust WebApi framework inspired by ASP.NET Core, built 
 
 [workspace.dependencies]
 # Internal crates
-lrwf-core = { path = "crates/lrwf-core" }
-lrwf-http = { path = "crates/lrwf-http" }
-lrwf-macros = { path = "crates/lrwf-macros" }
-lrwf = { path = "crates/lrwf" }
-lrwf-web = { path = "crates/lrwf-web" }
-lrwf-openapi = { path = "crates/lrwf-openapi" }
+lrwf-core = { version = "0.1.0", path = "crates/lrwf-core" }
+lrwf-http = { version = "0.1.0", path = "crates/lrwf-http" }
+lrwf-macros = { version = "0.1.0", path = "crates/lrwf-macros" }
+lrwf = { version = "0.1.0", path = "crates/lrwf" }
+lrwf-web = { version = "0.1.0", path = "crates/lrwf-web" }
+lrwf-openapi = { version = "0.1.0", path = "crates/lrwf-openapi" }
 
 # External dependencies
 lrdi = "0.2.6"

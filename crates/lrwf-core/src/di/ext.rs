@@ -1,5 +1,6 @@
 //! IServiceCollectionExt — Extension trait for lrdi ServiceCollection.
 
+use crate::handler::IHostedService;
 use crate::middleware::IMiddleware;
 use crate::pipeline::IPipelineBehavior;
 use lrdi::{ServiceCollection, ServiceLifetime};
@@ -31,6 +32,28 @@ pub trait IServiceCollectionExt: Sized {
     fn add_pipeline<T>(self) -> Self
     where
         T: IPipelineBehavior + Default + Send + Sync + 'static;
+
+    /// Register a hosted service in the DI container as a singleton.
+    ///
+    /// Hosted services are started when the host starts (before accepting
+    /// requests) and stopped during graceful shutdown.
+    ///
+    /// Analogous to ASP.NET Core's `AddHostedService<T>()`.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// Host::builder()
+    ///     .register(|svc| {
+    ///         svc.add_hosted_service::<DbInitService>()
+    ///     })
+    ///     .build()
+    ///     .run()
+    ///     .await
+    /// ```
+    fn add_hosted_service<T>(self) -> Self
+    where
+        T: IHostedService + Default + Send + Sync + 'static;
 }
 
 impl IServiceCollectionExt for ServiceCollection {
@@ -67,6 +90,13 @@ impl IServiceCollectionExt for ServiceCollection {
         self.add(ServiceLifetime::Singleton, |_| {
             Arc::new(T::default()) as Arc<dyn IPipelineBehavior>
         })
+    }
+
+    fn add_hosted_service<T>(self) -> Self
+    where
+        T: IHostedService + Default + Send + Sync + 'static,
+    {
+        self.singleton::<dyn IHostedService>(|_| Arc::new(T::default()))
     }
 }
 

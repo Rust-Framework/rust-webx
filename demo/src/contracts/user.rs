@@ -56,22 +56,3 @@ pub struct DeleteUserRequest {
 #[delete("/api/users/{id}")]
 #[authorize(role = "admin")]
 impl IRequest<String> for DeleteUserRequest {}
-
-// ── IEventRequest definitions — events are contracts too ──
-
-#[derive(Clone)]
-#[allow(dead_code)]
-pub struct UserCreatedEvent {
-    pub user_id: String,
-    pub user_name: String,
-}
-
-impl IEventRequest for UserCreatedEvent {}
-
-#[derive(Clone)]
-#[allow(dead_code)]
-pub struct UserDeletedEvent {
-    pub user_id: String,
-}
-
-impl IEventRequest for UserDeletedEvent {}

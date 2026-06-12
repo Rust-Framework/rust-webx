@@ -4,7 +4,8 @@ description: >
   使用 LRWF（Rust WebApi Framework）构建 ASP.NET Core 风格的 Rust Web 服务。
   涵盖 IRequest 直接路由、#[get]/#[post] 快捷键宏、IRequestHandler 编译时自动注册、
   中间件管道、IMediator 中介者模式、IPipelineBehavior 请求拦截器链、
-  IEventHandler 事件发布/订阅、编译时 inventory 路由收集、结构化异常处理、
+  IEventHandler 事件发布/订阅、IHostedService 后台服务/数据初始化、
+  编译时 inventory 路由收集、结构化异常处理、
   JWT Bearer Token 身份认证、基于资源（路由模式）的角色/权限授权。
   当用户需要在 Rust 中构建 WebApi、使用 DI+中介者模式、设计模块化后端架构
   或从 ASP.NET Core 迁移到 Rust 时使用此技能。
@@ -28,6 +29,7 @@ description: >
 - 使用 `IMiddleware` 实现 HTTP 请求中间件
 - 使用 `IPipelineBehavior` 实现 Mediator 管道拦截器
 - 使用 `IEventHandler` 实现事件发布/订阅
+- 使用 `IHostedService` 实现后台服务（数据初始化、定时任务、连接池预热）
 - 使用 `#[handler]` 编译时自动注册或 `register_handlers!` 手动注册
 - 使用 `Error::status_code()` 映射异常到 HTTP 状态码
 - 使用 `JwtAuth` + `jwt_middleware` 实现 JWT Bearer Token 身份认证
@@ -158,6 +160,54 @@ impl IMiddleware for LoggingMiddleware {
 | `Error::Routing(msg)` | 404 |
 
 响应格式为 JSON：`{"error": "message", "status": code}`
+
+### 当用户要使用 IHostedService（后台服务 / 数据初始化）
+
+`IHostedService` 是 ASP.NET Core 风格的背景服务接口，
+在 `Host::run()` 调用时自动启动（在 HTTP 监听器启动之前），
+并在服务关闭时自动停止。
+
+适用于：
+- **数据库迁移和数据初始化**（替代在 `main()` 中显式调用初始化函数）
+- **后台轮询 / 队列消费者**
+- **连接池预热**
+- **预计算缓存数据**
+
+```rust
+use lrwf::*;
+
+#[derive(Default)]
+struct DbInitService;
+
+#[async_trait]
+impl IHostedService for DbInitService {
+    async fn start(&self) -> Result<()> {
+        tracing::info!("Running migrations...");
+        run_migrations().await?;
+        tracing::info!("Seeding data...");
+        seed_data().await?;
+        Ok(())
+    }
+
+    async fn stop(&self) -> Result<()> {
+        tracing::info!("Shutting down...");
+        Ok(())
+    }
+}
+
+// 注册到 DI 容器
+Host::builder()
+    .register(|svc| {
+        svc.add_hosted_service::<DbInitService>()
+    })
+    .build()
+    .run()
+    .await?;
+```
+
+`stop()` 有默认空实现，如果不需要关闭逻辑可以省略。
+
+多个 hosted service 会按注册顺序依次启动，关闭时反向停止。
 
 ### 当用户要使用事件系统（发布/订阅）
 

@@ -6,8 +6,8 @@ description = "LRWF Demo — Best-practice cloud service project structure with 
 
 [dependencies]
 lrwf = { path = "../crates/lrwf" }
-lref = "0.1"
-lref-provider-sqlite = "0.1"
+lref = "0.3.2"
+lref-provider-sqlite = "0.3"
 lrdi = "0.2.6"
 async-trait = "0.1"
 tokio = { version = "1", features = ["full"] }

@@ -55,3 +55,53 @@ where
 pub trait IEventHandler<T: IEventRequest>: Send + Sync {
     async fn handle(&self, event: T) -> Result<()>;
 }
+
+/// Background service that is started when the host starts and
+/// stopped when the host performs a graceful shutdown.
+///
+/// Analogous to ASP.NET Core's IHostedService.
+///
+/// Use this for:
+/// - Data initialization / seeding at application startup
+/// - Background polling loops
+/// - Queue consumers
+/// - Connection pool warmup
+///
+/// # Example
+///
+/// ```ignore
+/// #[derive(Default)]
+/// struct DbInitService;
+///
+/// #[async_trait]
+/// impl IHostedService for DbInitService {
+///     async fn start(&self) -> Result<()> {
+///         tracing::info!("[DbInitService] Running migrations...");
+///         run_migrations().await?;
+///         tracing::info!("[DbInitService] Seeding data...");
+///         seed_data().await?;
+///         Ok(())
+///     }
+///
+///     async fn stop(&self) -> Result<()> {
+///         tracing::info!("[DbInitService] Shutting down...");
+///         Ok(())
+///     }
+/// }
+/// ```
+#[async_trait::async_trait]
+pub trait IHostedService: Send + Sync {
+    /// Called when the host starts.
+    ///
+    /// The host waits for all hosted services to finish `start()`
+    /// before beginning to accept incoming requests.
+    async fn start(&self) -> Result<()>;
+
+    /// Called during a graceful shutdown.
+    ///
+    /// The host calls `stop()` on all hosted services concurrently
+    /// after the HTTP server has stopped accepting new connections.
+    async fn stop(&self) -> Result<()> {
+        Ok(())
+    }
+}

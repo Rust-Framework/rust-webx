@@ -1,69 +1,106 @@
 //! Application startup — database initialization and seeding.
 //!
-//! Uses `AppDbContext` (not a global static) for database access.
-//! Migrations are in `crate::migrations/`.
+//! Uses `IHostedService` for lifecycle-managed data initialization via DI.
+//!
+//! Injection chain:
+//!   main.rs                              registers Arc<Mutex<lref::DbContext>>
+//!     → DbInitService (#[inject_attr])   injects Arc<Mutex<DbContext>>
+//!       → start()                        runs migrations + seeding
 
 use std::sync::Arc;
 
-use crate::domain::db_context::AppDbContext;
+use lref::{db_context::DbContext, prelude::*, provider::DbValue};
+use lrwf::*;
+use tokio::sync::Mutex;
 
-use lref::provider::DbValue;
-use lref_provider_sqlite::SqliteProvider;
+/// Database initialization service — auto-registered via `#[lrdi::inject_attr]`.
+#[lrdi::inject_attr(singleton, as = dyn IHostedService)]
+pub struct DbInitService {
+    ctx: Arc<Mutex<DbContext>>,
+}
 
-/// Initialize the database: create provider, run migrations, seed data.
-///
-/// Returns an `Arc<AppDbContext>` ready for DI registration.
-pub async fn initialize() -> Arc<AppDbContext> {
-    let sqlite = SqliteProvider::new("lrwf_demo.db").expect("Failed to open SQLite database");
-    let provider = Arc::new(sqlite) as Arc<dyn lref::provider::DatabaseProvider>;
-    let ctx = Arc::new(AppDbContext::new(Arc::clone(&provider)));
+#[async_trait]
+impl IHostedService for DbInitService {
+    async fn start(&self) -> Result<()> {
+        tracing::info!("[DbInitService] Starting database initialization...");
 
-    // Run migrations
-    crate::domain::migrations::m001_initial_20260611::up(&ctx)
-        .await
-        .expect("Migration failed");
-
-    // Seed admin user
-    if ctx
-        .set::<crate::domain::user::UserEntity>()
-        .filter_column("email", "=", DbValue::String("admin@lrwf.dev".into()))
-        .first_or_default()
-        .await
-        .ok()
-        .flatten()
-        .is_none()
-    {
-        let hashed =
-            bcrypt::hash("admin123", bcrypt::DEFAULT_COST).expect("Failed to hash admin password");
-        let sql = format!(
-            "INSERT INTO users (id, name, email, password_hash, role, created_at) \
-             VALUES ('admin-001', 'Admin', 'admin@lrwf.dev', '{}', 'admin', '{}')",
-            hashed.replace('\'', "''"),
-            now_secs()
-        );
-        ctx.execute(&sql).await.expect("Failed to insert admin");
-        tracing::info!("[DB] Default admin created: admin@lrwf.dev / admin123");
-    }
-
-    // Seed products
-    use crate::domain::product::ProductEntity;
-    let count = ctx.set::<ProductEntity>().count().await.unwrap_or(0);
-    if count == 0 {
-        for (name, price) in &[("Widget", 9.99), ("Gadget", 24.50), ("Thingamajig", 3.75)] {
-            let sql = format!(
-                "INSERT INTO products (id, name, price, created_at) VALUES ('{}', '{}', {}, '{}')",
-                uuid(),
-                name,
-                price,
-                now_secs()
-            );
-            ctx.execute(&sql).await.expect("Failed to seed product");
+        // Run migrations
+        {
+            let mut ctx = self.ctx.lock().await;
+            crate::domain::migrations::m001_initial_20260611::up(&mut ctx)
+                .await
+                .map_err(|e| Error::Internal(format!("Migration failed: {}", e)))?;
         }
-        tracing::info!("[DB] Seeded 3 sample products");
+        tracing::info!("[DbInitService] Migrations applied.");
+
+        // Seed admin user
+        {
+            let mut ctx = self.ctx.lock().await;
+            let query = ctx
+                .set::<crate::domain::user::UserEntity>()
+                .query()
+                .filter_column("email", "=", DbValue::String("admin@lrwf.dev".into()));
+            drop(ctx);
+
+            let no_admin = query.first_or_default().await.ok().flatten().is_none();
+
+            if no_admin {
+                let ctx = self.ctx.lock().await;
+                let hashed = bcrypt::hash("admin123", bcrypt::DEFAULT_COST)
+                    .map_err(|e| Error::Internal(format!("Hash failed: {}", e)))?;
+                let sql = format!(
+                    "INSERT INTO users (id, name, email, password_hash, role, created_at) \
+                     VALUES ('admin-001', 'Admin', 'admin@lrwf.dev', '{}', 'admin', '{}')",
+                    hashed.replace('\'', "''"),
+                    now_secs()
+                );
+                ctx.provider()
+                    .execute_migration_command(&sql)
+                    .await
+                    .map_err(|e| Error::Internal(format!("Failed to insert admin: {}", e)))?;
+                tracing::info!("[DbInitService] Default admin created: admin@lrwf.dev / admin123");
+            }
+        }
+
+        // Seed products
+        {
+            let mut ctx = self.ctx.lock().await;
+            let count = ctx
+                .set::<crate::domain::product::ProductEntity>()
+                .query()
+                .count()
+                .await
+                .unwrap_or(0);
+            drop(ctx);
+
+            if count == 0 {
+                for (name, price) in &[("Widget", 9.99), ("Gadget", 24.50), ("Thingamajig", 3.75)] {
+                    let ctx = self.ctx.lock().await;
+                    let sql = format!(
+                        "INSERT INTO products (id, name, price, created_at) \
+                         VALUES ('{}', '{}', {}, '{}')",
+                        uuid(),
+                        name,
+                        price,
+                        now_secs()
+                    );
+                    ctx.provider()
+                        .execute_migration_command(&sql)
+                        .await
+                        .map_err(|e| Error::Internal(format!("Failed to seed product: {}", e)))?;
+                }
+                tracing::info!("[DbInitService] Seeded 3 sample products");
+            }
+        }
+
+        tracing::info!("[DbInitService] Database initialization complete.");
+        Ok(())
     }
 
-    tracing::info!("[DB] Initialization complete");
-    ctx
+    async fn stop(&self) -> Result<()> {
+        tracing::info!("[DbInitService] Closing database connections...");
+        Ok(())
+    }
 }
 
 fn uuid() -> String {

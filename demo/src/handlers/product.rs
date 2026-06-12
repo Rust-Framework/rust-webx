@@ -1,57 +1,54 @@
 //! Product handlers — auto-registered via `#[lrdi::inject_attr]` + `#[handler(inject)]`.
-//!
-//! EF Core pattern: `ctx.set::<ProductEntity>()` for queries,
-//! `ctx.execute(&sql)` for writes (REF has no change tracking).
 
 use std::sync::Arc;
 
-use lref::provider::DbValue;
+use lref::{db_context::DbContext, prelude::*, provider::DbValue};
 use lrwf::*;
+use tokio::sync::Mutex;
 
 use crate::contracts::product::*;
-use crate::domain::db_context::AppDbContext;
 use crate::domain::product::{ProductEntity, ProductModel};
-
-// ── Handlers — auto-injected via #[inject_attr] ──
 
 #[lrdi::inject_attr(singleton, as = dyn IRequestHandler<ListProductsRequest, Vec<ProductModel>>)]
 pub struct ListProductsHandler {
-    ctx: Arc<AppDbContext>,
+    ctx: Arc<Mutex<DbContext>>,
 }
 
 #[lrdi::inject_attr(singleton, as = dyn IRequestHandler<GetProductRequest, ProductModel>)]
 pub struct GetProductHandler {
-    ctx: Arc<AppDbContext>,
+    ctx: Arc<Mutex<DbContext>>,
 }
 
 #[lrdi::inject_attr(singleton, as = dyn IRequestHandler<CreateProductRequest, ProductModel>)]
 pub struct CreateProductHandler {
-    ctx: Arc<AppDbContext>,
+    ctx: Arc<Mutex<DbContext>>,
 }
 
 #[lrdi::inject_attr(singleton, as = dyn IRequestHandler<UpdateProductRequest, ProductModel>)]
 pub struct UpdateProductHandler {
-    ctx: Arc<AppDbContext>,
+    ctx: Arc<Mutex<DbContext>>,
 }
 
 #[lrdi::inject_attr(singleton, as = dyn IRequestHandler<DeleteProductRequest, String>)]
 pub struct DeleteProductHandler {
-    ctx: Arc<AppDbContext>,
+    ctx: Arc<Mutex<DbContext>>,
 }
-
-// ── Handler implementations ──
 
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ListProductsRequest, Vec<ProductModel>> for ListProductsHandler {
-    async fn handle(&self, _: ListProductsRequest) -> Result<Vec<ProductModel>> {
-        let entities = self
-            .ctx
-            .set::<ProductEntity>()
+    async fn handle(&self, _req: ListProductsRequest) -> Result<Vec<ProductModel>> {
+        let query = {
+            let mut ctx = self.ctx.lock().await;
+            ctx.set::<ProductEntity>()
+                .query()
+                .order_by_desc_column("created_at")
+        };
+        let products = query
             .to_list()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?;
-        Ok(entities.into_iter().map(ProductModel::from).collect())
+        Ok(products.into_iter().map(ProductModel::from).collect())
     }
 }
 
@@ -59,15 +56,18 @@ impl IRequestHandler<ListProductsRequest, Vec<ProductModel>> for ListProductsHan
 #[async_trait]
 impl IRequestHandler<GetProductRequest, ProductModel> for GetProductHandler {
     async fn handle(&self, req: GetProductRequest) -> Result<ProductModel> {
-        let entity = self
-            .ctx
-            .set::<ProductEntity>()
-            .filter_column("id", "=", DbValue::String(req.id.clone()))
+        let query = {
+            let mut ctx = self.ctx.lock().await;
+            ctx.set::<ProductEntity>()
+                .query()
+                .filter_column("id", "=", DbValue::String(req.id))
+        };
+        let product = query
             .first_or_default()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?
-            .ok_or_else(|| Error::NotFound(format!("Product not found: {}", req.id)))?;
-        Ok(ProductModel::from(entity))
+            .ok_or_else(|| Error::NotFound("Product not found".into()))?;
+        Ok(ProductModel::from(product))
     }
 }
 
@@ -75,20 +75,29 @@ impl IRequestHandler<GetProductRequest, ProductModel> for GetProductHandler {
 #[async_trait]
 impl IRequestHandler<CreateProductRequest, ProductModel> for CreateProductHandler {
     async fn handle(&self, req: CreateProductRequest) -> Result<ProductModel> {
-        let id = uuid();
-        let now = now_secs();
+        let id = format!(
+            "{:x}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs().to_string())
+            .unwrap_or_else(|_| "0".to_string());
         let sql = format!(
             "INSERT INTO products (id, name, price, created_at) VALUES ('{}', '{}', {}, '{}')",
-            id,
-            req.name.replace('\'', "''"),
-            req.price,
-            now
+            id, req.name, req.price, now
         );
-        self.ctx
-            .execute(&sql)
-            .await
-            .map_err(|e| Error::Internal(format!("Failed to create product: {}", e)))?;
-        tracing::info!("Product created: {} (id: {})", req.name, id);
+        {
+            let ctx = self.ctx.lock().await;
+            ctx.provider()
+                .execute_migration_command(&sql)
+                .await
+                .map_err(|e| Error::Internal(format!("Failed to create product: {}", e)))?;
+        }
+        tracing::info!("[Product] Created: {}", req.name);
         Ok(ProductModel {
             id,
             name: req.name,
@@ -102,35 +111,36 @@ impl IRequestHandler<CreateProductRequest, ProductModel> for CreateProductHandle
 #[async_trait]
 impl IRequestHandler<UpdateProductRequest, ProductModel> for UpdateProductHandler {
     async fn handle(&self, req: UpdateProductRequest) -> Result<ProductModel> {
-        let existing = self
-            .ctx
-            .set::<ProductEntity>()
-            .filter_column("id", "=", DbValue::String(req.id.clone()))
+        let query = {
+            let mut ctx = self.ctx.lock().await;
+            ctx.set::<ProductEntity>().query().filter_column(
+                "id",
+                "=",
+                DbValue::String(req.id.clone()),
+            )
+        };
+        let existing = query
             .first_or_default()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?
-            .ok_or_else(|| Error::NotFound(format!("Product not found: {}", req.id)))?;
+            .ok_or_else(|| Error::NotFound("Product not found".into()))?;
 
-        let new_name = req.name.clone().unwrap_or(existing.name);
+        let new_name = req.name.unwrap_or(existing.name);
         let new_price = req.price.unwrap_or(existing.price);
-        let mut set_parts: Vec<String> = Vec::new();
-        if req.name.is_some() {
-            set_parts.push(format!("name = '{}'", new_name.replace('\'', "''")));
-        }
-        if req.price.is_some() {
-            set_parts.push(format!("price = {}", new_price));
-        }
-        if !set_parts.is_empty() {
-            let sql = format!(
-                "UPDATE products SET {} WHERE id = '{}'",
-                set_parts.join(", "),
-                req.id
-            );
-            self.ctx
-                .execute(&sql)
+        let sql = format!(
+            "UPDATE products SET name='{}', price={} WHERE id='{}'",
+            new_name.replace('\'', "''"),
+            new_price,
+            req.id
+        );
+        {
+            let ctx = self.ctx.lock().await;
+            ctx.provider()
+                .execute_migration_command(&sql)
                 .await
                 .map_err(|e| Error::Internal(format!("Failed to update product: {}", e)))?;
         }
+        tracing::info!("[Product] Updated: {} ({})", new_name, req.id);
         Ok(ProductModel {
             id: req.id,
             name: new_name,
@@ -144,28 +154,31 @@ impl IRequestHandler<UpdateProductRequest, ProductModel> for UpdateProductHandle
 #[async_trait]
 impl IRequestHandler<DeleteProductRequest, String> for DeleteProductHandler {
     async fn handle(&self, req: DeleteProductRequest) -> Result<String> {
-        let sql = format!("DELETE FROM products WHERE id = '{}'", req.id);
-        self.ctx
-            .execute(&sql)
-            .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
-        tracing::info!("Product deleted: {}", req.id);
-        Ok(format!("Product {} deleted", req.id))
+        {
+            let mut ctx = self.ctx.lock().await;
+            let query = ctx.set::<ProductEntity>().query().filter_column(
+                "id",
+                "=",
+                DbValue::String(req.id.clone()),
+            );
+            drop(ctx);
+            let exists = query
+                .first_or_default()
+                .await
+                .map_err(|e| Error::Internal(e.to_string()))?;
+            if exists.is_none() {
+                return Err(Error::NotFound("Product not found".into()));
+            }
+        }
+        let sql = format!("DELETE FROM products WHERE id='{}'", req.id);
+        {
+            let ctx = self.ctx.lock().await;
+            ctx.provider()
+                .execute_migration_command(&sql)
+                .await
+                .map_err(|e| Error::Internal(format!("Failed to delete product: {}", e)))?;
+        }
+        tracing::info!("[Product] Deleted: {}", req.id);
+        Ok(format!("Deleted product {}", req.id))
     }
-}
-
-fn uuid() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| format!("{:x}", d.as_nanos()))
-        .unwrap_or_else(|_| "0".to_string())
-}
-
-fn now_secs() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs().to_string())
-        .unwrap_or_else(|_| "0".to_string())
 }

@@ -16,7 +16,7 @@ pub use lrwf_core::config::{
     JwtSection, TlsSection,
 };
 pub use lrwf_core::error::{Error, Result};
-pub use lrwf_core::handler::{IEventHandler, IRequestHandler};
+pub use lrwf_core::handler::{IEventHandler, IHostedService, IRequestHandler};
 pub use lrwf_core::http::{
     read_json_body, write_json_response, FromHttpContext, HttpStatus, IClaimsExt, IHttpContext,
     IHttpRequest, IHttpResponse, Json,

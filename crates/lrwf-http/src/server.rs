@@ -13,6 +13,7 @@ use lrdi::{ServiceCollection, ServiceProvider};
 use lrwf_core::app::IHost;
 use lrwf_core::config::{self, AppOptions};
 use lrwf_core::error::Result;
+use lrwf_core::handler::IHostedService;
 use lrwf_core::http::IHttpContext;
 use lrwf_core::middleware::IMiddleware;
 use lrwf_core::mode::AppMode;
@@ -53,6 +54,9 @@ pub struct Host {
     #[allow(dead_code)]
     spa_root: Option<String>,
     shutdown: Arc<tokio::sync::Notify>,
+    /// Hosted services that are started on host start
+    /// and stopped on graceful shutdown.
+    hosted_services: Vec<Arc<dyn IHostedService>>,
 }
 
 #[allow(clippy::type_complexity)]
@@ -386,6 +390,11 @@ impl HostBuilder {
         let router = Arc::new(router);
         let router_handler = make_router_handler(Arc::clone(&router));
 
+        // Resolve all registered hosted services from the DI container.
+        // These will be started when `run()` is called and stopped on shutdown.
+        let hosted_services: Vec<Arc<dyn IHostedService>> =
+            provider.get_all::<dyn IHostedService>();
+
         Host {
             provider,
             options,
@@ -395,6 +404,7 @@ impl HostBuilder {
             mode: self.mode,
             spa_root: self.spa_root,
             shutdown: Arc::new(tokio::sync::Notify::new()),
+            hosted_services,
         }
     }
 }
@@ -473,6 +483,18 @@ impl Host {
     /// { "App": { "Urls": ["http://localhost:5000", "https://localhost:5030"] } }
     /// ```
     pub async fn run(&self) -> Result<()> {
+        // ── Start all hosted services before accepting connections ──
+        if !self.hosted_services.is_empty() {
+            tracing::info!(
+                "Starting {} hosted service(s)...",
+                self.hosted_services.len()
+            );
+            for svc in &self.hosted_services {
+                svc.start().await?;
+            }
+            tracing::info!("All hosted services started.");
+        }
+
         let urls = if self.options.app.urls.is_empty() {
             vec!["http://0.0.0.0:5000".to_string()]
         } else {
@@ -582,9 +604,25 @@ impl Host {
             }
         }
 
+        // Wait for all HTTP listeners to finish (they exit after shutdown signal).
         for h in handles {
             let _ = h.await;
         }
+
+        // ── Stop all hosted services during graceful shutdown ──
+        if !self.hosted_services.is_empty() {
+            tracing::info!(
+                "Stopping {} hosted service(s)...",
+                self.hosted_services.len()
+            );
+            for svc in &self.hosted_services {
+                if let Err(e) = svc.stop().await {
+                    tracing::warn!("Hosted service stop error: {}", e);
+                }
+            }
+            tracing::info!("All hosted services stopped.");
+        }
+
         Ok(())
     }
 

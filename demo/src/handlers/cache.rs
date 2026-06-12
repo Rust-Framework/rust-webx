@@ -1,23 +1,27 @@
-//! Cache demo — shows MemoryCache get-or-create pattern.
+//! Cache demo — MemoryCache get-or-create pattern at `/api/cache/stats`.
 
 use lrwf::*;
 use std::sync::OnceLock;
 use std::time::Duration;
-
-use crate::contracts::user::InfoRequest;
 
 fn shared_cache() -> &'static MemoryCache {
     static CACHE: OnceLock<MemoryCache> = OnceLock::new();
     CACHE.get_or_init(|| MemoryCache::new().with_max_entries(1000))
 }
 
+/// Request for cache statistics.
+pub struct CacheStatsRequest;
+
+#[get("/api/cache/stats")]
+impl IRequest<String> for CacheStatsRequest {}
+
 #[derive(Default)]
 pub struct CacheStatsHandler;
 
 #[handler]
 #[async_trait]
-impl IRequestHandler<InfoRequest, String> for CacheStatsHandler {
-    async fn handle(&self, _: InfoRequest) -> Result<String> {
+impl IRequestHandler<CacheStatsRequest, String> for CacheStatsHandler {
+    async fn handle(&self, _: CacheStatsRequest) -> Result<String> {
         let cache = shared_cache();
         let opts = DistributedCacheEntryOptions::new()
             .set_absolute_expiration_relative_to_now(Duration::from_secs(30));

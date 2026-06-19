@@ -1,0 +1,17 @@
+[package]
+name = "rust-webapp-macros"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "rust-webapp procedural macros: #[controller], #[endpoint], #[HttpGet], #[FromBody], rust_webapp::request!"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn.workspace = true
+quote.workspace = true
+proc-macro2.workspace = true

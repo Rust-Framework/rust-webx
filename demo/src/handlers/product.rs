@@ -1,35 +1,35 @@
-//! Product handlers — auto-registered via `#[lrdi::inject_attr]` + `#[handler(inject)]`.
+﻿//! Product handlers â€” auto-registered via `#[rust_dicore::inject_attr]` + `#[handler(inject)]`.
 
 use std::sync::Arc;
 
 use lref::{db_context::DbContext, prelude::*, provider::DbValue};
-use lrwf::*;
+use rust_webapp::*;
 use tokio::sync::Mutex;
 
 use crate::contracts::product::*;
 use crate::domain::product::{ProductEntity, ProductModel};
 
-#[lrdi::inject_attr(singleton, as = dyn IRequestHandler<ListProductsRequest, Vec<ProductModel>>)]
+#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<ListProductsRequest, Vec<ProductModel>>)]
 pub struct ListProductsHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[lrdi::inject_attr(singleton, as = dyn IRequestHandler<GetProductRequest, ProductModel>)]
+#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<GetProductRequest, ProductModel>)]
 pub struct GetProductHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[lrdi::inject_attr(singleton, as = dyn IRequestHandler<CreateProductRequest, ProductModel>)]
+#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<CreateProductRequest, ProductModel>)]
 pub struct CreateProductHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[lrdi::inject_attr(singleton, as = dyn IRequestHandler<UpdateProductRequest, ProductModel>)]
+#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<UpdateProductRequest, ProductModel>)]
 pub struct UpdateProductHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[lrdi::inject_attr(singleton, as = dyn IRequestHandler<DeleteProductRequest, String>)]
+#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<DeleteProductRequest, String>)]
 pub struct DeleteProductHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
@@ -88,7 +88,10 @@ impl IRequestHandler<CreateProductRequest, ProductModel> for CreateProductHandle
             .unwrap_or_else(|_| "0".to_string());
         let sql = format!(
             "INSERT INTO products (id, name, price, created_at) VALUES ('{}', '{}', {}, '{}')",
-            id, req.name, req.price, now
+            id,
+            crate::common::escape_sql(&req.name),
+            req.price,
+            now
         );
         {
             let ctx = self.ctx.lock().await;
@@ -129,9 +132,9 @@ impl IRequestHandler<UpdateProductRequest, ProductModel> for UpdateProductHandle
         let new_price = req.price.unwrap_or(existing.price);
         let sql = format!(
             "UPDATE products SET name='{}', price={} WHERE id='{}'",
-            new_name.replace('\'', "''"),
+            crate::common::escape_sql(&new_name),
             new_price,
-            req.id
+            crate::common::escape_sql(&req.id)
         );
         {
             let ctx = self.ctx.lock().await;
@@ -170,7 +173,10 @@ impl IRequestHandler<DeleteProductRequest, String> for DeleteProductHandler {
                 return Err(Error::NotFound("Product not found".into()));
             }
         }
-        let sql = format!("DELETE FROM products WHERE id='{}'", req.id);
+        let sql = format!(
+            "DELETE FROM products WHERE id='{}'",
+            crate::common::escape_sql(&req.id)
+        );
         {
             let ctx = self.ctx.lock().await;
             ctx.provider()

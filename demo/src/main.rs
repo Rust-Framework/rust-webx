@@ -1,8 +1,8 @@
-use std::sync::Arc;
+﻿use std::sync::Arc;
 
 use lref::db_context::{DbContext, DbContextOptionsBuilder};
 use lref_provider_sqlite::DbContextOptionsBuilderExt as _;
-use lrwf::*;
+use rust_webapp::*;
 use tokio::sync::Mutex;
 
 mod common;
@@ -13,7 +13,7 @@ mod startup;
 
 #[tokio::main]
 async fn main() {
-    // Configure DbContext — EF Core 风格
+    // Configure DbContext â€” EF Core é£Žæ ¼
     //   services.AddDbContext<AppDbContext>(o => {
     //       o.UseSqlite("...").AddInterceptor(new AuditInterceptor());
     //   })

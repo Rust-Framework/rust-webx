@@ -1,11 +1,11 @@
-//! Auth handlers — auto-registered via `#[lrdi::inject_attr]` + `#[handler(inject)]`.
+﻿//! Auth handlers â€” auto-registered via `#[rust_dicore::inject_attr]` + `#[handler(inject)]`.
 
 use std::sync::Arc;
 
 use bcrypt::{hash, verify, DEFAULT_COST};
 use jsonwebtoken::{encode, EncodingKey, Header};
 use lref::{db_context::DbContext, prelude::*, provider::DbValue};
-use lrwf::*;
+use rust_webapp::*;
 use serde::Serialize;
 use tokio::sync::Mutex;
 
@@ -39,22 +39,22 @@ fn create_token(user: &UserModel) -> Result<String> {
             iat: now,
             exp: now + 86_400,
         },
-        &EncodingKey::from_secret(lrwf::jwt_secret().as_bytes()),
+        &EncodingKey::from_secret(rust_webapp::jwt_secret().as_bytes()),
     )
     .map_err(|e| Error::Http(format!("Token creation failed: {}", e)))
 }
 
-#[lrdi::inject_attr(singleton, as = dyn IRequestHandler<RegisterRequest, AuthResponse>)]
+#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<RegisterRequest, AuthResponse>)]
 pub struct RegisterHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[lrdi::inject_attr(singleton, as = dyn IRequestHandler<LoginRequest, AuthResponse>)]
+#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<LoginRequest, AuthResponse>)]
 pub struct LoginHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[lrdi::inject_attr(singleton, as = dyn IRequestHandler<AuthMeRequest, UserView>)]
+#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<AuthMeRequest, UserView>)]
 pub struct AuthMeHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
@@ -96,9 +96,9 @@ impl IRequestHandler<RegisterRequest, AuthResponse> for RegisterHandler {
             "INSERT INTO users (id, name, email, password_hash, role, created_at) \
              VALUES ('{}', '{}', '{}', '{}', 'user', '{}')",
             id,
-            req.name.replace('\'', "''"),
-            req.email.replace('\'', "''"),
-            hashed.replace('\'', "''"),
+            crate::common::escape_sql(&req.name),
+            crate::common::escape_sql(&req.email),
+            crate::common::escape_sql(&hashed),
             now
         );
         {

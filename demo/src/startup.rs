@@ -1,20 +1,20 @@
-//! Application startup — database initialization and seeding.
+﻿//! Application startup â€” database initialization and seeding.
 //!
 //! Uses `IHostedService` for lifecycle-managed data initialization via DI.
 //!
 //! Injection chain:
 //!   main.rs                              registers Arc<Mutex<lref::DbContext>>
-//!     → DbInitService (#[inject_attr])   injects Arc<Mutex<DbContext>>
-//!       → start()                        runs migrations + seeding
+//!     â†’ DbInitService (#[inject_attr])   injects Arc<Mutex<DbContext>>
+//!       â†’ start()                        runs migrations + seeding
 
 use std::sync::Arc;
 
 use lref::{db_context::DbContext, prelude::*, provider::DbValue};
-use lrwf::*;
+use rust_webapp::*;
 use tokio::sync::Mutex;
 
-/// Database initialization service — auto-registered via `#[lrdi::inject_attr]`.
-#[lrdi::inject_attr(singleton, as = dyn IHostedService)]
+/// Database initialization service â€” auto-registered via `#[rust_dicore::inject_attr]`.
+#[rust_dicore::inject_attr(singleton, as = dyn IHostedService)]
 pub struct DbInitService {
     ctx: Arc<Mutex<DbContext>>,
 }
@@ -51,7 +51,7 @@ impl IHostedService for DbInitService {
                 let sql = format!(
                     "INSERT INTO users (id, name, email, password_hash, role, created_at) \
                      VALUES ('admin-001', 'Admin', 'admin@lrwf.dev', '{}', 'admin', '{}')",
-                    hashed.replace('\'', "''"),
+                    crate::common::escape_sql(&hashed),
                     now_secs()
                 );
                 ctx.provider()

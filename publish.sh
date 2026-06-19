@@ -1,8 +1,8 @@
 #!/bin/sh
 # ─────────────────────────────────────────────────────────────────
-# lrwf crate publish script
+# rust-webapp crate publish script
 #
-# Publishes all LRWF crates to crates.io in dependency order.
+# Publishes all rust-webapp crates to crates.io in dependency order.
 #
 # Usage:
 #   ./publish.sh              # Dry-run: verify all crates are publishable
@@ -11,12 +11,12 @@
 #   ./publish.sh --check      # Check only (cargo publish --dry-run)
 #
 # Order (must respect dependency graph):
-#   1. lrwf-core    (no internal deps)
-#   2. lrwf-macros  (no internal deps)
-#   3. lrwf-web     (depends on lrwf-core)
-#   4. lrwf-openapi (depends on lrwf-core)
-#   5. lrwf-http    (depends on lrwf-core, lrwf-web, lrwf-openapi)
-#   6. lrwf         (depends on all above, umbrella crate)
+#   1. rust-webapp-core     (no internal deps)
+#   2. rust-webapp-macros   (no internal deps)
+#   3. rust-webapp-spa      (depends on rust-webapp-core)
+#   4. rust-webapp-openapi  (depends on rust-webapp-core)
+#   5. rust-webapp-host     (depends on rust-webapp-core, rust-webapp-spa, rust-webapp-openapi)
+#   6. rust-webapp          (depends on all above, umbrella crate)
 # ─────────────────────────────────────────────────────────────────
 
 set -e
@@ -53,7 +53,7 @@ publish_crate() {
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
     # Verify with dry-run
-    cargo publish -p "$crate" --dry-run --allow-dirty 2>&1 | tail -5
+    cargo publish -p "$crate" --dry-run --allow-dirty --registry crates-io 2>&1 | tail -5
     if [ $? -ne 0 ]; then
         echo "  ✗ Dry-run failed for $crate"
         exit 1
@@ -63,7 +63,7 @@ publish_crate() {
         echo "  ✓ $crate — dry-run OK"
     else
         echo "  → Publishing $crate..."
-        cargo publish -p "$crate"
+        cargo publish -p "$crate" --registry crates-io
         if [ $? -eq 0 ]; then
             echo "  ✓ $crate published successfully"
         else
@@ -78,7 +78,7 @@ publish_crate() {
 # ── Main ──
 echo ""
 echo "┌─────────────────────────────────────────────────┐"
-echo "│          LRWF — Crate Publish Script            │"
+echo "│      rust-webapp — Crate Publish Script         │"
 if [ "$DO_PUBLISH" = true ]; then
     echo "│          MODE: PUBLISH (live)                   │"
 else
@@ -95,17 +95,17 @@ echo "▸ Verifying workspace..."
 cargo check --workspace 2>&1 | tail -1
 
 echo "▸ Running tests..."
-cargo test -p lrwf-core -p lrwf-http --quiet 2>&1 | tail -1
+cargo test -p rust-webapp-core -p rust-webapp-host --quiet 2>&1 | tail -1
 
 bump_version
 
 # Publish in dependency order
-publish_crate "lrwf-core"
-publish_crate "lrwf-macros"
-publish_crate "lrwf-web"
-publish_crate "lrwf-openapi"
-publish_crate "lrwf-http"
-publish_crate "lrwf"
+publish_crate "rust-webapp-core"
+publish_crate "rust-webapp-macros"
+publish_crate "rust-webapp-spa"
+publish_crate "rust-webapp-openapi"
+publish_crate "rust-webapp-host"
+publish_crate "rust-webapp"
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

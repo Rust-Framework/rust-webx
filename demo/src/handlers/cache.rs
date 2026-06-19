@@ -1,6 +1,6 @@
-//! Cache demo — MemoryCache get-or-create pattern at `/api/cache/stats`.
+﻿//! Cache demo â€” MemoryCache get-or-create pattern at `/api/cache/stats`.
 
-use lrwf::*;
+use rust_webapp::*;
 use std::sync::OnceLock;
 use std::time::Duration;
 

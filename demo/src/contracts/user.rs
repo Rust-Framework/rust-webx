@@ -1,7 +1,7 @@
-use crate::domain::user::UserModel;
-use lrwf::*;
+﻿use crate::domain::user::UserModel;
+use rust_webapp::*;
 
-// ── IRequest definitions — the API contract ──
+// â”€â”€ IRequest definitions â€” the API contract â”€â”€
 
 pub struct InfoRequest;
 

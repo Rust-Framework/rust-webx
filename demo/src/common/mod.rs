@@ -1,18 +1,24 @@
-//! Common services — auto-registered via `#[lrdi::inject_attr]` and lref interceptors.
+﻿//! Common services â€” auto-registered via `#[rust_dicore::inject_attr]` and lref interceptors.
 //!
-//! Services annotated with `#[lrdi::inject_attr]` are collected at compile time
+//! Services annotated with `#[rust_dicore::inject_attr]` are collected at compile time
 //! by `ServiceCollection::from_injected()` in `Host::build()`. No manual
 //! `.register()` call is needed.
 
 use lref::error::LrefResult;
 use lref::interceptor::{ISaveChangesInterceptor, SaveChangesContext, SaveChangesResultContext};
 use lref::prelude::*;
-use lrwf::*;
+use rust_webapp::*;
 
-/// Role-based authorizer — allows admin users to access admin routes.
+/// Sanitize a string value for safe use in SQL string literals.
+/// Escapes single quotes and backslashes to prevent SQL injection.
+pub fn escape_sql(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('\'', "''")
+}
+
+/// Role-based authorizer â€” allows admin users to access admin routes.
 ///
-/// Auto-registered as `dyn IDynamicAuthorizer` singleton via lrdi 0.2.5.
-#[lrdi::inject_attr(singleton, as = dyn IDynamicAuthorizer)]
+/// Auto-registered as `dyn IDynamicAuthorizer` singleton via rust_dicore 0.2.5.
+#[rust_dicore::inject_attr(singleton, as = dyn IDynamicAuthorizer)]
 pub struct RoleAuthorizer;
 
 #[async_trait]
@@ -36,10 +42,10 @@ impl IDynamicAuthorizer for RoleAuthorizer {
     }
 }
 
-/// Audit interceptor — logs save operations via lref's `ISaveChangesInterceptor`.
+/// Audit interceptor â€” logs save operations via lref's `ISaveChangesInterceptor`.
 ///
 /// Registered in `main.rs` via `DbContextOptionsBuilder::add_interceptor()`.
-/// Logs before/after saves and on failures — analogous to EF Core's
+/// Logs before/after saves and on failures â€” analogous to EF Core's
 /// `ISaveChangesInterceptor`.
 pub(crate) struct AuditInterceptor;
 
@@ -62,7 +68,7 @@ impl ISaveChangesInterceptor for AuditInterceptor {
         result: &SaveChangesResultContext,
     ) -> LrefResult<()> {
         tracing::info!(
-            "[Audit] Changes saved — {} entities persisted",
+            "[Audit] Changes saved â€” {} entities persisted",
             result.total()
         );
         Ok(())

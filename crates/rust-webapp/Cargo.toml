@@ -1,0 +1,25 @@
+[package]
+name = "rust-webapp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "rust-webapp — A Rust WebApi framework inspired by ASP.NET Core"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+
+[dependencies]
+rust-webapp-core.workspace = true
+rust-webapp-host.workspace = true
+rust-webapp-macros.workspace = true
+rust-webapp-spa.workspace = true
+rust-webapp-openapi.workspace = true
+rust-dicore.workspace = true
+rust-dicore-macros.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+hyper.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+inventory.workspace = true
+jsonwebtoken.workspace = true

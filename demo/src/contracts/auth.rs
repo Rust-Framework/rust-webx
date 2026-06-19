@@ -1,7 +1,7 @@
-use lrwf::*;
+﻿use rust_webapp::*;
 use serde::{Deserialize, Serialize};
 
-// ── Register ──
+// â”€â”€ Register â”€â”€
 
 #[derive(Deserialize)]
 pub struct RegisterRequest {
@@ -29,7 +29,7 @@ pub struct UserView {
 #[post("/api/auth/register")]
 impl IRequest<AuthResponse> for RegisterRequest {}
 
-// ── Login ──
+// â”€â”€ Login â”€â”€
 
 #[derive(Deserialize)]
 pub struct LoginRequest {
@@ -40,7 +40,7 @@ pub struct LoginRequest {
 #[post("/api/auth/login")]
 impl IRequest<AuthResponse> for LoginRequest {}
 
-// ── Auth Me (get current user from token) ──
+// â”€â”€ Auth Me (get current user from token) â”€â”€
 
 pub struct AuthMeRequest;
 

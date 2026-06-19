@@ -1,15 +1,15 @@
 [package]
-name = "lrwf-demo"
+name = "rust-webapp-demo"
 version = "0.1.0"
 edition = "2021"
-description = "LRWF Demo — Best-practice cloud service project structure with lref ORM"
+description = "rust-webapp Demo — Best-practice cloud service project structure with lref ORM"
 publish = false
 
 [dependencies]
-lrwf = { path = "../crates/lrwf" }
+rust-webapp = { path = "../crates/rust-webapp" }
 lref = "0.3.2"
 lref-provider-sqlite = "0.3"
-lrdi = "0.2.6"
+rust-dicore = { path = "../../rust-di/crates/rust-dicore", version = "0.2.6" }
 async-trait = "0.1"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }

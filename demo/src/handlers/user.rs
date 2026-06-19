@@ -1,40 +1,40 @@
-//! User handlers — auto-registered via `#[lrdi::inject_attr]` + `#[handler(inject)]`.
+﻿//! User handlers â€” auto-registered via `#[rust_dicore::inject_attr]` + `#[handler(inject)]`.
 
 use std::sync::Arc;
 
 use lref::{db_context::DbContext, prelude::*, provider::DbValue};
-use lrwf::*;
+use rust_webapp::*;
 use tokio::sync::Mutex;
 
 use crate::contracts::user::*;
 use crate::domain::user::{UserEntity, UserModel};
 
-#[lrdi::inject_attr(singleton, as = dyn IRequestHandler<ListUsersRequest, Vec<UserModel>>)]
+#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<ListUsersRequest, Vec<UserModel>>)]
 pub struct ListUsersHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[lrdi::inject_attr(singleton, as = dyn IRequestHandler<GetUserRequest, UserModel>)]
+#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<GetUserRequest, UserModel>)]
 pub struct GetUserHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[lrdi::inject_attr(singleton, as = dyn IRequestHandler<CreateUserRequest, UserModel>)]
+#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<CreateUserRequest, UserModel>)]
 pub struct CreateUserHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[lrdi::inject_attr(singleton, as = dyn IRequestHandler<UpdateUserRequest, UserModel>)]
+#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<UpdateUserRequest, UserModel>)]
 pub struct UpdateUserHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[lrdi::inject_attr(singleton, as = dyn IRequestHandler<DeleteUserRequest, String>)]
+#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<DeleteUserRequest, String>)]
 pub struct DeleteUserHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[lrdi::inject_attr(singleton, as = dyn IRequestHandler<InfoRequest, String>)]
+#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<InfoRequest, String>)]
 pub struct InfoHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
@@ -95,8 +95,8 @@ impl IRequestHandler<CreateUserRequest, UserModel> for CreateUserHandler {
             "INSERT INTO users (id, name, email, password_hash, role, created_at) \
              VALUES ('{}', '{}', '{}', '', 'user', '{}')",
             id,
-            req.name.replace('\'', "''"),
-            req.email.replace('\'', "''"),
+            crate::common::escape_sql(&req.name),
+            crate::common::escape_sql(&req.email),
             now
         );
         {
@@ -140,9 +140,9 @@ impl IRequestHandler<UpdateUserRequest, UserModel> for UpdateUserHandler {
         let new_email = req.email.unwrap_or(existing.email.clone());
         let sql = format!(
             "UPDATE users SET name='{}', email='{}' WHERE id='{}'",
-            new_name.replace('\'', "''"),
-            new_email.replace('\'', "''"),
-            req.id
+            crate::common::escape_sql(&new_name),
+            crate::common::escape_sql(&new_email),
+            crate::common::escape_sql(&req.id)
         );
         {
             let ctx = self.ctx.lock().await;
@@ -167,7 +167,10 @@ impl IRequestHandler<UpdateUserRequest, UserModel> for UpdateUserHandler {
 #[async_trait]
 impl IRequestHandler<DeleteUserRequest, String> for DeleteUserHandler {
     async fn handle(&self, req: DeleteUserRequest) -> Result<String> {
-        let sql = format!("DELETE FROM users WHERE id='{}'", req.id);
+        let sql = format!(
+            "DELETE FROM users WHERE id='{}'",
+            crate::common::escape_sql(&req.id)
+        );
         {
             let ctx = self.ctx.lock().await;
             ctx.provider()

@@ -1,9 +1,9 @@
-//! Product controller — demonstrates a controller-style module with doc comments.
+﻿//! Product controller â€” demonstrates a controller-style module with doc comments.
 
 use crate::domain::product::ProductModel;
-use lrwf::*;
+use rust_webapp::*;
 
-// ── IRequest definitions ──
+// â”€â”€ IRequest definitions â”€â”€
 
 pub struct ListProductsRequest;
 

@@ -2,12 +2,12 @@
 resolver = "2"
 
 members = [
-    "crates/lrwf-core",
-    "crates/lrwf-http",
-    "crates/lrwf-macros",
-    "crates/lrwf",
-    "crates/lrwf-web",
-    "crates/lrwf-openapi",
+    "crates/rust-webapp-core",
+    "crates/rust-webapp-host",
+    "crates/rust-webapp-macros",
+    "crates/rust-webapp",
+    "crates/rust-webapp-spa",
+    "crates/rust-webapp-openapi",
     "demo",
 ]
 
@@ -16,21 +16,25 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 authors = ["Start"]
-repository = "https://gitcode.com/rf2026/lrwf"
-description = "LRWF — A Rust WebApi framework inspired by ASP.NET Core, built on DI + Mediator pattern"
+homepage = "https://gitcode.com/rf2026/rust-webapp"
+repository = "https://gitcode.com/rf2026/rust-webapp"
+documentation = "https://docs.rs/rust-webapp"
+description = "rust-webapp — A Rust WebApi framework inspired by ASP.NET Core, built on DI + Mediator pattern"
 
 [workspace.dependencies]
 # Internal crates
-lrwf-core = { version = "0.1.0", path = "crates/lrwf-core" }
-lrwf-http = { version = "0.1.0", path = "crates/lrwf-http" }
-lrwf-macros = { version = "0.1.0", path = "crates/lrwf-macros" }
-lrwf = { version = "0.1.0", path = "crates/lrwf" }
-lrwf-web = { version = "0.1.0", path = "crates/lrwf-web" }
-lrwf-openapi = { version = "0.1.0", path = "crates/lrwf-openapi" }
+rust-webapp-core = { version = "0.1.0", path = "crates/rust-webapp-core" }
+rust-webapp-host = { version = "0.1.0", path = "crates/rust-webapp-host" }
+rust-webapp-macros = { version = "0.1.0", path = "crates/rust-webapp-macros" }
+rust-webapp = { version = "0.1.0", path = "crates/rust-webapp" }
+rust-webapp-spa = { version = "0.1.0", path = "crates/rust-webapp-spa" }
+rust-webapp-openapi = { version = "0.1.0", path = "crates/rust-webapp-openapi" }
+
+# DI framework
+rust-dicore = { path = "../rust-di/crates/rust-dicore", version = "0.2.6" }
+rust-dicore-macros = { path = "../rust-di/crates/rust-dicore-macros", version = "0.2.6" }
 
 # External dependencies
-lrdi = "0.2.6"
-lrdi-macros = "0.2.6"
 async-trait = "0.1"
 tokio = { version = "1", features = ["full"] }
 hyper = { version = "1", features = ["full"] }

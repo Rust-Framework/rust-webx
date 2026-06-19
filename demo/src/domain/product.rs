@@ -1,4 +1,4 @@
-use lref::prelude::*;
+﻿use lref::prelude::*;
 use serde::{Deserialize, Serialize};
 
 /// Product database entity.

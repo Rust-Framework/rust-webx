@@ -1117,115 +1117,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lrwf"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "hyper",
- "inventory",
- "jsonwebtoken",
- "lrdi",
- "lrdi-macros",
- "lrwf-core",
- "lrwf-http",
- "lrwf-macros",
- "lrwf-openapi",
- "lrwf-web",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "lrwf-core"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "inventory",
- "lrdi",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
-]
-
-[[package]]
-name = "lrwf-demo"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bcrypt",
- "inventory",
- "jsonwebtoken",
- "lrdi",
- "lref",
- "lref-provider-sqlite",
- "lrwf",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "lrwf-http"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "compact_str",
- "criterion",
- "flate2",
- "http-body-util",
- "hyper",
- "hyper-util",
- "inventory",
- "jsonwebtoken",
- "lrdi",
- "lrwf-core",
- "lrwf-openapi",
- "lrwf-web",
- "matchit",
- "reqwest",
- "rustls",
- "rustls-pemfile",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tokio-rustls",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "lrwf-macros"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "lrwf-openapi"
-version = "0.1.0"
-dependencies = [
- "inventory",
- "lrwf-core",
- "serde_json",
-]
-
-[[package]]
-name = "lrwf-web"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "lrwf-core",
- "tokio",
-]
-
-[[package]]
 name = "matchers"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1646,6 +1537,133 @@ dependencies = [
  "hashlink",
  "libsqlite3-sys",
  "smallvec",
+]
+
+[[package]]
+name = "rust-dicore"
+version = "0.2.6"
+dependencies = [
+ "inventory",
+ "rust-dicore-macros",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "rust-dicore-macros"
+version = "0.2.6"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "rust-webapp"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "hyper",
+ "inventory",
+ "jsonwebtoken",
+ "rust-dicore",
+ "rust-dicore-macros",
+ "rust-webapp-core",
+ "rust-webapp-host",
+ "rust-webapp-macros",
+ "rust-webapp-openapi",
+ "rust-webapp-spa",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "rust-webapp-core"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "inventory",
+ "rust-dicore",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "rust-webapp-demo"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcrypt",
+ "inventory",
+ "jsonwebtoken",
+ "lref",
+ "lref-provider-sqlite",
+ "rust-dicore",
+ "rust-webapp",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "rust-webapp-host"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "compact_str",
+ "criterion",
+ "flate2",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "inventory",
+ "jsonwebtoken",
+ "matchit",
+ "reqwest",
+ "rust-dicore",
+ "rust-webapp-core",
+ "rust-webapp-openapi",
+ "rust-webapp-spa",
+ "rustls",
+ "rustls-pemfile",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-rustls",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "rust-webapp-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "rust-webapp-openapi"
+version = "0.1.0"
+dependencies = [
+ "inventory",
+ "rust-webapp-core",
+ "serde_json",
+]
+
+[[package]]
+name = "rust-webapp-spa"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "rust-webapp-core",
+ "tokio",
 ]
 
 [[package]]

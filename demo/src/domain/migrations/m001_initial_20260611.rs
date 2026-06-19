@@ -1,4 +1,4 @@
-//! Initial migration — creates the core database tables.
+﻿//! Initial migration â€” creates the core database tables.
 //!
 //! Migration naming convention: `{seq}_{name}_{date}.rs`
 //! Run from `DbInitService::start()` during host initialization.

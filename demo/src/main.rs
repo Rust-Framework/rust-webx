@@ -1,7 +1,7 @@
 ﻿use std::sync::Arc;
 
-use lref::db_context::{DbContext, DbContextOptionsBuilder};
-use lref_provider_sqlite::DbContextOptionsBuilderExt as _;
+use rust_ef::db_context::{DbContext, DbContextOptionsBuilder};
+use rust_ef_sqlite::DbContextOptionsBuilderExt as _;
 use rust_webapp::*;
 use tokio::sync::Mutex;
 

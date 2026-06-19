@@ -1,12 +1,12 @@
-﻿//! Common services â€” auto-registered via `#[rust_dicore::inject_attr]` and lref interceptors.
+﻿//! Common services â€” auto-registered via `#[rust_dicore::inject_attr]` and rust-ef interceptors.
 //!
 //! Services annotated with `#[rust_dicore::inject_attr]` are collected at compile time
 //! by `ServiceCollection::from_injected()` in `Host::build()`. No manual
 //! `.register()` call is needed.
 
-use lref::error::LrefResult;
-use lref::interceptor::{ISaveChangesInterceptor, SaveChangesContext, SaveChangesResultContext};
-use lref::prelude::*;
+use rust_ef::error::LrefResult;
+use rust_ef::interceptor::{ISaveChangesInterceptor, SaveChangesContext, SaveChangesResultContext};
+use rust_ef::prelude::*;
 use rust_webapp::*;
 
 /// Sanitize a string value for safe use in SQL string literals.
@@ -42,7 +42,7 @@ impl IDynamicAuthorizer for RoleAuthorizer {
     }
 }
 
-/// Audit interceptor â€” logs save operations via lref's `ISaveChangesInterceptor`.
+/// Audit interceptor — logs save operations via rust-ef's `ISaveChangesInterceptor`.
 ///
 /// Registered in `main.rs` via `DbContextOptionsBuilder::add_interceptor()`.
 /// Logs before/after saves and on failures â€” analogous to EF Core's

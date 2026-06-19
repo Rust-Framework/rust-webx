@@ -1058,65 +1058,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "953f07c43838f8e6f9758cab68bf5bed85465e7587ebe0b823f1bcd81978ad3a"
 
 [[package]]
-name = "lrdi"
-version = "0.2.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6bbc7e79d6d430c2e977bd0bbed2e7ddc6ea9bd3dd986e8cd2d0aab3607c87d"
-dependencies = [
- "inventory",
- "lrdi-macros",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "lrdi-macros"
-version = "0.2.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfb71ba388ba2743af3c59bdb73d11f4119a986a750b8030e8af0251f7a94610"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "lref"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc906dd962a51d8f870d318c7e3f6843278d9d7ffea276356220f5d8919a4645"
-dependencies = [
- "async-trait",
- "lrdi",
- "lref-macros",
- "pin-project-lite",
- "thiserror 2.0.18",
- "tokio",
-]
-
-[[package]]
-name = "lref-macros"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3e2062de452d466c673691b0e8247c53ff7a81f061744ffa0fce1d4e6afd6ff"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "lref-provider-sqlite"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fadb8116b1c39d1b5881b99e0040ddcb0c1b088a57fc4fc9ec88624dbc4cd835"
-dependencies = [
- "async-trait",
- "lref",
- "rusqlite",
- "tokio",
-]
-
-[[package]]
 name = "matchers"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1544,7 +1485,18 @@ name = "rust-dicore"
 version = "0.2.6"
 dependencies = [
  "inventory",
- "rust-dicore-macros",
+ "rust-dicore-macros 0.2.6",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "rust-dicore"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac4214d3c6b6f291826d5dc7d824e0c8ecb453595ced4b3fa663d127c3712263"
+dependencies = [
+ "inventory",
+ "rust-dicore-macros 0.2.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "thiserror 1.0.69",
 ]
 
@@ -1558,6 +1510,47 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust-dicore-macros"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc1def7a33ffea9476a22198d2dde78606a7ffed511f38515d59ac49693c0217"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "rust-ef"
+version = "0.3.4"
+dependencies = [
+ "async-trait",
+ "rust-dicore 0.2.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rust-ef-macros",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "rust-ef-macros"
+version = "0.3.4"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "rust-ef-sqlite"
+version = "0.3.4"
+dependencies = [
+ "async-trait",
+ "rusqlite",
+ "rust-ef",
+ "tokio",
+]
+
+[[package]]
 name = "rust-webapp"
 version = "0.1.0"
 dependencies = [
@@ -1565,8 +1558,8 @@ dependencies = [
  "hyper",
  "inventory",
  "jsonwebtoken",
- "rust-dicore",
- "rust-dicore-macros",
+ "rust-dicore 0.2.6",
+ "rust-dicore-macros 0.2.6",
  "rust-webapp-core",
  "rust-webapp-host",
  "rust-webapp-macros",
@@ -1583,7 +1576,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "inventory",
- "rust-dicore",
+ "rust-dicore 0.2.6",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -1598,9 +1591,9 @@ dependencies = [
  "bcrypt",
  "inventory",
  "jsonwebtoken",
- "lref",
- "lref-provider-sqlite",
- "rust-dicore",
+ "rust-dicore 0.2.6",
+ "rust-ef",
+ "rust-ef-sqlite",
  "rust-webapp",
  "serde",
  "serde_json",
@@ -1623,7 +1616,7 @@ dependencies = [
  "jsonwebtoken",
  "matchit",
  "reqwest",
- "rust-dicore",
+ "rust-dicore 0.2.6",
  "rust-webapp-core",
  "rust-webapp-openapi",
  "rust-webapp-spa",

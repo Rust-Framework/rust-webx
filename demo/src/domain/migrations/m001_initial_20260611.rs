@@ -3,7 +3,7 @@
 //! Migration naming convention: `{seq}_{name}_{date}.rs`
 //! Run from `DbInitService::start()` during host initialization.
 
-use lref::db_context::{DbContext, IDbContext};
+use rust_ef::db_context::{DbContext, IDbContext};
 
 /// Run the initial migration: create `users` and `products` tables.
 pub async fn up(ctx: &mut DbContext) -> Result<(), String> {

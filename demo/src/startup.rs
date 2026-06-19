@@ -3,13 +3,13 @@
 //! Uses `IHostedService` for lifecycle-managed data initialization via DI.
 //!
 //! Injection chain:
-//!   main.rs                              registers Arc<Mutex<lref::DbContext>>
+//!   main.rs                              registers Arc<Mutex<rust_ef::DbContext>>
 //!     â†’ DbInitService (#[inject_attr])   injects Arc<Mutex<DbContext>>
 //!       â†’ start()                        runs migrations + seeding
 
 use std::sync::Arc;
 
-use lref::{db_context::DbContext, prelude::*, provider::DbValue};
+use rust_ef::{db_context::DbContext, prelude::*, provider::DbValue};
 use rust_webapp::*;
 use tokio::sync::Mutex;
 

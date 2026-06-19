@@ -1,4 +1,4 @@
-﻿use lref::prelude::*;
+﻿use rust_ef::prelude::*;
 use serde::{Deserialize, Serialize};
 
 /// User database entity.

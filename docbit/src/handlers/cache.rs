@@ -1,19 +1,15 @@
-﻿//! Cache demo â€” MemoryCache get-or-create pattern at `/api/cache/stats`.
+﻿//! Cache demo handler — illustrates framework MemoryCache usage.
 
 use rust_webapp::*;
 use std::sync::OnceLock;
 use std::time::Duration;
 
+use crate::contracts::cache::CacheStatsRequest;
+
 fn shared_cache() -> &'static MemoryCache {
     static CACHE: OnceLock<MemoryCache> = OnceLock::new();
     CACHE.get_or_init(|| MemoryCache::new().with_max_entries(1000))
 }
-
-/// Request for cache statistics.
-pub struct CacheStatsRequest;
-
-#[get("/api/cache/stats")]
-impl IRequest<String> for CacheStatsRequest {}
 
 #[derive(Default)]
 pub struct CacheStatsHandler;

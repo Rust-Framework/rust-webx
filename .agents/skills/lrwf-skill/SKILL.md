@@ -6,7 +6,8 @@ description: >
   中间件管道、IMediator 中介者模式、IPipelineBehavior 请求拦截器链、
   IEventHandler 事件发布/订阅、IHostedService 后台服务/数据初始化、
   编译时 inventory 路由收集、结构化异常处理、
-  JWT Bearer Token 身份认证、基于资源（路由模式）的角色/权限授权。
+  JWT Bearer Token 身份认证、基于资源（路由模式）的角色/权限授权、
+  业务应用标准分层（contracts/handlers/domain，面向接口 I…Service）。
   当用户需要在 Rust 中构建 WebApi、使用 DI+中介者模式、设计模块化后端架构
   或从 ASP.NET Core 迁移到 Rust 时使用此技能。
 ---
@@ -48,6 +49,7 @@ description: >
 |------|---------|------|
 | `reference/api.md` | 用户询问具体 API 签名、宏用法、类型定义 | 所有公开 API 的完整签名、使用示例 |
 | `guides/quickstart.md` | 用户问"怎么开始"、"写一个 Hello World"、"搭建项目" | 从零到运行的最小化项目完整步骤 |
+| `guides/project-structure.md` | 用户问项目结构、分层、contracts/handlers/domain、面向接口开发 | 业务应用标准目录、依赖规则、反模式 |
 
 ---
 
@@ -55,9 +57,21 @@ description: >
 
 ### 当用户要求"用 LRWF 搭建 WebApi 项目"
 
+**先加载 `guides/project-structure.md`**，按标准目录创建模块：
+
+```
+src/
+├── main.rs
+├── contracts/     # Request/Response/enum/I…Service — 仅依赖框架
+├── handlers/      # Handler + Service 实现 — inject_attr 自动注册
+└── domain/        # 实体 + 迁移 — 可引用 contracts
+```
+
+`appsettings.json` 放在项目根目录。
+
 1. 在 `Cargo.toml` 添加依赖：`lrwf = "0.1"`、`tokio`、`serde`
 2. 在 `main.rs` 添加 `use lrwf::*;`
-3. 按以下四步定义端点：
+3. 按以下四步定义端点（Request 定义在 `contracts/`，Handler 定义在 `handlers/`）：
    - 定义 Request 结构体（承载输入参数）
    - 用 `#[get("/path")]`（或 `#[post]`/`#[put]`/`#[delete]`）标注 `impl IRequest<TResponse> for Request`
    - 实现 handler：`#[derive(Default)]` + `#[async_trait] impl IRequestHandler<Req, Rsp> for Handler`
@@ -245,6 +259,22 @@ impl IRequestHandler<CreateUserRequest, UserModel> for CreateUserHandler {
 ---
 
 ## 必须遵守的规则
+
+### 规则 0：项目分层与依赖方向（业务应用）
+
+加载 `guides/project-structure.md` 获取完整说明。核心约束：
+
+| 层 | 拥有 | 依赖 |
+|----|------|------|
+| `contracts/` | Request、Response DTO、enum、`I…Service` trait、路由宏 | **仅**框架（`lrwf` / `rust_webapp`） |
+| `handlers/` | `IRequestHandler` 实现、`I…Service` 实现 | contracts、domain、基础设施 |
+| `domain/` | 实体、迁移、EF 配置 | contracts（复用枚举/model）、**禁止** handlers / 框架 |
+| `main.rs` | Host 配置、`bootstrap` 基础设施注册 | 不做业务 Service 手动注册 |
+
+- **面向接口**：Handler 注入 `Arc<dyn IBlogService>`，禁止 `Arc<BlogService>`
+- **接口在 contracts，实现在 handlers**：禁止独立 `services/` 目录
+- **contracts 禁止引用 domain**：DTO 属于契约层；domain 实体映射在 handlers 的 Service 实现中完成
+- 新增业务能力：**先写 trait + Request → 写实现 + Handler**，`main.rs` 通常无需改动
 
 ### 规则 1：请求和响应类型绑定一致
 
@@ -514,9 +544,12 @@ impl IRequestHandler<MyRequest, String> for MyHandler {
     └── "特定 API 怎么用？" → 加载 reference/api.md → 查看完整签名
 
 始终：
+- 业务应用使用 contracts / handlers / domain 三层，接口在 contracts、实现在 handlers
+- contracts 仅依赖框架，禁止引用 domain 或 handlers
+- Handler 依赖 Arc<dyn I…Service>，Service 用 inject_attr(as = dyn I…Service) 注册
 - 路由标注在 impl IRequest<T> 上，不是 struct 上
 - IRequest<T> 泛型参数 = IRequestHandler<T, R> 第二个参数
 - 路由扫描和Handler注册已内置，无需手动调用
 - 注册为 dyn IRequestHandler<T, R>，不是具体类型
-- #[handler] 要求 handler 实现 Default
+- #[handler] 要求 handler 实现 Default；有 DI 依赖时用 inject_attr + #[handler(inject)]
 ```

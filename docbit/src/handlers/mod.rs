@@ -1,6 +1,9 @@
 ﻿pub mod auth;
 pub mod blog;
+pub mod blog_service;
 pub mod cache;
+pub mod comment;
+pub mod doc_service;
 pub mod docs;
 pub mod site;
 pub mod user;

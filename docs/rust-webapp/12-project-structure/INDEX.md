@@ -6,7 +6,7 @@
 |------|------|
 | [推荐目录结构](directory-layout.md) | 标准项目布局 |
 | [职责归属与边界](responsibility-division.md) | 谁做什么 |
-| [Contracts / Handlers / Domain 分层](contracts-handlers-domain.md) | 三层详解 |
+| [Contracts / Handlers / Domain 分层](contracts-handlers-domain.md) | 契约驱动三层详解（含 I…Service） |
 | [测试策略](testing-strategy.md) | 单元与集成测试 |
 
 ## 下一步

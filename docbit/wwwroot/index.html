@@ -15,13 +15,14 @@
             href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github.min.css"
             id="hljs-theme"
         />
+        <link rel="icon" href="/assets/logo-32.svg" type="image/svg+xml" />
         <link rel="stylesheet" href="/app.css" />
     </head>
     <body>
         <header class="site-header" id="site-header">
             <div class="header-inner">
-                <a href="/" class="brand" data-nav>
-                    <span class="brand-mark">◆</span>
+                <a href="/" class="brand" data-nav aria-label="Docbit 首页">
+                    <img src="/assets/logo-32.svg" alt="" class="brand-logo" width="32" height="32" />
                     <span class="brand-text" id="brand-name">Docbit</span>
                 </a>
                 <nav class="main-nav" id="main-nav">
@@ -30,6 +31,7 @@
                     <a href="/about" data-nav>关于</a>
                 </nav>
                 <div class="header-actions">
+                    <div id="user-menu" class="header-user-menu"></div>
                     <button
                         type="button"
                         class="icon-btn"
@@ -61,9 +63,7 @@
             </div>
         </main>
 
-        <footer class="site-footer" id="site-footer">
-            <p>Built with <strong>rust-webapp</strong> · Rust</p>
-        </footer>
+        <footer class="site-footer" id="site-footer"></footer>
 
         <button type="button" class="back-to-top" id="back-to-top" aria-label="回到顶部" hidden>↑</button>
 
@@ -71,6 +71,13 @@
         <script src="https://cdn.jsdelivr.net/npm/markdown-it-anchor@9.2.0/dist/markdownItAnchor.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/highlight.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.4/dist/purify.min.js"></script>
+        <script src="/assets/js/core/utils.js"></script>
+        <script src="/assets/js/core/api.js"></script>
+        <script src="/assets/js/core/auth.js"></script>
+        <script src="/assets/js/core/theme.js"></script>
+        <script src="/assets/js/core/markdown.js"></script>
+        <script src="/assets/js/core/loader.js"></script>
+        <script src="/assets/js/core/footer.js"></script>
         <script src="/app.js"></script>
     </body>
 </html>

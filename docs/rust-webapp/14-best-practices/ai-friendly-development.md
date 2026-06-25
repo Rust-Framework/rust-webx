@@ -13,7 +13,9 @@
 - 返回 PagedResponse<BlogPostDto>
 ```
 
-AI 生成的代码可直接放入 `contracts/blog.rs` + `handlers/blog.rs`。
+AI 生成的代码可直接放入 `contracts/blog.rs`（DTO + `IBlogService` trait + `IRequest`）+ `handlers/blog.rs`（`BlogService` 实现 + Handler）。
+
+**contracts 禁止引用 domain**；DTO 必须在 contracts 定义。
 
 ### 2. 强约定减少歧义
 
@@ -54,9 +56,11 @@ handlers/blog/
 
 ```
 使用 rust-webapp 框架，遵循以下约定：
-- Request 定义在 contracts/，Handler 在 handlers/
+- contracts/：Request、Response DTO、enum、I…Service trait（仅依赖框架，禁止引用 domain）
+- handlers/：IRequestHandler 实现 + I…Service 实现（inject_attr 自动注册）
+- domain/：实体与迁移（可引用 contracts 枚举）
 - 使用 #[get]/#[post] 标注 impl IRequest<T>
-- Handler 使用 inject_attr + #[handler(inject)]
+- Handler 注入 Arc<dyn I…Service>，使用 inject_attr + #[handler(inject)]
 - 错误使用 Error::NotFound / Error::Validation
 - 返回 Result<T>
 

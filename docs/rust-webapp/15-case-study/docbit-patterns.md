@@ -2,12 +2,10 @@
 
 ## 模式 1：inject_attr + #[handler(inject)]
 
-Docbit 所有 Handler 的标准模式：
-
 ```rust
-#[inject_attr(singleton, as = dyn IRequestHandler<LoginRequest, AuthResponse>)]
+#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<LoginRequest, AuthResponse>)]
 pub struct LoginHandler {
-    ctx: Arc<Mutex<DbContext>>,
+    auth: Arc<dyn IAuthService>,
 }
 
 #[handler(inject)]
@@ -15,91 +13,97 @@ pub struct LoginHandler {
 impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler { ... }
 ```
 
-**复用场景**：任何需要数据库、缓存、外部服务注入的 Handler。
+**复用场景**：任何需要 DI 的 HTTP 端点。
 
-## 模式 2：IHostedService 初始化
+## 模式 2：接口在 contracts，实现在 handlers
 
 ```rust
-#[inject_attr(singleton, as = dyn IHostedService)]
-pub struct DbInitService { ... }
+// contracts/blog.rs — 契约
+pub trait IBlogService: Send + Sync {
+    fn list_all_posts(&self) -> Result<Vec<BlogPostSummary>, String>;
+}
 
-#[async_trait]
-impl IHostedService for DbInitService {
-    async fn start(&self) -> Result<()> {
-        run_migrations().await?;
-        seed_data().await?;
-        Ok(())
-    }
+pub struct ListBlogPostsRequest;
+#[get("/api/blog")]
+impl IRequest<Vec<BlogPostSummary>> for ListBlogPostsRequest {}
+
+// handlers/blog.rs — 实现
+#[rust_dicore::inject_attr(singleton, as = dyn IBlogService)]
+pub struct BlogService {
+    paths: Arc<AppPaths>,
+}
+
+impl IBlogService for BlogService { ... }
+
+#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<ListBlogPostsRequest, Vec<BlogPostSummary>>)]
+pub struct ListBlogPostsHandler {
+    blog: Arc<dyn IBlogService>,
 }
 ```
 
-**复用场景**：数据库迁移、种子数据、缓存预热、索引构建。
+**复用场景**：文档、博客、订单、通知等可替换业务模块。换存储实现时 Handler 与契约无需改动。
 
-## 模式 3：声明式授权
-
-```rust
-#[get("/api/auth/me")]
-#[authorize]
-impl IRequest<UserView> for AuthMeRequest {}
-```
-
-**复用场景**：任何需要登录的端点加 `#[authorize]`，管理员端点加 `#[authorize(role = "admin")]`。
-
-## 模式 4：Service 层复用
+## 模式 3：IHostedService 初始化
 
 ```rust
-// services/docs.rs — 不感知 HTTP
-impl DocService {
-    pub fn index(&self, work: &str) -> Result<DocIndex, String> { ... }
-    pub fn content(&self, work: &str, path: &str) -> Result<DocContent, String> { ... }
-}
-
-// handlers/docs.rs — 薄 Handler
-impl IRequestHandler<GetDocIndexRequest, DocIndex> for GetDocIndexHandler {
-    async fn handle(&self, req: GetDocIndexRequest) -> Result<DocIndex> {
-        self.docs.index(&req.work).map_err(|e| Error::NotFound(e))
-    }
+#[rust_dicore::inject_attr(singleton, as = dyn IHostedService)]
+pub struct DbInitService {
+    ctx: Arc<Mutex<DbContext>>,
+    docs: Arc<dyn IDocumentService>,
+    paths: Arc<AppPaths>,
 }
 ```
 
-**复用场景**：文件操作、外部 API 调用、复杂查询逻辑。
+**复用场景**：迁移、索引构建、资源同步——不在 `main()` 写初始化逻辑。
 
-## 模式 5：全栈单体
+## 模式 4：薄 Handler + 厚 Service 实现
 
 ```rust
-Host::builder()
-    .use_spa("wwwroot")
-    .use_auth()
-    .build()
+async fn handle(&self, req: GetDocIndexRequest) -> Result<DocIndex> {
+    self.docs.index(&req.work).map_err(|e| Error::NotFound(e))
+}
 ```
 
-**复用场景**：作品集、管理后台、中小型 SaaS 产品。
+Service 实现不感知 HTTP；Handler 只做参数传递与 `Error` 映射。
 
-## 模式 6：文档即代码
+## 模式 5：组合根最小化
 
-```
-docs/{work}/
-├── INDEX.json    # 左侧菜单
-├── INDEX.md      # 章节目录
-├── FOREWORD.md
-└── {chapter}/
-    ├── INDEX.md
-    └── *.md
+```rust
+.register(common::bootstrap::configure)  // 仅 AppPaths + DbContext
 ```
 
-**复用场景**：产品文档、API 文档、技术手册，通过 DocService 自动服务。
+业务代码通过 `inject_attr` 在 handlers 自注册，开发时聚焦 `contracts` / `handlers` / `domain`。
 
-## 从 Docbit 到你自己项目的检查清单
+## 模式 6：DTO 在 contracts，实体在 domain
 
-- [ ] 采用 contracts / handlers / domain / services 分层
-- [ ] Handler 使用 inject_attr 模式
-- [ ] 初始化逻辑放在 IHostedService
-- [ ] main.rs 只做 Host 配置
-- [ ] 认证端点使用 #[authorize]
-- [ ] 错误使用 Error 变体
+```rust
+// contracts/blog.rs
+#[derive(Serialize)]
+pub struct BlogPostSummary { pub slug: String, pub title: String }
+
+// domain/comment.rs — 仅持久化实体
+pub struct BlogCommentEntity { ... }
+
+// handlers/blog_service.rs — 映射
+fn to_summary(meta: &BlogPostMeta) -> BlogPostSummary { ... }
+```
+
+contracts 不引用 domain；domain 可通过 `use crate::contracts::…` 复用枚举。
+
+## 从 Docbit 到新项目的检查清单
+
+- [ ] `contracts` / `handlers` / `domain` 三层，无 `services/` 目录
+- [ ] `I…Service` trait 在 `contracts/`，实现在 `handlers/`
+- [ ] `contracts` 仅依赖框架，不引用 `domain`
+- [ ] Handler 注入 `Arc<dyn I…Service>`，不用具体类型
+- [ ] `bootstrap::configure` 只注册 DbContext、路径等基础设施
+- [ ] 初始化放在 `IHostedService`
+- [ ] `main.rs` 仅 Host 配置
+- [ ] `appsettings.json` 配置框架运行时参数
+- [ ] 认证端点使用 `#[authorize]`
 
 ## 小结
 
-Docbit 不仅是一个展示站点，更是 rust-webapp 应用形态的**标准答案**。复制这些模式，你就掌握了框架的精髓。
+面向接口 + 自动注册让业务开发**自动化、聚焦契约、组合根简洁**——这是 rust-webapp 业务应用模板的核心价值。
 
 下一章：[迁移指南](../16-migration/INDEX.md)

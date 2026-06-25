@@ -48,3 +48,34 @@ pub struct AuthMeRequest;
 #[get("/api/auth/me")]
 #[authorize]
 impl IRequest<UserView> for AuthMeRequest {}
+
+// ── Forgot / reset password ──
+
+#[derive(Deserialize)]
+pub struct ForgotPasswordRequest {
+    pub email: String,
+}
+
+#[derive(Serialize)]
+pub struct ForgotPasswordResponse {
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reset_token: Option<String>,
+}
+
+#[post("/api/auth/forgot-password")]
+impl IRequest<ForgotPasswordResponse> for ForgotPasswordRequest {}
+
+#[derive(Deserialize)]
+pub struct ResetPasswordRequest {
+    pub token: String,
+    pub password: String,
+}
+
+#[derive(Serialize)]
+pub struct ResetPasswordResponse {
+    pub message: String,
+}
+
+#[post("/api/auth/reset-password")]
+impl IRequest<ResetPasswordResponse> for ResetPasswordRequest {}

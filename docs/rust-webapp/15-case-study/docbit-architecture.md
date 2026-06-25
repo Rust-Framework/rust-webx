@@ -4,44 +4,26 @@
 
 ```
 docbit/src/
-├── main.rs           # 组合根：Host 配置 + DI 注册
-├── startup.rs        # DbInitService：迁移 + 种子 + 文档索引
-├── common/           # 共享工具
-├── contracts/        # API 契约
-│   ├── auth.rs       # LoginRequest, RegisterRequest, AuthMeRequest
-│   ├── blog.rs
-│   ├── docs.rs       # 文档 API 契约
-│   ├── site.rs
-│   ├── user.rs
-│   └── work.rs
-├── handlers/         # 处理器
-│   ├── auth.rs       # inject_attr + #[handler(inject)]
-│   ├── blog.rs
-│   ├── docs.rs
-│   ├── site.rs
-│   ├── user.rs
-│   └── work.rs
-├── services/         # 领域服务
-│   ├── docs.rs       # DocService：文件系统文档扫描
-│   └── site.rs
-└── domain/           # 实体 + 迁移
-    ├── user.rs
-    ├── blog.rs
-    ├── work.rs
-    └── migrations/
+├── main.rs              # 组合根：仅 Host 配置
+├── startup.rs           # DbInitService（IHostedService）
+├── common/
+│   ├── bootstrap.rs     # AppPaths + DbContext（唯一手动 DI）
+│   ├── paths.rs         # 数据目录解析
+│   └── mod.rs           # 拦截器、授权器（inject_attr 自动注册）
+├── contracts/           # Request/Response/enum/I…Service trait
+├── handlers/            # Handler + Service 实现（inject_attr + #[handler(inject)]）
+│   ├── doc_service.rs   # DocService（impl IDocumentService）
+│   └── blog_service.rs  # BlogService（impl IBlogService）
+└── domain/              # 实体 + EF 迁移
 ```
 
-## main.rs 分析
+## main.rs
 
 ```rust
 let host = Host::builder()
     .mode(AppMode::Development)
-    .register(move |svc| {
-        // 注册 DbContext 和 DocService
-        svc.singleton::<Mutex<DbContext>>(...);
-        svc.singleton::<DocService>(...);
-    })
-    .use_spa("wwwroot")
+    .register(common::bootstrap::configure)
+    .use_spa(wwwroot)
     .use_auth()
     .use_memory_cache()
     .build();
@@ -49,38 +31,39 @@ let host = Host::builder()
 host.run().await?;
 ```
 
-`main.rs` 只做三件事：
-1. 创建框架外的依赖（DbContext、DocService）
-2. 配置 Host 能力（SPA、Auth、Cache）
-3. 启动
+`main.rs` 不做业务注册。Handler、`IHostedService`、业务 Service、`IDynamicAuthorizer` 均由 `ServiceCollection::from_injected()` 自动收集。
 
-所有 Handler 通过 `inject_attr` 自动注册，无需在 main 中逐个列出。
+## bootstrap.rs
 
-## startup.rs 分析
+仅注册框架无法自动构造的基础设施：
 
-`DbInitService` 实现 `IHostedService`：
+- `AppPaths` — docs / blog-data / wwwroot / 数据库路径
+- `Mutex<DbContext>` — rust-ef SQLite 上下文
 
-1. 运行数据库迁移
-2. 种子管理员账户
-3. 种子作品集和博客数据
-4. 生成文档 INDEX.json
+业务 Service 在 `handlers/` 通过 `inject_attr(as = dyn I…Service)` 自注册。
 
-这是「应用初始化」的标准模式——不在 `main()` 中写初始化逻辑。
+## startup.rs
 
-## 数据流示例：用户登录
+`DbInitService` 注入 `Arc<dyn IDocumentService>`，在 `start()` 中：
+
+1. 运行 EF 迁移（m001–m004）
+2. 生成缺失的文档 `INDEX.json`
+3. 同步作品集 logo 到 `wwwroot`
+
+## 请求数据流
 
 ```
-POST /api/auth/login
-    → contracts/auth.rs (LoginRequest 反序列化)
-    → handlers/auth.rs (LoginHandler)
-        → 查询数据库验证密码
-        → bcrypt::verify
-        → jsonwebtoken::encode 签发 Token
-    → 返回 AuthResponse { token, user }
+GET /api/docs/{work}/index
+    → contracts/docs.rs (GetDocIndexRequest)
+    → handlers/docs.rs (GetDocIndexHandler)
+        → Arc<dyn IDocumentService>::index()
+    → DocIndex JSON (contracts DTO)
 ```
+
+Handler 不感知 `DocService` 具体类型，测试时可替换 mock 实现。
 
 ## 小结
 
-Docbit 的架构是 rust-webapp 推荐结构的完整实例化，可直接作为新项目的模板。
+Docbit 演示 rust-webapp 推荐的完整分层：**契约（含接口）→ Handler 履约 → 领域/基础设施**。面向接口，组合根最小化。
 
 下一节：[可复用的模式提炼](docbit-patterns.md)

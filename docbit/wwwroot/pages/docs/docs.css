@@ -1,0 +1,34 @@
+/* Docs page — theme overrides */
+/* Layout: pages/shell/shell.css */
+
+.content-shell[data-docs="rust-webapp"] .shell-brand-icon {
+    background: var(--brand-rust-soft);
+}
+
+.content-shell[data-docs="rust-webapp"] .shell-nav a.active,
+.content-shell[data-docs="rust-webapp"] .shell-nav a:hover {
+    color: var(--brand-rust);
+    background: var(--brand-rust-soft);
+}
+
+.doc-nav .nav-leaf a {
+    padding-left: 0.75rem;
+}
+
+.doc-nav .children.depth-2 {
+    margin-left: 0;
+    padding-left: 0.5rem;
+    border-left: 2px solid color-mix(in srgb, var(--border) 70%, transparent);
+    margin-bottom: 0.35rem;
+}
+
+.shell-article.is-swapping {
+    opacity: 0.45;
+    transition: opacity 0.12s ease;
+}
+
+    padding: 0.45rem 0.65rem 0.2rem;
+    font-size: 0.8rem;
+    color: var(--text-bright);
+    font-weight: 600;
+}

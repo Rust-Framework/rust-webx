@@ -51,6 +51,32 @@ impl IMiddleware for SpaMiddleware {
         }
 
         let request_path = ctx.request().path();
+
+        if request_path.starts_with("/assets/") {
+            let relative = alias_static_path(request_path.trim_start_matches('/'));
+            if relative.is_empty() {
+                ctx.response_mut().set_status(HttpStatus::NOT_FOUND);
+                return Ok(());
+            }
+            let candidate = self.root.join(&relative);
+            if relative.contains("..") || !candidate.is_file() {
+                ctx.response_mut().set_status(HttpStatus::NOT_FOUND);
+                return Ok(());
+            }
+            match tokio::fs::read(&candidate).await {
+                Ok(data) => {
+                    ctx.response_mut().set_status(HttpStatus::OK);
+                    ctx.response_mut()
+                        .set_header("content-type", mime_type(&candidate));
+                    ctx.response_mut().write_bytes(data).await?;
+                }
+                Err(_) => {
+                    ctx.response_mut().set_status(HttpStatus::NOT_FOUND);
+                }
+            }
+            return Ok(());
+        }
+
         let file_path = self.resolve_file(request_path);
 
         match tokio::fs::read(&file_path).await {
@@ -83,12 +109,12 @@ impl IMiddleware for SpaMiddleware {
 impl SpaMiddleware {
     /// Resolve a request path to a filesystem path, preventing traversal.
     fn resolve_file(&self, request_path: &str) -> PathBuf {
-        let relative = request_path.trim_start_matches('/');
+        let relative = alias_static_path(request_path.trim_start_matches('/'));
         if relative.is_empty() {
             return self.root.join(&self.index);
         }
 
-        let candidate = self.root.join(relative);
+        let candidate = self.root.join(&relative);
 
         // Canonicalize to detect and prevent path traversal attacks.
         // If canonicalization fails (file doesn't exist), do a manual
@@ -116,6 +142,19 @@ impl SpaMiddleware {
                 }
             }
         }
+    }
+}
+
+/// Map vendor paths that include a redundant `dist/` segment to on-disk layout.
+///
+/// Vditor resolves assets as `{cdn}/dist/js/...` while our vendored tree keeps
+/// `js/`, `css/`, and bundle files at the package root.
+fn alias_static_path(relative: &str) -> String {
+    const VDITOR_DIST: &str = "assets/vendor/vditor-dist/dist/";
+    if let Some(rest) = relative.strip_prefix(VDITOR_DIST) {
+        format!("assets/vendor/vditor-dist/{rest}")
+    } else {
+        relative.to_string()
     }
 }
 

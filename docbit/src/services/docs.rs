@@ -54,7 +54,7 @@ impl DocService {
         }
 
         let raw = fs::read_to_string(&index_path).map_err(|e| e.to_string())?;
-        serde_json::from_str(&raw).map_err(|e| format!("Invalid INDEX.json: {}", e))
+        parse_index_json(&raw)
     }
 
     /// Read a markdown file relative to the work docs root.
@@ -174,6 +174,115 @@ impl DocService {
         }
         Ok(items)
     }
+}
+
+// ── INDEX.json v2 (meta + parts + pathRules) ──
+
+#[derive(Debug, Deserialize)]
+struct IndexRootV2 {
+    meta: IndexMeta,
+    parts: Vec<IndexPart>,
+}
+
+#[derive(Debug, Deserialize)]
+struct IndexMeta {
+    title: String,
+    #[serde(default)]
+    foreword: Option<String>,
+    #[serde(rename = "pathRules")]
+    path_rules: IndexPathRules,
+}
+
+#[derive(Debug, Deserialize)]
+struct IndexPathRules {
+    #[serde(rename = "chapterIndex")]
+    chapter_index: String,
+    #[serde(rename = "sectionFile")]
+    section_file: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct IndexPart {
+    title: String,
+    chapters: Vec<IndexChapter>,
+}
+
+#[derive(Debug, Deserialize)]
+struct IndexChapter {
+    id: String,
+    title: String,
+    sections: Vec<IndexSection>,
+}
+
+#[derive(Debug, Deserialize)]
+struct IndexSection {
+    id: String,
+    title: String,
+}
+
+fn parse_index_json(raw: &str) -> Result<DocIndex, String> {
+    if let Ok(root) = serde_json::from_str::<IndexRootV2>(raw) {
+        return Ok(expand_index_v2(root));
+    }
+    serde_json::from_str(raw).map_err(|e| format!("Invalid INDEX.json: {}", e))
+}
+
+fn expand_index_v2(root: IndexRootV2) -> DocIndex {
+    let rules = &root.meta.path_rules;
+    let mut items = Vec::new();
+
+    if let Some(foreword) = root.meta.foreword {
+        items.push(DocIndexItem {
+            title: "前言".into(),
+            path: Some(foreword),
+            children: None,
+        });
+    }
+
+    for part in &root.parts {
+        let mut part_children = Vec::new();
+
+        for chapter in &part.chapters {
+            let mut chapter_children = Vec::new();
+
+            let chapter_index_path = apply_path_rule(&rules.chapter_index, chapter.id.as_str(), "");
+            chapter_children.push(DocIndexItem {
+                title: "章节大纲".into(),
+                path: Some(chapter_index_path),
+                children: None,
+            });
+
+            for section in &chapter.sections {
+                let path = apply_path_rule(&rules.section_file, &chapter.id, &section.id);
+                chapter_children.push(DocIndexItem {
+                    title: section.title.clone(),
+                    path: Some(path),
+                    children: None,
+                });
+            }
+
+            part_children.push(DocIndexItem {
+                title: chapter.title.clone(),
+                path: None,
+                children: Some(chapter_children),
+            });
+        }
+
+        items.push(DocIndexItem {
+            title: part.title.clone(),
+            path: None,
+            children: Some(part_children),
+        });
+    }
+
+    DocIndex {
+        title: root.meta.title,
+        items,
+    }
+}
+
+fn apply_path_rule(rule: &str, chapter_id: &str, section_id: &str) -> String {
+    rule.replace("{chapterId}", chapter_id).replace("{sectionId}", section_id)
 }
 
 fn humanize_slug(s: &str) -> String {

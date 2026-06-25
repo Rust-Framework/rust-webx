@@ -18,7 +18,7 @@ pub struct SiteLinks {
 impl Default for SiteConfig {
     fn default() -> Self {
         Self {
-            title: "Developer Portfolio".into(),
+            title: "Start 的作品".into(),
             tagline: "Rust · Web · Full Stack".into(),
             author: "Developer".into(),
             bio: "个人开发者作品集".into(),

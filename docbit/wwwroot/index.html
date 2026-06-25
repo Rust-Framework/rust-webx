@@ -1,14 +1,19 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Docbit — Developer Portfolio</title>
+        <title>Docbit — Start 的作品</title>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link
             href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
             rel="stylesheet"
+        />
+        <link
+            rel="stylesheet"
+            href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github.min.css"
+            id="hljs-theme"
         />
         <link rel="stylesheet" href="/app.css" />
     </head>
@@ -24,6 +29,29 @@
                     <a href="/blog" data-nav>博客</a>
                     <a href="/about" data-nav>关于</a>
                 </nav>
+                <div class="header-actions">
+                    <button
+                        type="button"
+                        class="icon-btn"
+                        id="theme-mode-btn"
+                        title="切换明暗模式"
+                        aria-label="切换明暗模式"
+                    >
+                        <span class="icon-sun" aria-hidden="true">☀</span>
+                        <span class="icon-moon" aria-hidden="true">☾</span>
+                    </button>
+                    <button
+                        type="button"
+                        class="nav-toggle"
+                        id="nav-toggle"
+                        aria-label="打开菜单"
+                        aria-expanded="false"
+                    >
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </button>
+                </div>
             </div>
         </header>
 
@@ -37,7 +65,12 @@
             <p>Built with <strong>rust-webapp</strong> · Rust</p>
         </footer>
 
-        <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+        <button type="button" class="back-to-top" id="back-to-top" aria-label="回到顶部" hidden>↑</button>
+
+        <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/markdown-it-anchor@9.2.0/dist/markdownItAnchor.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/highlight.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.4/dist/purify.min.js"></script>
         <script src="/app.js"></script>
     </body>
 </html>

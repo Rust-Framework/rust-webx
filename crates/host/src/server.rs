@@ -356,9 +356,9 @@ impl HostBuilder {
         if self.mode == AppMode::Development {
             let version = env!("CARGO_PKG_VERSION");
             tracing::info!("");
-            tracing::info!("  â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€");
+            tracing::info!("  ----------------------------------------------------------------");
             tracing::info!("    Rust WebApplication Framework v{}", version);
-            tracing::info!("  â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€");
+            tracing::info!("  ----------------------------------------------------------------");
             tracing::info!("    App:      {}", options.app.name);
             tracing::info!("    CORS:     enabled");
             if let Some(ref root) = self.spa_root {
@@ -381,7 +381,7 @@ impl HostBuilder {
                 tracing::info!("    OpenAPI:  {}/api/openapi.html", url);
                 tracing::info!("    OpenAPI:  {}/api/openapi.json", url);
             }
-            tracing::info!("  â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€");
+            tracing::info!("  ----------------------------------------------------------------");
             tracing::info!("");
         } else if route_count > 0 {
             tracing::info!("{} route(s) registered", route_count);
@@ -542,29 +542,7 @@ impl Host {
         }
 
         let notify = Arc::clone(&self.shutdown);
-
-        let shutdown_notify = std::sync::Arc::clone(&notify);
-        tokio::spawn(async move {
-            #[cfg(unix)]
-            {
-                use tokio::signal::unix::{signal, SignalKind};
-                let mut sigterm = signal(SignalKind::terminate())
-                    .expect("Failed to register SIGTERM handler");
-                let mut sigint = signal(SignalKind::interrupt())
-                    .expect("Failed to register SIGINT handler");
-                tokio::select! {
-                    _ = sigterm.recv() => {},
-                    _ = sigint.recv() => {},
-                    _ = tokio::signal::ctrl_c() => {},
-                }
-            }
-            #[cfg(not(unix))]
-            {
-                let _ = tokio::signal::ctrl_c().await;
-            }
-            tracing::info!("Shutdown signal received, draining connections...");
-            shutdown_notify.notify_waiters();
-        });
+        install_shutdown_handler(Arc::clone(&notify));
 
         let mut handles = Vec::new();
         let pipeline = Arc::clone(&self.pipeline);
@@ -631,6 +609,7 @@ impl Host {
     /// Start the server at a single explicit address (convenience wrapper).
     pub async fn run_at(&self, addr: &str) -> Result<()> {
         let notify = Arc::clone(&self.shutdown);
+        install_shutdown_handler(Arc::clone(&notify));
         serve_http(
             addr.to_string(),
             notify,
@@ -758,6 +737,58 @@ async fn write_error_response(ctx: &mut dyn IHttpContext, status: u16, message: 
 }
 
 // ---------------------------------------------------------------------------
+// Shutdown helpers
+// ---------------------------------------------------------------------------
+
+/// Register a process-wide Ctrl+C / SIGINT handler.
+///
+/// On Windows, `cargo run` may exit the parent without stopping the child;
+/// registering here ensures the server process itself receives the signal.
+/// A second Ctrl+C forces immediate exit.
+fn install_shutdown_handler(shutdown: Arc<tokio::sync::Notify>) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static CTRL_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+    if let Err(e) = ctrlc::set_handler(move || {
+        let n = CTRL_COUNT.fetch_add(1, Ordering::SeqCst);
+        if n == 0 {
+            tracing::info!("Shutdown signal received, draining connections...");
+            shutdown.notify_waiters();
+        } else {
+            tracing::warn!("Second interrupt — force exiting.");
+            std::process::exit(130);
+        }
+    }) {
+        tracing::warn!("Could not install Ctrl+C handler: {}", e);
+    }
+}
+
+async fn drain_connections(
+    join_set: &mut JoinSet<()>,
+    label: &str,
+    mode: AppMode,
+) {
+    let timeout_secs = if mode == AppMode::Development { 5 } else { 30 };
+    let drain_future = async {
+        while let Some(result) = join_set.join_next().await {
+            if let Err(e) = result {
+                tracing::error!("Connection task panicked: {:?}", e);
+            }
+        }
+    };
+
+    match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), drain_future).await {
+        Ok(_) => tracing::info!("{}: drained.", label),
+        Err(_) => {
+            tracing::warn!("{}: drain timeout, aborting connections.", label);
+            join_set.abort_all();
+            while join_set.join_next().await.is_some() {}
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // URL parsing & binding helpers
 // ---------------------------------------------------------------------------
 
@@ -795,80 +826,67 @@ async fn serve_http(
 
     let mut join_set = JoinSet::new();
 
-    let accept_loop = async {
-        loop {
-            let stream = match listener.accept().await {
-                Ok((stream, _)) => stream,
-                Err(e) => {
-                    tracing::error!("Accept error (will retry): {}", e);
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                    continue;
-                }
-            };
+    loop {
+        tokio::select! {
+            accept_result = listener.accept() => {
+                let (stream, _) = match accept_result {
+                    Ok(v) => v,
+                    Err(e) => {
+                        tracing::error!("Accept error (will retry): {}", e);
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                        continue;
+                    }
+                };
 
-            while join_set.try_join_next().is_some() {}
+                while join_set.try_join_next().is_some() {}
 
-            let io = TokioIo::new(stream);
-            let pipeline = Arc::clone(&pipeline);
-            let router_handler = router_handler.clone();
+                let io = TokioIo::new(stream);
+                let pipeline = Arc::clone(&pipeline);
+                let router_handler = router_handler.clone();
 
-            join_set.spawn(async move {
-                let svc_fn = service_fn(move |req: Request<Incoming>| {
-                    let pipeline = Arc::clone(&pipeline);
-                    let router_handler = router_handler.clone();
-                    let mode = mode;
-                    async move {
-                        let start = Instant::now();
-                        let method = req.method().to_string();
-                        let path = req.uri().path().to_string();
-                        let result =
-                            handle_request(req, pipeline, router_handler, max_body_size).await;
-                        let elapsed = start.elapsed();
-                        if mode == AppMode::Development {
-                            let status =
-                                result.as_ref().map(|r| r.status().as_u16()).unwrap_or(500);
-                            tracing::info!(
-                                "[{}] {} â†?{} ({:.0}ms)",
-                                method,
-                                path,
-                                status,
-                                elapsed.as_secs_f64() * 1000.0
-                            );
+                join_set.spawn(async move {
+                    let svc_fn = service_fn(move |req: Request<Incoming>| {
+                        let pipeline = Arc::clone(&pipeline);
+                        let router_handler = router_handler.clone();
+                        let mode = mode;
+                        async move {
+                            let start = Instant::now();
+                            let method = req.method().to_string();
+                            let path = req.uri().path().to_string();
+                            let result =
+                                handle_request(req, pipeline, router_handler, max_body_size).await;
+                            let elapsed = start.elapsed();
+                            if mode == AppMode::Development {
+                                let status =
+                                    result.as_ref().map(|r| r.status().as_u16()).unwrap_or(500);
+                                tracing::info!(
+                                    "[{}] {} -> {} ({:.0}ms)",
+                                    method,
+                                    path,
+                                    status,
+                                    elapsed.as_secs_f64() * 1000.0
+                                );
+                            }
+                            result
                         }
-                        result
+                    });
+
+                    if let Err(err) = hyper::server::conn::http1::Builder::new()
+                        .serve_connection(io, svc_fn)
+                        .await
+                    {
+                        tracing::error!("Connection error: {}", err);
                     }
                 });
-
-                if let Err(err) = hyper::server::conn::http1::Builder::new()
-                    .serve_connection(io, svc_fn)
-                    .await
-                {
-                    tracing::error!("Connection error: {}", err);
-                }
-            });
-        }
-    };
-
-    tokio::select! {
-        _ = accept_loop => {},
-        _ = shutdown.notified() => {
-            tracing::info!("HTTP {}: stop accepting, draining...", addr);
-            drop(listener);
-        }
-    }
-
-    let drain_future = async {
-        while let Some(result) = join_set.join_next().await {
-            if let Err(e) = result {
-                tracing::error!("Connection task panicked: {:?}", e);
+            }
+            _ = shutdown.notified() => {
+                tracing::info!("HTTP {}: stop accepting, draining...", addr);
+                break;
             }
         }
-    };
-
-    match tokio::time::timeout(std::time::Duration::from_secs(30), drain_future).await {
-        Ok(_) => tracing::info!("HTTP {}: drained.", addr),
-        Err(_) => tracing::warn!("HTTP {}: drain timeout, force-terminating.", addr),
     }
+
+    drain_connections(&mut join_set, &format!("HTTP {}", addr), mode).await;
 }
 
 /// Serve HTTPS (TLS) on the given address.
@@ -891,89 +909,76 @@ async fn serve_https(
 
     let mut join_set = JoinSet::new();
 
-    let accept_loop = async {
-        loop {
-            let stream = match listener.accept().await {
-                Ok((stream, _)) => stream,
-                Err(e) => {
-                    tracing::error!("Accept error (will retry): {}", e);
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                    continue;
-                }
-            };
+    loop {
+        tokio::select! {
+            accept_result = listener.accept() => {
+                let (stream, _) = match accept_result {
+                    Ok(v) => v,
+                    Err(e) => {
+                        tracing::error!("Accept error (will retry): {}", e);
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                        continue;
+                    }
+                };
 
-            while join_set.try_join_next().is_some() {}
+                while join_set.try_join_next().is_some() {}
 
-            let acceptor = acceptor.clone();
-            let pipeline = Arc::clone(&pipeline);
-            let router_handler = router_handler.clone();
+                let acceptor = acceptor.clone();
+                let pipeline = Arc::clone(&pipeline);
+                let router_handler = router_handler.clone();
 
-            join_set.spawn(async move {
-                match acceptor.accept(stream).await {
-                    Ok(tls_stream) => {
-                        let io = TokioIo::new(tls_stream);
-                        let svc_fn = service_fn(move |req: Request<Incoming>| {
-                            let pipeline = Arc::clone(&pipeline);
-                            let router_handler = router_handler.clone();
-                            let mode = mode;
-                            async move {
-                                let start = Instant::now();
-                                let method = req.method().to_string();
-                                let path = req.uri().path().to_string();
-                                let result =
-                                    handle_request(req, pipeline, router_handler, max_body_size)
-                                        .await;
-                                let elapsed = start.elapsed();
-                                if mode == AppMode::Development {
-                                    let status =
-                                        result.as_ref().map(|r| r.status().as_u16()).unwrap_or(500);
-                                    tracing::info!(
-                                        "[{}] {} â†?{} ({:.0}ms)",
-                                        method,
-                                        path,
-                                        status,
-                                        elapsed.as_secs_f64() * 1000.0
-                                    );
+                join_set.spawn(async move {
+                    match acceptor.accept(stream).await {
+                        Ok(tls_stream) => {
+                            let io = TokioIo::new(tls_stream);
+                            let svc_fn = service_fn(move |req: Request<Incoming>| {
+                                let pipeline = Arc::clone(&pipeline);
+                                let router_handler = router_handler.clone();
+                                let mode = mode;
+                                async move {
+                                    let start = Instant::now();
+                                    let method = req.method().to_string();
+                                    let path = req.uri().path().to_string();
+                                    let result =
+                                        handle_request(req, pipeline, router_handler, max_body_size)
+                                            .await;
+                                    let elapsed = start.elapsed();
+                                    if mode == AppMode::Development {
+                                        let status =
+                                            result.as_ref().map(|r| r.status().as_u16()).unwrap_or(500);
+                                        tracing::info!(
+                                            "[{}] {} -> {} ({:.0}ms)",
+                                            method,
+                                            path,
+                                            status,
+                                            elapsed.as_secs_f64() * 1000.0
+                                        );
+                                    }
+                                    result
                                 }
-                                result
-                            }
-                        });
+                            });
 
-                        if let Err(err) = hyper::server::conn::http1::Builder::new()
-                            .serve_connection(io, svc_fn)
-                            .await
-                        {
-                            tracing::error!("TLS connection error: {}", err);
+                            if let Err(err) = hyper::server::conn::http1::Builder::new()
+                                .serve_connection(io, svc_fn)
+                                .await
+                            {
+                                tracing::error!("TLS connection error: {}", err);
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("TLS handshake error: {}", e);
                         }
                     }
-                    Err(e) => {
-                        tracing::error!("TLS handshake error: {}", e);
-                    }
-                }
-            });
-        }
-    };
-
-    tokio::select! {
-        _ = accept_loop => {},
-        _ = shutdown.notified() => {
-            tracing::info!("HTTPS {}: stop accepting, draining...", addr);
-            drop(listener);
-        }
-    }
-
-    let drain_future = async {
-        while let Some(result) = join_set.join_next().await {
-            if let Err(e) = result {
-                tracing::error!("Connection task panicked: {:?}", e);
+                });
+            }
+            _ = shutdown.notified() => {
+                tracing::info!("HTTPS {}: stop accepting, draining...", addr);
+                break;
             }
         }
-    };
-
-    match tokio::time::timeout(std::time::Duration::from_secs(30), drain_future).await {
-        Ok(_) => tracing::info!("HTTPS {}: drained.", addr),
-        Err(_) => tracing::warn!("HTTPS {}: drain timeout, force-terminating.", addr),
     }
+
+    drain_connections(&mut join_set, &format!("HTTPS {}", addr), mode).await;
 }
 
 // ---------------------------------------------------------------------------

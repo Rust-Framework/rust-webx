@@ -132,8 +132,8 @@
     } else {
       slot.innerHTML = `
         <div class="user-menu guest">
-          <a href="/login" class="btn btn-sm" data-nav>登录</a>
-          <a href="/register" class="btn btn-sm btn-primary" data-nav>注册</a>
+          <a href="/login" class="layui-btn layui-btn-sm layui-btn-primary" data-nav>登录</a>
+          <a href="/register" class="layui-btn layui-btn-sm layui-btn-normal" data-nav>注册</a>
         </div>`;
     }
   }

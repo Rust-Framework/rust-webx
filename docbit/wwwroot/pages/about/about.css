@@ -1,1 +1,17 @@
-/* About page — uses global about-card */
+/* About page */
+
+.about-card {
+    background: var(--bg-card) !important;
+    border: 1px solid color-mix(in srgb, var(--border) 85%, transparent) !important;
+    border-radius: 18px !important;
+    box-shadow: 0 8px 32px var(--shadow) !important;
+}
+
+.about-card .about-links .layui-btn {
+    min-width: 6.5rem;
+}
+
+.about-card .layui-card-body {
+    text-align: center;
+    padding: 2.5rem 2rem;
+}

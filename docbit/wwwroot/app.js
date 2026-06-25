@@ -83,7 +83,7 @@
     document.getElementById("app").innerHTML =
       `<div class="error-box"><strong>加载失败</strong><p>${escapeHtml(msg)}</p>
        <div class="btn-row" style="justify-content:center;margin-top:1rem">
-         <a class="btn btn-primary" href="/" data-nav>返回首页</a>
+         <a class="layui-btn layui-btn-normal" href="/" data-nav>返回首页</a>
        </div></div>`;
   }
 
@@ -97,8 +97,13 @@
     }
   }
 
+  let renderPending = false;
+
   async function render() {
-    if (rendering) return;
+    if (rendering) {
+      renderPending = true;
+      return;
+    }
     rendering = true;
     try {
     const route = parseRoute(window.location.pathname);
@@ -114,10 +119,15 @@
     const shellPages = ["docs", "blog", "blog-post", "blog-write", "blog-edit"];
     document.body.classList.toggle(
       "layout-shell",
-      shellPages.includes(route.page) && route.page !== "blog-edit"
+      shellPages.includes(route.page) && route.page !== "blog-edit" && route.page !== "blog-write"
     );
     document.body.classList.toggle("layout-home", route.page === "home");
     document.body.classList.toggle("layout-blog-edit", route.page === "blog-edit");
+    document.body.classList.toggle("layout-blog-admin", route.page === "blog-write");
+    document.body.classList.toggle(
+      "layout-auth",
+      ["login", "register", "forgot", "reset"].includes(route.page)
+    );
     app.classList.remove("docs-page", "blog-page");
 
     try {
@@ -137,7 +147,7 @@
           if (softDocs && (await Docbit.Pages.docs.navigateTo(route.slug, route.docPath))) {
             break;
           }
-          await Docbit.Pages.docs.render(route.slug, route.docPath, navigate);
+          await Docbit.Pages.docs.render(route.slug, route.docPath);
           break;
         case "blog":
           await Docbit.Pages.blog.renderList(siteInfo);
@@ -174,10 +184,17 @@
     } catch (err) {
       if (!softDocs) showError(err.message);
     }
+    if (window.layui?.layer) {
+      layui.layer.closeAll("loading");
+    }
     Docbit.Footer?.render?.(siteInfo);
     prevRoute = { ...route };
     } finally {
       rendering = false;
+      if (renderPending) {
+        renderPending = false;
+        await render();
+      }
     }
   }
 

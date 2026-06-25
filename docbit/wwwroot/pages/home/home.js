@@ -80,8 +80,8 @@
       <p class="work-card-v2-desc">${escapeHtml(w.description)}</p>
       ${(w.tags || []).length ? `<div class="work-card-v2-tags">${tagList(w.tags.slice(0, 4))}</div>` : ""}
       <div class="work-card-v2-links">
-        ${demo ? `<a href="${escapeHtml(demo)}" class="work-link"${demo.startsWith("http") ? ' target="_blank" rel="noopener"' : " data-nav"}>🌐 Live Demo</a>` : ""}
-        ${repo ? `<a href="${escapeHtml(repo)}" class="work-link" target="_blank" rel="noopener">⌘ GitHub</a>` : ""}
+        ${demo ? `<a href="${escapeHtml(demo)}" class="work-chip-link"${demo.startsWith("http") ? ' target="_blank" rel="noopener"' : " data-nav"}>Live Demo</a>` : ""}
+        ${repo ? `<a href="${escapeHtml(repo)}" class="work-chip-link" target="_blank" rel="noopener">GitHub</a>` : ""}
       </div>
     </article>`;
   }
@@ -101,18 +101,21 @@
 
   function bindFilters(works) {
     const grid = document.getElementById("works-grid");
-    const tabs = document.querySelectorAll(".filter-tab");
-    if (!grid || !tabs.length) return;
+    if (!grid) return;
 
-    tabs.forEach((tab) => {
-      tab.addEventListener("click", () => {
-        const id = tab.dataset.filter;
-        tabs.forEach((t) => t.classList.toggle("active", t === tab));
-        const filter = FILTERS.find((f) => f.id === id) || FILTERS[0];
-        const filtered = works.filter((w) => filter.test(w));
-        grid.innerHTML = filtered.length
-          ? filtered.map(workCard).join("")
-          : '<p class="empty-hint">该分类下暂无作品。</p>';
+    function applyFilter(id) {
+      const filter = FILTERS.find((f) => f.id === id) || FILTERS[0];
+      const filtered = works.filter((w) => filter.test(w));
+      grid.innerHTML = filtered.length
+        ? filtered.map(workCard).join("")
+        : '<p class="empty-hint">该分类下暂无作品。</p>';
+    }
+
+    Docbit.UI.loadLayui().then((layui) => {
+      layui.element.render("tab", "works-filter");
+      layui.element.on("tab(works-filter)", (data) => {
+        const li = document.querySelectorAll(".works-filter-tabs .layui-tab-title li")[data.index];
+        if (li) applyFilter(li.dataset.filter);
       });
     });
   }
@@ -150,11 +153,13 @@
         <section class="home-works-section">
           <div class="home-works-header">
             <h2 class="home-works-title"><span class="title-icon" aria-hidden="true">📦</span> 精选作品</h2>
-            <div class="filter-tabs" role="tablist">
-              ${FILTERS.map(
-                (f, i) =>
-                  `<button type="button" class="filter-tab${i === 0 ? " active" : ""}" data-filter="${f.id}" role="tab">${escapeHtml(f.label)}</button>`
-              ).join("")}
+            <div class="layui-tab layui-tab-brief works-filter-tabs" lay-filter="works-filter" id="works-filter">
+              <ul class="layui-tab-title">
+                ${FILTERS.map(
+                  (f, i) =>
+                    `<li class="${i === 0 ? "layui-this" : ""}" data-filter="${f.id}">${escapeHtml(f.label)}</li>`
+                ).join("")}
+              </ul>
             </div>
           </div>
           <div class="works-grid-v2" id="works-grid">

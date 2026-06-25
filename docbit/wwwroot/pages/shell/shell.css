@@ -15,6 +15,7 @@ body.layout-shell #app {
 .content-shell {
     display: grid;
     grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+    grid-template-areas: "sidebar main";
     min-height: calc(100vh - var(--header-h));
     width: 100%;
     background: var(--bg);
@@ -22,9 +23,11 @@ body.layout-shell #app {
 
 .content-shell.has-toc {
     grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--toc-w);
+    grid-template-areas: "sidebar main toc";
 }
 
 .content-sidebar {
+    grid-area: sidebar;
     position: sticky;
     top: var(--header-h);
     height: calc(100vh - var(--header-h));
@@ -52,6 +55,7 @@ body.layout-shell #app {
 }
 
 .content-main {
+    grid-area: main;
     min-width: 0;
     padding: 0 clamp(1.25rem, 3vw, 2.5rem) 3rem;
 }
@@ -77,8 +81,30 @@ body.layout-shell #app {
     flex-shrink: 0;
 }
 
+.sidebar-close {
+    flex-shrink: 0;
+    padding: 0 0.5rem !important;
+    display: none;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 1.25rem;
+}
+
+.sidebar-close .layui-icon {
+    margin: 0;
+    font-size: 14px;
+}
+
 .shell-menu-btn {
     flex-shrink: 0;
+    padding: 0 0.55rem !important;
+}
+
+.shell-menu-btn .layui-icon {
+    margin: 0;
+    font-size: 16px;
 }
 
 .shell-breadcrumb {
@@ -139,7 +165,7 @@ body.layout-shell #app {
     justify-content: center;
     width: 34px;
     height: 34px;
-    border-radius: 10px;
+    border-radius: 12px;
     background: color-mix(in srgb, var(--accent) 8%, var(--bg-input));
 }
 
@@ -180,8 +206,8 @@ body.layout-shell #app {
 .shell-nav a,
 .shell-nav .shell-nav-link {
     display: block;
-    padding: 0.38rem 0.65rem;
-    border-radius: 8px;
+    padding: 0.38rem 0.75rem;
+    border-radius: var(--radius-pill);
     text-decoration: none;
     color: var(--text-muted);
     font-size: 0.8125rem;
@@ -208,6 +234,7 @@ body.layout-shell #app {
 }
 
 .content-toc-panel {
+    grid-area: toc;
     position: sticky;
     top: var(--header-h);
     height: calc(100vh - var(--header-h));
@@ -219,16 +246,7 @@ body.layout-shell #app {
 
 .sidebar-overlay {
     display: none;
-}
-
-.sidebar-close {
-    display: none;
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    cursor: pointer;
-    font-size: 1.25rem;
-    padding: 0.25rem;
+    grid-area: sidebar;
 }
 
 /* Blog list in shell */
@@ -287,12 +305,13 @@ body.layout-shell #app {
 
 .shell-cat-badge {
     flex-shrink: 0;
-    padding: 0.12rem 0.45rem;
-    border-radius: 6px;
+    padding: 0.18rem 0.55rem;
+    border-radius: var(--radius-pill);
     font-size: 0.68rem;
     font-weight: 600;
     color: var(--accent);
     background: var(--accent-soft);
+    border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 .comments-block {
@@ -306,9 +325,11 @@ body.layout-shell #app {
     .content-shell,
     .content-shell.has-toc {
         grid-template-columns: 1fr;
+        grid-template-areas: "main";
     }
 
     .content-sidebar {
+        grid-area: sidebar;
         position: fixed;
         top: var(--header-h);
         left: 0;
@@ -333,7 +354,9 @@ body.layout-shell #app {
     }
 
     .sidebar-close {
-        display: block;
+        display: inline-flex !important;
+        align-items: center;
+        justify-content: center;
     }
 
     .content-toc-panel {

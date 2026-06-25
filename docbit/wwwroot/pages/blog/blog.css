@@ -290,7 +290,8 @@ body.layout-blog-admin #app {
 }
 
 [data-theme="dark"] .serp-hit {
-    background: color-mix(in srgb, #f9a825 35%, transparent);
+    background: color-mix(in srgb, #fcd34d 30%, transparent);
+    color: #fde68a;
 }
 
 /* ── Edit page — centered vertical form ── */

@@ -1,17 +1,490 @@
-/* About page */
+/* About page — resume-style profile */
 
-.about-card {
-    background: var(--bg-card) !important;
-    border: 1px solid color-mix(in srgb, var(--border) 85%, transparent) !important;
-    border-radius: 18px !important;
-    box-shadow: 0 8px 32px var(--shadow) !important;
+.page-about {
+    position: relative;
+    /* 使用 clip 而非 hidden：hidden 会令 overflow-y 计算为 auto，
+       使本元素成为滚动容器而产生多余内层滚动条；clip 仅裁剪不产生滚动容器 */
+    overflow-x: clip;
+    background: var(--bg);
 }
 
-.about-card .about-links .layui-btn {
-    min-width: 6.5rem;
+.resume {
+    position: relative;
+    z-index: 1;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: clamp(1.25rem, 3vw, 2rem) clamp(1rem, 3vw, 2rem) 2rem;
 }
 
-.about-card .layui-card-body {
+/* ── Hero header ── */
+
+.resume-hero {
+    position: relative;
+    margin-bottom: 1.5rem;
+    padding: clamp(1.5rem, 3vw, 2.25rem) clamp(1.25rem, 3vw, 2rem);
+    border-radius: 20px;
+    border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+    background: linear-gradient(135deg, var(--bg-elevated) 0%, var(--bg-card) 50%, var(--bg) 100%);
+    overflow: hidden;
+}
+
+.resume-hero-glow {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse 60% 70% at 18% 30%, rgba(18, 150, 219, 0.12), transparent 62%);
+    pointer-events: none;
+}
+
+[data-theme="dark"] .resume-hero-glow {
+    background: radial-gradient(ellipse 60% 70% at 18% 30%, rgba(96, 165, 250, 0.08), transparent 62%);
+}
+
+.resume-hero-inner {
+    position: relative;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: clamp(1rem, 2.5vw, 1.75rem);
+    align-items: center;
+}
+
+.resume-avatar {
+    position: relative;
+    flex-shrink: 0;
+    width: clamp(96px, 12vw, 132px);
+    height: clamp(96px, 12vw, 132px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.resume-avatar-glow {
+    position: absolute;
+    inset: 8%;
+    border-radius: 50%;
+    background: radial-gradient(circle at 40% 40%, rgba(18, 150, 219, 0.35), transparent 62%),
+        radial-gradient(circle at 60% 60%, rgba(212, 35, 122, 0.25), transparent 58%);
+    filter: blur(8px);
+}
+
+.resume-avatar-img {
+    position: relative;
+    width: 88%;
+    height: auto;
+    filter: drop-shadow(0 10px 24px rgba(18, 150, 219, 0.2));
+    transition: transform var(--transition);
+}
+
+.resume-hero:hover .resume-avatar-img {
+    transform: scale(1.03);
+}
+
+.resume-hero-text {
+    min-width: 0;
+}
+
+.resume-name {
+    margin: 0 0 0.65rem;
+    font-size: clamp(1.65rem, 3.5vw, 2.25rem);
+    font-weight: 800;
+    color: var(--text-bright);
+    letter-spacing: -0.03em;
+    line-height: 1.15;
+}
+
+.resume-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 0.85rem;
+}
+
+.resume-pill {
+    display: inline-block;
+    padding: 0.22rem 0.65rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.resume-subtitle {
+    margin: 0 0 0.4rem;
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: var(--text);
+}
+
+.resume-bio {
+    margin: 0 0 0.35rem;
+    font-size: 0.88rem;
+    color: var(--text-muted);
+    line-height: 1.55;
+}
+
+.resume-motto {
+    margin: 0;
+    font-size: 0.82rem;
+    color: var(--accent);
+    font-style: italic;
+    line-height: 1.5;
+}
+
+/* ── Stats row ── */
+
+.resume-stats {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+    padding: 1.1rem 1rem;
+    border-radius: 16px;
+    border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+    background: var(--bg-card);
+    box-shadow: 0 4px 20px var(--shadow);
+}
+
+.resume-stat {
     text-align: center;
-    padding: 2.5rem 2rem;
+    min-width: 0;
+}
+
+.resume-stat strong {
+    display: block;
+    font-size: clamp(1.1rem, 2vw, 1.4rem);
+    font-weight: 800;
+    color: var(--text-bright);
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+}
+
+.resume-stat span {
+    display: block;
+    margin-top: 0.25rem;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+/* ── Body layout: sidebar + main ── */
+
+.resume-body {
+    display: grid;
+    grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
+    gap: 1.5rem;
+    align-items: start;
+}
+
+.resume-side {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    position: sticky;
+    top: calc(var(--header-h) + 1rem);
+}
+
+.resume-main {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    min-width: 0;
+}
+
+/* ── Card ── */
+
+.resume-card {
+    padding: 1.4rem 1.5rem;
+    border-radius: 16px;
+    border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+    background: var(--bg-card);
+    box-shadow: 0 4px 20px var(--shadow);
+}
+
+.resume-card-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0 0 1.1rem;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text-bright);
+}
+
+.resume-card-title .layui-icon {
+    font-size: 18px;
+    color: var(--accent);
+}
+
+/* ── Skill bars ── */
+
+.resume-skills {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.resume-skill {
+    min-width: 0;
+}
+
+.resume-skill-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.35rem;
+}
+
+.resume-skill-name {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--text-bright);
+}
+
+.resume-skill-pct {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+}
+
+.resume-skill-bar {
+    position: relative;
+    height: 6px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--text-muted) 18%, transparent);
+    overflow: hidden;
+}
+
+.resume-skill-fill {
+    position: absolute;
+    inset: 0;
+    width: 0;
+    border-radius: inherit;
+    background: linear-gradient(90deg, var(--accent) 0%, var(--accent-hover) 100%);
+    transition: width 0.6s ease;
+}
+
+.resume-skill-note {
+    margin: 0.3rem 0 0;
+    font-size: 0.74rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+/* ── Contact list ── */
+
+.resume-contact {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.resume-contact li {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.86rem;
+    color: var(--text);
+    min-width: 0;
+}
+
+.resume-contact .layui-icon {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    font-size: 14px;
+    color: var(--accent);
+    background: var(--accent-soft);
+}
+
+.resume-contact a {
+    color: var(--text);
+    text-decoration: none;
+    word-break: break-all;
+    transition: color var(--transition);
+}
+
+.resume-contact a:hover {
+    color: var(--accent);
+}
+
+/* ── Timeline ── */
+
+.resume-timeline {
+    list-style: none;
+    margin: 0;
+    padding: 0 0 0 1.5rem;
+    position: relative;
+}
+
+.resume-timeline::before {
+    content: "";
+    position: absolute;
+    left: 5px;
+    top: 6px;
+    bottom: 6px;
+    width: 2px;
+    background: color-mix(in srgb, var(--accent) 25%, transparent);
+    border-radius: 2px;
+}
+
+.resume-tl-item {
+    position: relative;
+    padding-bottom: 1.5rem;
+}
+
+.resume-tl-item:last-child {
+    padding-bottom: 0;
+}
+
+.resume-tl-dot {
+    position: absolute;
+    left: -1.5rem;
+    top: 4px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--bg-card);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.resume-tl-body {
+    min-width: 0;
+}
+
+.resume-tl-period {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--accent-soft);
+    padding: 0.18rem 0.55rem;
+    border-radius: 999px;
+    margin-bottom: 0.5rem;
+}
+
+.resume-tl-role {
+    margin: 0 0 0.2rem;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-bright);
+}
+
+.resume-tl-org {
+    margin-bottom: 0.4rem;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.resume-tl-desc {
+    margin: 0 0 0.6rem;
+    font-size: 0.86rem;
+    line-height: 1.6;
+    color: var(--text);
+}
+
+.resume-tl-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.resume-tl-tags .tag {
+    display: inline-block;
+    padding: 0.16rem 0.55rem;
+    border-radius: 6px;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    background: color-mix(in srgb, var(--text-muted) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+
+/* ── About text ── */
+
+.resume-about-text {
+    font-size: 0.9rem;
+    line-height: 1.75;
+    color: var(--text);
+}
+
+.resume-about-text p {
+    margin: 0 0 0.85rem;
+}
+
+.resume-about-text strong {
+    color: var(--text-bright);
+    font-weight: 600;
+}
+
+.resume-about-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    margin-top: 1rem;
+}
+
+.resume-about-actions .layui-btn .layui-icon {
+    margin-right: 0.3rem;
+    font-size: 15px;
+}
+
+/* ── Responsive ── */
+
+@media (max-width: 860px) {
+    .resume-body {
+        grid-template-columns: 1fr;
+    }
+
+    .resume-side {
+        position: static;
+    }
+}
+
+@media (max-width: 640px) {
+    .resume-hero-inner {
+        grid-template-columns: 1fr;
+        text-align: center;
+        gap: 1rem;
+    }
+
+    .resume-avatar {
+        margin: 0 auto;
+    }
+
+    .resume-pills {
+        justify-content: center;
+    }
+
+    .resume-stats {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1rem 0.5rem;
+    }
+
+    .resume-stats .resume-stat:nth-child(5) {
+        grid-column: 1 / -1;
+    }
+
+    .resume-card {
+        padding: 1.15rem 1.1rem;
+    }
+}
+
+@media (max-width: 420px) {
+    .resume-stats {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .resume-about-actions .layui-btn {
+        flex: 1 1 auto;
+    }
 }

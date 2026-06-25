@@ -69,12 +69,11 @@
     const site = brandName();
     return `
       <div class="page page-auth">
+        <div class="auth-aside-watermark" aria-hidden="true">
+          <img src="${LOGOS.heroBg}" alt="" width="320" height="320" />
+        </div>
         <div class="auth-layout">
           <aside class="auth-aside" aria-hidden="true">
-            <div class="auth-aside-surface" aria-hidden="true"></div>
-            <div class="auth-aside-watermark" aria-hidden="true">
-              <img src="${LOGOS.heroBg}" alt="" width="320" height="320" />
-            </div>
             <div class="auth-aside-inner">
               <div class="auth-aside-hero">
                 <a href="/" class="auth-aside-logo-link" data-nav aria-label="返回首页">
@@ -117,9 +116,26 @@
       </div>`;
   }
 
-  function bindForm(filter, onSubmit) {
-    Docbit.UI.renderForm();
-    Docbit.UI.onFormSubmit(filter, async (fields) => {
+  /* Layui 密码一致性校验规则 */
+  function registerVerifyRules() {
+    return Docbit.UI.loadLayui().then((layui) => {
+      layui.form.verify({
+        password2: function (value) {
+          const pwd = document.getElementById("password")?.value || "";
+          if (value && value !== pwd) return "两次输入的密码不一致";
+        },
+        password: function (value) {
+          if (value && value.length < 6) return "密码至少 6 位";
+        },
+      });
+    });
+  }
+
+  async function bindForm(filter, onSubmit) {
+    /* 确保 layui 已加载、表单已渲染、校验规则已注册后再绑定提交 */
+    await registerVerifyRules();
+    await Docbit.UI.renderForm();
+    await Docbit.UI.onFormSubmit(filter, async (fields) => {
       const form = document.querySelector("form.auth-form");
       const errEl = document.getElementById("auth-error");
       const okEl = document.getElementById("auth-success");
@@ -134,7 +150,7 @@
           errEl.querySelector(".auth-alert-text").textContent = err.message;
           errEl.hidden = false;
         }
-        Docbit.UI.error(err.message);
+        /* 仅使用页内 alert，不再弹 toast 避免重复提示 */
       } finally {
         if (btn) btn.disabled = false;
       }
@@ -175,9 +191,8 @@
           name: "password",
           type: "password",
           label: "密码",
-          verify: "required",
+          verify: "required|password",
           autocomplete: "current-password",
-          minlength: 6,
           placeholder: "至少 6 位",
         })}
         <div class="auth-field-extra">
@@ -233,9 +248,8 @@
           name: "password",
           type: "password",
           label: "密码",
-          verify: "required",
+          verify: "required|password",
           autocomplete: "new-password",
-          minlength: 6,
           placeholder: "至少 6 位",
         })}
         ${authField({
@@ -244,9 +258,8 @@
           name: "password2",
           type: "password",
           label: "确认密码",
-          verify: "required",
+          verify: "required|password2",
           autocomplete: "new-password",
-          minlength: 6,
           placeholder: "再次输入密码",
         })}
         ${authAlerts()}
@@ -260,7 +273,6 @@
     );
     document.title = "注册 — Start World";
     bindForm("register-submit", async (fd) => {
-      if (fd.password !== fd.password2) throw new Error("两次输入的密码不一致");
       await Docbit.Auth.register(fd.name, fd.email, fd.password);
       Docbit.UI.success("注册成功");
       Docbit.Router.navigate("/");
@@ -343,9 +355,8 @@
           name: "password",
           type: "password",
           label: "新密码",
-          verify: "required",
+          verify: "required|password",
           autocomplete: "new-password",
-          minlength: 6,
           placeholder: "至少 6 位",
         })}
         ${authField({
@@ -354,9 +365,8 @@
           name: "password2",
           type: "password",
           label: "确认密码",
-          verify: "required",
+          verify: "required|password2",
           autocomplete: "new-password",
-          minlength: 6,
           placeholder: "再次输入密码",
         })}
         ${authAlerts()}
@@ -370,7 +380,6 @@
     );
     document.title = "重置密码 — Start World";
     bindForm("reset-submit", async (fd) => {
-      if (fd.password !== fd.password2) throw new Error("两次输入的密码不一致");
       const res = await Docbit.Auth.resetPassword(fd.token, fd.password);
       const okEl = document.getElementById("auth-success");
       if (okEl) {

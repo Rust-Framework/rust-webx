@@ -70,13 +70,17 @@
     --danger-border: rgba(220, 38, 38, 0.2);
 }
 
-html { scroll-behavior: smooth; }
+html {
+    scroll-behavior: smooth;
+    overflow-x: clip;
+}
 
 body {
     font-family: var(--font);
     background: var(--bg);
     color: var(--text);
     min-height: 100vh;
+    overflow-x: hidden;
     line-height: 1.6;
     transition: background var(--transition), color var(--transition);
     display: flex;
@@ -691,14 +695,14 @@ body.layout-home #app .page-home {
 .page-deco--br {
     right: 0;
     bottom: 0;
-    transform: translate(18%, 22%);
+    transform: translate(6%, 22%);
 }
 
 /* Work detail — right edge, above fold */
 .page-deco--work {
     right: 0;
     top: 0;
-    transform: translate(22%, -8%);
+    transform: translate(8%, -8%);
 }
 
 .page-deco--work .page-deco-logo {
@@ -1139,32 +1143,6 @@ body.layout-home #app .page-home {
 
 #sidebar-open { display: none; }
 
-/* ── About ── */
-
-.about-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 2.25rem 2.5rem;
-    max-width: 640px;
-    margin: 0 auto;
-    box-shadow: 0 4px 24px var(--shadow);
-    text-align: center;
-}
-
-.about-logo {
-    width: 56px;
-    height: 56px;
-    margin: 0 auto 1rem;
-    border-radius: 16px;
-    display: block;
-}
-
-.about-card h2 { font-size: 1.45rem; color: var(--text-bright); margin-bottom: 0.5rem; }
-.about-card .tagline { color: var(--accent); font-weight: 500; margin-bottom: 1rem; font-size: 0.95rem; }
-.about-card p { margin-bottom: 1rem; line-height: 1.75; text-align: left; }
-.about-links { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1.5rem; justify-content: center; }
-
 /* ── Footer (brand · 备案 · meta) ── */
 
 .site-footer {
@@ -1243,6 +1221,106 @@ body.layout-home #app .page-home {
 .footer-logo {
     opacity: 0.88;
     flex-shrink: 0;
+}
+
+/* ── Scrollbar: theme-aware (Webkit + Firefox) ── */
+html {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+}
+
+[data-theme="dark"] html {
+    scrollbar-color: #30363d transparent;
+}
+
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--border-hover);
+}
+
+::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+    background: #30363d;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+    background: #484f58;
+}
+
+/* Shell sidebar / doc nav / TOC — slightly thinner with no track */
+.content-sidebar-body,
+.content-toc-panel,
+.doc-nav-wrap,
+.docs-toc-panel {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+}
+
+[data-theme="dark"] .content-sidebar-body,
+[data-theme="dark"] .content-toc-panel,
+[data-theme="dark"] .doc-nav-wrap,
+[data-theme="dark"] .docs-toc-panel {
+    scrollbar-color: #30363d transparent;
+}
+
+.content-sidebar-body::-webkit-scrollbar,
+.content-toc-panel::-webkit-scrollbar,
+.doc-nav-wrap::-webkit-scrollbar,
+.docs-toc-panel::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+.content-sidebar-body::-webkit-scrollbar-track,
+.content-toc-panel::-webkit-scrollbar-track,
+.doc-nav-wrap::-webkit-scrollbar-track,
+.docs-toc-panel::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.content-sidebar-body::-webkit-scrollbar-thumb,
+.content-toc-panel::-webkit-scrollbar-thumb,
+.doc-nav-wrap::-webkit-scrollbar-thumb,
+.docs-toc-panel::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 3px;
+}
+
+.content-sidebar-body::-webkit-scrollbar-thumb:hover,
+.content-toc-panel::-webkit-scrollbar-thumb:hover,
+.doc-nav-wrap::-webkit-scrollbar-thumb:hover,
+.docs-toc-panel::-webkit-scrollbar-thumb:hover {
+    background: var(--border-hover);
+}
+
+[data-theme="dark"] .content-sidebar-body::-webkit-scrollbar-thumb,
+[data-theme="dark"] .content-toc-panel::-webkit-scrollbar-thumb,
+[data-theme="dark"] .doc-nav-wrap::-webkit-scrollbar-thumb,
+[data-theme="dark"] .docs-toc-panel::-webkit-scrollbar-thumb {
+    background: #30363d;
+}
+
+[data-theme="dark"] .content-sidebar-body::-webkit-scrollbar-thumb:hover,
+[data-theme="dark"] .content-toc-panel::-webkit-scrollbar-thumb:hover,
+[data-theme="dark"] .doc-nav-wrap::-webkit-scrollbar-thumb:hover,
+[data-theme="dark"] .docs-toc-panel::-webkit-scrollbar-thumb:hover {
+    background: #484f58;
 }
 
 .footer-beian {

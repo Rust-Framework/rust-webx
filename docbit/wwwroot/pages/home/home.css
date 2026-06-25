@@ -5,6 +5,11 @@
     --hero-glow-pink: rgba(236, 72, 153, 0.12);
 }
 
+[data-theme="dark"] .page-home {
+    --hero-glow-blue: rgba(96, 165, 250, 0.08);
+    --hero-glow-pink: rgba(244, 114, 182, 0.07);
+}
+
 /* ── Hero banner ── */
 
 .home-hero {
@@ -118,6 +123,10 @@
     filter: drop-shadow(0 12px 28px rgba(59, 130, 246, 0.2));
 }
 
+[data-theme="dark"] .hero-visual-logo {
+    filter: drop-shadow(0 12px 28px rgba(96, 165, 250, 0.18));
+}
+
 .hero-stat-item {
     text-align: center;
 }
@@ -171,8 +180,36 @@
     margin: 0;
 }
 
+.works-filter-tabs,
+.works-filter-tabs.layui-tab-brief,
+.works-filter-tabs .layui-tab,
 .works-filter-tabs .layui-tab-title {
-    border: none;
+    border: none !important;
+    border-bottom: 0 !important;
+    box-shadow: none !important;
+    background: none !important;
+    background-image: none !important;
+    background-color: transparent !important;
+    outline: none !important;
+    text-decoration: none !important;
+}
+
+.works-filter-tabs .layui-tab-title::before,
+.works-filter-tabs .layui-tab-title::after,
+.works-filter-tabs .layui-tab::before,
+.works-filter-tabs .layui-tab::after,
+.works-filter-tabs.layui-tab-brief::before,
+.works-filter-tabs.layui-tab-brief::after,
+.works-filter-tabs .layui-tab-title li::before,
+.works-filter-tabs .layui-tab-title li::after {
+    content: none !important;
+    display: none !important;
+    background: none !important;
+    background-image: none !important;
+    border: none !important;
+    box-shadow: none !important;
+    width: 0 !important;
+    height: 0 !important;
 }
 
 .works-filter-tabs .layui-tab-title li {
@@ -353,6 +390,26 @@
     background: rgba(124, 58, 237, 0.1);
 }
 
+[data-theme="dark"] .work-card-v2-cat.cat-framework {
+    color: #f472b6;
+    background: rgba(244, 114, 182, 0.12);
+}
+
+[data-theme="dark"] .work-card-v2-cat.cat-web {
+    color: #60a5fa;
+    background: rgba(96, 165, 250, 0.12);
+}
+
+[data-theme="dark"] .work-card-v2-cat.cat-tool {
+    color: #34d399;
+    background: rgba(52, 211, 153, 0.12);
+}
+
+[data-theme="dark"] .work-card-v2-cat.cat-service {
+    color: #a78bfa;
+    background: rgba(167, 139, 250, 0.12);
+}
+
 .work-card-v2-cat.cat-default {
     color: var(--accent);
     background: var(--accent-soft);
@@ -388,6 +445,10 @@
     padding-top: 0.45rem;
     border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
     margin-top: auto;
+}
+
+[data-theme="dark"] .work-card-v2-links {
+    border-top-color: color-mix(in srgb, var(--border) 45%, transparent);
 }
 
 .work-chip-link {

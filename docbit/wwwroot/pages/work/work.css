@@ -3,6 +3,7 @@
 .page-work {
     position: relative;
     min-height: calc(100vh - var(--header-h) - 6rem);
+    overflow-x: hidden;
 }
 
 .page-work-inner {

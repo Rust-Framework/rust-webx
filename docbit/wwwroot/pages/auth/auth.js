@@ -71,9 +71,14 @@
       <div class="page page-auth">
         <div class="auth-layout">
           <aside class="auth-aside" aria-hidden="true">
+            <div class="auth-aside-surface" aria-hidden="true"></div>
+            <div class="auth-aside-watermark" aria-hidden="true">
+              <img src="${LOGOS.heroBg}" alt="" width="320" height="320" />
+            </div>
             <div class="auth-aside-inner">
               <div class="auth-aside-hero">
                 <a href="/" class="auth-aside-logo-link" data-nav aria-label="返回首页">
+                  <span class="auth-aside-logo-glow" aria-hidden="true"></span>
                   <img src="${LOGOS.heroBg}" alt="" class="auth-aside-logo" width="96" height="96" />
                 </a>
                 <div class="auth-aside-copy">

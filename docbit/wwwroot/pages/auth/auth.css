@@ -31,13 +31,54 @@ body.layout-auth #app {
 /* ── Left aside (flat, no card) ── */
 
 .auth-aside {
+    position: relative;
     display: flex;
     align-items: center;
     justify-content: flex-end;
     padding: 0 clamp(0.5rem, 2vw, 1.5rem) 0 0;
+    overflow: hidden;
+}
+
+.auth-aside-surface {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+        radial-gradient(ellipse 70% 55% at 8% 22%, rgba(236, 72, 153, 0.22), transparent 58%),
+        radial-gradient(ellipse 60% 50% at 28% 78%, rgba(59, 130, 246, 0.18), transparent 55%),
+        radial-gradient(ellipse 45% 40% at 85% 15%, rgba(18, 150, 219, 0.12), transparent 50%);
+}
+
+[data-theme="dark"] .auth-aside-surface {
+    background:
+        radial-gradient(ellipse 70% 55% at 8% 22%, rgba(212, 35, 122, 0.2), transparent 58%),
+        radial-gradient(ellipse 60% 50% at 28% 78%, rgba(59, 130, 246, 0.15), transparent 55%),
+        radial-gradient(ellipse 45% 40% at 85% 15%, rgba(18, 150, 219, 0.1), transparent 50%);
+}
+
+.auth-aside-watermark {
+    position: absolute;
+    left: -2rem;
+    bottom: -2.5rem;
+    transform: rotate(-12deg);
+    opacity: 0.07;
+    pointer-events: none;
+    user-select: none;
+}
+
+[data-theme="dark"] .auth-aside-watermark {
+    opacity: 0.1;
+}
+
+.auth-aside-watermark img {
+    width: clamp(200px, 24vw, 280px);
+    height: auto;
+    display: block;
 }
 
 .auth-aside-inner {
+    position: relative;
+    z-index: 1;
     max-width: 420px;
     width: 100%;
 }
@@ -51,16 +92,33 @@ body.layout-auth #app {
 }
 
 .auth-aside-logo-link {
+    position: relative;
     flex-shrink: 0;
-    display: block;
-    line-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: clamp(72px, 9vw, 96px);
+    height: clamp(72px, 9vw, 96px);
     text-decoration: none;
 }
 
+.auth-aside-logo-glow {
+    position: absolute;
+    inset: -18%;
+    border-radius: 50%;
+    background:
+        radial-gradient(circle at 40% 40%, rgba(236, 72, 153, 0.35), transparent 62%),
+        radial-gradient(circle at 60% 60%, rgba(59, 130, 246, 0.3), transparent 58%);
+    filter: blur(10px);
+    pointer-events: none;
+}
+
 .auth-aside-logo {
-    width: clamp(72px, 9vw, 96px);
-    height: clamp(72px, 9vw, 96px);
+    position: relative;
+    width: 88%;
+    height: 88%;
     object-fit: contain;
+    filter: drop-shadow(0 8px 20px rgba(212, 35, 122, 0.15));
     transition: transform var(--transition);
 }
 

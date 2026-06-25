@@ -91,9 +91,11 @@
     try {
       siteInfo = await Docbit.Api.get("/api/site");
       const brand = document.getElementById("brand-name");
-      if (brand && siteInfo.title) brand.textContent = siteInfo.title;
+      if (brand) {
+        brand.textContent = siteInfo.brand_name || siteInfo.title || "Start World";
+      }
     } catch (_) {
-      siteInfo = { title: "Docbit", tagline: "", author: "", bio: "", links: {} };
+      siteInfo = { title: "Start 的作品", brand_name: "Start World", tagline: "", author: "", bio: "", links: {} };
     }
   }
 

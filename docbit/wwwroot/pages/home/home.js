@@ -170,7 +170,7 @@
 
     bindFilters(sorted);
     bindWorkGridNavigation();
-    document.title = (site.title || "Docbit") + " — 作品集";
+    document.title = (site.title || "Start 的作品") + " — 作品集";
   }
 
   window.Docbit = window.Docbit || {};

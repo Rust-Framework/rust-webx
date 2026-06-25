@@ -22,7 +22,7 @@
           </div>
         </div>
       </div>`;
-    document.title = "关于 — " + (site.title || "Docbit");
+    document.title = "关于 — " + (site.brand_name || site.title || "Start World");
   }
 
   window.Docbit = window.Docbit || {};

@@ -46,9 +46,29 @@ impl IRequestHandler<GetDocIndexRequest, DocIndex> for GetDocIndexHandler {
 #[async_trait]
 impl IRequestHandler<GetDocContentRequest, DocContent> for GetDocContentHandler {
     async fn handle(&self, req: GetDocContentRequest) -> Result<DocContent> {
-        let path = req.path.replace(':', "/");
+        let path = percent_decode(&req.path).replace(':', "/");
         self.docs
             .content(&req.work, &path)
             .map_err(|e| Error::NotFound(e))
     }
+}
+
+fn percent_decode(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '%' {
+            let hex: String = chars.by_ref().take(2).collect();
+            if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+                result.push(byte as char);
+            } else {
+                result.push('%');
+            }
+        } else if c == '+' {
+            result.push(' ');
+        } else {
+            result.push(c);
+        }
+    }
+    result
 }

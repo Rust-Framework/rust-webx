@@ -21,7 +21,7 @@ impl IAppOptions for SiteSection {}
 ```json
 {
   "Site": {
-    "Title": "Developer Portfolio",
+    "Title": "Start 的作品",
     "Tagline": "Rust · Web · Full Stack",
     "Author": "Start"
   }

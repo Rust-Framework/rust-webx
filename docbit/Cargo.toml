@@ -2,7 +2,7 @@
 name = "docbit"
 version.workspace = true
 edition.workspace = true
-description = "Docbit — Developer portfolio site with works showcase, blog, and auto-parsed documentation"
+description = "Docbit — Start 的作品 site with works showcase, blog, and auto-parsed documentation"
 publish = false
 
 [dependencies]

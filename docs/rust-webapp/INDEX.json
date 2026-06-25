@@ -1,0 +1,169 @@
+{
+  "title": "rust-webapp 开发者手册",
+  "items": [
+    {
+      "title": "前言",
+      "path": "FOREWORD.md"
+    },
+    {
+      "title": "目录",
+      "path": "INDEX.md"
+    },
+    {
+      "title": "第一章 认识 rust-webapp",
+      "children": [
+        { "title": "章节大纲", "path": "01-introduction/INDEX.md" },
+        { "title": "什么是 rust-webapp", "path": "01-introduction/what-is-rust-webapp.md" },
+        { "title": "适用场景与边界", "path": "01-introduction/who-should-use.md" },
+        { "title": "生态与 Crate 全景", "path": "01-introduction/ecosystem-overview.md" }
+      ]
+    },
+    {
+      "title": "第二章 快速上手",
+      "children": [
+        { "title": "章节大纲", "path": "02-quickstart/INDEX.md" },
+        { "title": "创建项目与依赖", "path": "02-quickstart/create-project.md" },
+        { "title": "Hello World 详解", "path": "02-quickstart/hello-world.md" },
+        { "title": "第一个 CRUD API", "path": "02-quickstart/first-crud.md" },
+        { "title": "运行、调试与验证", "path": "02-quickstart/run-and-debug.md" }
+      ]
+    },
+    {
+      "title": "第三章 设计理念与哲学",
+      "children": [
+        { "title": "章节大纲", "path": "03-philosophy/INDEX.md" },
+        { "title": "核心设计原则", "path": "03-philosophy/design-principles.md" },
+        { "title": "ASP.NET Core 的启发", "path": "03-philosophy/aspnet-inspiration.md" },
+        { "title": "Rust 惯用法与类型安全", "path": "03-philosophy/rust-idioms.md" },
+        { "title": "渐进式披露与框架边界", "path": "03-philosophy/progressive-disclosure.md" }
+      ]
+    },
+    {
+      "title": "第四章 架构全景",
+      "children": [
+        { "title": "章节大纲", "path": "04-architecture/INDEX.md" },
+        { "title": "Crate 分层结构", "path": "04-architecture/crate-layout.md" },
+        { "title": "请求生命周期", "path": "04-architecture/request-lifecycle.md" },
+        { "title": "分层模型与依赖方向", "path": "04-architecture/layering-model.md" },
+        { "title": "编译时扫描机制", "path": "04-architecture/compile-time-scan.md" }
+      ]
+    },
+    {
+      "title": "第五章 请求即端点",
+      "children": [
+        { "title": "章节大纲", "path": "05-request-pattern/INDEX.md" },
+        { "title": "IRequest 与 IRequestHandler", "path": "05-request-pattern/irequest-irequesthandler.md" },
+        { "title": "路由宏详解", "path": "05-request-pattern/route-macros.md" },
+        { "title": "Handler 注册策略", "path": "05-request-pattern/handler-registration.md" },
+        { "title": "参数绑定与序列化", "path": "05-request-pattern/parameter-binding.md" },
+        { "title": "错误处理与 ProblemDetails", "path": "05-request-pattern/error-handling.md" }
+      ]
+    },
+    {
+      "title": "第六章 DI 与生命周期",
+      "children": [
+        { "title": "章节大纲", "path": "06-di-lifecycle/INDEX.md" },
+        { "title": "ServiceCollection 与服务注册", "path": "06-di-lifecycle/service-collection.md" },
+        { "title": "依赖注入模式", "path": "06-di-lifecycle/injection-patterns.md" },
+        { "title": "IHostedService 后台服务", "path": "06-di-lifecycle/hosted-services.md" },
+        { "title": "模块系统与 inject 宏", "path": "06-di-lifecycle/module-system.md" }
+      ]
+    },
+    {
+      "title": "第七章 中间件管道",
+      "children": [
+        { "title": "章节大纲", "path": "07-middleware/INDEX.md" },
+        { "title": "管道模型与执行顺序", "path": "07-middleware/pipeline-model.md" },
+        { "title": "内置中间件一览", "path": "07-middleware/built-in-middleware.md" },
+        { "title": "自定义中间件", "path": "07-middleware/custom-middleware.md" },
+        { "title": "中间件编排策略", "path": "07-middleware/ordering-strategy.md" }
+      ]
+    },
+    {
+      "title": "第八章 中介者与事件",
+      "children": [
+        { "title": "章节大纲", "path": "08-mediator-events/INDEX.md" },
+        { "title": "IMediator 请求调度", "path": "08-mediator-events/mediator-pattern.md" },
+        { "title": "IPipelineBehavior 拦截链", "path": "08-mediator-events/pipeline-behaviors.md" },
+        { "title": "事件发布与订阅", "path": "08-mediator-events/event-pub-sub.md" }
+      ]
+    },
+    {
+      "title": "第九章 认证与授权",
+      "children": [
+        { "title": "章节大纲", "path": "09-auth-security/INDEX.md" },
+        { "title": "JWT Bearer 认证", "path": "09-auth-security/jwt-authentication.md" },
+        { "title": "基于资源的授权", "path": "09-auth-security/resource-authorization.md" },
+        { "title": "authorize 宏与声明式授权", "path": "09-auth-security/authorize-macro.md" },
+        { "title": "安全最佳实践", "path": "09-auth-security/security-best-practices.md" }
+      ]
+    },
+    {
+      "title": "第十章 配置与环境",
+      "children": [
+        { "title": "章节大纲", "path": "10-configuration/INDEX.md" },
+        { "title": "appsettings.json 配置体系", "path": "10-configuration/appsettings.md" },
+        { "title": "AppMode 与环境切换", "path": "10-configuration/app-modes.md" },
+        { "title": "自定义配置节", "path": "10-configuration/custom-options.md" }
+      ]
+    },
+    {
+      "title": "第十一章 生产级能力",
+      "children": [
+        { "title": "章节大纲", "path": "11-production/INDEX.md" },
+        { "title": "CORS、TLS 与健康检查", "path": "11-production/cors-tls-health.md" },
+        { "title": "缓存与速率限制", "path": "11-production/caching-rate-limit.md" },
+        { "title": "OpenAPI 与 SPA 托管", "path": "11-production/openapi-spa.md" },
+        { "title": "优雅关闭与可观测性", "path": "11-production/graceful-shutdown.md" }
+      ]
+    },
+    {
+      "title": "第十二章 项目组织与职责划分",
+      "children": [
+        { "title": "章节大纲", "path": "12-project-structure/INDEX.md" },
+        { "title": "推荐目录结构", "path": "12-project-structure/directory-layout.md" },
+        { "title": "职责归属与边界", "path": "12-project-structure/responsibility-division.md" },
+        { "title": "Contracts / Handlers / Domain 分层", "path": "12-project-structure/contracts-handlers-domain.md" },
+        { "title": "测试策略", "path": "12-project-structure/testing-strategy.md" }
+      ]
+    },
+    {
+      "title": "第十三章 扩展与自定义封装",
+      "children": [
+        { "title": "章节大纲", "path": "13-extensibility/INDEX.md" },
+        { "title": "自定义组件封装", "path": "13-extensibility/custom-components.md" },
+        { "title": "自定义 Endpoint", "path": "13-extensibility/custom-endpoints.md" },
+        { "title": "样式与约定封装", "path": "13-extensibility/style-patterns.md" },
+        { "title": "第三方库集成", "path": "13-extensibility/third-party-integration.md" }
+      ]
+    },
+    {
+      "title": "第十四章 最佳实践",
+      "children": [
+        { "title": "章节大纲", "path": "14-best-practices/INDEX.md" },
+        { "title": "常见陷阱与排查", "path": "14-best-practices/common-pitfalls.md" },
+        { "title": "性能优化技巧", "path": "14-best-practices/performance-tips.md" },
+        { "title": "AI 友好开发模式", "path": "14-best-practices/ai-friendly-development.md" },
+        { "title": "代码审查清单", "path": "14-best-practices/code-review-checklist.md" }
+      ]
+    },
+    {
+      "title": "第十五章 案例研究：Docbit",
+      "children": [
+        { "title": "章节大纲", "path": "15-case-study/INDEX.md" },
+        { "title": "Docbit 项目概览", "path": "15-case-study/docbit-overview.md" },
+        { "title": "架构与模块划分", "path": "15-case-study/docbit-architecture.md" },
+        { "title": "可复用的模式提炼", "path": "15-case-study/docbit-patterns.md" }
+      ]
+    },
+    {
+      "title": "第十六章 迁移指南",
+      "children": [
+        { "title": "章节大纲", "path": "16-migration/INDEX.md" },
+        { "title": "从 ASP.NET Core 迁移", "path": "16-migration/from-aspnet-core.md" },
+        { "title": "从 Axum / Actix 迁移", "path": "16-migration/from-axum-actix.md" },
+        { "title": "概念对照表", "path": "16-migration/concept-mapping.md" }
+      ]
+    }
+  ]
+}

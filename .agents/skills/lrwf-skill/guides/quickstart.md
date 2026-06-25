@@ -316,29 +316,31 @@ impl IRequestHandler<CreateUserRequest, UserModel> for CreateUserHandler {
 
 ## 完整项目结构
 
+业务应用请采用 **contracts / handlers / domain** 分层（详见 `guides/project-structure.md`）：
+
 ```
 my-lrwf-app/
+├── appsettings.json
 ├── Cargo.toml
 └── src/
-    ├── main.rs            # 服务启动
-    ├── requests/          # 请求定义
+    ├── main.rs            # Host 启动（仅框架配置）
+    ├── startup.rs         # IHostedService（迁移、初始化）
+    ├── common/
+    │   └── bootstrap.rs     # DbContext、AppPaths 等基础设施
+    ├── contracts/         # Request/Response/enum/I…Service — 仅依赖框架
     │   ├── mod.rs
-    │   ├── hello.rs       # HelloRequest + #[get("/hello")]
-    │   └── user.rs        # User CRUD requests
-    ├── handlers/          # 请求处理器
+    │   ├── hello.rs
+    │   └── user.rs
+    ├── handlers/          # Handler + Service 实现
     │   ├── mod.rs
-    │   ├── hello.rs       # HelloHandler
-    │   └── user.rs        # User CRUD handlers
-    ├── middleware/         # 中间件
-    │   ├── mod.rs
-    │   └── logging.rs     # LoggingMiddleware
-    ├── events/            # 事件定义
-    │   ├── mod.rs
-    │   └── user.rs        # UserCreatedEvent
-    └── event_handlers/    # 事件处理器
+    │   ├── hello.rs
+    │   └── user.rs
+    └── domain/            # 实体 + 迁移（可引用 contracts）
         ├── mod.rs
-        └── email.rs       # SendWelcomeEmailHandler
+        └── user.rs
 ```
+
+**不要**使用 `requests/`、`services/` 等与上述职责重叠的目录。接口 trait 定义在 `contracts/`，实现在 `handlers/`。
 
 ## 常见问题
 

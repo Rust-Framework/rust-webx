@@ -1,9 +1,15 @@
 # Contracts / Handlers / Domain 分层
 
-## contracts — API 契约
+基于 LRWF 的业务应用采用**契约驱动、面向接口**的三层结构。关注契约，不关注实现。
+
+## contracts — API 与业务接口契约
+
+**仅依赖框架**（`rust_webapp` / `lrwf`），**禁止依赖 domain 或 handlers**。
 
 ```rust
-// contracts/auth.rs — 只定义「对外承诺什么」
+// contracts/auth.rs — 定义「对外承诺什么」
+
+use rust_webapp::*;
 
 #[derive(Deserialize)]
 pub struct LoginRequest {
@@ -17,72 +23,120 @@ pub struct AuthResponse {
     pub user: UserView,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy)]
+pub enum UserRole {
+    Admin,
+    User,
+}
+
+/// 业务服务接口 — 与 Request 同级，同属契约层
+pub trait IAuthService: Send + Sync {
+    fn login(&self, email: &str, password: &str) -> Result<AuthResponse, String>;
+}
+
 #[post("/api/auth/login")]
 impl IRequest<AuthResponse> for LoginRequest {}
 ```
 
 特点：
-- 一个文件可包含多个相关 Request
-- 是 OpenAPI 生成的数据源
-- 团队讨论 API 设计时只需看 contracts
 
-## handlers — 用例实现
+- Request、Response DTO、共享 enum、`I…Service` trait 均在此层
+- 路由宏、`#[authorize]` 等元数据在此声明
+- 是 OpenAPI 生成的数据源；团队讨论 API 时**只看 contracts**
+- **不含** `async fn` 业务实现、数据库访问
+
+## handlers — Handler 与 Service 实现
+
+**履约层**：实现 `IRequestHandler` 与 `I…Service`。
 
 ```rust
-// handlers/auth.rs — 只定义「如何履约」
+// handlers/auth.rs — 定义「如何履约」
 
-#[inject_attr(singleton, as = dyn IRequestHandler<LoginRequest, AuthResponse>)]
-pub struct LoginHandler {
+use crate::contracts::auth::{IAuthService, LoginRequest, AuthResponse};
+use crate::domain::user::UserEntity;
+
+#[rust_dicore::inject_attr(singleton, as = dyn IAuthService)]
+pub struct AuthService {
     ctx: Arc<Mutex<DbContext>>,
+}
+
+impl IAuthService for AuthService {
+    fn login(&self, email: &str, password: &str) -> Result<AuthResponse, String> {
+        // 读 UserEntity → 组装 AuthResponse（contracts DTO）
+    }
+}
+
+#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<LoginRequest, AuthResponse>)]
+pub struct LoginHandler {
+    auth: Arc<dyn IAuthService>,
 }
 
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
     async fn handle(&self, req: LoginRequest) -> Result<AuthResponse> {
-        // 验证凭据 → 签发 Token → 返回
+        self.auth.login(&req.email, &req.password)
+            .map_err(|e| Error::Validation(e))
     }
 }
 ```
 
 特点：
-- 通过 DI 获取依赖
-- 返回 `Result<T>`，不直接操作 HTTP
-- 可独立单元测试
 
-## domain — 领域模型
+- Handler 薄编排；复杂逻辑在 Service 实现中
+- Handler **只注入** `Arc<dyn I…Service>`
+- `inject_attr` + `#[handler(inject)]` 自动注册，无需改 `main.rs`
+- 返回 `Result<T>`，不直接操作 HTTP
+
+## domain — 持久化实体与迁移
 
 ```rust
-// domain/user.rs — 只定义「业务是什么」
+// domain/user.rs — 定义「数据是什么」
 
-pub struct UserEntity { ... }  // 数据库映射
-pub struct UserModel { ... }   // 业务模型
+use crate::contracts::auth::UserRole;  // 可复用 contracts 枚举
 
-impl UserModel {
-    pub fn from_entity(e: &UserEntity) -> Self { ... }
+pub struct UserEntity {
+    pub id: String,
+    pub role: UserRole,
+    // ...
 }
 ```
 
 特点：
-- 不依赖 rust-webapp 框架类型
-- 包含数据库迁移
-- 最稳定、变更最少
+
+- 数据库实体、EF 配置、迁移
+- **可以**引用 contracts 复用枚举或共享 model
+- **禁止**依赖框架类型（`serde` 除外）
+- **禁止**引用 handlers
 
 ## 数据流
 
 ```
 HTTP Request
-    → contracts (Request struct 反序列化)
-    → handlers (业务编排)
-    → services (领域逻辑)
-    → domain (实体操作)
-    → handlers (组装 Response DTO)
+    → contracts (Request 反序列化)
+    → handlers (Handler 编排)
+    → Arc<dyn I…Service> (handlers 内实现)
+    → domain (实体读写)
     → contracts (Response DTO 序列化)
     → HTTP Response
 ```
 
+## 依赖规则速查
+
+| 从 → 到 | contracts | handlers | domain |
+|---------|-----------|----------|--------|
+| contracts | — | ❌ | ❌ |
+| handlers | ✅ | — | ✅ |
+| domain | ✅（复用 enum/model） | ❌ | — |
+
+## 反模式
+
+- `contracts` 中 `use crate::domain::*` → DTO 应在 contracts，映射在 handlers
+- 独立 `services/` 目录 → 接口归 contracts，实现归 handlers
+- Handler 依赖 `Arc<AuthService>` → 应使用 `Arc<dyn IAuthService>`
+
 ## 小结
 
-三层分离让 API 契约、业务逻辑和领域模型各自独立演化。
+contracts 定义「承诺什么」，handlers 定义「如何履约」，domain 定义「数据是什么」。面向接口开发，让 API、实现与持久化各自独立演化。
 
 下一节：[测试策略](testing-strategy.md)

@@ -1,8 +1,11 @@
 ﻿//! Common services â€” auto-registered via `#[rust_dicore::inject_attr]` and rust-ef interceptors.
 //!
 //! Services annotated with `#[rust_dicore::inject_attr]` are collected at compile time
-//! by `ServiceCollection::from_injected()` in `Host::build()`. No manual
-//! `.register()` call is needed.
+//! by `ServiceCollection::from_injected()` in `Host::build()`. Infrastructure that
+//! rust-dicore cannot construct lives in `bootstrap::configure`.
+
+pub mod bootstrap;
+pub mod paths;
 
 use rust_ef::error::LrefResult;
 use rust_ef::interceptor::{ISaveChangesInterceptor, SaveChangesContext, SaveChangesResultContext};
@@ -32,6 +35,9 @@ impl IDynamicAuthorizer for RoleAuthorizer {
         if route_pattern.starts_with("/api/auth/") {
             return Ok(());
         }
+        if route_pattern.contains("/comments") {
+            return Ok(());
+        }
         if claims.has_role("admin") {
             return Ok(());
         }
@@ -44,7 +50,7 @@ impl IDynamicAuthorizer for RoleAuthorizer {
 
 /// Audit interceptor — logs save operations via rust-ef's `ISaveChangesInterceptor`.
 ///
-/// Registered in `main.rs` via `DbContextOptionsBuilder::add_interceptor()`.
+/// Registered via `bootstrap::configure` and `DbContextOptionsBuilder::add_interceptor`.
 /// Logs before/after saves and on failures â€” analogous to EF Core's
 /// `ISaveChangesInterceptor`.
 pub(crate) struct AuditInterceptor;

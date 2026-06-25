@@ -7,7 +7,8 @@ use rust_webapp::*;
 use tokio::sync::Mutex;
 
 use crate::contracts::user::*;
-use crate::domain::user::{UserEntity, UserModel};
+use crate::contracts::user::UserModel;
+use crate::domain::user::UserEntity;
 
 #[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<ListUsersRequest, Vec<UserModel>>)]
 pub struct ListUsersHandler {

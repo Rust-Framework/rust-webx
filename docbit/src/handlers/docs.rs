@@ -5,21 +5,20 @@ use std::sync::Arc;
 use rust_webapp::*;
 
 use crate::contracts::docs::*;
-use crate::services::docs::{DocContent, DocIndex, DocService};
 
 #[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<ListDocWorksRequest, Vec<String>>)]
 pub struct ListDocWorksHandler {
-    docs: Arc<DocService>,
+    docs: Arc<dyn IDocumentService>,
 }
 
 #[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<GetDocIndexRequest, DocIndex>)]
 pub struct GetDocIndexHandler {
-    docs: Arc<DocService>,
+    docs: Arc<dyn IDocumentService>,
 }
 
 #[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<GetDocContentRequest, DocContent>)]
 pub struct GetDocContentHandler {
-    docs: Arc<DocService>,
+    docs: Arc<dyn IDocumentService>,
 }
 
 #[handler(inject)]

@@ -1,7 +1,16 @@
-﻿use crate::domain::user::UserModel;
-use rust_webapp::*;
+﻿use rust_webapp::*;
+use serde::{Deserialize, Serialize};
 
-// â”€â”€ IRequest definitions â€” the API contract â”€â”€
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserModel {
+    pub id: String,
+    pub name: String,
+    pub email: String,
+    #[serde(default)]
+    pub password_hash: String,
+    pub role: String,
+    pub created_at: String,
+}
 
 pub struct InfoRequest;
 
@@ -25,7 +34,7 @@ pub struct GetUserRequest {
 #[authorize(role = "admin")]
 impl IRequest<UserModel> for GetUserRequest {}
 
-#[derive(serde::Deserialize)]
+#[derive(Deserialize)]
 pub struct CreateUserRequest {
     pub name: String,
     pub email: String,
@@ -36,7 +45,7 @@ pub struct CreateUserRequest {
 #[authorize(role = "admin")]
 impl IRequest<UserModel> for CreateUserRequest {}
 
-#[derive(serde::Deserialize)]
+#[derive(Deserialize)]
 pub struct UpdateUserRequest {
     pub id: String,
     pub name: Option<String>,

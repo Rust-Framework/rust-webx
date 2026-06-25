@@ -10,7 +10,8 @@ use serde::Serialize;
 use tokio::sync::Mutex;
 
 use crate::contracts::auth::*;
-use crate::domain::user::{UserEntity, UserModel};
+use crate::contracts::user::UserModel;
+use crate::domain::user::UserEntity;
 
 // JWT
 #[derive(Debug, Serialize, serde::Deserialize)]
@@ -56,6 +57,22 @@ pub struct LoginHandler {
 
 #[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<AuthMeRequest, UserView>)]
 pub struct AuthMeHandler {
+    ctx: Arc<Mutex<DbContext>>,
+}
+
+#[rust_dicore::inject_attr(
+    singleton,
+    as = dyn IRequestHandler<ForgotPasswordRequest, ForgotPasswordResponse>
+)]
+pub struct ForgotPasswordHandler {
+    ctx: Arc<Mutex<DbContext>>,
+}
+
+#[rust_dicore::inject_attr(
+    singleton,
+    as = dyn IRequestHandler<ResetPasswordRequest, ResetPasswordResponse>
+)]
+pub struct ResetPasswordHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
@@ -203,6 +220,137 @@ impl IRequestHandler<AuthMeRequest, UserView> for AuthMeHandler {
             email: user.email,
             role: user.role,
             created_at: user.created_at,
+        })
+    }
+}
+
+#[handler(inject)]
+#[async_trait]
+impl IRequestHandler<ForgotPasswordRequest, ForgotPasswordResponse> for ForgotPasswordHandler {
+    async fn handle(&self, req: ForgotPasswordRequest) -> Result<ForgotPasswordResponse> {
+        let query = {
+            let mut ctx = self.ctx.lock().await;
+            ctx.set::<UserEntity>().query().filter_column(
+                "email",
+                "=",
+                DbValue::String(req.email.clone()),
+            )
+        };
+        let user = query
+            .first_or_default()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?;
+
+        let base_msg = "If the email exists, a reset link has been sent.".to_string();
+        let Some(user) = user else {
+            return Ok(ForgotPasswordResponse {
+                message: base_msg,
+                reset_token: None,
+            });
+        };
+
+        let token = format!(
+            "{:x}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        let expires = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() + 3600)
+            .unwrap_or(0)
+            .to_string();
+
+        let sql = format!(
+            "INSERT INTO password_reset_tokens (token, user_id, expires_at, used) \
+             VALUES ('{}', '{}', '{}', 0)",
+            crate::common::escape_sql(&token),
+            crate::common::escape_sql(&user.id),
+            expires
+        );
+        {
+            let ctx = self.ctx.lock().await;
+            ctx.provider()
+                .execute_migration_command(&sql)
+                .await
+                .map_err(|e| Error::Internal(format!("Failed to create reset token: {}", e)))?;
+        }
+
+        tracing::info!("[Auth] Password reset requested for {}", req.email);
+        Ok(ForgotPasswordResponse {
+            message: format!(
+                "{} Development mode: use the token below on the reset page.",
+                base_msg
+            ),
+            reset_token: Some(token),
+        })
+    }
+}
+
+#[handler(inject)]
+#[async_trait]
+impl IRequestHandler<ResetPasswordRequest, ResetPasswordResponse> for ResetPasswordHandler {
+    async fn handle(&self, req: ResetPasswordRequest) -> Result<ResetPasswordResponse> {
+        use crate::domain::user::PasswordResetTokenEntity;
+
+        if req.password.len() < 6 {
+            return Err(Error::Http("Password must be at least 6 characters".into()));
+        }
+
+        let query = {
+            let mut ctx = self.ctx.lock().await;
+            ctx.set::<PasswordResetTokenEntity>()
+                .query()
+                .filter_column("token", "=", DbValue::String(req.token.clone()))
+        };
+        let record = query
+            .first_or_default()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?
+            .ok_or_else(|| Error::Http("Invalid or expired reset token".into()))?;
+
+        if record.used != 0 {
+            return Err(Error::Http("Reset token already used".into()));
+        }
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let expires_at: u64 = record.expires_at.parse().unwrap_or(0);
+        if now > expires_at {
+            return Err(Error::Http("Reset token expired".into()));
+        }
+
+        let hashed =
+            hash(&req.password, DEFAULT_COST).map_err(|e| Error::Http(format!("Hash: {}", e)))?;
+
+        let update_user = format!(
+            "UPDATE users SET password_hash='{}' WHERE id='{}'",
+            crate::common::escape_sql(&hashed),
+            crate::common::escape_sql(&record.user_id)
+        );
+        let mark_used = format!(
+            "UPDATE password_reset_tokens SET used=1 WHERE token='{}'",
+            crate::common::escape_sql(&req.token)
+        );
+
+        {
+            let ctx = self.ctx.lock().await;
+            ctx.provider()
+                .execute_migration_command(&update_user)
+                .await
+                .map_err(|e| Error::Internal(e.to_string()))?;
+            ctx.provider()
+                .execute_migration_command(&mark_used)
+                .await
+                .map_err(|e| Error::Internal(e.to_string()))?;
+        }
+
+        tracing::info!("[Auth] Password reset completed for user {}", record.user_id);
+        Ok(ResetPasswordResponse {
+            message: "Password updated successfully. You can now sign in.".into(),
         })
     }
 }

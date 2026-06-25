@@ -1,0 +1,20 @@
+{
+  "title": "Admin",
+  "posts": [
+    {
+      "slug": "welcome-to-rust-webapp",
+      "title": "欢迎使用 rust-webapp 作品集",
+      "summary": "介绍 rust-webapp 框架的设计理念和本作品集站点的用途。",
+      "category": "rust",
+      "tags": [
+        "rust",
+        "webapi",
+        "portfolio"
+      ],
+      "published_at": "1782357367",
+      "path": "welcome-to-rust-webapp.md",
+      "author_id": "admin-001",
+      "author_name": "Admin"
+    }
+  ]
+}

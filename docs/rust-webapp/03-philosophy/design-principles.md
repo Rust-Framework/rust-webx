@@ -58,10 +58,15 @@ graph LR
 
 ## 依赖倒置（DIP）
 
-业务代码依赖抽象：
+业务代码依赖抽象，接口定义在 **contracts**，实现在 **handlers**：
 
 ```rust
-// ✅ Handler 依赖 trait
+// contracts/cache.rs — 接口
+pub trait IDistributedCache: Send + Sync {
+    fn get(&self, key: &str) -> Option<String>;
+}
+
+// handlers/cache.rs — Handler 只依赖 trait
 struct GetUserHandler {
     cache: Arc<dyn IDistributedCache>,
 }
@@ -72,7 +77,7 @@ struct GetUserHandler {
 }
 ```
 
-框架中所有横切能力均以 trait 暴露：`IMiddleware`、`IDistributedCache`、`IAuthenticationHandler`。
+框架横切能力也以 trait 暴露：`IMiddleware`、`IDistributedCache`、`IAuthenticationHandler`。业务 `I…Service` 与 `IRequest` 同属契约层。
 
 ## 请求即边界（Request as Boundary）
 

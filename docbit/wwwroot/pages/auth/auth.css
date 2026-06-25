@@ -11,7 +11,16 @@ body.layout-auth #app {
     position: relative;
     min-height: calc(100vh - var(--header-h));
     display: flex;
-    background: var(--bg);
+    overflow-x: hidden;
+    background:
+        radial-gradient(ellipse 70% 60% at 12% 30%, rgba(236, 72, 153, 0.14), transparent 62%),
+        var(--bg);
+}
+
+[data-theme="dark"] .page-auth {
+    background:
+        radial-gradient(ellipse 70% 60% at 12% 30%, rgba(212, 35, 122, 0.14), transparent 62%),
+        var(--bg);
 }
 
 .auth-layout {
@@ -19,7 +28,7 @@ body.layout-auth #app {
     z-index: 1;
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    align-items: center;
+    align-items: start;
     gap: clamp(2rem, 5vw, 4rem);
     width: 100%;
     max-width: 1080px;
@@ -33,45 +42,29 @@ body.layout-auth #app {
 .auth-aside {
     position: relative;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: flex-end;
     padding: 0 clamp(0.5rem, 2vw, 1.5rem) 0 0;
-    overflow: hidden;
-}
-
-.auth-aside-surface {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background:
-        radial-gradient(ellipse 70% 55% at 8% 22%, rgba(236, 72, 153, 0.22), transparent 58%),
-        radial-gradient(ellipse 60% 50% at 28% 78%, rgba(59, 130, 246, 0.18), transparent 55%),
-        radial-gradient(ellipse 45% 40% at 85% 15%, rgba(18, 150, 219, 0.12), transparent 50%);
-}
-
-[data-theme="dark"] .auth-aside-surface {
-    background:
-        radial-gradient(ellipse 70% 55% at 8% 22%, rgba(212, 35, 122, 0.2), transparent 58%),
-        radial-gradient(ellipse 60% 50% at 28% 78%, rgba(59, 130, 246, 0.15), transparent 55%),
-        radial-gradient(ellipse 45% 40% at 85% 15%, rgba(18, 150, 219, 0.1), transparent 50%);
+    overflow: visible;
 }
 
 .auth-aside-watermark {
     position: absolute;
-    left: -2rem;
-    bottom: -2.5rem;
+    left: -3rem;
+    bottom: -3rem;
     transform: rotate(-12deg);
-    opacity: 0.07;
+    opacity: 0.06;
     pointer-events: none;
     user-select: none;
+    z-index: 0;
 }
 
 [data-theme="dark"] .auth-aside-watermark {
-    opacity: 0.1;
+    opacity: 0.08;
 }
 
 .auth-aside-watermark img {
-    width: clamp(200px, 24vw, 280px);
+    width: clamp(220px, 26vw, 320px);
     height: auto;
     display: block;
 }
@@ -310,7 +303,7 @@ body.layout-auth #app {
     border-radius: var(--radius-pill) !important;
     font-size: 0.95rem !important;
     font-weight: 600 !important;
-    background: linear-gradient(135deg, var(--accent) 0%, color-mix(in srgb, var(--accent) 82%, #0e7ab8) 100%) !important;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%) !important;
     border: none !important;
     box-shadow: 0 4px 14px var(--accent-glow);
     transition: transform var(--transition), box-shadow var(--transition), opacity var(--transition);
@@ -332,10 +325,11 @@ body.layout-auth #app {
     font-size: 15px;
 }
 
-/* ── Alerts & links ── */
-
+/* ── Alerts & links ──
+   仅在未 hidden 时以 flex 显示，确保 [hidden] 属性能正确隐藏
+   （否则 display:flex 会覆盖 UA 的 [hidden]{display:none}） */
 .auth-alert {
-    display: flex;
+    display: none;
     align-items: flex-start;
     gap: 0.5rem;
     padding: 0.7rem 0.85rem;
@@ -343,6 +337,10 @@ body.layout-auth #app {
     border-radius: 10px;
     font-size: 0.85rem;
     line-height: 1.45;
+}
+
+.auth-alert:not([hidden]) {
+    display: flex;
 }
 
 .auth-alert .layui-icon {

@@ -1,1 +1,13 @@
-/* Work detail page — uses global detail styles */
+/* Work detail page */
+
+.page-work .detail-header {
+    margin-bottom: 1.75rem;
+}
+
+.page-work .tag-row {
+    margin-top: 0.85rem;
+}
+
+.page-work .btn-row {
+    margin-top: 1.75rem;
+}

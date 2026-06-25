@@ -12,8 +12,10 @@
     --accent-rgb: 18, 150, 219;
     --brand-rust: #d4237a;
     --brand-rust-soft: rgba(212, 35, 122, 0.1);
-    --radius: 12px;
-    --radius-sm: 8px;
+    --radius: 14px;
+    --radius-sm: 10px;
+    --radius-pill: 999px;
+    --radius-btn: 10px;
     --font: 'Inter', system-ui, -apple-system, sans-serif;
     --mono: 'JetBrains Mono', 'Fira Code', monospace;
     --header-h: 60px;
@@ -151,7 +153,7 @@ body.layout-home #app .page-home {
     width: 32px;
     height: 32px;
     flex-shrink: 0;
-    border-radius: 8px;
+    border-radius: 10px;
     transition: transform var(--transition);
 }
 
@@ -170,8 +172,8 @@ body.layout-home #app .page-home {
 }
 
 .main-nav a {
-    padding: 0.45rem 0.9rem;
-    border-radius: var(--radius-sm);
+    padding: 0.45rem 0.95rem;
+    border-radius: var(--radius-pill);
     text-decoration: none;
     color: var(--text-muted);
     font-size: 0.875rem;
@@ -271,7 +273,7 @@ body.layout-home #app .page-home {
     width: 100%;
     padding: 0.5rem 0.65rem;
     border: none;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     background: none;
     color: var(--text);
     font-size: 0.85rem;
@@ -297,7 +299,7 @@ body.layout-home #app .page-home {
     justify-content: center;
     width: 36px;
     height: 36px;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-pill);
     border: 1px solid var(--border);
     background: var(--bg-elevated);
     color: var(--text-muted);
@@ -577,13 +579,13 @@ body.layout-home #app .page-home {
 
 .tag {
     display: inline-block;
-    padding: 0.18rem 0.55rem;
-    border-radius: 4px;
-    font-size: 0.7rem;
+    padding: 0.22rem 0.65rem;
+    border-radius: var(--radius-pill);
+    font-size: 0.72rem;
     font-weight: 500;
-    background: var(--bg-input);
+    background: color-mix(in srgb, var(--bg-input) 88%, transparent);
     color: var(--text-muted);
-    border: 1px solid var(--border);
+    border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
     line-height: 1.4;
     white-space: nowrap;
 }
@@ -601,12 +603,11 @@ body.layout-home #app .page-home {
 
 .badge {
     display: inline-block;
-    padding: 0.2rem 0.6rem;
-    border-radius: 6px;
+    padding: 0.22rem 0.65rem;
+    border-radius: var(--radius-pill);
     font-size: 0.72rem;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.01em;
     flex-shrink: 0;
 }
 
@@ -620,8 +621,8 @@ body.layout-home #app .page-home {
     display: inline-flex;
     align-items: center;
     gap: 0.4rem;
-    padding: 0.55rem 1.15rem;
-    border-radius: var(--radius-sm);
+    padding: 0.55rem 1.2rem;
+    border-radius: var(--radius-pill);
     font-size: 0.875rem;
     font-weight: 600;
     text-decoration: none;
@@ -655,7 +656,16 @@ body.layout-home #app .page-home {
     font-size: 0.8rem;
 }
 
-.btn-row { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1.5rem; }
+.btn-row {
+    display: flex;
+    gap: 0.65rem;
+    flex-wrap: wrap;
+    margin-top: 1.5rem;
+}
+
+.page-work .btn-row .layui-btn {
+    margin: 0;
+}
 
 /* ── Work detail ── */
 
@@ -1103,7 +1113,7 @@ body.layout-home #app .page-home {
     width: 56px;
     height: 56px;
     margin: 0 auto 1rem;
-    border-radius: 14px;
+    border-radius: 16px;
     display: block;
 }
 

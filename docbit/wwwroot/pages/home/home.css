@@ -167,6 +167,31 @@
     font-size: 1.1rem;
 }
 
+.works-filter-tabs {
+    margin: 0;
+}
+
+.works-filter-tabs .layui-tab-title {
+    border: none;
+}
+
+.works-filter-tabs .layui-tab-title li {
+    padding: 0 0.85rem;
+    line-height: 36px;
+    font-size: 0.82rem;
+    border-radius: 999px;
+    margin-right: 0.35rem;
+}
+
+.works-filter-tabs .layui-tab-title .layui-this:after {
+    display: none;
+}
+
+.works-filter-tabs .layui-tab-title .layui-this {
+    background: var(--accent-soft);
+    border-radius: 999px;
+}
+
 .filter-tabs {
     display: flex;
     flex-wrap: wrap;
@@ -212,7 +237,7 @@
     flex-direction: column;
     gap: 0.65rem;
     padding: 1.1rem 1.15rem 1rem;
-    border-radius: 14px;
+    border-radius: 16px;
     border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
     background: var(--bg-card);
     transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
@@ -273,8 +298,8 @@
     justify-content: center;
     width: 32px;
     height: 32px;
-    border-radius: 8px;
-    background: var(--bg-input);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--bg-input) 85%, transparent);
 }
 
 .work-card-v2-icon img {
@@ -302,8 +327,8 @@
 
 .work-card-v2-cat {
     flex-shrink: 0;
-    padding: 0.12rem 0.45rem;
-    border-radius: 6px;
+    padding: 0.18rem 0.55rem;
+    border-radius: var(--radius-pill);
     font-size: 0.65rem;
     font-weight: 700;
 }
@@ -353,27 +378,37 @@
 
 .work-card-v2-tags .tag {
     font-size: 0.65rem;
-    padding: 0.12rem 0.4rem;
+    padding: 0.14rem 0.5rem;
 }
 
 .work-card-v2-links {
     display: flex;
-    gap: 0.85rem;
-    padding-top: 0.35rem;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    padding-top: 0.45rem;
     border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
     margin-top: auto;
 }
 
-.work-link {
+.work-chip-link {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.3rem 0.8rem;
+    border-radius: var(--radius-pill);
     font-size: 0.72rem;
-    font-weight: 500;
-    color: var(--text-muted);
+    font-weight: 600;
     text-decoration: none;
-    transition: color 0.15s ease;
+    border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+    background: color-mix(in srgb, var(--bg-input) 75%, var(--bg-card));
+    color: var(--text-muted);
+    transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
 }
 
-.work-link:hover {
+.work-chip-link:hover {
     color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+    background: var(--accent-soft);
+    transform: translateY(-1px);
 }
 
 /* ── Home page (footer styles live in app.css) ── */

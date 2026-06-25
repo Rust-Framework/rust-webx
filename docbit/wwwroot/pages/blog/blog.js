@@ -45,7 +45,7 @@
     return c.name || blogCategoryLabel(c.id);
   }
 
-  function renderCategorySidebar(categories, activeCategory, totalCount, extraHtml = "", q = "") {
+  function categorySidebarParts(categories, activeCategory, totalCount, extraHtml = "", q = "") {
     const allActive = !activeCategory ? " active" : "";
     const items = [
       `<li><a href="${categoryLink("", q)}" class="shell-nav-link${allActive}" data-nav>全部 <span class="count">${totalCount}</span></a></li>`,
@@ -62,39 +62,31 @@
         </a></li>`
       );
     });
-    return `
-      <aside class="content-sidebar">
-        <div class="content-sidebar-header">
-          <div class="shell-brand">
+    return {
+      header: `<div class="shell-brand">
             <span class="shell-brand-icon">✎</span>
             <div>
               <span class="shell-brand-label">博客</span>
               <h4>技术分享</h4>
             </div>
-          </div>
-          <button type="button" class="sidebar-close" id="sidebar-close" aria-label="关闭">×</button>
-        </div>
-        ${extraHtml}
-        <nav class="content-sidebar-body shell-nav"><ul class="blog-cat-list">${items.join("")}</ul></nav>
-      </aside>`;
+          </div>`,
+      extra: extraHtml,
+      body: `<ul class="blog-cat-list">${items.join("")}</ul>`,
+    };
   }
 
-  function shellWrap(sidebarHtml, mainHtml) {
-    return `
-      <div class="content-shell page-blog">
-        <div class="sidebar-overlay" id="sidebar-overlay"></div>
-        ${sidebarHtml}
-        <div class="content-main">${mainHtml}</div>
-      </div>`;
-  }
-
-  function topbar(breadcrumbHtml, actionsHtml = "") {
-    return `
-      <div class="shell-topbar">
-        <button type="button" class="btn btn-sm shell-menu-btn" id="sidebar-open">☰</button>
-        <nav class="shell-breadcrumb" aria-label="面包屑">${breadcrumbHtml}</nav>
-        ${actionsHtml ? `<div class="shell-topbar-actions">${actionsHtml}</div>` : ""}
-      </div>`;
+  function mountBlogShell(sidebar, breadcrumb, actions, content) {
+    Docbit.Shell.mount(
+      Docbit.Shell.layout({
+        className: "page-blog",
+        sidebarHeader: sidebar.header,
+        sidebarExtra: sidebar.extra,
+        sidebarBody: sidebar.body,
+        breadcrumb,
+        actions,
+        content,
+      })
+    );
   }
 
   function filterPosts(posts, category, q) {
@@ -156,7 +148,7 @@
               enterkeyhint="search"
             />
             ${q ? `<button type="button" class="blog-search-clear" id="blog-search-clear" aria-label="清除">×</button>` : ""}
-            <button type="submit" class="btn btn-primary blog-search-btn">搜索</button>
+            <button type="submit" class="blog-search-btn">搜索</button>
           </div>
         </form>
         <p class="blog-search-stats" id="blog-search-stats">
@@ -197,10 +189,6 @@
           </h3>
           <p class="blog-card-summary">${highlightQuery(p.summary, q)}</p>
           ${(p.tags || []).length ? `<div class="blog-card-tags">${tagList(p.tags)}</div>` : ""}
-          <footer class="blog-card-foot">
-            <span class="blog-card-author">${escapeHtml(p.author_name || "匿名")}</span>
-            <span class="blog-card-slug">${escapeHtml(p.slug)}</span>
-          </footer>
         </article>`
         )
         .join("")}
@@ -271,15 +259,21 @@
     if (!Docbit.Auth.isLoggedIn()) {
       return `<div class="comment-guest">
         <p>登录后即可参与讨论。</p>
-        <a href="/login?redirect=${redirect}" class="btn btn-primary btn-sm" data-nav>登录</a>
-        <a href="/register" class="btn btn-sm" data-nav>注册</a>
+        <a href="/login?redirect=${redirect}" class="layui-btn layui-btn-sm layui-btn-normal" data-nav>登录</a>
+        <a href="/register" class="layui-btn layui-btn-sm layui-btn-primary" data-nav>注册</a>
       </div>`;
     }
-    return `<form class="comment-form" id="comment-form">
-      <label for="comment-content">发表评论</label>
-      <textarea id="comment-content" rows="4" placeholder="写下你的想法…" maxlength="4000" required></textarea>
-      <div class="comment-form-actions">
-        <button type="submit" class="btn btn-primary btn-sm">发布评论</button>
+    return `<form class="layui-form comment-form" id="comment-form" lay-filter="comment-form">
+      <div class="layui-form-item layui-form-text">
+        <label class="layui-form-label">评论</label>
+        <div class="layui-input-block">
+          <textarea id="comment-content" class="layui-textarea" placeholder="写下你的想法…" maxlength="4000" required></textarea>
+        </div>
+      </div>
+      <div class="layui-form-item">
+        <div class="layui-input-block">
+          <button type="submit" class="layui-btn layui-btn-sm layui-btn-normal">发布评论</button>
+        </div>
       </div>
       <p class="form-error" id="comment-error" hidden></p>
     </form>`;
@@ -288,6 +282,7 @@
   function bindCommentForm(slug) {
     const form = document.getElementById("comment-form");
     if (!form) return;
+    Docbit.UI.renderForm();
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const errEl = document.getElementById("comment-error");
@@ -296,6 +291,7 @@
       errEl.hidden = true;
       try {
         await Docbit.Api.post(`/api/blog/${encodeURIComponent(slug)}/comments`, { slug, content }, true);
+        Docbit.UI.success("评论已发布");
         await renderPost(slug);
       } catch (err) {
         errEl.textContent = err.message;
@@ -386,23 +382,20 @@
     const filtered = filterPosts(posts, activeCategory, q);
     const loggedIn = Docbit.Auth.isLoggedIn();
     const sidebarExtra = loggedIn
-      ? `<div class="shell-sidebar-actions"><a href="/blog/write" class="btn btn-primary btn-sm" data-nav>写文章</a></div>`
+      ? `<div class="shell-sidebar-actions"><a href="/blog/write" class="layui-btn layui-btn-sm layui-btn-normal layui-btn-fluid" data-nav>写文章</a></div>`
       : "";
 
-    const sidebar = renderCategorySidebar(categories, activeCategory, posts.length, sidebarExtra, q);
-    const main = `
-      ${topbar(
-        `<a href="/" data-nav>首页</a><span class="sep">/</span><span class="current">博客</span>`,
-        loggedIn ? `<a href="/blog/write" class="btn btn-sm" data-nav>管理文章</a>` : ""
-      )}
-      <div class="shell-article blog-list-article">
+    const sidebar = categorySidebarParts(categories, activeCategory, posts.length, sidebarExtra, q);
+    mountBlogShell(
+      sidebar,
+      `<a href="/" data-nav>首页</a><span class="sep">/</span><span class="current">博客</span>`,
+      loggedIn ? `<a href="/blog/write" class="layui-btn layui-btn-sm layui-btn-primary" data-nav>管理文章</a>` : "",
+      `<div class="shell-article blog-list-article">
         ${renderSearchHub(q, filtered.length, activeCategory)}
         ${renderBlogCardList(filtered, q)}
-      </div>`;
-
-    document.getElementById("app").innerHTML = shellWrap(sidebar, main);
+      </div>`
+    );
     bindSearchForm(activeCategory);
-    Docbit.Shell.initShellSidebar();
     document.title = (q ? `${q} — 搜索` : "博客") + " — " + (siteInfo?.title || "Docbit");
   }
 
@@ -416,18 +409,15 @@
 
     const manage = canManagePost(post);
     const sidebarExtra = Docbit.Auth.isLoggedIn()
-      ? `<div class="shell-sidebar-actions"><a href="/blog/write" class="btn btn-primary btn-sm" data-nav>写文章</a></div>`
+      ? `<div class="shell-sidebar-actions"><a href="/blog/write" class="layui-btn layui-btn-sm layui-btn-normal layui-btn-fluid" data-nav>写文章</a></div>`
       : "";
 
-    const sidebar = renderCategorySidebar(categories, post.category, allPosts.length, sidebarExtra);
-    const main = `
-      ${topbar(
-        `<a href="/" data-nav>首页</a><span class="sep">/</span><a href="/blog" data-nav>博客</a><span class="sep">/</span><span class="current">${escapeHtml(post.title)}</span>`,
-        manage
-          ? `<a href="/blog/write/${escapeHtml(post.slug)}" class="btn btn-sm" data-nav>编辑</a>`
-          : ""
-      )}
-      <header class="blog-post-header">
+    const sidebar = categorySidebarParts(categories, post.category, allPosts.length, sidebarExtra);
+    mountBlogShell(
+      sidebar,
+      `<a href="/" data-nav>首页</a><span class="sep">/</span><a href="/blog" data-nav>博客</a><span class="sep">/</span><span class="current">${escapeHtml(post.title)}</span>`,
+      manage ? `<a href="/blog/write/${escapeHtml(post.slug)}" class="layui-btn layui-btn-sm layui-btn-primary" data-nav>编辑</a>` : "",
+      `<header class="blog-post-header">
         ${post.category ? `<span class="shell-cat-badge">${escapeHtml(blogCategoryLabel(post.category))}</span>` : ""}
         <h1>${escapeHtml(post.title)}</h1>
         <div class="meta">${escapeHtml(post.author_name)} · ${escapeHtml(post.published_at)}</div>
@@ -438,13 +428,125 @@
         <h3 class="comments-title">讨论 · ${comments.length} 条评论</h3>
         ${renderCommentForm(slug)}
         ${renderComments(comments)}
-      </section>`;
-
-    document.getElementById("app").innerHTML = shellWrap(sidebar, main);
+      </section>`
+    );
     enhance(document.getElementById("blog-article"));
     bindCommentForm(slug);
-    Docbit.Shell.initShellSidebar();
     document.title = post.title + " — 博客";
+  }
+
+  let writeTableEventsBound = false;
+  let writePostsCache = [];
+
+  function formatTableDate(value) {
+    const n = Number(value);
+    if (!Number.isNaN(n) && n > 1_000_000_000) {
+      return new Date(n * 1000).toLocaleString("zh-CN", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    }
+    return value == null ? "" : String(value);
+  }
+
+  function normalizeWritePosts(posts) {
+    return posts.map((p) => ({
+      ...p,
+      tags_text: (p.tags || []).join(", "),
+      category_label: blogCategoryLabel(p.category),
+      published_label: formatTableDate(p.published_at),
+    }));
+  }
+
+  function bindWriteTableEvents(table) {
+    if (writeTableEventsBound) return;
+    writeTableEventsBound = true;
+
+    table.on("toolbar(blog-manage-table)", (obj) => {
+      if (obj.event === "create") {
+        Docbit.Router.navigate("/blog/write/new");
+        return;
+      }
+      if (obj.event === "refresh") {
+        reloadWriteTable();
+        return;
+      }
+      if (obj.event === "batchDel") {
+        const checked = table.checkStatus("blogManageTable");
+        if (!checked.data.length) {
+          Docbit.UI.error("请先勾选要删除的文章");
+          return;
+        }
+        Docbit.UI.confirm(`确定删除选中的 ${checked.data.length} 篇文章？`).then(async (ok) => {
+          if (!ok) return;
+          try {
+            for (const row of checked.data) {
+              await Docbit.Api.del(`/api/blog/${encodeURIComponent(row.slug)}`, true);
+            }
+            Docbit.UI.success("已删除选中文章");
+            await reloadWriteTable();
+          } catch (err) {
+            Docbit.UI.error(err.message);
+          }
+        });
+      }
+    });
+
+    table.on("tool(blog-manage-table)", (obj) => {
+      const row = obj.data;
+      if (obj.event === "view") {
+        Docbit.Router.navigate(`/blog/${encodeURIComponent(row.slug)}`);
+      } else if (obj.event === "edit") {
+        Docbit.Router.navigate(`/blog/write/${encodeURIComponent(row.slug)}`);
+      } else if (obj.event === "del") {
+        Docbit.UI.confirm(`确定删除「${row.title}」？`).then(async (ok) => {
+          if (!ok) return;
+          try {
+            await Docbit.Api.del(`/api/blog/${encodeURIComponent(row.slug)}`, true);
+            obj.del();
+            writePostsCache = writePostsCache.filter((p) => p.slug !== row.slug);
+            Docbit.UI.success("文章已删除");
+          } catch (err) {
+            Docbit.UI.error(err.message);
+          }
+        });
+      }
+    });
+  }
+
+  function bindWriteSearch(table) {
+    const root = document.querySelector(".page-blog-admin");
+    if (!root || root.dataset.searchBound) return;
+    root.dataset.searchBound = "1";
+    let searchTimer;
+    root.addEventListener("input", (e) => {
+      if (e.target.id !== "blog-admin-search") return;
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => {
+        const q = e.target.value.trim().toLowerCase();
+        const filtered = q
+          ? writePostsCache.filter((p) => {
+              const hay = [p.title, p.slug, p.summary, p.category_label, p.tags_text]
+                .join(" ")
+                .toLowerCase();
+              return hay.includes(q);
+            })
+          : writePostsCache;
+        table.reload("blogManageTable", { data: filtered, page: { curr: 1 } });
+      }, 280);
+    });
+  }
+
+  async function reloadWriteTable() {
+    const posts = await Docbit.Api.get("/api/blog/my", true);
+    writePostsCache = normalizeWritePosts(posts);
+    const table = await Docbit.UI.tableApi();
+    const searchInput = document.getElementById("blog-admin-search");
+    if (searchInput) searchInput.value = "";
+    table.reload("blogManageTable", { data: writePostsCache, page: { curr: 1 } });
   }
 
   async function renderWriteList() {
@@ -452,85 +554,167 @@
       Docbit.Router.navigate("/login?redirect=" + encodeURIComponent("/blog/write"));
       return;
     }
-    const [myPosts, categories, allPosts] = await Promise.all([
-      Docbit.Api.get("/api/blog/my", true),
-      Docbit.Api.get("/api/blog/categories"),
-      Docbit.Api.get("/api/blog"),
-    ]);
 
-    const list =
-      myPosts.length === 0
-        ? '<p class="empty-hint">你还没有发布文章，点击「新建文章」开始写作。</p>'
-        : `<div class="shell-post-list">${myPosts
-            .map(
-              (p) => `
-          <div class="shell-post-item" style="cursor:default">
-            <div class="shell-post-top">
-              <h3>${escapeHtml(p.title)}</h3>
-              <a href="/blog/write/${escapeHtml(p.slug)}" class="btn btn-sm" data-nav>编辑</a>
-            </div>
-            <div class="summary">${escapeHtml(p.summary)}</div>
-            <div class="shell-post-meta"><span>${escapeHtml(p.published_at)}</span></div>
-          </div>`
-            )
-            .join("")}</div>`;
+    const myPosts = await Docbit.Api.get("/api/blog/my", true);
+    writePostsCache = normalizeWritePosts(myPosts);
 
-    const sidebar = renderCategorySidebar(
-      categories,
-      "",
-      allPosts.length,
-      `<div class="shell-sidebar-actions"><a href="/blog/write/new" class="btn btn-primary btn-sm" data-nav>新建文章</a></div>`
-    );
-    const main = `
-      ${topbar(
-        `<a href="/blog" data-nav>博客</a><span class="sep">/</span><span class="current">我的文章</span>`,
-        `<a href="/blog/write/new" class="btn btn-primary btn-sm" data-nav>新建</a>`
-      )}
-      <div class="shell-article">${list}</div>`;
+    document.getElementById("app").innerHTML = `
+      <div class="page-blog-admin">
+        <table id="blog-manage-table" lay-filter="blog-manage-table"></table>
+      </div>
+      <script type="text/html" id="blog-table-toolbar">
+        <div class="blog-table-toolbar-inner">
+          <div class="layui-btn-container">
+            <button class="layui-btn layui-btn-sm" lay-event="create">
+              <i class="layui-icon layui-icon-add-1"></i> 新建
+            </button>
+            <button class="layui-btn layui-btn-sm layui-btn-danger" lay-event="batchDel">
+              <i class="layui-icon layui-icon-delete"></i> 删除
+            </button>
+            <button class="layui-btn layui-btn-sm layui-btn-primary" lay-event="refresh">
+              <i class="layui-icon layui-icon-refresh"></i>
+            </button>
+          </div>
+          <input type="search" class="layui-input" id="blog-admin-search" placeholder="搜索标题、Slug、摘要、标签" autocomplete="off" />
+        </div>
+      </script>
+      <script type="text/html" id="blog-row-bar">
+        <a class="layui-btn layui-btn-primary layui-btn-xs" lay-event="view">查看</a>
+        <a class="layui-btn layui-btn-xs" lay-event="edit">编辑</a>
+        <a class="layui-btn layui-btn-danger layui-btn-xs" lay-event="del">删除</a>
+      </script>
+      <script type="text/html" id="blog-title-tpl">
+        <a href="/blog/{{ d.slug }}" data-nav>{{ d.title }}</a>
+      </script>`;
 
-    document.getElementById("app").innerHTML = shellWrap(sidebar, main);
-    Docbit.Shell.initShellSidebar();
-    document.title = "我的文章 — 博客";
+    const table = await Docbit.UI.tableApi();
+    bindWriteTableEvents(table);
+
+    await Docbit.UI.renderTable({
+      elem: "#blog-manage-table",
+      id: "blogManageTable",
+      data: writePostsCache,
+      page: true,
+      limit: 20,
+      limits: [10, 20, 30, 50, 100],
+      height: "full-105",
+      cellMinWidth: 100,
+      toolbar: "#blog-table-toolbar",
+      defaultToolbar: ["filter", "exports", "print"],
+      cols: [
+        [
+          { type: "checkbox", fixed: "left" },
+          { field: "title", title: "标题", minWidth: 260, sort: true, templet: "#blog-title-tpl" },
+          { field: "slug", title: "Slug", width: 160, sort: true },
+          { field: "category_label", title: "分类", width: 120, sort: true },
+          { field: "summary", title: "摘要", minWidth: 280 },
+          { field: "tags_text", title: "标签", width: 180 },
+          { field: "published_label", title: "发布时间", width: 180, sort: true },
+          { fixed: "right", title: "操作", width: 200, align: "center", toolbar: "#blog-row-bar" },
+        ],
+      ],
+      text: { none: "暂无文章" },
+    });
+
+    bindWriteSearch(table);
+    document.title = "文章管理 — 博客";
   }
 
   function bindCategoryAdd(categories, selectEl) {
-    const panel = document.getElementById("new-category-panel");
     const addBtn = document.getElementById("add-category-btn");
-    const saveBtn = document.getElementById("save-category-btn");
-    const errEl = document.getElementById("category-error");
-    if (!panel || !addBtn || !saveBtn || !selectEl) return;
+    if (!addBtn || !selectEl) return;
 
-    addBtn.addEventListener("click", () => {
-      panel.hidden = !panel.hidden;
-      if (!panel.hidden) document.getElementById("new-cat-name")?.focus();
-    });
+    addBtn.addEventListener("click", () => openCategoryDialog(categories, selectEl));
+  }
 
-    saveBtn.addEventListener("click", async () => {
-      const id = document.getElementById("new-cat-id")?.value?.trim();
-      const name = document.getElementById("new-cat-name")?.value?.trim();
-      errEl.hidden = true;
-      if (!id || !/^[a-zA-Z0-9_-]+$/.test(id)) {
-        errEl.textContent = "分类标识仅支持字母、数字、下划线和连字符";
-        errEl.hidden = false;
-        return;
-      }
-      if (!name) {
-        errEl.textContent = "请填写分类名称";
-        errEl.hidden = false;
-        return;
-      }
-      try {
-        await Docbit.Api.post("/api/blog/categories", { id, name }, true);
-        categories.push({ id, name, count: 0 });
-        categories.sort((a, b) => a.id.localeCompare(b.id));
-        selectEl.innerHTML = buildCategoryOptions(categories, id);
-        panel.hidden = true;
-        document.getElementById("new-cat-id").value = "";
-        document.getElementById("new-cat-name").value = "";
-      } catch (err) {
-        errEl.textContent = err.message;
-        errEl.hidden = false;
-      }
+  async function openCategoryDialog(categories, selectEl) {
+    const layui = await Docbit.UI.loadLayui();
+
+    function renderTableRows() {
+      return categories
+        .map(
+          (c) =>
+            `<tr>
+              <td><code>${escapeHtml(c.id)}</code></td>
+              <td>${escapeHtml(categoryName(c))}</td>
+              <td>${c.count || 0}</td>
+            </tr>`
+        )
+        .join("");
+    }
+
+    layui.layer.open({
+      type: 1,
+      title: "分类管理",
+      area: ["500px", "auto"],
+      shadeClose: true,
+      content: `
+        <div class="category-dialog" style="padding:16px 20px">
+          <table class="layui-table" lay-size="sm">
+            <colgroup><col width="130"><col><col width="60"></colgroup>
+            <thead><tr><th>标识</th><th>名称</th><th>数量</th></tr></thead>
+            <tbody id="cat-list-body">${renderTableRows()}</tbody>
+          </table>
+          <fieldset class="layui-elem-field" style="margin-top:16px">
+            <legend>新建分类</legend>
+            <div class="layui-field-box">
+              <form class="layui-form" lay-filter="new-category-form">
+                <div class="layui-form-item">
+                  <label class="layui-form-label">标识</label>
+                  <div class="layui-input-block">
+                    <input type="text" id="new-cat-id" class="layui-input" placeholder="英文、数字、下划线" maxlength="40" />
+                  </div>
+                </div>
+                <div class="layui-form-item">
+                  <label class="layui-form-label">名称</label>
+                  <div class="layui-input-block">
+                    <input type="text" id="new-cat-name" class="layui-input" placeholder="显示名称" maxlength="60" />
+                  </div>
+                </div>
+                <div class="layui-form-item">
+                  <div class="layui-input-block">
+                    <button type="button" class="layui-btn layui-btn-sm layui-btn-normal" id="save-category-btn">添加分类</button>
+                  </div>
+                </div>
+              </form>
+            </div>
+          </fieldset>
+          <p class="form-error form-error-inline" id="category-error" hidden></p>
+        </div>`,
+      success() {
+        Docbit.UI.renderForm();
+        const errEl = document.getElementById("category-error");
+        document.getElementById("save-category-btn")?.addEventListener("click", async () => {
+          const id = document.getElementById("new-cat-id")?.value?.trim();
+          const name = document.getElementById("new-cat-name")?.value?.trim();
+          errEl.hidden = true;
+          if (!id || !/^[a-zA-Z0-9_-]+$/.test(id)) {
+            errEl.textContent = "分类标识仅支持字母、数字、下划线和连字符";
+            errEl.hidden = false;
+            return;
+          }
+          if (!name) {
+            errEl.textContent = "请填写分类名称";
+            errEl.hidden = false;
+            return;
+          }
+          try {
+            await Docbit.Api.post("/api/blog/categories", { id, name }, true);
+            categories.push({ id, name, count: 0 });
+            categories.sort((a, b) => a.id.localeCompare(b.id));
+            selectEl.innerHTML = buildCategoryOptions(categories, id);
+            Docbit.UI.renderForm("select");
+            const tbody = document.getElementById("cat-list-body");
+            if (tbody) tbody.innerHTML = renderTableRows();
+            document.getElementById("new-cat-id").value = "";
+            document.getElementById("new-cat-name").value = "";
+            Docbit.UI.success("分类已添加");
+          } catch (err) {
+            errEl.textContent = err.message;
+            errEl.hidden = false;
+          }
+        });
+      },
     });
   }
 
@@ -558,64 +742,66 @@
 
     document.getElementById("app").innerHTML = `
       <div class="blog-edit-page">
-        <header class="blog-edit-toolbar">
-          <nav class="blog-edit-crumb" aria-label="面包屑">
-            <a href="/blog/write" data-nav>我的文章</a>
-            <span class="sep">/</span>
-            <span class="current">${isNewLabel}</span>
-          </nav>
-          <div class="blog-edit-toolbar-actions">
-            <a href="/blog/write" class="btn btn-sm" data-nav>取消</a>
-            ${!isNew ? `<button type="button" class="btn btn-sm btn-danger" id="delete-post-btn">删除</button>` : ""}
-            <button type="submit" form="blog-edit-form" class="btn btn-primary btn-sm">保存</button>
-          </div>
-        </header>
+        <div class="blog-edit-container">
+          <header class="blog-edit-toolbar">
+            <nav class="blog-edit-crumb" aria-label="面包屑">
+              <a href="/blog/write" data-nav>文章管理</a>
+              <span class="sep">/</span>
+              <span class="current">${isNewLabel}</span>
+            </nav>
+            <div class="blog-edit-toolbar-actions">
+              <a href="/blog/write" class="layui-btn layui-btn-sm layui-btn-primary" data-nav>取消</a>
+              ${!isNew ? `<button type="button" class="layui-btn layui-btn-sm layui-btn-danger" id="delete-post-btn">删除</button>` : ""}
+              <button type="submit" form="blog-edit-form" class="layui-btn layui-btn-sm layui-btn-normal">保存</button>
+            </div>
+          </header>
 
-        <form class="blog-edit-form" id="blog-edit-form" novalidate>
-          <details class="blog-edit-meta-panel" open>
-            <summary class="blog-edit-meta-toggle">文章信息</summary>
-            <div class="blog-edit-meta-grid">
-              <div class="meta-field meta-title">
-                <label for="post-title">标题</label>
-                <input id="post-title" required maxlength="300" placeholder="文章标题" value="${escapeHtml(post?.title || "")}" />
-              </div>
-              <div class="meta-field meta-slug">
-                <label for="post-slug">Slug</label>
-                <input id="post-slug" required maxlength="120" placeholder="url-slug" ${isNew ? "" : "readonly"} value="${escapeHtml(post?.slug || "")}" />
-              </div>
-              <div class="meta-field meta-category">
-                <label for="post-category">分类</label>
-                <div class="category-picker">
-                  <select id="post-category">${categoryOptions}</select>
-                  <button type="button" class="btn btn-sm category-add-btn" id="add-category-btn" title="添加分类">+</button>
-                </div>
-                <div id="new-category-panel" class="new-category-panel" hidden>
-                  <input id="new-cat-id" placeholder="标识 (英文)" maxlength="40" />
-                  <input id="new-cat-name" placeholder="显示名称" maxlength="60" />
-                  <button type="button" class="btn btn-sm btn-primary" id="save-category-btn">添加</button>
-                </div>
-                <p class="form-error form-error-inline" id="category-error" hidden></p>
-              </div>
-              <div class="meta-field meta-tags">
-                <label for="post-tags">标签</label>
-                <input id="post-tags" placeholder="逗号分隔，如 rust, web" value="${escapeHtml((post?.tags || []).join(", "))}" />
-              </div>
-              <div class="meta-field meta-summary">
-                <label for="post-summary">摘要</label>
-                <textarea id="post-summary" required maxlength="500" rows="2" placeholder="一句话摘要，用于列表展示">${escapeHtml(post?.summary || "")}</textarea>
+          <form class="layui-form blog-edit-form" id="blog-edit-form" lay-filter="blog-edit-form" novalidate>
+            <div class="layui-form-item">
+              <label class="layui-form-label" for="post-title">标题</label>
+              <div class="layui-input-block">
+                <input type="text" id="post-title" class="layui-input" required maxlength="300" placeholder="文章标题" value="${escapeHtml(post?.title || "")}" />
               </div>
             </div>
-          </details>
+            <div class="layui-form-item">
+              <label class="layui-form-label" for="post-slug">Slug</label>
+              <div class="layui-input-block">
+                <input type="text" id="post-slug" class="layui-input" required maxlength="120" placeholder="url-slug" ${isNew ? "" : "readonly"} value="${escapeHtml(post?.slug || "")}" />
+              </div>
+            </div>
+            <div class="layui-form-item">
+              <label class="layui-form-label" for="post-category">分类</label>
+              <div class="layui-input-block category-picker">
+                <select id="post-category" lay-filter="post-category">${categoryOptions}</select>
+                <button type="button" class="layui-btn layui-btn-sm layui-btn-primary category-add-btn" id="add-category-btn" title="管理分类">
+                  <i class="layui-icon layui-icon-add-1"></i>
+                </button>
+              </div>
+            </div>
+            <div class="layui-form-item">
+              <label class="layui-form-label" for="post-tags">标签</label>
+              <div class="layui-input-block">
+                <input type="text" id="post-tags" class="layui-input" placeholder="逗号分隔，如 rust, web" value="${escapeHtml((post?.tags || []).join(", "))}" />
+              </div>
+            </div>
+            <div class="layui-form-item layui-form-text">
+              <label class="layui-form-label" for="post-summary">摘要</label>
+              <div class="layui-input-block">
+                <textarea id="post-summary" class="layui-textarea" required maxlength="500" placeholder="一句话摘要，用于列表展示">${escapeHtml(post?.summary || "")}</textarea>
+              </div>
+            </div>
 
-          <div class="blog-edit-body">
-            <div id="vditor" class="vditor-host"></div>
-          </div>
-          <p class="form-error blog-edit-error" id="edit-error" hidden></p>
-        </form>
+            <div class="blog-edit-body">
+              <div id="vditor" class="vditor-host"></div>
+            </div>
+            <p class="form-error blog-edit-error" id="edit-error" hidden></p>
+          </form>
+        </div>
       </div>`;
 
     const selectEl = document.getElementById("post-category");
     bindCategoryAdd(categories, selectEl);
+    Docbit.UI.renderForm("select");
 
     const dark = isDarkTheme();
     const initialContent = post?.content || "## 新文章\n\n开始写作…";
@@ -713,6 +899,7 @@
         window.removeEventListener("resize", onResize);
         editorWindowResize = null;
         Docbit.Router.navigate(`/blog/${payload.slug}`);
+        Docbit.UI.success("文章已保存");
       } catch (err) {
         errEl.textContent = err.message;
         errEl.hidden = false;
@@ -720,12 +907,14 @@
     });
 
     document.getElementById("delete-post-btn")?.addEventListener("click", async () => {
-      if (!confirm("确定删除这篇文章？")) return;
+      const ok = await Docbit.UI.confirm("确定删除这篇文章？删除后不可恢复。");
+      if (!ok) return;
       try {
         await Docbit.Api.del(`/api/blog/${encodeURIComponent(post.slug)}`, true);
         window.removeEventListener("resize", onResize);
         editorWindowResize = null;
         Docbit.Router.navigate("/blog/write");
+        Docbit.UI.success("文章已删除");
       } catch (err) {
         errEl.textContent = err.message;
         errEl.hidden = false;

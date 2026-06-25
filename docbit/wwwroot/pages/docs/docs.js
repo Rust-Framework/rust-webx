@@ -50,7 +50,7 @@
     }
   }
 
-  async function loadArticle(workSlug, docsSlug, docPath) {
+  async function loadArticle(docsSlug, docPath) {
     const article = document.getElementById("doc-article");
     if (!article) return;
 
@@ -79,28 +79,35 @@
     ) {
       return false;
     }
-    await loadArticle(workSlug, cached.docsSlug, docPath);
+    await loadArticle(cached.docsSlug, docPath);
     return true;
   }
 
-  async function render(workSlug, docPath, navigate) {
+  function resolveDocPath(index, docPath) {
+    if (docPath) return docPath;
+    const preferred = "FOREWORD.md";
+    const hasPreferred = index.items.some(
+      (i) => i.path === preferred || findPathInItems(index.items, preferred)
+    );
+    const first = findFirstDoc(index.items);
+    return hasPreferred ? preferred : first;
+  }
+
+  async function render(workSlug, docPath) {
     const work = await Docbit.Api.get(`/api/works/${encodeURIComponent(workSlug)}`);
     const docsSlug = work.docs_slug || workSlug;
     const index = await Docbit.Api.get(`/api/docs/${encodeURIComponent(docsSlug)}/index`);
 
     cached = { workSlug, docsSlug, work, index };
 
-    if (!docPath) {
-      const preferred = "FOREWORD.md";
-      const hasPreferred = index.items.some(
-        (i) => i.path === preferred || findPathInItems(index.items, preferred)
+    const targetPath = resolveDocPath(index, docPath);
+    if (!docPath && targetPath) {
+      window.history.replaceState(
+        null,
+        "",
+        `/works/${encodeURIComponent(workSlug)}/docs/${encodeURIComponent(targetPath)}`
       );
-      const first = findFirstDoc(index.items);
-      const target = hasPreferred ? preferred : first;
-      if (target) {
-        navigate(`/works/${workSlug}/docs/${target}`, true);
-        return;
-      }
+      docPath = targetPath;
     }
 
     let content = { content: "# 暂无文档\n\n请在 `docs/` 目录添加 Markdown 文件。" };
@@ -110,36 +117,28 @@
 
     const navHtml = renderDocNav(index.items, workSlug, docPath);
 
-    document.getElementById("app").innerHTML = `
-      <div class="content-shell" id="docs-layout" data-docs="${escapeHtml(docsSlug)}">
-        <div class="sidebar-overlay" id="sidebar-overlay"></div>
-        <aside class="content-sidebar" id="docs-sidebar">
-          <div class="content-sidebar-header">
-            ${brandHtml(docsSlug, index.title, work)}
-            <button type="button" class="sidebar-close" id="sidebar-close" aria-label="关闭目录">×</button>
-          </div>
-          <nav class="content-sidebar-body shell-nav"><ul class="doc-nav">${navHtml}</ul></nav>
-        </aside>
-        <div class="content-main">
-          <div class="shell-topbar">
-            <button type="button" class="btn btn-sm shell-menu-btn" id="sidebar-open">☰</button>
-            <nav class="shell-breadcrumb" aria-label="面包屑">
-              <a href="/" data-nav>首页</a>
-              <span class="sep">/</span>
-              <a href="/works/${escapeHtml(workSlug)}" data-nav>${escapeHtml(work.title)}</a>
-              <span class="sep">/</span>
-              <span class="current">文档</span>
-            </nav>
-          </div>
-          <article class="markdown-body shell-article" id="doc-article">${renderMd(content.content)}</article>
-        </div>
-        <aside class="content-toc-panel docs-toc-panel" id="toc-slot"></aside>
-      </div>`;
+    Docbit.Shell.mount(
+      Docbit.Shell.layout({
+        id: "docs-layout",
+        className: "page-docs",
+        sidebarId: "docs-sidebar",
+        withToc: false,
+        sidebarHeader: brandHtml(docsSlug, index.title, work),
+        sidebarBody: `<ul class="doc-nav">${navHtml}</ul>`,
+        breadcrumb: `
+          <a href="/" data-nav>首页</a>
+          <span class="sep">/</span>
+          <a href="/works/${escapeHtml(workSlug)}" data-nav>${escapeHtml(work.title)}</a>
+          <span class="sep">/</span>
+          <span class="current">文档</span>`,
+        content: `<article class="markdown-body shell-article" id="doc-article">${renderMd(content.content)}</article>`,
+      })
+    );
 
     const article = document.getElementById("doc-article");
     enhance(article);
     updateToc(article);
-    Docbit.Shell.initShellSidebar();
+    Docbit.UI.renderForm();
     document.title = work.title + " — 文档";
   }
 

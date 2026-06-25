@@ -21,10 +21,10 @@
           <p>${escapeHtml(work.description)}</p>
         </div>
         <div class="btn-row">
-          ${hasDocs ? `<a class="btn btn-primary" href="/works/${escapeHtml(work.slug)}/docs" data-nav>查看文档</a>` : ""}
-          ${work.repo_url ? `<a class="btn" href="${escapeHtml(work.repo_url)}" target="_blank" rel="noopener">源码仓库</a>` : ""}
-          ${work.demo_url ? `<a class="btn" href="${escapeHtml(work.demo_url)}" target="_blank" rel="noopener">在线演示</a>` : ""}
-          <a class="btn" href="/" data-nav>← 返回首页</a>
+          ${hasDocs ? `<a class="layui-btn layui-btn-normal" href="/works/${escapeHtml(work.slug)}/docs" data-nav>查看文档</a>` : ""}
+          ${work.repo_url ? `<a class="layui-btn layui-btn-primary" href="${escapeHtml(work.repo_url)}" target="_blank" rel="noopener">源码仓库</a>` : ""}
+          ${work.demo_url ? `<a class="layui-btn layui-btn-primary" href="${escapeHtml(work.demo_url)}" target="_blank" rel="noopener">在线演示</a>` : ""}
+          <a class="layui-btn layui-btn-primary" href="/" data-nav>← 返回首页</a>
         </div>
       </div>`;
     document.title = work.title + " — 作品";

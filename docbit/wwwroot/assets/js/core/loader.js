@@ -2,7 +2,11 @@
 (function () {
   "use strict";
 
-  const loadedCss = new Set(["/app.css"]);
+  const loadedCss = new Set([
+    "/app.css",
+    "/assets/vendor/layui/css/layui.css",
+    "/assets/css/layui-bridge.css",
+  ]);
   const loadedJs = new Set();
 
   const SHELL_CSS = "/pages/shell/shell.css";

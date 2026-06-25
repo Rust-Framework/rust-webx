@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "PascalCase")]
 pub struct SiteConfig {
     pub title: String,
+    #[serde(default = "default_brand_name")]
+    pub brand_name: String,
     pub tagline: String,
     pub author: String,
     pub bio: String,
@@ -58,6 +60,9 @@ pub struct SiteFooter {
     pub site_label: String,
 }
 
+fn default_brand_name() -> String {
+    "Start World".into()
+}
 fn default_stacks() -> String {
     "5".into()
 }
@@ -99,6 +104,7 @@ impl Default for SiteConfig {
     fn default() -> Self {
         Self {
             title: "Start 的作品".into(),
+            brand_name: default_brand_name(),
             tagline: "Rust · Web · Full Stack".into(),
             author: "Developer".into(),
             bio: "个人开发者作品集".into(),

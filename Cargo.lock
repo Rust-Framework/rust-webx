@@ -396,6 +396,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "docbit"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcrypt",
+ "inventory",
+ "jsonwebtoken",
+ "rust-dicore",
+ "rust-ef",
+ "rust-ef-sqlite",
+ "rust-webapp",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "dunce"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1483,30 +1501,12 @@ dependencies = [
 [[package]]
 name = "rust-dicore"
 version = "0.2.6"
-dependencies = [
- "inventory",
- "rust-dicore-macros 0.2.6",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "rust-dicore"
-version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac4214d3c6b6f291826d5dc7d824e0c8ecb453595ced4b3fa663d127c3712263"
 dependencies = [
  "inventory",
- "rust-dicore-macros 0.2.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rust-dicore-macros",
  "thiserror 1.0.69",
-]
-
-[[package]]
-name = "rust-dicore-macros"
-version = "0.2.6"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -1522,10 +1522,12 @@ dependencies = [
 
 [[package]]
 name = "rust-ef"
-version = "0.3.4"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1fda274370d567a1b84ef67d27b3fdc8abecb9698093f814b63f57372ab75d0"
 dependencies = [
  "async-trait",
- "rust-dicore 0.2.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rust-dicore",
  "rust-ef-macros",
  "thiserror 2.0.18",
  "tokio",
@@ -1533,7 +1535,9 @@ dependencies = [
 
 [[package]]
 name = "rust-ef-macros"
-version = "0.3.4"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ab0409f1d9558f9000e3e97c43b315a72c207d1f01771ad5c3ee8529d0409c0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1542,7 +1546,9 @@ dependencies = [
 
 [[package]]
 name = "rust-ef-sqlite"
-version = "0.3.4"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7e7864ba56dfd6e37471bec1e9e467ee10358dce45bd7fd2c0623fb0a65d265"
 dependencies = [
  "async-trait",
  "rusqlite",
@@ -1558,8 +1564,8 @@ dependencies = [
  "hyper",
  "inventory",
  "jsonwebtoken",
- "rust-dicore 0.2.6",
- "rust-dicore-macros 0.2.6",
+ "rust-dicore",
+ "rust-dicore-macros",
  "rust-webapp-core",
  "rust-webapp-host",
  "rust-webapp-macros",
@@ -1576,29 +1582,11 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "inventory",
- "rust-dicore 0.2.6",
+ "rust-dicore",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
-]
-
-[[package]]
-name = "rust-webapp-demo"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bcrypt",
- "inventory",
- "jsonwebtoken",
- "rust-dicore 0.2.6",
- "rust-ef",
- "rust-ef-sqlite",
- "rust-webapp",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -1616,7 +1604,7 @@ dependencies = [
  "jsonwebtoken",
  "matchit",
  "reqwest",
- "rust-dicore 0.2.6",
+ "rust-dicore",
  "rust-webapp-core",
  "rust-webapp-openapi",
  "rust-webapp-spa",

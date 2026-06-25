@@ -2,13 +2,13 @@
 resolver = "2"
 
 members = [
-    "crates/rust-webapp-core",
-    "crates/rust-webapp-host",
-    "crates/rust-webapp-macros",
-    "crates/rust-webapp",
-    "crates/rust-webapp-spa",
-    "crates/rust-webapp-openapi",
-    "demo",
+    "crates/core",
+    "crates/host",
+    "crates/macros",
+    "crates/webapp",
+    "crates/spa",
+    "crates/openapi",
+    "docbit",
 ]
 
 [workspace.package]
@@ -23,16 +23,16 @@ description = "rust-webapp — A Rust WebApi framework inspired by ASP.NET Core,
 
 [workspace.dependencies]
 # Internal crates
-rust-webapp-core = { version = "0.1.0", path = "crates/rust-webapp-core" }
-rust-webapp-host = { version = "0.1.0", path = "crates/rust-webapp-host" }
-rust-webapp-macros = { version = "0.1.0", path = "crates/rust-webapp-macros" }
-rust-webapp = { version = "0.1.0", path = "crates/rust-webapp" }
-rust-webapp-spa = { version = "0.1.0", path = "crates/rust-webapp-spa" }
-rust-webapp-openapi = { version = "0.1.0", path = "crates/rust-webapp-openapi" }
+rust-webapp-core = { version = "0.1.0", path = "crates/core" }
+rust-webapp-host = { version = "0.1.0", path = "crates/host" }
+rust-webapp-macros = { version = "0.1.0", path = "crates/macros" }
+rust-webapp = { version = "0.1.0", path = "crates/webapp" }
+rust-webapp-spa = { version = "0.1.0", path = "crates/spa" }
+rust-webapp-openapi = { version = "0.1.0", path = "crates/openapi" }
 
-# DI framework
-rust-dicore = { path = "../rust-di/crates/rust-dicore", version = "0.2.6" }
-rust-dicore-macros = { path = "../rust-di/crates/rust-dicore-macros", version = "0.2.6" }
+# DI framework (crates.io — no local path required)
+rust-dicore = { version = "0.2.6" }
+rust-dicore-macros = { version = "0.2.6" }
 
 # External dependencies
 async-trait = "0.1"

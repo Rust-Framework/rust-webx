@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Docbit — Developer Portfolio</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+            rel="stylesheet"
+        />
+        <link rel="stylesheet" href="/app.css" />
+    </head>
+    <body>
+        <header class="site-header" id="site-header">
+            <div class="header-inner">
+                <a href="/" class="brand" data-nav>
+                    <span class="brand-mark">◆</span>
+                    <span class="brand-text" id="brand-name">Docbit</span>
+                </a>
+                <nav class="main-nav" id="main-nav">
+                    <a href="/" data-nav>作品</a>
+                    <a href="/blog" data-nav>博客</a>
+                    <a href="/about" data-nav>关于</a>
+                </nav>
+            </div>
+        </header>
+
+        <main id="app">
+            <div class="loading-state">
+                <div class="spinner"></div>
+            </div>
+        </main>
+
+        <footer class="site-footer" id="site-footer">
+            <p>Built with <strong>rust-webapp</strong> · Rust</p>
+        </footer>
+
+        <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+        <script src="/app.js"></script>
+    </body>
+</html>

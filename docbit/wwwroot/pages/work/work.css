@@ -1,5 +1,15 @@
 /* Work detail page */
 
+.page-work {
+    position: relative;
+    min-height: calc(100vh - var(--header-h) - 6rem);
+}
+
+.page-work-inner {
+    position: relative;
+    z-index: 1;
+}
+
 .page-work .detail-header {
     margin-bottom: 1.75rem;
 }

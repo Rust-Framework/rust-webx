@@ -57,6 +57,15 @@
     return `<img src="${src}" alt="" class="${className}" width="${s}" height="${s}" loading="lazy" />`;
   }
 
+  /** Subtle logo watermark — no gradient overlays */
+  function pageDecoHtml(placement) {
+    const place = placement || "br";
+    return `
+      <div class="page-deco page-deco--${place}" aria-hidden="true">
+        <img src="${LOGOS.heroBg}" alt="" class="page-deco-logo" width="320" height="320" loading="lazy" />
+      </div>`;
+  }
+
   window.Docbit = window.Docbit || {};
   Docbit.Utils = {
     escapeHtml,
@@ -67,5 +76,6 @@
     workLogoUrl,
     docsLogoUrl,
     logoImg,
+    pageDecoHtml,
   };
 })();

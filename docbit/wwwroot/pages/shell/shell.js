@@ -47,8 +47,11 @@
           <nav class="content-sidebar-body shell-nav">${sidebarBody}</nav>
         </aside>
         <div class="content-main">
+          ${typeof Docbit !== "undefined" && Docbit.Utils?.pageDecoHtml ? Docbit.Utils.pageDecoHtml("br") : ""}
+          <div class="content-main-inner">
           ${topbar(breadcrumb, actions)}
           ${content}
+          </div>
         </div>
         ${tocHtml}
       </div>`;

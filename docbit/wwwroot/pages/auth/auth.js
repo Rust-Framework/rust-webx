@@ -34,7 +34,7 @@
   ];
 
   function brandName() {
-    return document.getElementById("brand-name")?.textContent?.trim() || "Docbit";
+    return document.getElementById("brand-name")?.textContent?.trim() || "Start World";
   }
 
   function authField(opts) {
@@ -69,22 +69,18 @@
     const site = brandName();
     return `
       <div class="page page-auth">
-        <div class="auth-bg-glow" aria-hidden="true"></div>
         <div class="auth-layout">
           <aside class="auth-aside" aria-hidden="true">
-            <div class="auth-aside-watermark" aria-hidden="true">
-              <img src="${LOGOS.heroBg}" alt="" width="320" height="320" />
-            </div>
             <div class="auth-aside-inner">
-              <a href="/" class="auth-brand" data-nav aria-label="返回首页">
-                <img src="${LOGOS.heroBg}" alt="" class="auth-brand-logo" width="128" height="128" />
-                <div class="auth-brand-text">
-                  <span class="auth-brand-name">${escapeHtml(site)}</span>
-                  <span class="auth-brand-tagline">用 Rust 构建更好的未来</span>
+              <div class="auth-aside-hero">
+                <a href="/" class="auth-aside-logo-link" data-nav aria-label="返回首页">
+                  <img src="${LOGOS.heroBg}" alt="" class="auth-aside-logo" width="96" height="96" />
+                </a>
+                <div class="auth-aside-copy">
+                  <h2 class="auth-aside-title">${escapeHtml(aside.title)}</h2>
+                  <p class="auth-aside-desc">${escapeHtml(aside.desc)}</p>
                 </div>
-              </a>
-              <h2 class="auth-aside-title">${escapeHtml(aside.title)}</h2>
-              <p class="auth-aside-desc">${escapeHtml(aside.desc)}</p>
+              </div>
               <ul class="auth-aside-pills">
                 ${aside.pills
                   .map((p) => `<li><span class="auth-pill">${escapeHtml(p)}</span></li>`)
@@ -191,7 +187,7 @@
       </form>`,
       `<span>还没有账号？<a href="/register" class="auth-link" data-nav>立即注册</a></span>`
     );
-    document.title = "登录 — Docbit";
+    document.title = "登录 — Start World";
     bindForm("login-submit", async (fd) => {
       await Docbit.Auth.login(fd.email, fd.password);
       Docbit.UI.success("登录成功");
@@ -203,7 +199,7 @@
     document.getElementById("app").innerHTML = authShell(
       "register",
       "注册",
-      "填写信息，创建你的 Docbit 账号",
+      "填写信息，创建你的账号",
       `<form class="layui-form auth-form" id="register-form" lay-filter="register-form">
         ${authField({
           icon: "layui-icon-username",
@@ -257,7 +253,7 @@
       </form>`,
       `<span>已有账号？<a href="/login" class="auth-link" data-nav>返回登录</a></span>`
     );
-    document.title = "注册 — Docbit";
+    document.title = "注册 — Start World";
     bindForm("register-submit", async (fd) => {
       if (fd.password !== fd.password2) throw new Error("两次输入的密码不一致");
       await Docbit.Auth.register(fd.name, fd.email, fd.password);
@@ -292,7 +288,7 @@
       </form>`,
       `<a href="/login" class="auth-link auth-back-link" data-nav><i class="layui-icon layui-icon-left" aria-hidden="true"></i> 返回登录</a>`
     );
-    document.title = "找回密码 — Docbit";
+    document.title = "找回密码 — Start World";
     bindForm("forgot-submit", async (fd) => {
       const res = await Docbit.Auth.forgotPassword(fd.email);
       const okEl = document.getElementById("auth-success");
@@ -367,7 +363,7 @@
       </form>`,
       `<a href="/login" class="auth-link auth-back-link" data-nav><i class="layui-icon layui-icon-left" aria-hidden="true"></i> 返回登录</a>`
     );
-    document.title = "重置密码 — Docbit";
+    document.title = "重置密码 — Start World";
     bindForm("reset-submit", async (fd) => {
       if (fd.password !== fd.password2) throw new Error("两次输入的密码不一致");
       const res = await Docbit.Auth.resetPassword(fd.token, fd.password);

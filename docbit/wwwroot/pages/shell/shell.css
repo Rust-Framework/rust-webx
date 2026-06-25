@@ -56,8 +56,14 @@ body.layout-shell #app {
 
 .content-main {
     grid-area: main;
+    position: relative;
     min-width: 0;
     padding: 0 clamp(1.25rem, 3vw, 2.5rem) 3rem;
+}
+
+.content-main-inner {
+    position: relative;
+    z-index: 1;
 }
 
 .shell-topbar {

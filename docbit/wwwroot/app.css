@@ -667,6 +667,49 @@ body.layout-home #app .page-home {
     margin: 0;
 }
 
+/* ── Page logo watermark (work, docs, blog) — icon only, no color blobs ── */
+
+.page-deco {
+    position: absolute;
+    pointer-events: none;
+    user-select: none;
+    z-index: 0;
+}
+
+.page-deco-logo {
+    display: block;
+    width: clamp(180px, 22vw, 280px);
+    height: auto;
+    opacity: 0.04;
+}
+
+[data-theme="dark"] .page-deco-logo {
+    opacity: 0.065;
+}
+
+/* Shell / blog / docs — bottom-right, clipped inside main column */
+.page-deco--br {
+    right: 0;
+    bottom: 0;
+    transform: translate(18%, 22%);
+}
+
+/* Work detail — right edge, above fold */
+.page-deco--work {
+    right: 0;
+    top: 0;
+    transform: translate(22%, -8%);
+}
+
+.page-deco--work .page-deco-logo {
+    width: clamp(200px, 28vw, 300px);
+    opacity: 0.035;
+}
+
+[data-theme="dark"] .page-deco--work .page-deco-logo {
+    opacity: 0.055;
+}
+
 /* ── Work detail ── */
 
 .detail-header { margin-bottom: 2rem; }

@@ -396,7 +396,7 @@
       </div>`
     );
     bindSearchForm(activeCategory);
-    document.title = (q ? `${q} — 搜索` : "博客") + " — " + (siteInfo?.title || "Docbit");
+    document.title = (q ? `${q} — 搜索` : "博客") + " — " + (siteInfo?.brand_name || siteInfo?.title || "Start World");
   }
 
   async function renderPost(slug, siteInfo) {

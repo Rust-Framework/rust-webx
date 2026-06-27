@@ -4,6 +4,10 @@
 //! Navigation-derived fields (e.g. `category_name`, `author_name`, `roles`)
 //! require the caller to have loaded the navigation via `linq!(include ...)`
 //! before conversion; unloaded navigations yield empty defaults.
+//!
+//! 导航访问 API（rust-ef 1.1.0 源码实证）：
+//! - `HasMany<T,J>`：`e.roles.items().iter()`（无 `.iter()` 直接方法）
+//! - `BelongsTo<T>`：`e.category.get().map(...)`（无 `.as_ref()`）
 
 use docbit_contracts::{
     blog::{BlogPostModel, BlogPostSummary},
@@ -23,7 +27,7 @@ impl From<User> for UserModel {
             id: e.id,
             name: e.name,
             email: e.email,
-            roles: e.roles.iter().map(|r| r.name.clone()).collect(),
+            roles: e.roles.items().iter().map(|r| r.name.clone()).collect(),
             created_at: e.created_at,
         }
     }
@@ -41,13 +45,13 @@ impl From<Blog> for BlogPostModel {
             category_id: e.category_id,
             category_name: e
                 .category
-                .as_ref()
+                .get()
                 .map(|c| c.name.clone())
                 .unwrap_or_default(),
             author_id: e.author_id,
             author_name: e
                 .author
-                .as_ref()
+                .get()
                 .map(|a| a.name.clone())
                 .unwrap_or_default(),
             published_at: e.published_at,
@@ -68,13 +72,13 @@ impl From<Blog> for BlogPostSummary {
             category_id: e.category_id,
             category_name: e
                 .category
-                .as_ref()
+                .get()
                 .map(|c| c.name.clone())
                 .unwrap_or_default(),
             author_id: e.author_id,
             author_name: e
                 .author
-                .as_ref()
+                .get()
                 .map(|a| a.name.clone())
                 .unwrap_or_default(),
             published_at: e.published_at,
@@ -121,7 +125,7 @@ impl From<Exhibition> for ExhibitionModel {
             category_id: e.category_id,
             category_name: e
                 .category
-                .as_ref()
+                .get()
                 .map(|c| c.name.clone())
                 .unwrap_or_default(),
             tags: serde_json::from_str(&e.tags).unwrap_or_default(),
@@ -143,6 +147,8 @@ impl From<Role> for RoleModel {
             id: e.id,
             name: e.name,
             description: e.description,
+            created_at: e.created_at,
+            updated_at: e.updated_at,
         }
     }
 }
@@ -151,9 +157,13 @@ impl From<Resource> for ResourceModel {
     fn from(e: Resource) -> Self {
         Self {
             id: e.id,
-            route_pattern: e.route_pattern,
-            method: e.method,
+            name: e.name,
             description: e.description,
+            r#type: e.resource_type,
+            value: e.value,
+            properties: e.properties,
+            created_at: e.created_at,
+            updated_at: e.updated_at,
         }
     }
 }

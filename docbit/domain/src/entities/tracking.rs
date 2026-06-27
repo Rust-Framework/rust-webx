@@ -1,4 +1,4 @@
-//! Tracking entity — site visit statistics.
+//! Tracking entity — site visit statistics (log table, no audit fields).
 
 use rust_ef::prelude::*;
 
@@ -15,8 +15,10 @@ pub struct Tracking {
     #[required]
     #[max_length(10)]
     pub method: String,
-    #[max_length(50)]
+    #[required]
+    #[max_length(64)]
     pub ip: String,
+    #[required]
     #[max_length(500)]
     pub user_agent: String,
     #[max_length(500)]

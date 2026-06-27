@@ -17,6 +17,17 @@ pub struct Role {
     pub name: String,
     #[max_length(200)]
     pub description: String,
+    #[index]
+    pub created_id: Option<i32>, // 无 FK
+    #[required]
+    pub created_at: i64,
+    #[index]
+    pub updated_id: Option<i32>, // 无 FK
+    #[required]
+    pub updated_at: i64,
+    #[required]
+    #[index]
+    pub is_deleted: bool,
     #[navigation]
     pub users: HasMany<User, RoleUser>,
     #[navigation]
@@ -37,4 +48,6 @@ pub struct RoleUser {
     #[foreign_key(Role)]
     #[index]
     pub role_id: i32,
+    #[required]
+    pub created_at: i64, // 联结表仅留 created_at
 }

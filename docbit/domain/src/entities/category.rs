@@ -16,11 +16,20 @@ pub struct Category {
     #[unique]
     pub slug: String,
     #[foreign_key(Category)]
-    pub parent_id: Option<i32>,
+    pub parent_id: Option<i32>, // 自外键
     #[required]
     pub sort_order: i32,
+    #[index]
+    pub created_id: Option<i32>, // 无 FK
     #[required]
     pub created_at: i64,
+    #[index]
+    pub updated_id: Option<i32>, // 无 FK
+    #[required]
+    pub updated_at: i64,
+    #[required]
+    #[index]
+    pub is_deleted: bool,
     #[navigation]
     pub parent: BelongsTo<Category>,
     #[navigation]

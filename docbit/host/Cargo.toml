@@ -1,0 +1,20 @@
+[package]
+name = "docbit-host"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+docbit-contracts.workspace = true
+docbit-domain.workspace = true
+docbit-handlers.workspace = true
+rust-ef.workspace = true
+rust-ef-sqlite.workspace = true
+rust-ef-mysql.workspace = true
+rust-webapp.workspace = true
+rust-dicore.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true

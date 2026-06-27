@@ -1,0 +1,19 @@
+[package]
+name = "docbit-handlers"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+docbit-contracts.workspace = true
+docbit-domain.workspace = true
+rust-ef.workspace = true
+rust-webapp.workspace = true
+rust-dicore.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+jsonwebtoken.workspace = true
+bcrypt = "0.16"
+tracing.workspace = true

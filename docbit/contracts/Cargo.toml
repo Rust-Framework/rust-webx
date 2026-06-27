@@ -1,0 +1,10 @@
+[package]
+name = "docbit-contracts"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+rust-webapp.workspace = true
+serde.workspace = true
+serde_json.workspace = true

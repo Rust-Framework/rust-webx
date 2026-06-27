@@ -1,11 +1,10 @@
 //! User entity — i32 auto-increment PK, multi-role via RoleUser join.
 
 use rust_ef::prelude::*;
-use serde::{Deserialize, Serialize};
 
 use super::role::{Role, RoleUser};
 
-#[derive(Debug, Clone, EntityType, Serialize, Deserialize)]
+#[derive(Debug, Clone, EntityType)]
 #[table("users")]
 pub struct User {
     #[primary_key]

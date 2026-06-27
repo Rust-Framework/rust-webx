@@ -8,3 +8,5 @@ publish = false
 rust-webapp.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+inventory.workspace = true
+async-trait.workspace = true

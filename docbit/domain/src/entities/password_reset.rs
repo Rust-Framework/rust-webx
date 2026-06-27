@@ -1,11 +1,10 @@
 //! PasswordResetToken entity — supports forgot/reset password flow.
 
 use rust_ef::prelude::*;
-use serde::{Deserialize, Serialize};
 
 use super::user::User;
 
-#[derive(Debug, Clone, EntityType, Serialize, Deserialize)]
+#[derive(Debug, Clone, EntityType)]
 #[table("password_reset_tokens")]
 pub struct PasswordResetToken {
     #[primary_key]

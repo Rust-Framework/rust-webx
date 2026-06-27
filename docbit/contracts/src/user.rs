@@ -33,7 +33,7 @@ pub struct ListUsersRequest;
 impl IRequest<Vec<UserModel>> for ListUsersRequest {}
 
 pub struct GetUserRequest {
-    pub id: i32,
+    pub id: String,
 }
 
 /// Get a single user by their unique ID
@@ -54,7 +54,7 @@ impl IRequest<UserModel> for CreateUserRequest {}
 
 #[derive(Deserialize)]
 pub struct UpdateUserRequest {
-    pub id: i32,
+    pub id: String,
     pub name: Option<String>,
     pub email: Option<String>,
 }
@@ -65,7 +65,7 @@ pub struct UpdateUserRequest {
 impl IRequest<UserModel> for UpdateUserRequest {}
 
 pub struct DeleteUserRequest {
-    pub id: i32,
+    pub id: String,
 }
 
 /// Delete a user by their unique ID

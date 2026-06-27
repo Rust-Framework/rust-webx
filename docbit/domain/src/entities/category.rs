@@ -1,9 +1,8 @@
 //! Category entity — hierarchical via self-referencing `parent_id`.
 
 use rust_ef::prelude::*;
-use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, EntityType, Serialize, Deserialize)]
+#[derive(Debug, Clone, EntityType)]
 #[table("categories")]
 pub struct Category {
     #[primary_key]

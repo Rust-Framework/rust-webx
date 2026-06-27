@@ -638,6 +638,8 @@ dependencies = [
 name = "docbit-contracts"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "inventory",
  "rust-webapp",
  "serde",
  "serde_json",

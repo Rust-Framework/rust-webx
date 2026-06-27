@@ -1,12 +1,11 @@
 //! Role + RoleUser entities — many-to-many between User and Role.
 
 use rust_ef::prelude::*;
-use serde::{Deserialize, Serialize};
 
 use super::resource::{Authorize, Resource};
 use super::user::User;
 
-#[derive(Debug, Clone, EntityType, Serialize, Deserialize)]
+#[derive(Debug, Clone, EntityType)]
 #[table("roles")]
 pub struct Role {
     #[primary_key]
@@ -24,7 +23,7 @@ pub struct Role {
     pub resources: HasMany<Resource, Authorize>,
 }
 
-#[derive(Debug, Clone, EntityType, Serialize, Deserialize)]
+#[derive(Debug, Clone, EntityType)]
 #[table("role_users")]
 pub struct RoleUser {
     #[primary_key]

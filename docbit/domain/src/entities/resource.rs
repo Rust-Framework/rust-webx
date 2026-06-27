@@ -4,11 +4,10 @@
 //! table between `Role` and `Resource` (many-to-many).
 
 use rust_ef::prelude::*;
-use serde::{Deserialize, Serialize};
 
 use super::role::Role;
 
-#[derive(Debug, Clone, EntityType, Serialize, Deserialize)]
+#[derive(Debug, Clone, EntityType)]
 #[table("resources")]
 pub struct Resource {
     #[primary_key]
@@ -29,7 +28,7 @@ pub struct Resource {
     pub roles: HasMany<Role, Authorize>,
 }
 
-#[derive(Debug, Clone, EntityType, Serialize, Deserialize)]
+#[derive(Debug, Clone, EntityType)]
 #[table("authorizes")]
 pub struct Authorize {
     #[primary_key]

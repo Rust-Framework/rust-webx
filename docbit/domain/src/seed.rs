@@ -19,7 +19,7 @@ use crate::entities::{Category, Role};
 /// afterwards to create tables and insert the seed rows.
 pub fn seed(ctx: &mut DbContext) {
     // 默认角色：admin + user
-    ctx.model().entity::<Role>().has_data(vec![
+    ctx.model().entity::<Role>().has_data(&[
         Role {
             id: 1,
             name: "admin".into(),
@@ -37,7 +37,7 @@ pub fn seed(ctx: &mut DbContext) {
     ]);
 
     // 默认根分类
-    ctx.model().entity::<Category>().has_data(vec![Category {
+    ctx.model().entity::<Category>().has_data(&[Category {
         id: 1,
         name: "未分类".into(),
         slug: "uncategorized".into(),

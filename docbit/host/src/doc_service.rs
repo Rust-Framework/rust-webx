@@ -1,7 +1,7 @@
 //! Documentation filesystem service — scans `docs/` and serves INDEX.json + markdown.
 //!
-//! 实现合约层的 `IDocumentService`。需要文件系统访问与 `AppPaths`，
-//! 因此放在 host crate 而非 handlers crate。
+//! 实现合约层的 `IDocumentService`。无需任何外部路径注入 ——
+//! docs 目录按框架约定写死为 `<app_base>/docs`，并在缺失时上溯查找。
 //!
 //! `list_portfolio` / `get_portfolio` 从文件系统 INDEX.json 读取元数据并
 //! 返回 `ExhibitionModel`；DB 专属字段（id、category_id、created_at 等）
@@ -9,37 +9,37 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use serde::Deserialize;
 
 use docbit_contracts::docs::{DocContent, DocIndex, DocIndexItem, IDocumentService};
 use docbit_contracts::exhibition::ExhibitionModel;
-
-use crate::paths::AppPaths;
+use rust_webapp::app_base;
 
 #[rust_dicore::inject_attr(singleton, as = dyn IDocumentService)]
-pub struct DocService {
-    paths: Arc<AppPaths>,
-}
+pub struct DocService;
 
 impl DocService {
-    fn root(&self) -> &Path {
-        &self.paths.docs_root
+    /// 文档数据目录：约定为 `<app_base>/docs`，缺失时上溯 cwd 各祖先查找。
+    ///
+    /// 这是本服务的特定约定，与 ASP.NET Core 中 `wwwroot` 的硬编码约定一致，
+    /// 不通过 DI 注入路径。
+    fn root() -> PathBuf {
+        resolve_data_path("docs", &app_base())
     }
 
-    fn work_dir(&self, work: &str) -> PathBuf {
-        self.root().join(work)
+    fn work_dir(work: &str) -> PathBuf {
+        Self::root().join(work)
     }
 
     fn write_index(&self, work: &str, index: &DocIndex) -> Result<(), String> {
-        let path = self.work_dir(work).join("INDEX.json");
+        let path = Self::work_dir(work).join("INDEX.json");
         let json = serde_json::to_string_pretty(index).map_err(|e| e.to_string())?;
         fs::write(path, json).map_err(|e| e.to_string())
     }
 
     fn build_index(&self, work: &str) -> Result<DocIndex, String> {
-        let dir = self.work_dir(work);
+        let dir = Self::work_dir(work);
         let items = self.scan_dir(&dir, &dir)?;
         let title = humanize_slug(work);
         Ok(DocIndex { title, items })
@@ -86,7 +86,7 @@ impl DocService {
     }
 
     fn load_portfolio_item(&self, dir_slug: &str) -> Result<ExhibitionModel, String> {
-        let raw = fs::read_to_string(self.work_dir(dir_slug).join("INDEX.json"))
+        let raw = fs::read_to_string(Self::work_dir(dir_slug).join("INDEX.json"))
             .map_err(|e| e.to_string())?;
 
         if let Ok(root) = serde_json::from_str::<IndexRootV2>(&raw) {
@@ -121,7 +121,7 @@ impl DocService {
     }
 
     fn logo_public_url(&self, dir_slug: &str, logo_name: &str) -> Option<String> {
-        let path = self.work_dir(dir_slug).join(logo_name);
+        let path = Self::work_dir(dir_slug).join(logo_name);
         if !path.is_file() {
             return None;
         }
@@ -133,7 +133,7 @@ impl DocService {
     }
 
     fn resolve_logo_file(&self, dir_slug: &str, logo_name: &str) -> Result<Option<PathBuf>, String> {
-        let path = self.work_dir(dir_slug).join(logo_name);
+        let path = Self::work_dir(dir_slug).join(logo_name);
         if path.is_file() {
             Ok(Some(path))
         } else {
@@ -144,11 +144,11 @@ impl DocService {
 
 impl IDocumentService for DocService {
     fn list_works(&self) -> Result<Vec<String>, String> {
-        if !self.root().is_dir() {
+        if !Self::root().is_dir() {
             return Ok(vec![]);
         }
         let mut works = Vec::new();
-        for entry in fs::read_dir(self.root()).map_err(|e| e.to_string())? {
+        for entry in fs::read_dir(Self::root()).map_err(|e| e.to_string())? {
             let entry = entry.map_err(|e| e.to_string())?;
             if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
                 works.push(entry.file_name().to_string_lossy().to_string());
@@ -159,7 +159,7 @@ impl IDocumentService for DocService {
     }
 
     fn index(&self, work: &str) -> Result<DocIndex, String> {
-        let dir = self.work_dir(work);
+        let dir = Self::work_dir(work);
         if !dir.is_dir() {
             return Err(format!("Documentation not found for work '{}'", work));
         }
@@ -174,7 +174,7 @@ impl IDocumentService for DocService {
     }
 
     fn content(&self, work: &str, path: &str) -> Result<DocContent, String> {
-        let dir = self.work_dir(work);
+        let dir = Self::work_dir(work);
         if !dir.is_dir() {
             return Err(format!("Documentation not found for work '{}'", work));
         }
@@ -194,13 +194,13 @@ impl IDocumentService for DocService {
     }
 
     fn ensure_all_indexes(&self) -> Result<(), String> {
-        if !self.root().is_dir() {
+        if !Self::root().is_dir() {
             return Err(format!(
                 "Docs directory not found: {}",
-                self.root().display()
+                Self::root().display()
             ));
         }
-        for entry in fs::read_dir(self.root()).map_err(|e| e.to_string())? {
+        for entry in fs::read_dir(Self::root()).map_err(|e| e.to_string())? {
             let entry = entry.map_err(|e| e.to_string())?;
             if !entry.file_type().map_err(|e| e.to_string())?.is_dir() {
                 continue;
@@ -221,7 +221,7 @@ impl IDocumentService for DocService {
     fn list_portfolio(&self) -> Result<Vec<ExhibitionModel>, String> {
         let mut items = Vec::new();
         for slug in self.list_works()? {
-            let index_path = self.work_dir(&slug).join("INDEX.json");
+            let index_path = Self::work_dir(&slug).join("INDEX.json");
             if !index_path.is_file() {
                 continue;
             }
@@ -232,7 +232,7 @@ impl IDocumentService for DocService {
     }
 
     fn get_portfolio(&self, slug: &str) -> Result<ExhibitionModel, String> {
-        let index_path = self.work_dir(slug).join("INDEX.json");
+        let index_path = Self::work_dir(slug).join("INDEX.json");
         if !index_path.is_file() {
             return Err(format!("Portfolio item not found: {}", slug));
         }
@@ -244,7 +244,7 @@ impl IDocumentService for DocService {
         fs::create_dir_all(&dest_dir).map_err(|e| e.to_string())?;
 
         for slug in self.list_works()? {
-            let index_path = self.work_dir(&slug).join("INDEX.json");
+            let index_path = Self::work_dir(&slug).join("INDEX.json");
             if !index_path.is_file() {
                 continue;
             }
@@ -506,4 +506,43 @@ fn title_from_markdown(path: &Path) -> Option<String> {
         }
     }
     None
+}
+
+/// 解析相对数据目录（如 `docs`）。
+///
+/// 约定优先：先看 `<base>/<relative>`，再看 `<base>/../<relative>`（workspace 级），
+/// 最后从 cwd 向上遍历查找。命中即返回；都未命中返回 `<base>/<relative>`。
+fn resolve_data_path(relative: &str, base: &Path) -> PathBuf {
+    let rel = Path::new(relative);
+
+    let direct = base.join(rel);
+    if direct.exists() {
+        return direct;
+    }
+
+    if let Some(workspace) = base.parent() {
+        let workspace_path = workspace.join(rel);
+        if workspace_path.exists() {
+            return workspace_path;
+        }
+    }
+
+    if let Ok(cwd) = std::env::current_dir() {
+        let mut dir: Option<&Path> = Some(cwd.as_path());
+        while let Some(d) = dir {
+            if let Ok(entries) = std::fs::read_dir(d) {
+                for entry in entries.flatten() {
+                    if entry.path().is_dir() {
+                        let candidate = entry.path().join(rel);
+                        if candidate.exists() {
+                            return candidate;
+                        }
+                    }
+                }
+            }
+            dir = d.parent();
+        }
+    }
+
+    direct
 }

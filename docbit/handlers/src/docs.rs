@@ -1,10 +1,16 @@
-//! Documentation API handlers.
+//! Documentation API handlers — read-only over `IDocumentService`.
+//!
+//! `IDocumentService` 由 host crate 实现（需要文件系统访问与 `AppPaths`），
+//! 此处仅注入 `Arc<dyn IDocumentService>` 并提供 HTTP 包装。
 
 use std::sync::Arc;
 
 use rust_webapp::*;
 
-use crate::contracts::docs::*;
+use docbit_contracts::docs::{
+    DocContent, DocIndex, GetDocContentRequest, GetDocIndexRequest, IDocumentService,
+    ListDocWorksRequest,
+};
 
 #[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<ListDocWorksRequest, Vec<String>>)]
 pub struct ListDocWorksHandler {
@@ -24,10 +30,8 @@ pub struct GetDocContentHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ListDocWorksRequest, Vec<String>> for ListDocWorksHandler {
-    async fn handle(&self, _req: ListDocWorksRequest) -> Result<Vec<String>> {
-        self.docs
-            .list_works()
-            .map_err(|e| Error::Internal(e))
+    async fn handle(&self, _: ListDocWorksRequest) -> Result<Vec<String>> {
+        self.docs.list_works().map_err(Error::Internal)
     }
 }
 
@@ -35,9 +39,7 @@ impl IRequestHandler<ListDocWorksRequest, Vec<String>> for ListDocWorksHandler {
 #[async_trait]
 impl IRequestHandler<GetDocIndexRequest, DocIndex> for GetDocIndexHandler {
     async fn handle(&self, req: GetDocIndexRequest) -> Result<DocIndex> {
-        self.docs
-            .index(&req.work)
-            .map_err(|e| Error::NotFound(e))
+        self.docs.index(&req.work).map_err(Error::NotFound)
     }
 }
 
@@ -45,13 +47,13 @@ impl IRequestHandler<GetDocIndexRequest, DocIndex> for GetDocIndexHandler {
 #[async_trait]
 impl IRequestHandler<GetDocContentRequest, DocContent> for GetDocContentHandler {
     async fn handle(&self, req: GetDocContentRequest) -> Result<DocContent> {
+        // 路径编码约定：`/` 在 URL 路径段中以 `:` 替代，这里还原。
         let path = percent_decode(&req.path).replace(':', "/");
-        self.docs
-            .content(&req.work, &path)
-            .map_err(|e| Error::NotFound(e))
+        self.docs.content(&req.work, &path).map_err(Error::NotFound)
     }
 }
 
+/// 简易 percent-decoding：把 `%XX` 与 `+` 还原为原始字符。
 fn percent_decode(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     let mut chars = s.chars();

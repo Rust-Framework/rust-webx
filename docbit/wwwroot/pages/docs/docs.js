@@ -94,7 +94,7 @@
   }
 
   async function render(workSlug, docPath) {
-    const work = await Docbit.Api.get(`/api/works/${encodeURIComponent(workSlug)}`);
+    const work = await Docbit.Api.get(`/api/exhibitions/${encodeURIComponent(workSlug)}`);
     const docsSlug = work.docs_slug || workSlug;
     const index = await Docbit.Api.get(`/api/docs/${encodeURIComponent(docsSlug)}/index`);
 

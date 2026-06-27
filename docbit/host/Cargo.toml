@@ -18,3 +18,5 @@ tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
+bcrypt = "0.16"
+inventory.workspace = true

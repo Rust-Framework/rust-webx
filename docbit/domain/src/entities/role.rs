@@ -1,0 +1,41 @@
+//! Role + RoleUser entities — many-to-many between User and Role.
+
+use rust_ef::prelude::*;
+use serde::{Deserialize, Serialize};
+
+use super::resource::{Authorize, Resource};
+use super::user::User;
+
+#[derive(Debug, Clone, EntityType, Serialize, Deserialize)]
+#[table("roles")]
+pub struct Role {
+    #[primary_key]
+    #[auto_increment]
+    pub id: i32,
+    #[required]
+    #[max_length(50)]
+    #[unique]
+    pub name: String,
+    #[max_length(200)]
+    pub description: String,
+    #[navigation]
+    pub users: HasMany<User, RoleUser>,
+    #[navigation]
+    pub resources: HasMany<Resource, Authorize>,
+}
+
+#[derive(Debug, Clone, EntityType, Serialize, Deserialize)]
+#[table("role_users")]
+pub struct RoleUser {
+    #[primary_key]
+    #[auto_increment]
+    pub id: i32,
+    #[required]
+    #[foreign_key(User)]
+    #[index]
+    pub user_id: i32,
+    #[required]
+    #[foreign_key(Role)]
+    #[index]
+    pub role_id: i32,
+}

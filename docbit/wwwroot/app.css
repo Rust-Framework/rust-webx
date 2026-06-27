@@ -272,7 +272,8 @@ body.layout-home #app .page-home {
     word-break: break-all;
 }
 
-.user-dropdown-item {
+.user-dropdown-item,
+a.user-dropdown-item {
     display: block;
     width: 100%;
     padding: 0.5rem 0.65rem;
@@ -283,10 +284,12 @@ body.layout-home #app .page-home {
     font-size: 0.85rem;
     text-align: left;
     cursor: pointer;
+    text-decoration: none;
     transition: background var(--transition);
 }
 
-.user-dropdown-item:hover {
+.user-dropdown-item:hover,
+a.user-dropdown-item:hover {
     background: var(--accent-soft);
     color: var(--accent);
 }

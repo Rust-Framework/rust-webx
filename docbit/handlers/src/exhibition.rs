@@ -7,7 +7,8 @@ use rust_webapp::*;
 use tokio::sync::Mutex;
 
 use docbit_contracts::exhibition::{
-    ExhibitionModel, GetExhibitionRequest, ListExhibitionsRequest, UpsertExhibitionRequest,
+    DeleteExhibitionRequest, ExhibitionModel, GetExhibitionRequest, ListExhibitionsRequest,
+    UpsertExhibitionRequest,
 };
 use docbit_domain::entities::Exhibition;
 
@@ -25,6 +26,11 @@ pub struct GetExhibitionHandler {
 
 #[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<UpsertExhibitionRequest, ExhibitionModel>)]
 pub struct UpsertExhibitionHandler {
+    ctx: Arc<Mutex<DbContext>>,
+}
+
+#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<DeleteExhibitionRequest, String>)]
+pub struct DeleteExhibitionHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
@@ -150,5 +156,49 @@ impl IRequestHandler<UpsertExhibitionRequest, ExhibitionModel> for UpsertExhibit
         .ok_or_else(|| Error::Internal("Exhibition vanished after save".into()))?;
         tracing::info!("[Exhibition] Upserted: {} ({})", saved.slug, saved.id);
         Ok(ExhibitionModel::from(saved))
+    }
+}
+
+#[handler(inject)]
+#[async_trait]
+impl IRequestHandler<DeleteExhibitionRequest, String> for DeleteExhibitionHandler {
+    async fn handle_with_claims(
+        &self,
+        req: DeleteExhibitionRequest,
+        claims: Option<&dyn IClaims>,
+    ) -> Result<String> {
+        let op = operator_id(claims);
+        let now = now_secs();
+
+        let mut ctx = self.ctx.lock().await;
+        let items = ctx
+            .set::<Exhibition>()
+            .query()
+            .filter_column("slug", "=", DbValue::String(req.slug.clone()))
+            .filter_column("is_deleted", "=", DbValue::Bool(false))
+            .to_list()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?;
+
+        if items.is_empty() {
+            return Err(Error::NotFound(format!("Exhibition not found: {}", req.slug)));
+        }
+
+        for mut item in items {
+            item.is_deleted = true;
+            item.updated_id = op;
+            item.updated_at = now;
+            ctx.set::<Exhibition>().update(item);
+        }
+        ctx.save_changes()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?;
+
+        tracing::info!("[Exhibition] Soft-deleted: {}", req.slug);
+        Ok(format!("Deleted: {}", req.slug))
+    }
+
+    async fn handle(&self, _: DeleteExhibitionRequest) -> Result<String> {
+        unreachable!("handle_with_claims is always called")
     }
 }

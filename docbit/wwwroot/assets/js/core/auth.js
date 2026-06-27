@@ -103,6 +103,7 @@
           </button>
           <div class="user-dropdown" id="user-dropdown" hidden>
             <div class="user-dropdown-meta">${Docbit.Utils.escapeHtml(user.email)}</div>
+            ${user.roles && user.roles.includes("admin") ? '<a href="/admin/index.html" class="user-dropdown-item" data-nav>后台管理</a>' : ""}
             <button type="button" class="user-dropdown-item" id="logout-btn">退出登录</button>
           </div>
         </div>`;

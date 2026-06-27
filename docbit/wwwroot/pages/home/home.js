@@ -121,7 +121,7 @@
   }
 
   async function render(siteInfo) {
-    const works = await Docbit.Api.get("/api/works");
+    const works = await Docbit.Api.get("/api/exhibitions");
     const sorted = [...works].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
     const site = siteInfo || {};
     const stats = site.stats || {};

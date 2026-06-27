@@ -184,7 +184,7 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
             return Err(Error::Http("Invalid email or password".into()));
         }
 
-        let model = UserModel {
+        let model = UserView {
             id: user.id,
             name: user.name.clone(),
             email: user.email.clone(),
@@ -199,21 +199,21 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
 
 #[handler(inject)]
 #[async_trait]
-impl IRequestHandler<AuthMeRequest, UserModel> for AuthMeHandler {
-    async fn handle(&self, _: AuthMeRequest) -> Result<UserModel> {
+impl IRequestHandler<AuthMeRequest, UserView> for AuthMeHandler {
+    async fn handle(&self, _: AuthMeRequest) -> Result<UserView> {
         unreachable!("handle_with_claims is always called by the dispatcher")
     }
     async fn handle_with_claims(
         &self,
         _: AuthMeRequest,
         claims: Option<&dyn IClaims>,
-    ) -> Result<UserModel> {
+    ) -> Result<UserView> {
         let uid = operator_id(claims)
             .ok_or_else(|| Error::Http("Not authenticated".into()))?;
         let user = load_user_by_id(&self.ctx, uid)
             .await?
             .ok_or_else(|| Error::Http("User not found".into()))?;
-        Ok(UserModel {
+        Ok(UserView {
             id: user.id,
             name: user.name,
             email: user.email,

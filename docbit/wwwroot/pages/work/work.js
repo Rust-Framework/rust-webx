@@ -5,7 +5,7 @@
   const { escapeHtml, categoryBadge, tagList, workLogoUrl, pageDecoHtml } = Docbit.Utils;
 
   async function render(slug) {
-    const work = await Docbit.Api.get(`/api/works/${encodeURIComponent(slug)}`);
+    const work = await Docbit.Api.get(`/api/exhibitions/${encodeURIComponent(slug)}`);
     const hasDocs = work.docs_slug && work.docs_slug.length > 0;
     const logo = workLogoUrl(work);
 

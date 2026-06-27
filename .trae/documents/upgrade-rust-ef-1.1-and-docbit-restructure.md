@@ -152,18 +152,19 @@ host       ──→  contracts, domain, handlers, rust-ef, rust-ef-sqlite, rust
 
 ### 3.2 审计字段与软删除约定（适用大部分主表）
 
-为满足运维审计与数据安全需求，**主表**（users / roles / categories / blogs / comments / exhibitions / resources）统一追加以下 5 个审计 + 软删除字段；**联结表**（role_users / authorizes）与**日志表**（tracking）不追加，保持轻量。
+为满足运维审计与数据安全需求，**主表**（users / roles / categories / blogs / comments / exhibitions / resources）统一追加以下 5 个审计 + 软删除字段；**联结表**（role\_users / authorizes）与**日志表**（tracking）不追加，保持轻量。
 
-| 字段          | 类型          | 约束                                       | 说明                                       |
-| ----------- | ----------- | ---------------------------------------- | ---------------------------------------- |
-| created\_id | Option<i32> | `#[index]`（**不加 `#[foreign_key]`**）      | 创建人 user id；无 FK 约束，软删除用户后仍可保留创建者信息       |
-| created\_at | i64         | `#[required]`                            | 创建时间戳                                    |
-| updated\_id | Option<i32> | `#[index]`（**不加 `#[foreign_key]`**）      | 更新人 user id                              |
-| updated\_at | i64         | `#[required]`                            | 更新时间戳                                    |
-| is\_deleted | bool        | `#[required]` `#[index]`                 | 软删除标记，默认 false                           |
+| 字段          | 类型          | 约束                                      | 说明                                  |
+| ----------- | ----------- | --------------------------------------- | ----------------------------------- |
+| created\_id | Option<i32> | `#[index]`（**不加** **`#[foreign_key]`**） | 创建人 user id；无 FK 约束，软删除用户后仍可保留创建者信息 |
+| created\_at | i64         | `#[required]`                           | 创建时间戳                               |
+| updated\_id | Option<i32> | `#[index]`（**不加** **`#[foreign_key]`**） | 更新人 user id                         |
+| updated\_at | i64         | `#[required]`                           | 更新时间戳                               |
+| is\_deleted | bool        | `#[required]` `#[index]`                | 软删除标记，默认 false                      |
 
 > **设计决策**：
-> 1. `created_id` / `updated_id` **不使用 `#[foreign_key(User)]`** —— 避免与 User 表自引用产生重复 `FK_User` 常量（详见 3.4 节 rust-ef 限制），且软删除用户后审计记录仍需可读。
+>
+> 1. `created_id` / `updated_id` **不使用** **`#[foreign_key(User)]`** —— 避免与 User 表自引用产生重复 `FK_User` 常量（详见 3.4 节 rust-ef 限制），且软删除用户后审计记录仍需可读。
 > 2. `is_deleted` 加 `#[index]`，所有列表查询须带 `where is_deleted = false` 过滤（handlers 层统一封装）。
 > 3. 首条 users 记录（初始化 admin）的 `created_id` / `updated_id` 为 `None`。
 
@@ -171,32 +172,32 @@ host       ──→  contracts, domain, handlers, rust-ef, rust-ef-sqlite, rust
 
 #### 3.3.1 users 表
 
-| 列名             | 类型     | 约束                                             | 说明        |
-| -------------- | ------ | ---------------------------------------------- | --------- |
-| id             | i32    | `#[primary_key]` `#[auto_increment]`           | 主键        |
-| name           | String | `#[required]` `#[max_length(100)]`             | 昵称        |
-| email          | String | `#[required]` `#[max_length(200)]` `#[unique]` | 邮箱（唯一）    |
-| password\_hash | String | `#[required]` `#[max_length(200)]`             | bcrypt 哈希 |
-| created\_id   | Option<i32> | `#[index]`（无 FK）                          | 创建人（首条 admin 为 None）     |
-| created\_at    | i64    | `#[required]`                                  | Unix 时间戳  |
-| updated\_id   | Option<i32> | `#[index]`（无 FK）                          | 更新人                      |
-| updated\_at   | i64    | `#[required]`                                  | 更新时间戳                    |
-| is\_deleted   | bool   | `#[required]` `#[index]`                       | 软删除标记                    |
+| 列名             | 类型          | 约束                                             | 说明                   |
+| -------------- | ----------- | ---------------------------------------------- | -------------------- |
+| id             | i32         | `#[primary_key]` `#[auto_increment]`           | 主键                   |
+| name           | String      | `#[required]` `#[max_length(100)]`             | 昵称                   |
+| email          | String      | `#[required]` `#[max_length(200)]` `#[unique]` | 邮箱（唯一）               |
+| password\_hash | String      | `#[required]` `#[max_length(200)]`             | bcrypt 哈希            |
+| created\_id    | Option<i32> | `#[index]`（无 FK）                               | 创建人（首条 admin 为 None） |
+| created\_at    | i64         | `#[required]`                                  | Unix 时间戳             |
+| updated\_id    | Option<i32> | `#[index]`（无 FK）                               | 更新人                  |
+| updated\_at    | i64         | `#[required]`                                  | 更新时间戳                |
+| is\_deleted    | bool        | `#[required]` `#[index]`                       | 软删除标记                |
 
 > **变更**：移除 `role` 字段（改为通过 RoleUser 关联表实现多角色）；`id` 从 String 改为 i32 自增；`created_at` 从 String 改为 i64；新增审计字段与软删除。
 
 #### 3.3.2 roles 表
 
-| 列名          | 类型     | 约束                                            | 说明                    |
-| ----------- | ------ | --------------------------------------------- | --------------------- |
-| id          | i32    | `#[primary_key]` `#[auto_increment]`          | 主键                    |
-| name        | String | `#[required]` `#[max_length(50)]` `#[unique]` | 角色名（admin/user/guest） |
-| description | String | `#[max_length(200)]`                          | 描述                    |
-| created\_id | Option<i32> | `#[index]`（无 FK）                         | 创建人                  |
-| created\_at | i64    | `#[required]`                                  | 创建时间                 |
-| updated\_id | Option<i32> | `#[index]`（无 FK）                         | 更新人                  |
-| updated\_at | i64    | `#[required]`                                  | 更新时间                 |
-| is\_deleted | bool   | `#[required]` `#[index]`                       | 软删除标记                |
+| 列名          | 类型          | 约束                                            | 说明                    |
+| ----------- | ----------- | --------------------------------------------- | --------------------- |
+| id          | i32         | `#[primary_key]` `#[auto_increment]`          | 主键                    |
+| name        | String      | `#[required]` `#[max_length(50)]` `#[unique]` | 角色名（admin/user/guest） |
+| description | String      | `#[max_length(200)]`                          | 描述                    |
+| created\_id | Option<i32> | `#[index]`（无 FK）                              | 创建人                   |
+| created\_at | i64         | `#[required]`                                 | 创建时间                  |
+| updated\_id | Option<i32> | `#[index]`（无 FK）                              | 更新人                   |
+| updated\_at | i64         | `#[required]`                                 | 更新时间                  |
+| is\_deleted | bool        | `#[required]` `#[index]`                      | 软删除标记                 |
 
 #### 3.3.3 role\_users 表（角色分配）
 
@@ -217,32 +218,32 @@ host       ──→  contracts, domain, handlers, rust-ef, rust-ef-sqlite, rust
 | slug        | String      | `#[required]` `#[max_length(100)]` `#[unique]` | URL 友好标识           |
 | parent\_id  | Option<i32> | `#[foreign_key(Category)]`                     | 父分类 FK（自外键，可空表根分类） |
 | sort\_order | i32         | `#[required]`                                  | 排序                 |
-| created\_id| Option<i32> | `#[index]`（无 FK）                              | 创建人                |
-| created\_at| i64         | `#[required]`                                  | 创建时间               |
-| updated\_id| Option<i32> | `#[index]`（无 FK）                              | 更新人                |
-| updated\_at| i64         | `#[required]`                                  | 更新时间               |
-| is\_deleted| bool        | `#[required]` `#[index]`                       | 软删除标记              |
+| created\_id | Option<i32> | `#[index]`（无 FK）                               | 创建人                |
+| created\_at | i64         | `#[required]`                                  | 创建时间               |
+| updated\_id | Option<i32> | `#[index]`（无 FK）                               | 更新人                |
+| updated\_at | i64         | `#[required]`                                  | 更新时间               |
+| is\_deleted | bool        | `#[required]` `#[index]`                       | 软删除标记              |
 
 > 实体加 `#[navigation] pub parent: BelongsTo<Category>` 和 `#[navigation] pub children: HasMany<Category>`。
 
 #### 3.3.5 blogs 表（博客）
 
-| 列名            | 类型     | 约束                                                  | 说明                             |
-| ------------- | ------ | --------------------------------------------------- | ------------------------------ |
-| id            | i32    | `#[primary_key]` `#[auto_increment]`                | 主键                             |
-| slug          | String | `#[required]` `#[max_length(200)]` `#[unique]`      | URL 友好标识                       |
-| title         | String | `#[required]` `#[max_length(200)]`                  | 标题                             |
-| summary       | String | `#[max_length(500)]`                                | 摘要                             |
-| content       | String | `#[required]`                                       | Markdown 正文                    |
-| tags          | String | `#[required]`                                       | JSON 数组字符串（如 `["rust","web"]`） |
-| category\_id  | i32    | `#[required]` `#[foreign_key(Category)]` `#[index]` | 分类 FK                          |
-| author\_id    | i32    | `#[required]` `#[foreign_key(User)]` `#[index]`     | 作者 FK                          |
-| published\_at | i64    | `#[required]`                                       | 发布时间戳                          |
-| created\_at   | i64    | `#[required]`                                       | 创建时间戳                          |
-| updated\_at   | i64    | `#[required]`                                       | 更新时间戳                          |
-| created\_id   | Option<i32> | `#[index]`（无 FK）                              | 创建人（author_id 已存作者，此为运维审计创建人）   |
-| updated\_id   | Option<i32> | `#[index]`（无 FK）                              | 更新人                            |
-| is\_deleted   | bool   | `#[required]` `#[index]`                            | 软删除标记                          |
+| 列名            | 类型          | 约束                                                  | 说明                             |
+| ------------- | ----------- | --------------------------------------------------- | ------------------------------ |
+| id            | i32         | `#[primary_key]` `#[auto_increment]`                | 主键                             |
+| slug          | String      | `#[required]` `#[max_length(200)]` `#[unique]`      | URL 友好标识                       |
+| title         | String      | `#[required]` `#[max_length(200)]`                  | 标题                             |
+| summary       | String      | `#[max_length(500)]`                                | 摘要                             |
+| content       | String      | `#[required]`                                       | Markdown 正文                    |
+| tags          | String      | `#[required]`                                       | JSON 数组字符串（如 `["rust","web"]`） |
+| category\_id  | i32         | `#[required]` `#[foreign_key(Category)]` `#[index]` | 分类 FK                          |
+| author\_id    | i32         | `#[required]` `#[foreign_key(User)]` `#[index]`     | 作者 FK                          |
+| published\_at | i64         | `#[required]`                                       | 发布时间戳                          |
+| created\_at   | i64         | `#[required]`                                       | 创建时间戳                          |
+| updated\_at   | i64         | `#[required]`                                       | 更新时间戳                          |
+| created\_id   | Option<i32> | `#[index]`（无 FK）                                    | 创建人（author\_id 已存作者，此为运维审计创建人） |
+| updated\_id   | Option<i32> | `#[index]`（无 FK）                                    | 更新人                            |
+| is\_deleted   | bool        | `#[required]` `#[index]`                            | 软删除标记                          |
 
 > 实体加 `#[navigation] pub category: BelongsTo<Category>` 和 `#[navigation] pub author: BelongsTo<User>` 和 `#[navigation] pub comments: HasMany<Comment>`。
 > `tags` 用 String 存 JSON，读写时 `serde_json::to_string` / `from_str`。
@@ -260,7 +261,7 @@ host       ──→  contracts, domain, handlers, rust-ef, rust-ef-sqlite, rust
 | parent\_id  | Option<i32> | `#[foreign_key(Comment)]`                       | 回复目标评论 FK（直接回复）  |
 | quoted\_id  | Option<i32> | `#[foreign_key(Comment)]`                       | 引用评论 FK（引用某条）    |
 | created\_at | i64         | `#[required]`                                   | 创建时间戳            |
-| updated\_id | Option<i32> | `#[index]`（无 FK）                              | 更新人（编辑评论时记录）     |
+| updated\_id | Option<i32> | `#[index]`（无 FK）                                | 更新人（编辑评论时记录）     |
 | updated\_at | i64         | `#[required]`                                   | 更新时间戳            |
 | is\_deleted | bool        | `#[required]` `#[index]`                        | 软删除标记（审核隐藏）      |
 
@@ -286,8 +287,8 @@ host       ──→  contracts, domain, handlers, rust-ef, rust-ef-sqlite, rust
 | logo\_url    | Option<String> | `#[max_length(500)]`                                | Logo URL           |
 | created\_at  | i64            | `#[required]`                                       | 创建时间戳              |
 | updated\_at  | i64            | `#[required]`                                       | 更新时间戳              |
-| created\_id  | Option<i32>    | `#[index]`（无 FK）                                   | 创建人                |
-| updated\_id  | Option<i32>    | `#[index]`（无 FK）                                   | 更新人                |
+| created\_id  | Option<i32>    | `#[index]`（无 FK）                                    | 创建人                |
+| updated\_id  | Option<i32>    | `#[index]`（无 FK）                                    | 更新人                |
 | is\_deleted  | bool           | `#[required]` `#[index]`                            | 软删除标记              |
 
 > 实体加 `#[navigation] pub category: BelongsTo<Category>`。
@@ -297,21 +298,22 @@ host       ──→  contracts, domain, handlers, rust-ef, rust-ef-sqlite, rust
 
 > **重新设计**：取消原 `route_pattern + method` 双列硬编码，改为通用 `type + value + properties` 三段式模型，可表达应用/模块/页面/操作/数据/其他六类资源，配合 `Authorize` 表支撑框架动态鉴权。
 
-| 列名            | 类型          | 约束                                          | 说明                                              |
-| ------------- | ----------- | ------------------------------------------- | ----------------------------------------------- |
-| id            | i32         | `#[primary_key]` `#[auto_increment]`        | 唯一标识                                            |
-| name          | String      | `#[required]` `#[max_length(100)]`          | 资源名称                                            |
-| description   | String      | `#[max_length(500)]`                        | 资源描述                                            |
-| type          | String      | `#[required]` `#[max_length(20)]` `#[index]`| 资源分类：`应用`/`模块`/`页面`/`操作`/`数据`/`其他`            |
-| value         | String      | `#[required]` `#[max_length(200)]`          | 资源值；`页面`/`操作` 类型时为路由（如 `/api/blog/{slug}`）     |
-| properties    | String      | `#[required]`                               | 配置属性 JSON；`操作` 类型存 `{"method":"GET"}` 等        |
-| created\_id   | Option<i32> | `#[index]`                                  | 创建人（审计字段，无 FK）                                  |
-| created\_at   | i64         | `#[required]`                               | 创建时间                                            |
-| updated\_id   | Option<i32> | `#[index]`                                  | 更新人（审计字段，无 FK）                                  |
-| updated\_at   | i64         | `#[required]`                               | 更新时间                                            |
-| is\_deleted   | bool        | `#[required]` `#[index]`                    | 软删除标记                                           |
+| 列名          | 类型          | 约束                                           | 说明                                         |
+| ----------- | ----------- | -------------------------------------------- | ------------------------------------------ |
+| id          | i32         | `#[primary_key]` `#[auto_increment]`         | 唯一标识                                       |
+| name        | String      | `#[required]` `#[max_length(100)]`           | 资源名称                                       |
+| description | String      | `#[max_length(500)]`                         | 资源描述                                       |
+| type        | String      | `#[required]` `#[max_length(20)]` `#[index]` | 资源分类：`应用`/`模块`/`页面`/`操作`/`数据`/`其他`         |
+| value       | String      | `#[required]` `#[max_length(200)]`           | 资源值；`页面`/`操作` 类型时为路由（如 `/api/blog/{slug}`） |
+| properties  | String      | `#[required]`                                | 配置属性 JSON；`操作` 类型存 `{"method":"GET"}` 等    |
+| created\_id | Option<i32> | `#[index]`                                   | 创建人（审计字段，无 FK）                             |
+| created\_at | i64         | `#[required]`                                | 创建时间                                       |
+| updated\_id | Option<i32> | `#[index]`                                   | 更新人（审计字段，无 FK）                             |
+| updated\_at | i64         | `#[required]`                                | 更新时间                                       |
+| is\_deleted | bool        | `#[required]` `#[index]`                     | 软删除标记                                      |
 
 > **动态鉴权匹配规则**（host/authorizer.rs 实现）：
+>
 > 1. 加载所有 `type ∈ {页面, 操作}` 且 `is_deleted = false` 的 Resource。
 > 2. 对入站请求：用 `value`（路由模式，支持 `{slug}` 占位与 `*` 通配）匹配请求路径；`操作` 类型再从 `properties` 解析 `method` 匹配 HTTP 方法。
 > 3. 命中 Resource → 查 `Authorize` 表得 `role_id` 集合 → 校验当前用户角色是否命中。
@@ -328,17 +330,17 @@ host       ──→  contracts, domain, handlers, rust-ef, rust-ef-sqlite, rust
 
 #### 3.3.10 tracking 表（站点跟踪）
 
-| 列名     | 类型     | 约束                                            | 说明      |
-| ------ | ------ | --------------------------------------------- | ------- |
-| id     | i32    | `#[primary_key]` `#[auto_increment]`          | 主键      |
-| path   | String | `#[required]` `#[max_length(500)]` `#[index]` | 访问路径    |
-| method | String | `#[required]` `#[max_length(10)]`             | HTTP 方法 |
-| ip          | String      | `#[required]` `#[max_length(64)]`               | 客户端 IP  |
-| user\_agent | String      | `#[required]` `#[max_length(500)]`              | UA      |
-| referer     | Option<String> | `#[max_length(500)]`                       | 来源页     |
-| status      | i32         | `#[required]`                                  | 响应状态码   |
-| duration\_ms| i32         | `#[required]`                                  | 耗时(ms)  |
-| visited\_at | i64         | `#[required]` `#[index]`                       | 访问时间戳   |
+| 列名           | 类型             | 约束                                            | 说明      |
+| ------------ | -------------- | --------------------------------------------- | ------- |
+| id           | i32            | `#[primary_key]` `#[auto_increment]`          | 主键      |
+| path         | String         | `#[required]` `#[max_length(500)]` `#[index]` | 访问路径    |
+| method       | String         | `#[required]` `#[max_length(10)]`             | HTTP 方法 |
+| ip           | String         | `#[required]` `#[max_length(64)]`             | 客户端 IP  |
+| user\_agent  | String         | `#[required]` `#[max_length(500)]`            | UA      |
+| referer      | Option<String> | `#[max_length(500)]`                          | 来源页     |
+| status       | i32            | `#[required]`                                 | 响应状态码   |
+| duration\_ms | i32            | `#[required]`                                 | 耗时(ms)  |
+| visited\_at  | i64            | `#[required]` `#[index]`                      | 访问时间戳   |
 
 > 日志表，不追加审计字段与软删除（按需定期清理）。
 
@@ -350,42 +352,54 @@ host       ──→  contracts, domain, handlers, rust-ef, rust-ef-sqlite, rust
 
 ### 4.1 导航属性访问 API
 
-| 类型           | 错误写法              | 正确写法                              | 方法签名                                   | 源码位置            |
-| ------------ | ----------------- | --------------------------------- | -------------------------------------- | --------------- |
-| `HasMany<T,J>` | `e.roles.iter()`  | `e.roles.items().iter()`          | `pub fn items(&self) -> &[T]`          | relations.rs:181 |
-| `BelongsTo<T>` | `e.category.as_ref()` | `e.category.get()`            | `pub fn get(&self) -> Option<&T>`      | relations.rs:63  |
+| 类型             | 错误写法                  | 正确写法                     | 方法签名                              | 源码位置             |
+| -------------- | --------------------- | ------------------------ | --------------------------------- | ---------------- |
+| `HasMany<T,J>` | `e.roles.iter()`      | `e.roles.items().iter()` | `pub fn items(&self) -> &[T]`     | relations.rs:181 |
+| `BelongsTo<T>` | `e.category.as_ref()` | `e.category.get()`       | `pub fn get(&self) -> Option<&T>` | relations.rs:63  |
 
-- `HasMany` **未实现** `IntoIterator`/`Deref`，必须先 `.items()` 取 `&[T]` 再 `.iter()`。
-- `BelongsTo` **未实现** `Deref`，用 `.get()` 返回 `Option<&T>`。
-- 调用前须 `linq!(...; include b.nav)` 预加载，否则 `items()` 为空、`get()` 为 `None`。
+* `HasMany` **未实现** `IntoIterator`/`Deref`，必须先 `.items()` 取 `&[T]` 再 `.iter()`。
+
+* `BelongsTo` **未实现** `Deref`，用 `.get()` 返回 `Option<&T>`。
+
+* 调用前须 `linq!(...; include b.nav)` 预加载，否则 `items()` 为空、`get()` 为 `None`。
 
 ### 4.2 重复 `FK_<Target>` 常量（E0592）规避
 
-- **根因**：`#[derive(EntityType)]` 为每个 `#[foreign_key(Target)]` 生成 `pub const FK_{Target}: &'static str = {column};`，命名仅取目标实体名，与字段名无关；同实体两个 FK 指向同目标 → 重复定义。
-- **宏不支持** `name=`/`as=` 消歧参数（`extract_foreign_key_target` 仅字符串化括号内全部 token）。
-- **规避方案**：`Comment` 的 `parent_id` 保留 `#[foreign_key(Comment)]`，`quoted_id` 改为**裸 `#[foreign_key]`**（无参数）。裸形式经 `has_attr` 仍置 `is_foreign_key=true`，但 `extract_foreign_key_target` 对 `Meta::Path` 返回 `None`，跳过常量生成。`FK_*` 常量无外部引用，安全。
-- **连带风险**：`parent`/`quoted` 两个 `BelongsTo<Comment>` 的 `fk_column` 元数据都会被宏设为首个 FK 列（`blog_id`），导致 `include b.parent`/`b.quoted` 运行时按错误列关联。**规避**：不在 `linq!` 中 `include` `parent`/`quoted`，改为查询后按 `parent_id`/`quoted_id` 二次查询手动装配。
+* **根因**：`#[derive(EntityType)]` 为每个 `#[foreign_key(Target)]` 生成 `pub const FK_{Target}: &'static str = {column};`，命名仅取目标实体名，与字段名无关；同实体两个 FK 指向同目标 → 重复定义。
+
+* **宏不支持** `name=`/`as=` 消歧参数（`extract_foreign_key_target` 仅字符串化括号内全部 token）。
+
+* **规避方案**：`Comment` 的 `parent_id` 保留 `#[foreign_key(Comment)]`，`quoted_id` 改为**裸** **`#[foreign_key]`**（无参数）。裸形式经 `has_attr` 仍置 `is_foreign_key=true`，但 `extract_foreign_key_target` 对 `Meta::Path` 返回 `None`，跳过常量生成。`FK_*` 常量无外部引用，安全。
+
+* **连带风险**：`parent`/`quoted` 两个 `BelongsTo<Comment>` 的 `fk_column` 元数据都会被宏设为首个 FK 列（`blog_id`），导致 `include b.parent`/`b.quoted` 运行时按错误列关联。**规避**：不在 `linq!` 中 `include` `parent`/`quoted`，改为查询后按 `parent_id`/`quoted_id` 二次查询手动装配。
 
 ### 4.3 `linq!` include 语法
 
-- 正确：`linq!(ctx.set::<Blog>(); include b.posts)` —— 分号分隔，点访问，`b` 隐式绑定。
-- 嵌套：`linq!(ctx.set::<Blog>(); include b.posts then b.comments)`。
-- 错误：`include b => b.posts`（`=>` 会被 order 子句解析器误消费）。
+* 正确：`linq!(ctx.set::<Blog>(); include b.posts)` —— 分号分隔，点访问，`b` 隐式绑定。
+
+* 嵌套：`linq!(ctx.set::<Blog>(); include b.posts then b.comments)`。
+
+* 错误：`include b => b.posts`（`=>` 会被 order 子句解析器误消费）。
 
 ### 4.4 其他已确认 API
 
-- `has_data(&mut self, data: &[T])` —— 取切片引用，非 `Vec`。
-- `set::<T>()` 用于 CRUD；`model().entity::<T>()` 仅用于配置/种子。
-- `DbContext::from_options(&options)?` 同步返回 `EFResult<DbContext>`，无 `.await`。
-- 错误类型：`rust_ef::error::{EFResult, EFError}`（非 `LrefResult`）。
-- 实体 derive 仅 `#[derive(Debug, Clone, EntityType)]`，**不加** `Serialize, Deserialize`（导航字段未实现这些 trait）。
-- `on_save_failed` 返回 `()`，非 `EFResult<()>`（与 `on_saving`/`on_saved` 不同）。
+* `has_data(&mut self, data: &[T])` —— 取切片引用，非 `Vec`。
+
+* `set::<T>()` 用于 CRUD；`model().entity::<T>()` 仅用于配置/种子。
+
+* `DbContext::from_options(&options)?` 同步返回 `EFResult<DbContext>`，无 `.await`。
+
+* 错误类型：`rust_ef::error::{EFResult, EFError}`（非 `LrefResult`）。
+
+* 实体 derive 仅 `#[derive(Debug, Clone, EntityType)]`，**不加** `Serialize, Deserialize`（导航字段未实现这些 trait）。
+
+* `on_save_failed` 返回 `()`，非 `EFResult<()>`（与 `on_saving`/`on_saved` 不同）。
 
 ***
 
 ## 五、实体定义（已修正，含审计字段 + 简化命名）
 
-> 命名规则：实体类型简化（`Blog` 非 `BlogEntity`）；DTO 保留 `*Model` 后缀。审计字段 `created_id`/`updated_id` 一律 `Option<i32>` + `#[index]`，**不加 `#[foreign_key]`**。
+> 命名规则：实体类型简化（`Blog` 非 `BlogEntity`）；DTO 保留 `*Model` 后缀。审计字段 `created_id`/`updated_id` 一律 `Option<i32>` + `#[index]`，**不加** **`#[foreign_key]`**。
 
 ### 5.1 [domain/src/entities/user.rs](file:///e:/GitCode/RF/rust-webapp/docbit/domain/src/entities/user.rs)
 
@@ -621,9 +635,11 @@ let category_name: String = e.category.get().map(|c| c.name.clone()).unwrap_or_d
 
 ### 5.10 seed.rs 修正
 
-- `has_data(&[...])` 取切片引用。
-- 种子：2 个 Role（admin/user）+ 1 个 Category（uncategorized）。admin 用户在 host/startup.rs 用 bcrypt 运行时生成 hash 后插入（不硬编码 hash）。
-- Resource 种子：写入核心操作资源（type=操作，value=各 API 路由，properties=`{"method":"GET"}` 等）。
+* `has_data(&[...])` 取切片引用。
+
+* 种子：2 个 Role（admin/user）+ 1 个 Category（uncategorized）。admin 用户在 host/startup.rs 用 bcrypt 运行时生成 hash 后插入（不硬编码 hash）。
+
+* Resource 种子：写入核心操作资源（type=操作，value=各 API 路由，properties=`{"method":"GET"}` 等）。
 
 ***
 
@@ -631,98 +647,128 @@ let category_name: String = e.category.get().map(|c| c.name.clone()).unwrap_or_d
 
 > 每个 service 用 `#[rust_dicore::inject_attr]` 注册，实现 contracts 中的 trait 或直接消费 `Mutex<DbContext>`。所有列表查询带 `is_deleted = false` 过滤；写操作在 `save_changes` 前由 AuditInterceptor 注入 `created_id`/`updated_id`/时间戳。
 
-| 模块          | service 职责                                          | handler 路由（已在 contracts 定义）                          |
-| ----------- | -------------------------------------------------- | ---------------------------------------------------- |
-| auth        | 注册(bcrypt)/登录(JWT)/me/忘记密码/重置密码                     | POST /api/auth/register、/login、GET /api/auth/me 等     |
-| blog        | 实现 `IBlogService`：linq! 查 Blog + include category/author/comments；slug 唯一校验 | GET /api/blog、/api/blog/{slug} 等                      |
-| comment     | 按 blog_id 列表；parent_id/quoted_id 二次查询手动装配（勿 include） | POST /api/comments、GET /api/comments/{blog_id}、DELETE |
-| category    | CRUD + 树构建（递归 children）                             | GET /api/categories、POST/PUT/DELETE                   |
-| exhibition  | CRUD + slug 唯一；`list_portfolio`/`get_portfolio` 实现  | /api/exhibitions 系列（替换原 /api/works）                   |
-| user        | 6 个 CRUD；不返回 password_hash；assign/revoke 角色          | /api/users 系列 + /api/role-users                      |
-| rbac        | Role/Resource/Authorize CRUD；Resource 写入新字段结构        | /api/roles、/api/resources、/api/authorizes             |
-| tracking    | 汇总统计 + 列表（仅 admin）                                  | GET /api/tracking、/api/tracking/summary               |
-| docs        | 保留文件系统文档读取；`list_portfolio`/`get_portfolio` 转调 exhibition service | /api/docs、/api/docs/{work}/index、/content             |
-| site        | 读 appsettings.json 返回 SiteConfig                     | GET /api/site                                         |
-| cache       | 演示 MemoryCache get-or-create                        | GET /api/cache/stats                                  |
+| 模块         | service 职责                                                                  | handler 路由（已在 contracts 定义）                            |
+| ---------- | --------------------------------------------------------------------------- | ------------------------------------------------------ |
+| auth       | 注册(bcrypt)/登录(JWT)/me/忘记密码/重置密码                                             | POST /api/auth/register、/login、GET /api/auth/me 等      |
+| blog       | 实现 `IBlogService`：linq! 查 Blog + include category/author/comments；slug 唯一校验 | GET /api/blog、/api/blog/{slug} 等                       |
+| comment    | 按 blog\_id 列表；parent\_id/quoted\_id 二次查询手动装配（勿 include）                     | POST /api/comments、GET /api/comments/{blog\_id}、DELETE |
+| category   | CRUD + 树构建（递归 children）                                                     | GET /api/categories、POST/PUT/DELETE                    |
+| exhibition | CRUD + slug 唯一；`list_portfolio`/`get_portfolio` 实现                          | /api/exhibitions 系列（替换原 /api/works）                    |
+| user       | 6 个 CRUD；不返回 password\_hash；assign/revoke 角色                                | /api/users 系列 + /api/role-users                        |
+| rbac       | Role/Resource/Authorize CRUD；Resource 写入新字段结构                               | /api/roles、/api/resources、/api/authorizes              |
+| tracking   | 汇总统计 + 列表（仅 admin）                                                          | GET /api/tracking、/api/tracking/summary                |
+| docs       | 保留文件系统文档读取；`list_portfolio`/`get_portfolio` 转调 exhibition service           | /api/docs、/api/docs/{work}/index、/content              |
+| site       | 读 appsettings.json 返回 SiteConfig                                            | GET /api/site                                          |
+| cache      | 演示 MemoryCache get-or-create                                                | GET /api/cache/stats                                   |
 
 ***
 
 ## 七、host 层（组合根）
 
-| 文件              | 职责                                                                       |
-| --------------- | ------------------------------------------------------------------------ |
-| main.rs         | `Host::builder()` 入口，读取环境变量 `ASPNETCORE_ENVIRONMENT` 选 Development/Production |
-| config.rs       | `AppSettings`：App/Jwt/Cors/Database 配置；Database.Provider = sqlite\|mysql   |
-| paths.rs        | AppPaths：wwwroot/db_path/docs_root（移除 blog_root）                          |
-| bootstrap.rs    | `configure(svc)`：注册 AppPaths、`Mutex<DbContext>`、选 Provider（SQLite 本地 / MySQL 线上） |
-| interceptor.rs  | `AuditInterceptor`（ISaveChangesInterceptor）：注入 created_id/updated_id/时间戳；错误类型用 EFResult/EFError |
-| authorizer.rs   | `DynamicAuthorizer`：加载 type∈{页面,操作} Resource + Authorize → 缓存 AuthzMatrix；按 value 路由匹配 + properties.method 匹配；`#[authorize]` 接入 |
-| middleware.rs   | `TrackingMiddleware`：记录访问到 tracking 表（异步，不阻塞响应）                            |
-| startup.rs      | `DbInitService`（IHostedService）：`ensure_created()` + `has_data()` 种子 + docs.ensure_all_indexes + admin 用户 bcrypt 初始化 |
+| 文件             | 职责                                                                                                                              |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| main.rs        | `Host::builder()` 入口，读取环境变量 `ASPNETCORE_ENVIRONMENT` 选 Development/Production                                                   |
+| config.rs      | `AppSettings`：App/Jwt/Cors/Database 配置；Database.Provider = sqlite\|mysql                                                        |
+| paths.rs       | AppPaths：wwwroot/db\_path/docs\_root（移除 blog\_root）                                                                             |
+| bootstrap.rs   | `configure(svc)`：注册 AppPaths、`Mutex<DbContext>`、选 Provider（SQLite 本地 / MySQL 线上）                                                |
+| interceptor.rs | `AuditInterceptor`（ISaveChangesInterceptor）：注入 created\_id/updated\_id/时间戳；错误类型用 EFResult/EFError                               |
+| authorizer.rs  | `DynamicAuthorizer`：加载 type∈{页面,操作} Resource + Authorize → 缓存 AuthzMatrix；按 value 路由匹配 + properties.method 匹配；`#[authorize]` 接入 |
+| middleware.rs  | `TrackingMiddleware`：记录访问到 tracking 表（异步，不阻塞响应）                                                                                 |
+| startup.rs     | `DbInitService`（IHostedService）：`ensure_created()` + `has_data()` 种子 + docs.ensure\_all\_indexes + admin 用户 bcrypt 初始化          |
 
 **数据库 Provider 选择**：
-- Development：SQLite，`db_path = docbit/host/docbit.db`
-- Production：MySQL `gz-cdb-g7aefwbv.sql.tencentcdb.com:63675`，用户 root，密码见 appsettings.Production.json（不入库）
+
+* Development：SQLite，`db_path = docbit/host/docbit.db`
+
+* Production：MySQL `gz-cdb-g7aefwbv.sql.tencentcdb.com:63675`，用户 root，密码见 appsettings.Production.json（不入库）
 
 ***
 
 ## 八、实现步骤（8 步，含当前进度）
 
 ### 步骤 1 ✅ workspace 配置
+
 根 [Cargo.toml](file:///e:/GitCode/RF/rust-webapp/Cargo.toml) 已加 4 个 docbit 子 crate member + workspace deps（rust-ef 1.1、rust-ef-sqlite 1.1、rust-ef-mysql 1.1）。
 
 ### 步骤 2 ✅ contracts crate（已完成编译）
+
 11 个模块全部完成，已修复：path 参数 String 类型、inventory/async-trait 依赖、RevokeRole/ListComments/ListTracking 路由适配。
 
 ### 步骤 3 ⏳ domain crate（进行中，7 个错误待修）
+
 已完成：9 实体定义骨架、conversions.rs、seed.rs。
 **待修（本方案已给出修正）**：
+
 1. comment.rs：`quoted_id` 改裸 `#[foreign_key]`（见 5.5）
 2. conversions.rs：`HasMany` 用 `.items().iter()`、`BelongsTo` 用 `.get().map(...)`（见 5.9）
 3. 全部实体补审计字段 + 软删除（见第五章）
 4. resource.rs 按新设计重写（见 5.7）
 5. seed.rs：`has_data(&[...])` 已修；补 Resource 种子
-6. password_reset.rs：保留（auth 模块用）
+6. password\_reset.rs：保留（auth 模块用）
 
 ### 步骤 4 ⬜ handlers crate（11 模块，service + handler）
+
 按第六章表逐模块实现。优先级：auth → blog → exhibition → category → comment → user → rbac → tracking → docs → site → cache。
 
 ### 步骤 5 ⬜ host crate
+
 按第七章表实现 8 个文件。关键：authorizer.rs 的新 Resource 匹配逻辑、startup.rs 的 admin bcrypt 初始化。
 
 ### 步骤 6 ⬜ 配置 + wwwroot 迁移 + JS 路由
-- appsettings.json / Development.json / Production.json 落到 docbit/host/
-- wwwroot 迁到 docbit/host/wwwroot/
-- 前端 JS：`/api/works` → `/api/exhibitions` 全局替换
+
+* appsettings.json / Development.json / Production.json 落到 docbit/host/
+
+* wwwroot 迁到 docbit/host/wwwroot/
+
+* 前端 JS：`/api/works` → `/api/exhibitions` 全局替换
 
 ### 步骤 7 ⬜ 删除旧文件
-- docbit/src/（整树）
-- docbit/Cargo.toml（旧单 crate）
-- docbit/appsettings*.json
-- docbit/docbit.db
+
+* docbit/src/（整树）
+
+* docbit/Cargo.toml（旧单 crate）
+
+* docbit/appsettings\*.json
+
+* docbit/docbit.db
 
 ### 步骤 8 ⬜ 编译验证
-- `cargo build --workspace`
-- `cargo build -p docbit-host`
-- 运行 docbit-host，验证：登录、博客 CRUD、评论引用/回复、分类树、作品列表、动态鉴权、访问统计
+
+* `cargo build --workspace`
+
+* `cargo build -p docbit-host`
+
+* 运行 docbit-host，验证：登录、博客 CRUD、评论引用/回复、分类树、作品列表、动态鉴权、访问统计
 
 ***
 
 ## 九、验证清单
 
-- [ ] contracts crate `cargo build -p docbit-contracts` 通过
-- [ ] domain crate `cargo build -p docbit-domain` 通过（含 9 实体 + 审计字段 + Resource 新设计）
-- [ ] handlers crate `cargo build -p docbit-handlers` 通过
-- [ ] host crate `cargo build -p docbit-host` 通过
-- [ ] `cargo build --workspace` 全绿
-- [ ] 运行后 SQLite 自动建 10 张表（含审计字段）
-- [ ] admin 用户初始化（bcrypt hash 运行时生成）
-- [ ] 博客从 DB 读取（非文件系统）
-- [ ] 评论 parent_id/quoted_id 引用/回复工作（手动二次查询）
-- [ ] 动态鉴权：未授权角色访问 /api/users 被拒
-- [ ] 软删除：删除博客后列表不显示，DB 中 is_deleted=true
-- [ ] 线上 MySQL 连接成功（Production 配置）
-- [ ] 前端 /api/exhibitions 正常返回作品列表
+* [ ] contracts crate `cargo build -p docbit-contracts` 通过
+
+* [ ] domain crate `cargo build -p docbit-domain` 通过（含 9 实体 + 审计字段 + Resource 新设计）
+
+* [ ] handlers crate `cargo build -p docbit-handlers` 通过
+
+* [ ] host crate `cargo build -p docbit-host` 通过
+
+* [ ] `cargo build --workspace` 全绿
+
+* [ ] 运行后 SQLite 自动建 10 张表（含审计字段）
+
+* [ ] admin 用户初始化（bcrypt hash 运行时生成）
+
+* [ ] 博客从 DB 读取（非文件系统）
+
+* [ ] 评论 parent\_id/quoted\_id 引用/回复工作（手动二次查询）
+
+* [ ] 动态鉴权：未授权角色访问 /api/users 被拒
+
+* [ ] 软删除：删除博客后列表不显示，DB 中 is\_deleted=true
+
+* [ ] 线上 MySQL 连接成功（Production 配置）
+
+* [ ] 前端 /api/exhibitions 正常返回作品列表
 
 ***
 
@@ -733,6 +779,6 @@ let category_name: String = e.category.get().map(|c| c.name.clone()).unwrap_or_d
 3. **Resource 重新设计**：`type + value + properties` 三段式通用模型，替换 `route_pattern + method`。
 4. **双自外键规避**：`parent_id` 命名 FK，`quoted_id` 裸 `#[foreign_key]`；运行时勿 include parent/quoted，手动二次查询。
 5. **导航访问 API**：`HasMany.items().iter()`、`BelongsTo.get().map(...)`。
-6. **blogs.created_id vs author_id**：author_id 是博客作者，created_id/updated_id 是运维审计操作人，语义分离。
-7. **联结表/日志表不加审计**：role_users、authorizes 仅 created_at；tracking 仅 visited_at。
+6. **blogs.created\_id vs author\_id**：author\_id 是博客作者，created\_id/updated\_id 是运维审计操作人，语义分离。
+7. **联结表/日志表不加审计**：role\_users、authorizes 仅 created\_at；tracking 仅 visited\_at。
 

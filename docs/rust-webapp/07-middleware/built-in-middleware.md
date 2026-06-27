@@ -10,8 +10,8 @@
 | Timing | 自动 | Server-Timing 头 |
 | SecurityHeaders | 自动 | X-Frame-Options 等 |
 | CORS | `use_cors(config)` | 跨域 |
-| JWT Auth | `use_auth()` | Bearer Token 认证 |
-| Resource Auth | `use_auth()` 自动 | 基于路由的授权 |
+| JWT Auth | `add_authentication()` | Bearer Token 认证 |
+| Resource Auth | `add_authentication()` 自动 | 基于路由的授权 |
 | RateLimit | 配置启用 | 请求速率限制 |
 | Compression | 自动 | Gzip 压缩 |
 | SPA | `use_spa("wwwroot")` | 静态文件托管 |
@@ -33,7 +33,7 @@ Host::builder()
 ## JWT 认证
 
 ```rust
-Host::builder().use_auth()
+Host::builder().add_authentication()
 ```
 
 自动注册 `jwt_middleware`，从 `Jwt.Secret` 配置读取密钥。

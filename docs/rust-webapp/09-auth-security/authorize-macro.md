@@ -23,12 +23,12 @@ impl IRequest<SettingsDto> for UpdateSettingsRequest {}
 
 `#[authorize]` 宏在编译期记录授权要求，`Host::build()` 时 `collect_authorizers()` 自动构建 `ResourceAuthorization` 策略。
 
-## 与 use_auth() 的关系
+## 与 add_authentication() 的关系
 
 | 配置 | 效果 |
 |------|------|
-| 无 `use_auth()` | `#[authorize]` 元数据收集但不执行 |
-| `use_auth()` | JWT 认证 + 授权策略生效 |
+| 无 `add_authentication()` | `#[authorize]` 元数据收集但不执行 |
+| `add_authentication()` | JWT 认证 + 授权策略生效 |
 
 ## Docbit 实例
 

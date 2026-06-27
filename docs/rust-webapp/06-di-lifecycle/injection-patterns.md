@@ -63,7 +63,7 @@ pub struct GetDocIndexHandler {
 Host::builder()
     .register(common::bootstrap::configure)  // AppPaths + DbContext
     .use_spa(...)
-    .use_auth()
+    .add_authentication()
     .build();
 ```
 

@@ -47,7 +47,7 @@ Host::builder()
 
 ```rust
 Host::builder()
-    .use_auth()
+    .add_authentication()
     .use_cors(config)
     .use_memory_cache()
     .configure(|app| app.useOptions(|o| { ... }))

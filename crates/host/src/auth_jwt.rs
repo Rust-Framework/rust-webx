@@ -1,4 +1,4 @@
-﻿//! JWT authentication module for the LRWF framework.
+//! JWT authentication module for the LRWF framework.
 //!
 //! Provides `JwtAuth` â€?an `IAuthenticationHandler` implementation that reads
 //! a Bearer token from the `Authorization` header and validates it using
@@ -203,7 +203,7 @@ pub fn jwt_middleware(handler: Arc<dyn IAuthenticationHandler>) -> impl IMiddlew
 static JWT_ENCODING_SECRET: OnceLock<String> = OnceLock::new();
 
 /// Initialize the global JWT encoding secret from the configured secret.
-/// This is called automatically by `.use_auth()` on the `HostBuilder`,
+/// This is called automatically by `.add_authentication()` on the `HostBuilder`,
 /// but can also be called manually if needed.
 ///
 /// # Panics

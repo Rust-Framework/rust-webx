@@ -22,7 +22,7 @@ let policy = ResourceAuthorization::new()
     .allow_permission("/api/settings", "settings:write");
 ```
 
-`use_auth()` 自动从 `#[authorize]` 编译期元数据构建策略。
+`add_authentication()` 自动从 `#[authorize]` 编译期元数据构建策略。
 
 ## 授权流程
 

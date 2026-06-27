@@ -78,7 +78,7 @@ impl IRequest<UserDto> for CreateUserRequest {}
 impl IRequest<SettingsDto> for UpdateSettingsRequest {}
 ```
 
-授权元数据在编译期收集，`use_auth()` 启用后由 `resource_auth_middleware` 执行。
+授权元数据在编译期收集，`add_authentication()` 启用后由 `resource_auth_middleware` 执行。
 
 ## 常见错误
 

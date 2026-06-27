@@ -66,7 +66,7 @@ pub struct HostBuilder {
     spa_root: Option<String>,
     options_modifiers: Vec<Box<dyn FnOnce(&mut AppOptions) + Send>>,
     cors_config: Option<CorsConfig>,
-    use_auth: bool,
+    auth_enabled: bool,
 }
 
 #[allow(clippy::type_complexity)]
@@ -100,7 +100,7 @@ impl HostBuilder {
             spa_root: None,
             options_modifiers: Vec::new(),
             cors_config: None,
-            use_auth: false,
+            auth_enabled: false,
         }
     }
 
@@ -136,10 +136,10 @@ impl HostBuilder {
     ///
     /// ```ignore
     /// Host::builder()
-    ///     .bind_config::<SiteConfig>("Site")
+    ///     .add_options::<SiteConfig>("Site")
     ///     .build()
     /// ```
-    pub fn bind_config<T>(self, section: &str) -> Self
+    pub fn add_options<T>(self, section: &str) -> Self
     where
         T: for<'de> serde::Deserialize<'de> + Default + Send + Sync + 'static,
     {
@@ -149,7 +149,7 @@ impl HostBuilder {
             let appsettings = config::load_appsettings(mode).unwrap_or_default();
             let bound: T = config::bind_config(&appsettings, &section);
             tracing::info!(
-                "[Host] bind_config<{}>(\"{}\") registered",
+                "[Host] add_options<{}>(\"{}\") registered",
                 std::any::type_name::<T>(),
                 section
             );
@@ -167,8 +167,19 @@ impl HostBuilder {
         self
     }
 
-    pub fn use_auth(mut self) -> Self {
-        self.use_auth = true;
+    /// Register JWT authentication service and middleware.
+    ///
+    /// 参考 ASP.NET Core 的 `services.AddAuthentication()` + `app.UseAuthentication()`：
+    /// 启用 JWT Bearer Token 认证，中间件自动添加到管道。授权（`#[authorize]`）
+    /// 由框架通过编译期元数据自动收集，无需显式调用。
+    ///
+    /// ```ignore
+    /// Host::builder()
+    ///     .add_authentication()
+    ///     .build()
+    /// ```
+    pub fn add_authentication(mut self) -> Self {
+        self.auth_enabled = true;
         self
     }
 
@@ -179,11 +190,11 @@ impl HostBuilder {
     ///
     /// ```ignore
     /// Host::builder()
-    ///     .use_memory_cache()
+    ///     .add_memory_cache()
     ///     .build()
     ///     .run().await;
     /// ```
-    pub fn use_memory_cache(mut self) -> Self {
+    pub fn add_memory_cache(mut self) -> Self {
         let cache = Arc::new(MemoryCache::new());
         self.service_configs
             .push(Box::new(move |svc| svc.instance(cache)));
@@ -191,7 +202,7 @@ impl HostBuilder {
     }
 
     /// Register a memory cache with custom configuration.
-    pub fn use_memory_cache_with(mut self, max_entries: usize) -> Self {
+    pub fn add_memory_cache_with(mut self, max_entries: usize) -> Self {
         let cache = Arc::new(MemoryCache::new().with_max_entries(max_entries));
         self.service_configs
             .push(Box::new(move |svc| svc.instance(Arc::clone(&cache))));
@@ -277,7 +288,7 @@ impl HostBuilder {
             pipeline.add_middleware(Arc::new(SpaMiddleware::new(spa_root.clone())));
         }
 
-        if self.use_auth {
+        if self.auth_enabled {
             let secret = options.jwt.secret.clone();
             if !secret.is_empty() {
                 let jwt_auth = Arc::new(JwtAuth::new(
@@ -288,7 +299,7 @@ impl HostBuilder {
                 init_jwt_secret(&secret);
             } else {
                 tracing::warn!(
-                    "use_auth() enabled but no JWT secret configured. Set jwt.secret in appsettings.json or JWT_SECRET env var."
+                    "add_authentication() enabled but no JWT secret configured. Set jwt.secret in appsettings.json or JWT_SECRET env var."
                 );
             }
         }

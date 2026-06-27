@@ -24,7 +24,7 @@ let host = Host::builder()
     .mode(AppMode::Development)
     .register(common::bootstrap::configure)
     .use_spa(wwwroot)
-    .use_auth()
+    .add_authentication()
     .use_memory_cache()
     .build();
 

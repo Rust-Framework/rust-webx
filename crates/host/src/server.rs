@@ -1,4 +1,4 @@
-﻿//! Host builder and hyper server integration.
+//! Host builder and hyper server integration.
 //!
 //! Includes built-in exception middleware: errors produced by endpoints
 //! are caught and converted to well-formed HTTP error responses using
@@ -94,7 +94,9 @@ impl HostBuilder {
     pub fn new() -> Self {
         Self {
             service_configs: Vec::new(),
-            mode: AppMode::default(),
+            // 默认从 `APP_ENV` 环境变量解析运行模式；未设置时为 Development。
+            // 应用可通过 `.mode()` 显式覆盖。
+            mode: AppMode::from_env(),
             spa_root: None,
             options_modifiers: Vec::new(),
             cors_config: None,

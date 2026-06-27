@@ -1,4 +1,4 @@
-﻿//! Built-in configuration support: appsettings.json + AppOptions pattern.
+//! Built-in configuration support: appsettings.json + AppOptions pattern.
 //!
 //! The framework automatically loads `appsettings.json` (merged with
 //! `appsettings.Development.json` in dev mode) and binds it to the
@@ -160,17 +160,20 @@ pub struct AppOptions {
 // Config loading helpers
 // ---------------------------------------------------------------------------
 
-/// Load the merged appsettings JSON (base + Development overlay + env overrides).
+/// Load the merged appsettings JSON (base + environment overlay + env overrides).
+///
+/// 按运行模式自动合并对应的 `appsettings.{Mode}.json` overlay：
+/// - `Development` → `appsettings.Development.json`
+/// - `Production`  → `appsettings.Production.json`
 ///
 /// Environment variables prefixed with `APP__` override the corresponding JSON values.
 /// For example, `APP__App__Address=0.0.0.0:8080` overrides `{"App": {"Address": "..."}}`.
 pub fn load_appsettings(mode: AppMode) -> Option<serde_json::Value> {
     let mut base = read_json_file("appsettings.json")?;
 
-    if mode == AppMode::Development {
-        if let Some(dev) = read_json_file("appsettings.Development.json") {
-            merge_json(&mut base, dev);
-        }
+    let overlay_name = mode.overlay_filename();
+    if let Some(overlay) = read_json_file(overlay_name) {
+        merge_json(&mut base, overlay);
     }
 
     // Apply environment variable overrides (APP__Section__Key pattern)
@@ -257,7 +260,18 @@ fn read_json_file(path: impl AsRef<Path>) -> Option<serde_json::Value> {
         return Some(value);
     }
 
-    // 2. Walk up from cwd; at each ancestor, check its immediate
+    // 2. Try next to the running executable (deployment scenario: config
+    //    files sit alongside the binary, regardless of cwd).
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            let candidate = exe_dir.join(path);
+            if let Some(value) = try_read(&candidate) {
+                return Some(value);
+            }
+        }
+    }
+
+    // 3. Walk up from cwd; at each ancestor, check its immediate
     //    subdirectories.  This handles cargo workspace layouts where
     //    config files live in a member crate (e.g.
     //    workspace_root/demo/appsettings.json) and `cargo run` is

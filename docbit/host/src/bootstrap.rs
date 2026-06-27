@@ -30,7 +30,6 @@ pub fn configure(mode: AppMode) -> impl FnOnce(ServiceCollection) -> ServiceColl
     move |mut svc| {
         let paths = Arc::new(AppPaths::resolve());
         tracing::info!("[docbit] docs root: {}", paths.docs_root.display());
-        tracing::info!("[docbit] blog root: {}", paths.blog_root.display());
         tracing::info!("[docbit] database: {}", paths.db_path.display());
         tracing::info!("[docbit] wwwroot: {}", paths.wwwroot.display());
 

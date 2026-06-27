@@ -1,8 +1,12 @@
 //! Configuration — `SiteConfig` 加载与 `DbContextOptions` 构建。
 //!
-//! 根据 `AppMode` 选择数据库 provider：
-//! - Development：SQLite（`docbit.db`）
-//! - Production：MySQL（连接串来自 `appsettings.Production.json` 的 `Database:ConnectionString`）
+//! 运行模式（`AppMode`）与环境 overlay 的识别由框架统一处理：
+//! - 框架 `HostBuilder::new()` 默认从 `APP_ENV` 环境变量解析模式；
+//! - 框架 `load_appsettings(mode)` 自动合并 `appsettings.{Mode}.json` overlay；
+//! - 框架 `read_json_file` 按 cwd → exe 同级 → 上溯目录顺序定位配置文件。
+//!
+//! 本模块仅消费框架已合并好的 appsettings，绑定 `SiteConfig` 与 `DatabaseConfig`，
+//! 并据此构建 `DbContextOptions`。
 
 use std::sync::Arc;
 
@@ -16,7 +20,7 @@ use docbit_contracts::site::SiteConfig;
 use crate::interceptor::AuditInterceptor;
 use crate::paths::AppPaths;
 
-/// 从 appsettings.json 读取 `Site` 节并解析为 `SiteConfig`，失败时返回默认值。
+/// 从 appsettings 读取 `Site` 节并解析为 `SiteConfig`，失败时返回默认值。
 pub fn load_site_config(mode: AppMode) -> SiteConfig {
     let appsettings = match load_appsettings(mode) {
         Some(v) => v,

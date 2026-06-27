@@ -128,6 +128,11 @@ impl From<Exhibition> for ExhibitionModel {
                 .get()
                 .map(|c| c.name.clone())
                 .unwrap_or_default(),
+            category: e
+                .category
+                .get()
+                .map(|c| c.slug.clone())
+                .unwrap_or_default(),
             tags: serde_json::from_str(&e.tags).unwrap_or_default(),
             repo_url: e.repo_url,
             demo_url: e.demo_url,

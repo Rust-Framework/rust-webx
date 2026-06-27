@@ -12,6 +12,7 @@ pub struct ExhibitionModel {
     pub description: String,
     pub category_id: i32,
     pub category_name: String,
+    pub category: String,
     pub tags: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repo_url: Option<String>,

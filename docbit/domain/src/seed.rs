@@ -13,7 +13,7 @@
 
 use rust_ef::prelude::*;
 
-use crate::entities::{Category, Resource, Role};
+use crate::entities::{Category, Exhibition, Resource, Role, RoleUser, User};
 
 /// 资源分类常量
 pub const RES_TYPE_APP: &str = "应用";
@@ -57,19 +57,117 @@ pub fn seed(ctx: &mut DbContext) {
     ]);
 
     // 默认根分类
-    ctx.model().entity::<Category>().has_data(&[Category {
+    ctx.model().entity::<Category>().has_data(&[
+        Category {
+            id: 1,
+            name: "未分类".into(),
+            slug: "uncategorized".into(),
+            parent_id: None,
+            sort_order: 0,
+            created_id: None,
+            created_at: now,
+            updated_id: None,
+            updated_at: now,
+            is_deleted: false,
+            parent: BelongsTo::new(),
+            children: HasMany::new(),
+        },
+        Category {
+            id: 2,
+            name: "ORM框架".into(),
+            slug: "orm".into(),
+            parent_id: None,
+            sort_order: 1,
+            created_id: None,
+            created_at: now,
+            updated_id: None,
+            updated_at: now,
+            is_deleted: false,
+            parent: BelongsTo::new(),
+            children: HasMany::new(),
+        },
+        Category {
+            id: 3,
+            name: "Web框架".into(),
+            slug: "framework".into(),
+            parent_id: None,
+            sort_order: 2,
+            created_id: None,
+            created_at: now,
+            updated_id: None,
+            updated_at: now,
+            is_deleted: false,
+            parent: BelongsTo::new(),
+            children: HasMany::new(),
+        },
+    ]);
+
+    // 默认作品（与 docs/ 目录下的 INDEX.json 元数据一致）
+    ctx.model().entity::<Exhibition>().has_data(&[
+        Exhibition {
+            id: 1,
+            slug: "rust-ef".into(),
+            title: "Rust Entity Framework".into(),
+            subtitle: "接口导向 · EF Core 风格 · DI 集成 ORM".into(),
+            description: "面向 Rust 开发者的 EF Core 风格 ORM 最佳实践指南，涵盖实体设计、LINQ 查询、变更跟踪、批量操作、事务迁移与 DI 集成。".into(),
+            category_id: 2,  // orm
+            tags: r#"["rust","orm","ef-core","database","linq"]"#.into(),
+            repo_url: Some("https://gitcode.com/rf2026/rust-ef".into()),
+            demo_url: None,
+            docs_slug: Some("rust-ef".into()),
+            featured: true,
+            sort_order: 1,
+            logo_url: Some("/assets/works/rust-ef.svg".into()),
+            created_at: now,
+            updated_at: now,
+            created_id: None,
+            updated_id: None,
+            is_deleted: false,
+            category: BelongsTo::new(),
+        },
+        Exhibition {
+            id: 2,
+            slug: "rust-webapp".into(),
+            title: "Rust WebApplication Framework".into(),
+            subtitle: "高内聚·编译时路由·DI+中介者双核心".into(),
+            description: "生产级 Rust Web 服务框架，提供编译时路由扫描、零配置 Handler 注册、JWT 认证授权、统一异常中间件、事件发布/订阅及 SPA 托管能力。".into(),
+            category_id: 3,  // framework
+            tags: r#"["rust","webapp","webapi","mediator"]"#.into(),
+            repo_url: Some("https://gitcode.com/rf2026/rust-webapp".into()),
+            demo_url: None,
+            docs_slug: Some("rust-webapp".into()),
+            featured: true,
+            sort_order: 2,
+            logo_url: Some("/assets/works/rust-webapp.svg".into()),
+            created_at: now,
+            updated_at: now,
+            created_id: None,
+            updated_id: None,
+            is_deleted: false,
+            category: BelongsTo::new(),
+        },
+    ]);
+
+    // 默认管理员账号（密码：admin123，bcrypt cost=4）
+    ctx.model().entity::<User>().has_data(&[User {
         id: 1,
-        name: "未分类".into(),
-        slug: "uncategorized".into(),
-        parent_id: None,
-        sort_order: 0,
+        name: "Administrator".into(),
+        email: "admin@docbit.local".into(),
+        password_hash: "$2b$04$0Txv1I1N9PmPg4I9fkbZUuFVeDWIDtmlD6CEjiwxAuLzSNMHVQ/3W".into(),
         created_id: None,
         created_at: now,
         updated_id: None,
         updated_at: now,
         is_deleted: false,
-        parent: BelongsTo::new(),
-        children: HasMany::new(),
+        roles: HasMany::new(),
+    }]);
+
+    // admin 用户关联 admin 角色
+    ctx.model().entity::<RoleUser>().has_data(&[RoleUser {
+        id: 1,
+        user_id: 1,
+        role_id: 1,
+        created_at: now,
     }]);
 
     // 核心操作资源（动态鉴权用）：admin 专属管理接口

@@ -316,7 +316,7 @@ body.layout-blog-edit #app {
 
 .blog-edit-container {
     width: 100%;
-    max-width: 52rem;
+    max-width: 80rem;
     display: flex;
     flex-direction: column;
     gap: 0;

@@ -10,9 +10,10 @@
     "demoUrl": "",
     "featured": true,
     "sortOrder": 1,
-    "version": "0.3",
+    "version": "1.1.0",
     "language": "zh-CN",
-    "author": "RF Team",
+    "author": "Start",
+    "logo": "logo.svg",
     "foreword": "FOREWORD.md",
     "pathRules": {
       "chapterIndex": "{chapterId}/INDEX.md",

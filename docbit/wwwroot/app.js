@@ -49,6 +49,10 @@
       }
       return { page: "work", pageKey: "work", slug: parts[1] };
     }
+    if (parts[0] === "admin") {
+            window.location.href = "/admin/index.html";
+            return { page: "home", pageKey: "home" };
+        }
     return { page: "home", pageKey: "home" };
   }
 
@@ -126,8 +130,7 @@
     document.body.classList.toggle("layout-home", route.page === "home");
     document.body.classList.toggle("layout-blog-edit", route.page === "blog-edit");
     document.body.classList.toggle("layout-blog-admin", route.page === "blog-write");
-    document.body.classList.toggle(
-      "layout-auth",
+    document.body.classList.toggle("layout-auth",
       ["login", "register", "forgot", "reset"].includes(route.page)
     );
     app.classList.remove("docs-page", "blog-page");

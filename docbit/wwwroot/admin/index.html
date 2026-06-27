@@ -1,0 +1,1132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>后台管理 - Docbit</title>
+<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/assets/vendor/layui/css/layui.css">
+<link rel="stylesheet" href="/assets/css/layui-bridge.css">
+<style>
+/* ── Tokens ── */
+:root {
+    --admin-sidebar-w: 232px;
+    --admin-header-h: 56px;
+    --r: 4px;          /* base radius (intentionally small) */
+    --r-pill: 999px;
+    --t-fast: .12s ease;
+    --t-med:  .18s ease;
+}
+
+/* ── Reset within shell ── */
+.admin-wrap * { box-sizing:border-box; }
+.admin-wrap { display:flex; min-height:100vh; background:var(--bg); color:var(--text); font-family:var(--font,system-ui,-apple-system,"Segoe UI",sans-serif); font-size:14px; -webkit-font-smoothing:antialiased; }
+
+/* ── Sidebar ── */
+.admin-sidebar { width:var(--admin-sidebar-w); flex-shrink:0; background:var(--bg-elevated); border-right:1px solid var(--border); display:flex; flex-direction:column; position:fixed; top:0; left:0; bottom:0; z-index:100; transition:width var(--t-med); }
+.admin-sidebar-header { height:var(--admin-header-h); display:flex; align-items:center; padding:0 14px; font-size:14px; font-weight:600; color:var(--text-bright); border-bottom:1px solid var(--border); flex-shrink:0; gap:8px; letter-spacing:.1px; white-space:nowrap; overflow:hidden; min-width:0; }
+.admin-sidebar-header .logo-dot { width:26px; height:26px; flex-shrink:0; background:linear-gradient(135deg,var(--accent),var(--brand-rust,#d4237a)); display:inline-flex; align-items:center; justify-content:center; color:#fff; font-weight:700; font-size:12px; }
+.admin-sidebar-header .brand { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.admin-sidebar-header .back-link { flex-shrink:0; color:var(--text-muted); font-size:12px; text-decoration:none; padding:3px 7px; border:1px solid var(--border); transition:all var(--t-fast); white-space:nowrap; }
+.admin-sidebar-header .back-link:hover { color:var(--accent); border-color:var(--accent); }
+.admin-nav { flex:1; overflow-y:auto; padding:8px 0 16px; }
+.admin-nav-section { padding:18px 16px 6px; font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.8px; font-weight:600; }
+.admin-nav-item { display:flex; align-items:center; gap:10px; padding:7px 16px; color:var(--text); font-size:13.5px; text-decoration:none; cursor:pointer; border-left:2px solid transparent; transition:background var(--t-fast), color var(--t-fast), border-color var(--t-fast); user-select:none; position:relative; }
+.admin-nav-item:hover { background:var(--accent-soft); color:var(--accent); }
+.admin-nav-item.active { background:var(--accent-soft); color:var(--accent); border-left-color:var(--accent); font-weight:600; }
+.admin-nav-item .nav-icon { width:18px; height:18px; display:inline-flex; align-items:center; justify-content:center; font-size:13px; flex-shrink:0; opacity:.85; }
+.admin-nav-item:hover .nav-icon, .admin-nav-item.active .nav-icon { opacity:1; }
+
+/* ── Main ── */
+.admin-main { margin-left:var(--admin-sidebar-w); flex:1; min-width:0; padding:0; }
+.admin-topbar { height:var(--admin-header-h); display:flex; align-items:center; justify-content:space-between; padding:0 24px; background:var(--bg-elevated); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:50; backdrop-filter:saturate(180%) blur(8px); gap:16px; min-width:0; }
+.admin-topbar-title { font-size:14.5px; font-weight:600; color:var(--text-bright); display:flex; align-items:center; gap:8px; min-width:0; overflow:hidden; }
+.admin-topbar-title .crumb { color:var(--text-muted); font-weight:400; font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.admin-topbar-actions { display:flex; align-items:center; gap:8px; flex-shrink:0; }
+.theme-toggle-btn { width:32px; height:32px; border:1px solid transparent; background:transparent; color:var(--text-muted); cursor:pointer; display:inline-flex; align-items:center; justify-content:center; font-size:14px; transition:all var(--t-fast); flex-shrink:0; }
+.theme-toggle-btn:hover { color:var(--accent); background:var(--accent-soft); }
+.admin-user-chip { display:inline-flex; align-items:center; gap:8px; padding:3px 10px 3px 3px; background:var(--bg-card); border:1px solid var(--border); font-size:13px; color:var(--text); max-width:200px; min-width:0; }
+.admin-user-chip > span:not(.avatar):not(.role-badge) { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.admin-user-chip .avatar { width:24px; height:24px; flex-shrink:0; background:linear-gradient(135deg,var(--accent),var(--brand-rust,#d4237a)); color:#fff; display:inline-flex; align-items:center; justify-content:center; font-weight:600; font-size:12px; }
+.admin-user-chip .role-badge { padding:1px 6px; background:var(--accent-soft); color:var(--accent); font-size:11px; font-weight:600; flex-shrink:0; }
+.admin-content { padding:24px 24px 40px; max-width:100%; }
+
+/* ── Page header ── */
+.admin-page-header { display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:18px; gap:16px; flex-wrap:wrap; }
+.admin-page-title { font-size:20px; font-weight:600; color:var(--text-bright); letter-spacing:-.2px; }
+.admin-page-subtitle { font-size:13px; color:var(--text-muted); margin-top:3px; }
+.admin-page-actions { display:flex; gap:8px; }
+
+/* ── Stats (dense, list-like) ── */
+.admin-stats { display:grid; grid-template-columns:repeat(auto-fill,minmax(208px,1fr)); gap:1px; margin-bottom:20px; background:var(--border); border:1px solid var(--border); }
+.admin-stat-card { background:var(--bg-card); padding:16px 18px; transition:background var(--t-fast); position:relative; cursor:default; }
+.admin-stat-card:hover { background:var(--bg-elevated); }
+.admin-stat-card:hover .admin-stat-value { color:var(--accent); }
+.admin-stat-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+.admin-stat-label { font-size:12.5px; color:var(--text-muted); }
+.admin-stat-icon { width:22px; height:22px; display:inline-flex; align-items:center; justify-content:center; font-size:13px; color:var(--text-muted); }
+.admin-stat-card:hover .admin-stat-icon { color:var(--accent); }
+.admin-stat-value { font-size:24px; font-weight:600; color:var(--text-bright); line-height:1.2; letter-spacing:-.3px; font-feature-settings:"tnum"; }
+.admin-stat-delta { font-size:11.5px; color:var(--text-muted); margin-top:4px; }
+.admin-stat-delta.up { color:#10b981; }
+.admin-stat-delta.down { color:#ef4444; }
+
+/* ── Section (flat, hairline borders) ── */
+.admin-section { background:var(--bg-card); border:1px solid var(--border); margin-bottom:16px; }
+.admin-section-header { display:flex; align-items:center; justify-content:space-between; padding:11px 18px; border-bottom:1px solid var(--border); background:transparent; }
+.admin-section-title { font-size:13.5px; font-weight:600; color:var(--text-bright); display:flex; align-items:center; gap:8px; }
+.admin-section-title::before { content:""; width:3px; height:14px; background:var(--accent); }
+.admin-section-body { padding:0; }
+
+/* ── Tables (enterprise flat) ── */
+.admin-main .layui-table { margin:0; background:transparent; color:var(--text); border:0; }
+.admin-main .layui-table thead tr { background:transparent; }
+.admin-main .layui-table th { background:var(--bg-elevated) !important; color:var(--text-muted) !important; font-weight:500; border:0 !important; border-bottom:1px solid var(--border) !important; text-align:left; font-size:12.5px; text-transform:uppercase; letter-spacing:.4px; padding:10px 14px !important; }
+.admin-main .layui-table td { background:var(--bg-card) !important; color:var(--text) !important; border:0 !important; border-bottom:1px solid var(--border) !important; padding:12px 14px !important; font-size:13.5px; vertical-align:middle; }
+.admin-main .layui-table tbody tr:last-child td { border-bottom:0 !important; }
+.admin-main .layui-table tbody tr { transition:background var(--t-fast); }
+.admin-main .layui-table tbody tr:hover td { background:var(--accent-soft) !important; }
+.admin-main .layui-table .layui-btn+.layui-btn { margin-left:4px; }
+.admin-main .layui-table td, .admin-main .layui-table th { white-space:nowrap; }
+.admin-main .layui-table td a { color:var(--accent); text-decoration:none; }
+.admin-main .layui-table td a:hover { text-decoration:underline; }
+.admin-main .layui-table .col-actions { white-space:nowrap; }
+.admin-main .layui-table .col-id { color:var(--text-muted); font-feature-settings:"tnum"; }
+.admin-main .layui-table .col-username { font-weight:500; color:var(--text-bright); }
+
+/* ── Badges (small, square) ── */
+.badge { display:inline-flex; align-items:center; gap:4px; padding:1px 7px; font-size:11.5px; font-weight:500; line-height:18px; border:1px solid transparent; }
+.badge::before { content:""; width:6px; height:6px; border-radius:50%; background:currentColor; opacity:.7; }
+.badge-green { background:rgba(16,185,129,.08); color:#10b981; border-color:rgba(16,185,129,.2); }
+.badge-orange { background:rgba(245,158,11,.08); color:#f59e0b; border-color:rgba(245,158,11,.2); }
+.badge-blue { background:var(--accent-soft); color:var(--accent); border-color:rgba(var(--accent-rgb,18,150,219),.25); }
+.badge-red { background:rgba(239,68,68,.08); color:#ef4444; border-color:rgba(239,68,68,.2); }
+.badge-purple { background:rgba(139,92,246,.08); color:#8b5cf6; border-color:rgba(139,92,246,.2); }
+.badge-gray { background:rgba(107,114,128,.08); color:var(--text-muted); border-color:var(--border); }
+
+/* ── Buttons (sharp) ── */
+.admin-main .layui-btn { border-radius:var(--r) !important; transition:all var(--t-fast); font-weight:500; }
+.admin-main .layui-btn-sm { font-size:12.5px; }
+.admin-main .layui-btn-primary { background:var(--bg-card); border-color:var(--border); color:var(--text); }
+.admin-main .layui-btn-primary:hover { color:var(--accent); border-color:var(--accent); background:var(--accent-soft); }
+.admin-main .layui-btn-normal { background:var(--accent); border-color:var(--accent); }
+.admin-main .layui-btn-normal:hover { background:var(--accent-hover); border-color:var(--accent-hover); }
+.admin-main .layui-btn-danger { background:#ef4444; border-color:#ef4444; }
+.admin-main .layui-btn-danger:hover { background:#dc2626; border-color:#dc2626; }
+.admin-main .layui-btn-warm { background:#f59e0b; border-color:#f59e0b; color:#fff; }
+.admin-main .layui-btn-text { background:transparent; border:0; color:var(--accent); padding:0 4px; }
+.admin-main .layui-btn-text:hover { color:var(--accent-hover); text-decoration:underline; }
+
+/* ── Pagination ── */
+.admin-main .layui-laypage { margin:18px 0 4px; text-align:right; }
+.admin-main .layui-laypage a, .admin-main .layui-laypage span { border-radius:var(--r) !important; }
+
+/* ── Search bar ── */
+.admin-toolbar { display:flex; align-items:center; gap:8px; padding:10px 14px; background:var(--bg-elevated); border-bottom:1px solid var(--border); flex-wrap:wrap; }
+.admin-toolbar .layui-input { height:30px; line-height:30px; padding:0 10px; font-size:13px; min-width:200px; }
+.admin-toolbar .layui-btn { height:30px; line-height:30px; padding:0 12px; font-size:13px; }
+
+/* ── Empty/Loading ── */
+.admin-empty { text-align:center; padding:60px 20px; color:var(--text-muted); font-size:13px; }
+.admin-loading { display:flex; align-items:center; justify-content:center; padding:60px 20px; color:var(--text-muted); gap:10px; font-size:13px; }
+.admin-loading::before { content:""; width:14px; height:14px; border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:adminSpin .6s linear infinite; }
+@keyframes adminSpin { to { transform:rotate(360deg); } }
+
+/* ── Dialogs (sharp, dense) ── */
+.layui-layer { border-radius:var(--r) !important; overflow:hidden; box-shadow:0 12px 40px rgba(0,0,0,.18) !important; }
+.layui-layer-title { background:var(--bg-elevated) !important; color:var(--text-bright) !important; border-bottom:1px solid var(--border) !important; font-weight:600 !important; font-size:14px !important; padding:0 16px !important; height:42px !important; line-height:42px !important; }
+.layui-layer-content { background:var(--bg-card) !important; color:var(--text) !important; }
+.layui-layer-setwin { top:14px !important; }
+.layui-layer-setwin a { color:var(--text-muted) !important; }
+.layui-layer-btn { border-top:1px solid var(--border) !important; background:var(--bg-elevated) !important; padding:8px 12px !important; }
+.layui-layer-btn a { background:var(--bg-card) !important; color:var(--text) !important; border:1px solid var(--border) !important; border-radius:var(--r) !important; font-size:13px !important; }
+.layui-layer-btn .layui-layer-btn0 { background:var(--accent) !important; border-color:var(--accent) !important; color:#fff !important; }
+.layui-layer-btn .layui-layer-btn0:hover { background:var(--accent-hover) !important; border-color:var(--accent-hover) !important; }
+.layui-form-label { color:var(--text) !important; font-size:13px !important; padding:9px 12px !important; }
+.layui-input, .layui-textarea, .layui-select { background:var(--bg-card) !important; color:var(--text) !important; border-color:var(--border) !important; border-radius:var(--r) !important; }
+.layui-input:focus, .layui-textarea:focus { border-color:var(--accent) !important; box-shadow:0 0 0 2px var(--accent-soft) !important; }
+.layui-form-select .layui-input { padding-right:24px; }
+
+/* ── Code/pre ── */
+.admin-section-body pre { color:var(--text); background:var(--code-bg,#f8fafc) !important; border:1px solid var(--border); border-radius:var(--r); margin:14px; font-size:12.5px; }
+
+/* ── Auth switch (matrix toggle) ── */
+.auth-switch { display:inline-block; position:relative; width:30px; height:16px; background:var(--border); transition:background var(--t-fast); vertical-align:middle; }
+.auth-switch-knob { position:absolute; top:2px; left:2px; width:12px; height:12px; background:#fff; transition:left var(--t-fast); box-shadow:0 1px 2px rgba(0,0,0,.2); }
+.auth-switch.on { background:var(--accent); }
+.auth-switch.on .auth-switch-knob { left:16px; }
+.auth-switch.locked { opacity:.6; cursor:not-allowed; }
+.auth-matrix td { vertical-align:middle !important; }
+
+/* ── Permission list (admin page) ── */
+.perm-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:1px; background:var(--border); border:1px solid var(--border); margin:0; }
+.perm-group { background:var(--bg-card); padding:14px 16px; }
+.perm-group-title { font-size:12.5px; font-weight:600; color:var(--text-bright); margin-bottom:10px; text-transform:uppercase; letter-spacing:.4px; }
+.perm-list { display:flex; flex-direction:column; gap:4px; }
+.perm-item { display:flex; align-items:center; gap:8px; padding:4px 0; font-size:13px; color:var(--text); }
+
+/* ── Responsive ── */
+@media (max-width:1100px) {
+    .admin-stats { grid-template-columns:repeat(3,1fr); }
+}
+@media (max-width:900px) {
+    .admin-topbar { padding:0 16px; }
+    .admin-content { padding:16px 16px 32px; }
+    .admin-stats { grid-template-columns:repeat(2,1fr); }
+    .admin-user-chip { max-width:140px; }
+}
+@media (max-width:640px) {
+    .admin-sidebar { width:56px; }
+    .admin-sidebar-header .brand, .admin-nav-item span:not(.nav-icon), .admin-nav-section, .admin-sidebar-header .back-link { display:none; }
+    .admin-sidebar-header { padding:0; justify-content:center; gap:0; }
+    .admin-nav-item { justify-content:center; padding:7px 0; }
+    .admin-main { margin-left:56px; }
+    .admin-stats { grid-template-columns:1fr; }
+    .admin-content { padding:12px; }
+    .admin-user-chip { max-width:120px; }
+    .admin-page-title { font-size:18px; }
+}
+</style>
+</head>
+<body>
+<div class="admin-wrap">
+    <aside class="admin-sidebar">
+        <div class="admin-sidebar-header">
+            <span class="logo-dot">D</span>
+            <span class="brand">Docbit</span>
+            <a href="/" class="back-link" title="返回主站">返回</a>
+        </div>
+        <nav class="admin-nav" id="admin-nav"></nav>
+    </aside>
+    <main class="admin-main">
+        <div class="admin-topbar">
+            <div class="admin-topbar-title" id="topbar-title">仪表盘</div>
+            <div class="admin-topbar-actions">
+                <button type="button" class="theme-toggle-btn" id="theme-toggle" title="切换主题">
+                    <span class="theme-icon-light" hidden>☀</span>
+                    <span class="theme-icon-dark">☾</span>
+                </button>
+                <span class="admin-user-chip" id="user-chip"></span>
+            </div>
+        </div>
+        <div class="admin-content"><div id="admin-main"></div></div>
+    </main>
+</div>
+
+<script src="/assets/vendor/layui/layui.js"></script>
+<script>
+(function(){ "use strict";
+
+// ── Theme integration ──
+const THEME_KEY = 'docbit-theme';
+function getTheme(){ return localStorage.getItem(THEME_KEY) || 'light'; }
+function setTheme(mode){
+    document.documentElement.setAttribute('data-theme', mode);
+    localStorage.setItem(THEME_KEY, mode);
+    var l=document.querySelector('.theme-icon-light'), d=document.querySelector('.theme-icon-dark');
+    if(l&&d){ l.hidden = mode==='light'; d.hidden = mode==='dark'; }
+}
+setTheme(getTheme());
+document.getElementById('theme-toggle').addEventListener('click', function(){
+    setTheme(getTheme()==='dark' ? 'light' : 'dark');
+});
+
+// ── Auth guard ──
+function getToken(){ try{return localStorage.getItem('docbit-token')}catch(e){return null} }
+function getUser(){ try{var r=localStorage.getItem('docbit-user');return r?JSON.parse(r):null}catch(e){return null} }
+(function(){
+    var u=getUser();
+    if(!getToken()||!u||!u.roles||!u.roles.includes('admin')){ window.location.replace('/login?redirect=/admin/index.html'); return; }
+    var chip=document.getElementById('user-chip');
+    if(chip){
+        var initial=(u.name||u.email||'?').charAt(0).toUpperCase();
+        chip.innerHTML='<span class="avatar">'+initial+'</span><span>'+(u.name||'')+'</span><span class="role-badge">admin</span>';
+    }
+})();
+
+// ── API helper ──
+function esc(s){ var d=document.createElement('div'); d.textContent=s==null?'':String(s); return d.innerHTML; }
+function dateStr(ts){ return ts?new Date(ts).toLocaleString():'-'; }
+function getAuthHeader(){ var t=getToken(); return t?'Bearer '+t:null; }
+async function api(path, auth){
+    var h={'Accept':'application/json'};
+    if(auth){var ah=getAuthHeader();if(ah)h['Authorization']=ah}
+    var r=await fetch(path,{headers:h});
+    if(!r.ok){var txt=await r.text();try{var j=JSON.parse(txt);throw new Error(j.detail||j.error||j.title||j.message||txt)}catch(e){if(e instanceof SyntaxError)throw new Error(txt);throw e}}
+    var t2=await r.text();return t2?JSON.parse(t2):null;
+}
+async function apiDel(path, auth){
+    var h={};
+    if(auth){var ah=getAuthHeader();if(ah)h['Authorization']=ah}
+    var r=await fetch(path,{method:'DELETE',headers:h});
+    if(!r.ok){var txt=await r.text();try{var j=JSON.parse(txt);throw new Error(j.detail||j.error||j.message||txt)}catch(e){if(e instanceof SyntaxError)throw new Error(txt);throw e}}
+    return r.status===204?null:r.text();
+}
+async function apiPost(path, body, auth){ return sendJson('POST', path, body, auth); }
+async function apiPut(path, body, auth){ return sendJson('PUT', path, body, auth); }
+async function sendJson(method, path, body, auth){
+    var h={'Content-Type':'application/json','Accept':'application/json'};
+    if(auth){var ah=getAuthHeader();if(ah)h['Authorization']=ah}
+    var r=await fetch(path,{method:method,headers:h,body:JSON.stringify(body)});
+    if(!r.ok){var txt=await r.text();try{var j=JSON.parse(txt);throw new Error(j.detail||j.error||j.title||j.message||txt)}catch(e){if(e instanceof SyntaxError)throw new Error(txt);throw e}}
+    var t2=await r.text();return t2?JSON.parse(t2):null;
+}
+
+// ── Generation token — fixes the cross-page race condition ──
+// Each render() call gets a unique token. Inline `onclick` handlers
+// bound during an old render check the token at call time and bail out
+// if a newer render has taken over (preventing undefined-__A errors).
+var __GEN = 0;
+function __guard(gen, fn){ return function(){ if(__GEN!==gen) return; try{ fn.apply(this, arguments) }catch(_){} } }
+
+function confirmDelete(msg, cb){
+    if(typeof layui!=='undefined' && layui.layer){
+        layui.layer.confirm(msg||'确定要删除吗？',{icon:3,title:'确认'},function(idx){ layui.layer.close(idx); cb(); });
+    } else { if(confirm(msg||'确定要删除吗？')) cb(); }
+}
+function confirmAction(title, content, cb){
+    if(typeof layui!=='undefined' && layui.layer){
+        layui.layer.open({
+            type:1, title:title, area:['420px','auto'], btn:['确定','取消'],
+            content:'<div style="padding:24px 28px;font-size:13.5px;line-height:1.7">'+content+'</div>',
+            yes:function(idx){ layui.layer.close(idx); cb(); }
+        });
+    } else { if(confirm(title+'\n'+content.replace(/<[^>]+>/g,''))) cb(); }
+}
+function toast(msg, icon){
+    if(typeof layui!=='undefined' && layui.layer){
+        layui.layer.msg(msg, {icon:icon||1, time:1500});
+    } else { console.log(msg); }
+}
+
+// ── Cached category list ──
+var CATEGORIES_CACHE = [];
+async function loadCategoryOptions(){
+    try{ var c=await api('/api/categories'); CATEGORIES_CACHE=Array.isArray(c)?c:[]; }catch(e){ CATEGORIES_CACHE=[]; }
+}
+function categoryOptions(selectedId){
+    var opts='<option value="">-- 选择分类 --</option>';
+    CATEGORIES_CACHE.forEach(function(c){
+        var sel=c.id===selectedId?' selected':'';
+        opts+='<option value="'+c.id+'"'+sel+'>'+esc(c.name)+'</option>';
+    });
+    return opts;
+}
+
+// ============================================================
+//  NAV + PAGES
+// ============================================================
+var NAV = [
+    { section:'概览' },
+    { id:'dashboard',      icon:'📊', label:'仪表盘' },
+    { section:'业务管理' },
+    { id:'users',          icon:'👥', label:'用户管理' },
+    { id:'roles',          icon:'🔐', label:'角色权限' },
+    { id:'authorization',  icon:'🛡', label:'授权矩阵' },
+    { section:'内容管理' },
+    { id:'blog',           icon:'📝', label:'博客管理' },
+    { id:'exhibitions',    icon:'🎨', label:'作品管理' },
+    { id:'categories',     icon:'🗂', label:'分类管理' },
+    { id:'comments',       icon:'💬', label:'评论管理' },
+    { section:'系统' },
+    { id:'resources',      icon:'📦', label:'资源管理' },
+    { id:'cache',          icon:'⚙', label:'缓存状态' },
+];
+var PAGES = {};
+
+// ============================================================
+//  PAGE: Dashboard
+// ============================================================
+PAGES.dashboard={render:async function(c){
+    c.innerHTML='<div class="admin-loading">加载中...</div>';
+    var users=[],bc=0,cc=0,ec=0,recent=[];
+    try{users=await api('/api/users',true)}catch(e){}
+    try{var b=await api('/api/blog/my',true);bc=Array.isArray(b)?b.length:0;recent=Array.isArray(b)?b.slice(0,5):[]}catch(e){}
+    try{var c2=await api('/api/categories');cc=Array.isArray(c2)?c2.length:0}catch(e){}
+    try{var e=await api('/api/exhibitions');ec=Array.isArray(e)?e.length:0}catch(e){}
+    c.innerHTML=
+        '<div class="admin-page-header"><div><div class="admin-page-title">系统概览</div><div class="admin-page-subtitle">欢迎回来，'+(esc((getUser()||{}).name||''))+' · 今日数据一览</div></div></div>'+
+        '<div class="admin-stats">'+
+            statCard('👥', Array.isArray(users)?users.length:0, '注册用户')+
+            statCard('📝', bc, '博客文章')+
+            statCard('🎨', ec, '作品')+
+            statCard('🗂', cc, '分类')+
+        '</div>'+
+        '<div class="admin-section"><div class="admin-section-header"><span class="admin-section-title">📰 最近的博客文章</span></div><div class="admin-section-body">'+
+            (recent.length?'<table class="layui-table"><thead><tr><th>标题</th><th>分类</th><th>发表时间</th></tr></thead><tbody>'+
+                recent.map(function(b2){return '<tr><td><a href="/blog/'+esc(b2.slug)+'" target="_blank">'+esc(b2.title)+'</a></td><td>'+esc(b2.category_name||'-')+'</td><td>'+dateStr(b2.published_at)+'</td></tr>'}).join('')+
+            '</tbody></table>':'<div class="admin-empty">暂无博客数据</div>')+
+        '</div></div>';
+}};
+function statCard(icon, value, label, delta){
+    return '<div class="admin-stat-card"><div class="admin-stat-head"><span class="admin-stat-label">'+label+'</span><span class="admin-stat-icon">'+icon+'</span></div><div class="admin-stat-value">'+value+'</div>'+(delta?'<div class="admin-stat-delta '+(delta.up?'up':(delta.down?'down':''))+'">'+delta.text+'</div>':'')+'</div>';
+}
+
+// ============================================================
+//  PAGE: Users — list with assign-role / reset-pwd / disable
+// ============================================================
+PAGES.users={render:async function(c){
+    var gen=++__GEN;
+    c.innerHTML='<div class="admin-loading">加载中...</div>';
+    var items=[], roles=[];
+    try{ items=await api('/api/users',true); roles=await api('/api/roles',true) }catch(e){c.innerHTML='<div class="admin-empty">加载失败：'+esc(e.message)+'</div>';return}
+    if(gen!==__GEN) return;
+    var me=(getUser()||{}).id;
+
+    function renderRoles(uid){
+        var u=items.find(function(x){return x.id===uid}); if(!u) return '';
+        var r2=(u.roles||[]).map(function(r){return '<span class="badge badge-blue" data-toggle-role="'+esc(r)+'" data-uid="'+uid+'" title="点击移除该角色">'+esc(r)+' ×</span>'}).join(' ');
+        return r2||'<span class="badge badge-gray" data-add-role="'+uid+'" style="cursor:pointer">+ 分配角色</span>';
+    }
+    function rowHtml(u){
+        var disabled=u.disabled;
+        var statusBadge=disabled?'<span class="badge badge-red">已停用</span>':'<span class="badge badge-green">正常</span>';
+        var last=u.last_login_at?dateStr(u.last_login_at):'<span style="color:var(--text-muted)">从未</span>';
+        var initial=(u.name||'?').charAt(0).toUpperCase();
+        return '<tr data-uid="'+u.id+'">'+
+            '<td class="col-id">#'+u.id+'</td>'+
+            '<td><div style="display:flex;align-items:center;gap:10px">'+
+                '<div class="avatar" style="width:32px;height:32px;background:linear-gradient(135deg,var(--accent),var(--brand-rust,#d4237a));color:#fff;display:inline-flex;align-items:center;justify-content:center;font-weight:600;font-size:13px;flex-shrink:0">'+esc(initial)+'</div>'+
+                '<div style="min-width:0"><div class="col-username">'+esc(u.name)+'</div><div style="font-size:12px;color:var(--text-muted)">'+esc(u.email)+'</div></div>'+
+            '</div></td>'+
+            '<td><div class="role-cell" data-uid="'+u.id+'" style="display:flex;gap:4px;flex-wrap:wrap;max-width:280px">'+renderRoles(u.id)+'</div></td>'+
+            '<td>'+statusBadge+'</td>'+
+            '<td style="font-size:12.5px">'+last+'</td>'+
+            '<td style="font-size:12.5px;color:var(--text-muted)">'+dateStr(u.created_at)+'</td>'+
+            '<td class="col-actions">'+
+                '<button class="layui-btn layui-btn-xs" data-act="assign" data-id="'+u.id+'" title="分配角色"><span style="font-size:11px">角色</span></button>'+
+                '<button class="layui-btn layui-btn-xs" data-act="reset" data-id="'+u.id+'" title="重置密码"><span style="font-size:11px">重置</span></button>'+
+                (u.id===me ? '' : (disabled
+                    ? '<button class="layui-btn layui-btn-xs layui-btn-normal" data-act="enable" data-id="'+u.id+'" title="启用账号"><span style="font-size:11px">启用</span></button>'
+                    : '<button class="layui-btn layui-btn-xs layui-btn-warm" data-act="disable" data-id="'+u.id+'" title="停用账号"><span style="font-size:11px">停用</span></button>'))+
+            '</td></tr>';
+    }
+    function rows(){ return items.map(rowHtml).join(''); }
+
+    function rebind(){
+        c.querySelectorAll('[data-toggle-role]').forEach(function(b){
+            var uid=parseInt(b.dataset.uid), rn=b.dataset.toggleRole;
+            b.onclick=__guard(gen, function(){
+                confirmAction('移除角色', '确定要从该用户移除角色 <b>'+esc(rn)+'</b>？', function(){
+                    var role=roles.find(function(r){return r.name===rn});
+                    if(!role){ toast('未找到角色ID', 2); return; }
+                    apiDel('/api/role-users/'+uid+'/'+role.id, true).then(function(){
+                        var u=items.find(function(x){return x.id===uid}); if(u) u.roles=(u.roles||[]).filter(function(r){return r!==rn});
+                        toast('已移除');
+                        var cell=c.querySelector('tr[data-uid="'+uid+'"] .role-cell'); if(cell) cell.innerHTML=renderRoles(uid);
+                        rebind();
+                    }).catch(function(e){ toast('失败：'+e.message, 2); });
+                });
+            });
+        });
+        c.querySelectorAll('[data-add-role]').forEach(function(b){
+            b.onclick=__guard(gen, function(){ openAssignDialog(parseInt(b.dataset.addRole)); });
+        });
+        c.querySelectorAll('button[data-act]').forEach(function(btn){
+            var id=parseInt(btn.dataset.id);
+            btn.onclick=__guard(gen, function(){
+                var u=items.find(function(x){return x.id===id});
+                if(!u) return;
+                if(btn.dataset.act==='assign') openAssignDialog(id);
+                else if(btn.dataset.act==='reset') toast('密码重置功能暂未开放', 5);
+                else if(btn.dataset.act==='disable') toast('账号停用功能暂未开放', 5);
+                else if(btn.dataset.act==='enable') toast('账号启用功能暂未开放', 5);
+            });
+        });
+    }
+
+    function openAssignDialog(uid){
+        if(gen!==__GEN) return;
+        var u=items.find(function(x){return x.id===uid}); if(!u) return;
+        var have=(u.roles||[]);
+        var opts=roles.map(function(r){
+            var ck=have.indexOf(r.name)>-1?'checked':'';
+            return '<label class="perm-item" style="cursor:pointer;display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid var(--border);margin-bottom:4px;transition:background .12s" onmouseover="this.style.background=\'var(--accent-soft)\'" onmouseout="this.style.background=\'\'">'+
+                '<input type="checkbox" value="'+esc(r.name)+'" '+ck+'> '+
+                '<span style="font-weight:500">'+esc(r.name)+'</span>'+
+                '<span style="margin-left:auto;color:var(--text-muted);font-size:12px">'+esc(r.description||'')+'</span>'+
+            '</label>';
+        }).join('');
+        layui.layer.open({type:1,title:'为「'+esc(u.name)+'」分配角色',area:['460px','420px'],content:
+            '<div style="padding:16px 20px"><div id="ar-list">'+opts+'</div></div>',
+            btn:['保存','取消'],
+            yes:function(idx,layero){
+                var checked=Array.from(layero.find('input[type=checkbox]:checked')).map(function(i){return i.value});
+                var toAdd=checked.filter(function(rn){return have.indexOf(rn)<0});
+                var toRemove=have.filter(function(rn){return checked.indexOf(rn)<0});
+                var promises=[];
+                toAdd.forEach(function(rn){
+                    var role=roles.find(function(r){return r.name===rn});
+                    if(role) promises.push(apiPost('/api/role-users', {user_id: uid, role_id: role.id}, true));
+                });
+                toRemove.forEach(function(rn){
+                    var role=roles.find(function(r){return r.name===rn});
+                    if(role) promises.push(apiDel('/api/role-users/'+uid+'/'+role.id, true));
+                });
+                if(promises.length===0){ toast('无变更'); layui.layer.close(idx); return; }
+                Promise.all(promises).then(function(){
+                    u.roles=checked; toast('已保存'); layui.layer.close(idx);
+                    var cell=c.querySelector('tr[data-uid="'+uid+'"] .role-cell'); if(cell) cell.innerHTML=renderRoles(uid);
+                    rebind();
+                }).catch(function(e){ toast('失败：'+e.message, 2); });
+            }
+        });
+    }
+    function openResetDialog(u){
+        layui.layer.open({type:1,title:'重置密码 — '+esc(u.name),area:['440px','260px'],content:
+            '<form class="layui-form" style="padding:24px 24px 0">'+
+                formField('rp-pwd','新密码','','至少 6 位','password')+
+                '<div style="color:var(--text-muted);font-size:12px;margin:8px 0 0 110px">重置后用户需使用新密码登录</div>'+
+            '</form>',
+            btn:['保存','取消'],
+            yes:function(idx,layero){
+                var pwd=layero.find('#rp-pwd').val();
+                if(!pwd||pwd.length<6){ toast('密码至少 6 位', 5); return false; }
+                apiPost('/api/users/'+u.id+'/reset-password',{password:pwd},true).then(function(){ toast('已重置'); layui.layer.close(idx); }).catch(function(e){ toast('失败：'+e.message, 2); return false; });
+            }
+        });
+    }
+
+    c.innerHTML=
+        pageHeader('用户管理', items.length+' 个用户 · '+items.filter(function(u){return u.disabled}).length+' 已停用', null)+
+        '<div class="admin-section">'+
+            '<div class="admin-toolbar">'+
+                '<input class="layui-input" id="u-search" placeholder="搜索用户名 / 邮箱..." style="min-width:240px">'+
+                '<button class="layui-btn layui-btn-primary" id="u-search-btn">搜索</button>'+
+                '<div style="margin-left:auto;font-size:12.5px;color:var(--text-muted)">提示：点击角色徽章可快速移除 · 双击行查看详情</div>'+
+            '</div>'+
+            '<div class="admin-section-body"><table class="layui-table"><thead><tr><th>ID</th><th>用户</th><th>角色</th><th>状态</th><th>最近登录</th><th>注册时间</th><th>操作</th></tr></thead><tbody>'+rows()+'</tbody></table></div>'+
+        '</div>';
+
+    rebind();
+    var searchInput=document.getElementById('u-search');
+    function doSearch(){
+        var q=(searchInput.value||'').trim().toLowerCase();
+        c.querySelectorAll('tbody tr').forEach(function(tr){
+            tr.style.display= (!q||tr.textContent.toLowerCase().indexOf(q)>-1)?'':'none';
+        });
+    }
+    searchInput.oninput=doSearch;
+    document.getElementById('u-search-btn').onclick=doSearch;
+    searchInput.onkeydown=function(e){ if(e.key==='Enter') doSearch(); };
+}};
+
+// ============================================================
+//  PAGE: Roles (CRUD) — with member count & member drill-down
+// ============================================================
+PAGES.roles={render:async function(c){
+    var gen=++__GEN;
+    c.innerHTML='<div class="admin-loading">加载中...</div>';
+    var items=[], allUsers=[];
+    try{ items=await api('/api/roles',true); allUsers=await api('/api/users',true) }catch(e){c.innerHTML='<div class="admin-empty">加载失败：'+esc(e.message)+'</div>';return}
+    if(gen!==__GEN) return;
+    var userCount={};
+    allUsers.forEach(function(u){ (u.roles||[]).forEach(function(r){ userCount[r]=(userCount[r]||0)+1 }) });
+
+    function rowHtml(r){
+        var uc=userCount[r.name]||0;
+        var isSys=r.name==='admin'||r.name==='user';
+        return '<tr data-rid="'+r.id+'">'+
+            '<td class="col-id">#'+r.id+'</td>'+
+            '<td><span class="badge badge-blue">'+esc(r.name)+'</span>'+(isSys?' <span class="badge badge-gray" style="font-size:10.5px">系统</span>':'')+'</td>'+
+            '<td style="color:var(--text-muted)">'+esc(r.description||'-')+'</td>'+
+            '<td><a href="javascript:;" data-see-users="'+esc(r.name)+'" class="link-strong" style="font-weight:500;color:var(--accent)">'+uc+' 人 →</a></td>'+
+            '<td style="font-size:12.5px;color:var(--text-muted)">'+dateStr(r.created_at)+'</td>'+
+            '<td class="col-actions">'+
+                '<button class="layui-btn layui-btn-xs" data-act="edit" data-id="'+r.id+'"><span style="font-size:11px">编辑</span></button>'+
+                (isSys
+                    ? '<button class="layui-btn layui-btn-xs layui-btn-danger" disabled title="系统角色不可删除"><span style="font-size:11px">删除</span></button>'
+                    : '<button class="layui-btn layui-btn-xs layui-btn-danger" data-act="del" data-id="'+r.id+'"><span style="font-size:11px">删除</span></button>')+
+            '</td></tr>';
+    }
+    function rows(){ return items.map(rowHtml).join(''); }
+
+    function rebind(){
+        c.querySelectorAll('button[data-act]').forEach(function(btn){
+            var id=parseInt(btn.dataset.id);
+            btn.onclick=__guard(gen, function(){
+                var item=items.find(function(x){return x.id===id});
+                if(btn.dataset.act==='edit') showRoleForm('编辑角色', item);
+                else if(btn.dataset.act==='del') confirmAction('删除角色', '确定要删除角色 <b>'+esc(item.name)+'</b> 吗？<div style="color:var(--text-muted);font-size:12px;margin-top:6px">拥有该角色的 '+userCount[item.name]+' 个用户将失去此权限</div>', function(){
+                    apiDel('/api/roles/'+id,true).then(function(){ toast('已删除'); PAGES.roles.render(c); }).catch(function(e){ toast('失败：'+e.message, 2); });
+                });
+            });
+        });
+        c.querySelectorAll('[data-see-users]').forEach(function(b){
+            var rn=b.dataset.seeUsers;
+            b.onclick=__guard(gen, function(){
+                var list=allUsers.filter(function(u){return (u.roles||[]).indexOf(rn)>-1});
+                var rows2=list.length?list.map(function(u){
+                    return '<tr><td class="col-id">#'+u.id+'</td><td><div style="display:flex;align-items:center;gap:8px"><div class="avatar" style="width:24px;height:24px;background:linear-gradient(135deg,var(--accent),var(--brand-rust,#d4237a));color:#fff;display:inline-flex;align-items:center;justify-content:center;font-weight:600;font-size:11px">'+esc((u.name||'?').charAt(0).toUpperCase())+'</div><span class="col-username">'+esc(u.name)+'</span></div></td><td style="color:var(--text-muted);font-size:12.5px">'+esc(u.email)+'</td><td style="font-size:12.5px">'+dateStr(u.created_at)+'</td></tr>';
+                }).join(''):'<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:40px">暂无用户</td></tr>';
+                layui.layer.open({type:1,title:'角色「'+esc(rn)+'」的成员 · '+list.length+' 人',area:['600px','460px'],content:
+                    '<div style="padding:0"><table class="layui-table" style="margin:0"><thead><tr><th>ID</th><th>用户</th><th>邮箱</th><th>注册时间</th></tr></thead><tbody>'+rows2+'</tbody></table></div>'
+                });
+            });
+        });
+    }
+
+    function showRoleForm(title, def){
+        var isEdit=!!def.id;
+        var nameRO=isEdit?'readonly':'';
+        layui.layer.open({type:1,title:title,area:['480px','300px'],content:
+            '<form class="layui-form" style="padding:30px 30px 0 0">'+
+                formField('rf-name','角色名',def.name||'',(isEdit?'系统角色名不可修改':'如：editor'))+
+                formField('rf-desc','描述',def.description||'','权限说明')+
+                '<div class="layui-form-item"><div class="layui-input-block" style="margin-left:110px"><button class="layui-btn" id="rf-save" type="button">保存</button></div></div>'+
+            '</form>',
+            success:function(){
+                if(isEdit){ var el=document.getElementById('rf-name'); if(el){ el.readOnly=true; el.style.color='var(--text-muted)'; el.style.background='var(--bg-elevated)'; el.style.cursor='not-allowed'; } }
+                document.getElementById('rf-save').onclick=function(){
+                    var data={name:document.getElementById('rf-name').value.trim(), description:document.getElementById('rf-desc').value.trim()};
+                    if(!data.name){ toast('请填写角色名', 5); return; }
+                    var p=isEdit ? apiPut('/api/roles/'+def.id,data,true) : apiPost('/api/roles',data,true);
+                    p.then(function(){ toast('已保存'); layui.layer.closeAll(); PAGES.roles.render(c); }).catch(function(e){ toast('失败：'+e.message, 2); });
+                };
+            }
+        });
+    }
+
+    c.innerHTML=
+        pageHeader('角色权限', items.length+' 个角色', '<button class="layui-btn layui-btn-sm layui-btn-normal" id="r-add">+ 新建角色</button>')+
+        '<div class="admin-section"><div class="admin-section-body"><table class="layui-table"><thead><tr><th>ID</th><th>角色</th><th>描述</th><th>成员</th><th>创建时间</th><th>操作</th></tr></thead><tbody>'+rows()+'</tbody></table></div></div>';
+
+    document.getElementById('r-add').onclick=__guard(gen, function(){ showRoleForm('新建角色', {}); });
+    rebind();
+}};
+
+// ============================================================
+//  PAGE: Blog
+// ============================================================
+PAGES.blog={render:async function(c){
+    var gen=++__GEN;
+    c.innerHTML='<div class="admin-loading">加载中...</div>';
+    var items=[];
+    try{items=await api('/api/blog/my',true)}catch(e){c.innerHTML='<div class="admin-empty">加载失败：'+esc(e.message)+'</div>';return}
+    if(gen!==__GEN) return;
+
+    c.innerHTML=
+        pageHeader('博客管理', items.length+' 篇文章',
+            '<a href="/blog/write/new" class="layui-btn layui-btn-sm layui-btn-normal" target="_blank">写文章</a>')+
+        sectionTable(
+            ['ID','标题','分类','作者','发表时间','操作'],
+            items.map(function(p){
+                return '<tr><td>'+p.id+'</td><td><a href="/blog/'+esc(p.slug)+'" target="_blank">'+esc(p.title)+'</a></td><td>'+esc(p.category_name||'-')+'</td><td>'+esc(p.author_name)+'</td><td>'+dateStr(p.published_at)+'</td><td>'+
+                    '<a href="/blog/write/'+esc(p.slug)+'" class="layui-btn layui-btn-xs" target="_blank">编辑</a>'+
+                    '<button class="layui-btn layui-btn-xs layui-btn-danger" data-del="'+esc(p.slug)+'">删除</button></td></tr>';
+            }).join('')
+        );
+
+    c.querySelectorAll('button[data-del]').forEach(function(btn){
+        var slug=btn.dataset.del;
+        btn.onclick=__guard(gen, function(){
+            confirmDelete('确定要删除这篇文章吗？', function(){
+                apiDel('/api/blog/'+slug,true).then(function(){ toast('已删除'); PAGES.blog.render(c); }).catch(function(e){ toast('失败：'+e.message, 2); });
+            });
+        });
+    });
+}};
+
+// ============================================================
+//  PAGE: Exhibitions
+// ============================================================
+PAGES.exhibitions={render:async function(c){
+    var gen=++__GEN;
+    c.innerHTML='<div class="admin-loading">加载中...</div>';
+    await loadCategoryOptions();
+    if(gen!==__GEN) return;
+    var items=[];
+    try{items=await api('/api/exhibitions')}catch(e){c.innerHTML='<div class="admin-empty">加载失败：'+esc(e.message)+'</div>';return}
+    if(gen!==__GEN) return;
+
+    function showForm(title, def){
+        layui.layer.open({type:1,title:title,area:['580px','540px'],content:
+            '<form class="layui-form" style="padding:20px 30px 0 0">'+
+                formField('ef-slug', '标识', def.slug, '唯一标识')+
+                formField('ef-title', '标题', def.title, '')+
+                formField('ef-subtitle', '副标题', def.subtitle, '')+
+                formArea('ef-desc', '描述', def.description)+
+                '<div class="layui-form-item"><label class="layui-form-label" style="width:80px">分类</label><div class="layui-input-block" style="margin-left:110px"><select class="layui-input" id="ef-cat">'+categoryOptions(def.category_id)+'</select></div></div>'+
+                formField('ef-tags', '标签', (def.tags||[]).join(','), '逗号分隔')+
+                '<div class="layui-form-item"><label class="layui-form-label" style="width:80px">排序</label><div class="layui-input-block" style="margin-left:110px"><input class="layui-input" id="ef-sort" type="number" value="'+(def.sort_order||0)+'"></div></div>'+
+                '<div class="layui-form-item"><label class="layui-form-label" style="width:80px">推荐</label><div class="layui-input-block" style="margin-left:110px"><input type="checkbox" id="ef-feat" '+(def.featured?'checked':'')+' lay-skin="switch"></div></div>'+
+                '<div class="layui-form-item"><div class="layui-input-block" style="margin-left:110px"><button class="layui-btn" id="ef-save" type="button">保存</button></div></div>'+
+            '</form>',
+            success:function(){
+                document.getElementById('ef-save').onclick=function(){
+                    var tagsStr=document.getElementById('ef-tags').value.trim();
+                    var tags=tagsStr?tagsStr.split(',').map(function(s){return s.trim()}).filter(Boolean):[];
+                    var data={
+                        slug:document.getElementById('ef-slug').value.trim(),
+                        title:document.getElementById('ef-title').value.trim(),
+                        subtitle:document.getElementById('ef-subtitle').value.trim(),
+                        description:document.getElementById('ef-desc').value.trim(),
+                        category_id:parseInt(document.getElementById('ef-cat').value)||0,
+                        tags:tags,
+                        sort_order:parseInt(document.getElementById('ef-sort').value)||0,
+                        featured:document.getElementById('ef-feat').checked,
+                        repo_url:null,demo_url:null,docs_slug:null,logo_url:null
+                    };
+                    if(!data.slug||!data.title){ toast('请填写标识和标题', 5); return; }
+                    apiPost('/api/exhibitions',data,true).then(function(){ toast('已保存'); layui.layer.closeAll(); PAGES.exhibitions.render(c); }).catch(function(e){ toast('失败：'+e.message, 2); });
+                };
+            }
+        });
+    }
+
+    c.innerHTML=
+        pageHeader('作品管理', items.length+' 个作品',
+            '<button class="layui-btn layui-btn-sm layui-btn-normal" id="e-add">+ 添加作品</button>')+
+        sectionTable(
+            ['ID','标题','分类','标签','推荐','排序','更新时间','操作'],
+            items.map(function(it){
+                var tags=(it.tags||[]).map(function(t){return '<span class="badge badge-blue">'+esc(t)+'</span>'}).join(' ');
+                return '<tr><td>'+it.id+'</td><td><a href="/works/'+esc(it.slug)+'" target="_blank">'+esc(it.title)+'</a></td><td>'+esc(it.category_name||'-')+'</td><td>'+(tags||'-')+'</td><td>'+(it.featured?'<span class="badge badge-green">是</span>':'<span class="badge badge-orange">否</span>')+'</td><td>'+it.sort_order+'</td><td>'+dateStr(it.updated_at)+'</td><td>'+
+                    '<button class="layui-btn layui-btn-xs" data-edit="'+esc(it.slug)+'">编辑</button>'+
+                    '<button class="layui-btn layui-btn-xs layui-btn-danger" data-del="'+esc(it.slug)+'">删除</button></td></tr>';
+            }).join('')
+        );
+
+    document.getElementById('e-add').onclick=__guard(gen, function(){ showForm('添加作品', {}); });
+    c.querySelectorAll('button[data-edit]').forEach(function(btn){
+        var slug=btn.dataset.edit;
+        btn.onclick=__guard(gen, function(){
+            var item=items.find(function(x){return x.slug===slug});
+            if(item) showForm('编辑作品', item);
+        });
+    });
+    c.querySelectorAll('button[data-del]').forEach(function(btn){
+        var slug=btn.dataset.del;
+        btn.onclick=__guard(gen, function(){
+            confirmDelete('确定要删除作品「'+esc(slug)+'」吗？', function(){
+                apiDel('/api/exhibitions/'+slug,true).then(function(){ toast('已删除'); PAGES.exhibitions.render(c); }).catch(function(e){ toast('失败：'+e.message, 2); });
+            });
+        });
+    });
+}};
+
+// ============================================================
+//  PAGE: Categories
+// ============================================================
+PAGES.categories={render:async function(c){
+    var gen=++__GEN;
+    c.innerHTML='<div class="admin-loading">加载中...</div>';
+    var items=[];
+    try{items=await api('/api/categories')}catch(e){c.innerHTML='<div class="admin-empty">加载失败：'+esc(e.message)+'</div>';return}
+    if(gen!==__GEN) return;
+
+    function flat(arr, level){
+        var out=[];
+        (arr||[]).forEach(function(n){ out.push({id:n.id,name:n.name,slug:n.slug,parent_id:n.parent_id,level:level,sort_order:n.sort_order}); out=out.concat(flat(n.children, level+1)); });
+        return out;
+    }
+    var flatList=flat(items,0);
+
+    function parentOptions(selectedId, excludeId){
+        var opts='<option value="">无（顶级）</option>';
+        flatList.forEach(function(n){
+            if(n.id===excludeId) return;
+            var prefix=new Array(n.level+1).join('— ');
+            var sel=n.id===selectedId?' selected':'';
+            opts+='<option value="'+n.id+'"'+sel+'>'+prefix+esc(n.name)+'</option>';
+        });
+        return opts;
+    }
+
+    c.innerHTML=
+        pageHeader('分类管理', flatList.length+' 个分类',
+            '<button class="layui-btn layui-btn-sm layui-btn-normal" id="cat-add">+ 添加分类</button>')+
+        sectionTable(
+            ['ID','名称','标识','上级','排序','操作'],
+            flatList.map(function(n){
+                var parentName='';
+                if(n.parent_id){var p=flatList.find(function(x){return x.id===n.parent_id});if(p)parentName=p.name;}
+                var prefix=new Array(n.level+1).join('— ');
+                return '<tr><td>'+n.id+'</td><td>'+prefix+esc(n.name)+'</td><td><span class="badge badge-blue">'+esc(n.slug)+'</span></td><td>'+esc(parentName||'-')+'</td><td>'+n.sort_order+'</td><td>'+
+                    '<button class="layui-btn layui-btn-xs" data-edit="'+n.id+'">编辑</button>'+
+                    '<button class="layui-btn layui-btn-xs layui-btn-danger" data-del="'+n.id+'">删除</button></td></tr>';
+            }).join('')
+        );
+
+    document.getElementById('cat-add').onclick=__guard(gen, function(){
+        layui.layer.open({type:1,title:'添加分类',area:['480px','360px'],content:
+            '<form class="layui-form" style="padding:30px 30px 0 0">'+
+                formField('c-name', '名称', '', '如：教程')+
+                formField('c-slug', '标识', '', '唯一标识')+
+                '<div class="layui-form-item"><label class="layui-form-label" style="width:80px">上级</label><div class="layui-input-block" style="margin-left:110px"><select class="layui-input" id="c-parent">'+parentOptions()+'</select></div></div>'+
+                formField('c-sort', '排序', 0, '0', 'number')+
+                '<div class="layui-form-item"><div class="layui-input-block" style="margin-left:110px"><button class="layui-btn" id="c-save" type="button">保存</button></div></div>'+
+            '</form>',
+            success:function(){
+                document.getElementById('c-save').onclick=function(){
+                    var data={
+                        name:document.getElementById('c-name').value.trim(),
+                        slug:document.getElementById('c-slug').value.trim(),
+                        parent_id:parseInt(document.getElementById('c-parent').value)||null,
+                        sort_order:parseInt(document.getElementById('c-sort').value)||0
+                    };
+                    if(!data.name||!data.slug){ toast('请填写名称和标识', 5); return; }
+                    apiPost('/api/categories',data,true).then(function(){ toast('已添加'); layui.layer.closeAll(); PAGES.categories.render(c); }).catch(function(e){ toast('失败：'+e.message, 2); });
+                };
+            }
+        });
+    });
+
+    c.querySelectorAll('button[data-edit]').forEach(function(btn){
+        var id=parseInt(btn.dataset.edit);
+        btn.onclick=__guard(gen, function(){
+            var item=flatList.find(function(x){return x.id===id});
+            if(!item) return;
+            layui.layer.open({type:1,title:'编辑分类',area:['480px','320px'],content:
+                '<form class="layui-form" style="padding:30px 30px 0 0">'+
+                    formField('ce-name', '名称', item.name, '')+
+                    formField('ce-sort', '排序', item.sort_order, '0', 'number')+
+                    '<div class="layui-form-item"><div class="layui-input-block" style="margin-left:110px"><button class="layui-btn" id="ce-save" type="button">保存</button></div></div>'+
+                '</form>',
+                success:function(){
+                    document.getElementById('ce-save').onclick=function(){
+                        apiPut('/api/categories/'+id,{name:document.getElementById('ce-name').value.trim(),sort_order:parseInt(document.getElementById('ce-sort').value)||0},true).then(function(){ toast('已更新'); layui.layer.closeAll(); PAGES.categories.render(c); }).catch(function(e){ toast('失败：'+e.message, 2); });
+                    };
+                }
+            });
+        });
+    });
+    c.querySelectorAll('button[data-del]').forEach(function(btn){
+        var id=parseInt(btn.dataset.del);
+        btn.onclick=__guard(gen, function(){
+            var item=flatList.find(function(x){return x.id===id});
+            confirmDelete('确定要删除分类「'+esc(item?item.name:'')+'」吗？', function(){
+                apiDel('/api/categories/'+id,true).then(function(){ toast('已删除'); PAGES.categories.render(c); }).catch(function(e){ toast('失败：'+e.message, 2); });
+            });
+        });
+    });
+}};
+
+// ============================================================
+//  PAGE: Comments
+// ============================================================
+PAGES.comments={render:async function(c){
+    var gen=++__GEN;
+    c.innerHTML='<div class="admin-loading">加载中...</div>';
+    var posts=[];
+    try{posts=await api('/api/blog/my',true)}catch(e){}
+    var all=[];
+    for(var i=0;i<posts.length;i++){
+        try{var cmts=await api('/api/comments/'+posts[i].id,true);if(Array.isArray(cmts))cmts.forEach(function(c2){c2._blog_title=posts[i].title;all.push(c2)})}catch(e){}
+        if(gen!==__GEN) return;
+    }
+
+    function rows(){
+        return all.map(function(c2){
+            return '<tr><td>'+c2.id+'</td><td>'+esc(c2._blog_title||'-')+'</td><td>'+esc(c2.user_name)+'</td><td style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(c2.content)+'">'+esc(c2.content)+'</td><td>'+dateStr(c2.created_at)+'</td><td>'+
+                '<button class="layui-btn layui-btn-xs layui-btn-danger" data-del="'+c2.id+'">删除</button></td></tr>';
+        }).join('');
+    }
+
+    c.innerHTML=
+        pageHeader('评论管理', '共 '+all.length+' 条评论', null)+
+        '<div class="admin-section"><div class="admin-section-body">'+
+            (all.length
+                ? '<table class="layui-table"><thead><tr><th>ID</th><th>文章</th><th>用户</th><th>内容</th><th>时间</th><th>操作</th></tr></thead><tbody>'+rows()+'</tbody></table>'
+                : '<div class="admin-empty">暂无评论数据</div>')+
+        '</div></div>';
+
+    c.querySelectorAll('button[data-del]').forEach(function(btn){
+        var id=parseInt(btn.dataset.del);
+        btn.onclick=__guard(gen, function(){
+            confirmDelete('确定要删除此评论吗？', function(){
+                apiDel('/api/comments/'+id,true).then(function(){
+                    toast('已删除'); all=all.filter(function(x){return x.id!==id});
+                    c.querySelector('.admin-section').innerHTML=(all.length?'<div class="admin-section-body"><table class="layui-table"><thead><tr><th>ID</th><th>文章</th><th>用户</th><th>内容</th><th>时间</th><th>操作</th></tr></thead><tbody>'+rows()+'</tbody></table>':'<div class="admin-empty">暂无评论数据</div>');
+                    rebindRows();
+                }).catch(function(e){ toast('失败：'+e.message, 2); });
+            });
+        });
+    });
+
+    function rebindRows(){
+        c.querySelectorAll('button[data-del]').forEach(function(btn){
+            var id=parseInt(btn.dataset.del);
+            btn.onclick=__guard(gen, function(){
+                confirmDelete('确定要删除此评论吗？', function(){
+                    apiDel('/api/comments/'+id,true).then(function(){ toast('已删除'); PAGES.comments.render(c); }).catch(function(e){ toast('失败：'+e.message, 2); });
+                });
+            });
+        });
+    }
+}};
+
+// ============================================================
+//  PAGE: Resources — group by type with side panel
+// ============================================================
+PAGES.resources={render:async function(c){
+    var gen=++__GEN;
+    c.innerHTML='<div class="admin-loading">加载中...</div>';
+    var items=[];
+    try{items=await api('/api/resources',true)}catch(e){c.innerHTML='<div class="admin-empty">加载失败：'+esc(e.message)+'</div>';return}
+    if(gen!==__GEN) return;
+
+    // group by type
+    var groups={};
+    items.forEach(function(r){ (groups[r.type]=groups[r.type]||[]).push(r) });
+    var typeOrder=Object.keys(groups).sort();
+    var typeCount=typeOrder.length;
+
+    function showForm(title, def){
+        var isEdit=!!def.id;
+        var types=['操作','菜单','页面','API','数据'].map(function(t){return '<option value="'+t+'"'+(def.type===t?' selected':'')+'>'+t+'</option>'}).join('');
+        layui.layer.open({type:1,title:title,area:['540px',isEdit?'420px':'480px'],content:
+            '<form class="layui-form" style="padding:24px 30px 0 0">'+
+                formField('rs-name','名称',def.name||'','资源的可读名称')+
+                '<div class="layui-form-item"><label class="layui-form-label" style="width:80px">类型</label><div class="layui-input-block" style="margin-left:110px"><select class="layui-input" id="rs-type">'+types+'</select></div></div>'+
+                formField('rs-value','资源值',def.value||'','如：/api/blog/{slug}')+
+                formField('rs-desc','描述',def.description||'','用途说明')+
+                '<div class="layui-form-item"><label class="layui-form-label" style="width:80px">属性</label><div class="layui-input-block" style="margin-left:110px"><textarea class="layui-textarea" id="rs-prop" rows="2" placeholder="JSON 字符串">'+esc(def.properties||'{}')+'</textarea></div></div>'+
+                '<div class="layui-form-item"><div class="layui-input-block" style="margin-left:110px"><button class="layui-btn" id="rs-save" type="button">保存</button></div></div>'+
+            '</form>',
+            success:function(){
+                document.getElementById('rs-save').onclick=function(){
+                    var data={
+                        name:document.getElementById('rs-name').value.trim(),
+                        type:document.getElementById('rs-type').value,
+                        value:document.getElementById('rs-value').value.trim(),
+                        description:document.getElementById('rs-desc').value.trim(),
+                        properties:document.getElementById('rs-prop').value.trim()||'{}'
+                    };
+                    if(!data.name){ toast('请填写名称', 5); return; }
+                    try{ JSON.parse(data.properties); }catch(e){ toast('属性必须是合法 JSON', 5); return; }
+                    var p=isEdit ? apiPut('/api/resources/'+def.id,data,true) : apiPost('/api/resources',data,true);
+                    p.then(function(){ toast('已保存'); layui.layer.closeAll(); PAGES.resources.render(c); }).catch(function(e){ toast('失败：'+e.message, 2); });
+                };
+            }
+        });
+    }
+
+    function typeBadge(t){
+        var colorMap={'操作':'badge-blue','菜单':'badge-green','页面':'badge-purple','API':'badge-orange','数据':'badge-red'};
+        return '<span class="badge '+(colorMap[t]||'badge-gray')+'">'+esc(t)+'</span>';
+    }
+
+    function rowHtml(r){
+        return '<tr data-rid="'+r.id+'">'+
+            '<td class="col-id">#'+r.id+'</td>'+
+            '<td><div class="col-username">'+esc(r.name)+'</div><div style="font-size:12px;color:var(--text-muted);margin-top:2px">'+esc(r.description||'')+'</div></td>'+
+            '<td>'+typeBadge(r.type)+'</td>'+
+            '<td><code style="font-size:12px;background:var(--bg-elevated);padding:3px 8px;border:1px solid var(--border);font-family:ui-monospace,Menlo,monospace">'+esc(r.value||'-')+'</code></td>'+
+            '<td style="font-size:12.5px;color:var(--text-muted)">'+dateStr(r.updated_at)+'</td>'+
+            '<td class="col-actions">'+
+                '<button class="layui-btn layui-btn-xs" data-act="edit" data-id="'+r.id+'"><span style="font-size:11px">编辑</span></button>'+
+                '<button class="layui-btn layui-btn-xs layui-btn-danger" data-act="del" data-id="'+r.id+'"><span style="font-size:11px">删除</span></button>'+
+            '</td></tr>';
+    }
+    function rows(){
+        if(typeOrder.length===0) return '<tr><td colspan="6"><div class="admin-empty">暂无资源</div></td></tr>';
+        return typeOrder.map(function(t){
+            return '<tr><td colspan="6" style="background:var(--bg-elevated);padding:8px 14px;font-weight:600;font-size:12.5px;color:var(--text-bright)">'+typeBadge(t)+' <span style="margin-left:8px;color:var(--text-muted);font-weight:400">'+groups[t].length+' 项</span></td></tr>'+
+                groups[t].map(rowHtml).join('');
+        }).join('');
+    }
+
+    function rebind(){
+        c.querySelectorAll('button[data-act]').forEach(function(btn){
+            var id=parseInt(btn.dataset.id);
+            btn.onclick=__guard(gen, function(){
+                var item=items.find(function(x){return x.id===id});
+                if(btn.dataset.act==='edit') showForm('编辑资源', item);
+                else if(btn.dataset.act==='del') confirmAction('删除资源','确定要删除资源 <b>'+esc(item.name)+'</b> 吗？', function(){
+                    apiDel('/api/resources/'+id,true).then(function(){ toast('已删除'); PAGES.resources.render(c); }).catch(function(e){ toast('失败：'+e.message, 2); });
+                });
+            });
+        });
+    }
+
+    c.innerHTML=
+        pageHeader('资源管理', items.length+' 个资源 · '+typeCount+' 个类型',
+            '<button class="layui-btn layui-btn-sm layui-btn-normal" id="rsc-add">+ 新建资源</button>')+
+        '<div class="admin-section"><div class="admin-section-body"><table class="layui-table"><thead><tr><th>ID</th><th>名称</th><th>类型</th><th>资源值</th><th>更新时间</th><th>操作</th></tr></thead><tbody>'+rows()+'</tbody></table></div></div>';
+
+    document.getElementById('rsc-add').onclick=__guard(gen, function(){ showForm('新建资源', {type:'操作', properties:'{}'}); });
+    rebind();
+}};
+
+// ============================================================
+//  PAGE: Cache
+// ============================================================
+PAGES.cache={render:async function(c){
+    c.innerHTML='<div class="admin-loading">加载中...</div>';
+    var stats=null;
+    try{stats=await api('/api/cache/stats',true)}catch(e){c.innerHTML='<div class="admin-empty">加载失败：'+esc(e.message)+'</div>';return}
+    c.innerHTML=
+        pageHeader('缓存状态', 'MemoryCache 运行状态', null)+
+        '<div class="admin-section"><div class="admin-section-header"><span class="admin-section-title">缓存详情</span></div><div class="admin-section-body"><pre style="margin:16px 20px;font-size:13px;color:var(--text);background:var(--code-bg);padding:16px;border-radius:8px;overflow-x:auto;border:1px solid var(--border)">'+esc((function(){try{return JSON.stringify(stats,null,2)}catch(e){return String(stats)}})())+'</pre></div></div>';
+}};
+
+// ============================================================
+//  PAGE: Authorization — role × resource matrix
+// ============================================================
+PAGES.authorization={render:async function(c){
+    var gen=++__GEN;
+    c.innerHTML='<div class="admin-loading">加载中...</div>';
+    var roles=[], resources=[], authorizes=[];
+    try{ roles=await api('/api/roles',true); resources=await api('/api/resources',true); authorizes=await api('/api/authorizes',true) }catch(e){c.innerHTML='<div class="admin-empty">加载失败：'+esc(e.message)+'</div>';return}
+    if(gen!==__GEN) return;
+    authorizes=Array.isArray(authorizes)?authorizes:[];
+
+    // 构建 role_id → roleName 映射
+    var roleMap={}; roles.forEach(function(r){ roleMap[r.id]=r.name; });
+    var roleByName={}; roles.forEach(function(r){ roleByName[r.name]=r; });
+
+    // 授权集合：key = "roleId:resourceId"
+    var granted={};
+    authorizes.forEach(function(a){ granted[a.role_id+':'+a.resource_id]=a.id; });
+
+    function isGranted(roleId, resourceId){ return !!granted[roleId+':'+resourceId]; }
+
+    // group resources by type
+    var groups={};
+    resources.forEach(function(r){ (groups[r.type]=groups[r.type]||[]).push(r) });
+    var typeOrder=Object.keys(groups).sort();
+
+    function cellHtml(role, r){
+        var granted=isGranted(role.id, r.id);
+        var isSysRole=role.name==='admin';
+        return '<td style="text-align:center;padding:6px 8px"><label style="cursor:'+(isSysRole?'not-allowed':'pointer')+';display:inline-block;position:relative">'+
+            '<input type="checkbox" '+(granted?'checked':'')+' '+(isSysRole?'disabled':'')+' data-rid="'+r.id+'" data-rid-name="'+r.id+'" data-role-id="'+role.id+'" data-role-name="'+esc(role.name)+'" style="position:absolute;opacity:0;width:0;height:0">'+
+            '<span class="auth-switch '+(granted?'on':'')+' '+(isSysRole?'locked':'')+'"><span class="auth-switch-knob"></span></span>'+
+        '</label></td>';
+    }
+    function typeBadge(t){
+        var colorMap={'操作':'badge-blue','菜单':'badge-green','页面':'badge-purple','API':'badge-orange','数据':'badge-red'};
+        return '<span class="badge '+(colorMap[t]||'badge-gray')+'">'+esc(t)+'</span>';
+    }
+
+    function renderTable(){
+        var head='<thead><tr><th style="min-width:240px">资源</th>'+roles.map(function(r){return '<th style="text-align:center;min-width:90px"><div style="font-weight:600">'+esc(r.name)+'</div><div style="font-size:11px;color:var(--text-muted);font-weight:400;margin-top:2px">'+(r.name==='admin'?'全部':r.description||'&nbsp;')+'</div></th>'}).join('')+'</tr></thead>';
+        var body=typeOrder.length===0?'<tr><td colspan="'+(roles.length+1)+'" style="text-align:center;color:var(--text-muted);padding:60px">暂无资源，请先到「资源管理」创建</td></tr>':
+            typeOrder.map(function(t){
+                var groupRow='<tr><td colspan="'+(roles.length+1)+'" style="background:var(--bg-elevated);padding:8px 14px;font-weight:600;font-size:12.5px;color:var(--text-bright)">'+typeBadge(t)+' <span style="margin-left:8px;color:var(--text-muted);font-weight:400">'+groups[t].length+' 项</span></td></tr>';
+                var rows=groups[t].map(function(r){
+                    return '<tr data-rid="'+r.id+'"><td><div class="col-username" style="font-size:13px">'+esc(r.name)+'</div><code style="font-size:11px;color:var(--text-muted);font-family:ui-monospace,Menlo,monospace">'+esc(r.value||'')+'</code></td>'+
+                        roles.map(function(role){ return cellHtml(role, r) }).join('')+
+                        '</tr>';
+                }).join('');
+                return groupRow+rows;
+            }).join('');
+        return '<table class="layui-table auth-matrix" style="margin:0"><colgroup><col><col span="'+roles.length+'"></colgroup>'+head+'<tbody>'+body+'</tbody></table>';
+    }
+
+    c.innerHTML=
+        pageHeader('授权管理','角色 × 资源 权限矩阵','<button class="layui-btn layui-btn-sm layui-btn-primary" id="auth-clear" title="清空所有自定义授权（仅 admin 保留）">重置矩阵</button>')+
+        '<div class="admin-section">'+
+            '<div class="admin-toolbar">'+
+                '<span style="font-size:12.5px;color:var(--text-muted)">'+resources.length+' 个资源 × '+roles.length+' 个角色</span>'+
+                '<div style="margin-left:auto;display:flex;align-items:center;gap:14px;font-size:12px;color:var(--text-muted)">'+
+                    '<span><span class="auth-switch on" style="position:relative;top:3px;margin-right:4px"><span class="auth-switch-knob"></span></span>已授权</span>'+
+                    '<span><span class="auth-switch" style="position:relative;top:3px;margin-right:4px"><span class="auth-switch-knob"></span></span>未授权</span>'+
+                    '<span><span class="auth-switch on locked" style="position:relative;top:3px;margin-right:4px"><span class="auth-switch-knob"></span></span>系统角色不可改</span>'+
+                '</div>'+
+            '</div>'+
+            '<div class="admin-section-body" style="overflow-x:auto">'+renderTable()+'</div>'+
+        '</div>';
+
+    c.querySelectorAll('input[type=checkbox][data-rid]').forEach(function(cb){
+        cb.onchange=__guard(gen, function(){
+            var roleId=parseInt(cb.dataset.roleId), resourceId=parseInt(cb.dataset.rid);
+            var key=roleId+':'+resourceId;
+            var sw=cb.parentNode.querySelector('.auth-switch');
+            if(cb.checked){
+                apiPost('/api/authorizes', {role_id: roleId, resource_id: resourceId}, true).then(function(created){
+                    if(created&&created.id) granted[key]=created.id;
+                    if(sw) sw.classList.add('on');
+                    toast('已授权');
+                }).catch(function(e){ cb.checked=false; toast('失败：'+e.message, 2); });
+            } else {
+                var aid=granted[key];
+                if(!aid){ if(sw) sw.classList.remove('on'); return; }
+                apiDel('/api/authorizes/'+aid, true).then(function(){
+                    delete granted[key];
+                    if(sw) sw.classList.remove('on');
+                    toast('已撤销');
+                }).catch(function(e){ cb.checked=true; toast('失败：'+e.message, 2); });
+            }
+        });
+    });
+    document.getElementById('auth-clear').onclick=__guard(gen, function(){
+        confirmAction('重置授权矩阵','确定要清空所有自定义授权吗？<div style="color:var(--text-muted);font-size:12px;margin-top:6px">admin 角色的权限始终保留</div>', function(){
+            var ids=Object.values(granted);
+            Promise.all(ids.map(function(id){ return apiDel('/api/authorizes/'+id, true) })).then(function(){
+                PAGES.authorization.render(c); toast('已重置');
+            }).catch(function(e){ toast('失败：'+e.message, 2); });
+        });
+    });
+}};
+
+// ============================================================
+//  Helpers
+// ============================================================
+function pageHeader(title, subtitle, action){
+    return '<div class="admin-page-header"><div><div class="admin-page-title">'+esc(title)+'</div>'+(subtitle?'<div class="admin-page-subtitle">'+esc(subtitle)+'</div>':'')+'</div>'+(action?'<div>'+action+'</div>':'')+'</div>';
+}
+function sectionTable(headers, rows){
+    return '<div class="admin-section"><div class="admin-section-body">'+
+        '<table class="layui-table"><thead><tr>'+headers.map(function(h){return '<th>'+esc(h)+'</th>'}).join('')+'</tr></thead><tbody>'+rows+'</tbody></table>'+
+    '</div></div>';
+}
+function formField(id, label, val, ph, type){
+    return '<div class="layui-form-item"><label class="layui-form-label" style="width:80px">'+esc(label)+'</label><div class="layui-input-block" style="margin-left:110px"><input class="layui-input" id="'+id+'" type="'+(type||'text')+'" value="'+esc(val==null?'':val)+'" placeholder="'+esc(ph||'')+'"></div></div>';
+}
+function formArea(id, label, val){
+    return '<div class="layui-form-item"><label class="layui-form-label" style="width:80px">'+esc(label)+'</label><div class="layui-input-block" style="margin-left:110px"><textarea class="layui-textarea" id="'+id+'" rows="2">'+esc(val==null?'':val)+'</textarea></div></div>';
+}
+
+// ============================================================
+//  Navigation
+// ============================================================
+function getInitialPage(){
+    var m=window.location.pathname.match(/\/admin\/(\w+)/);
+    if(m&&PAGES[m[1]]) return m[1];
+    var q=new URLSearchParams(window.location.search).get('page');
+    if(q&&PAGES[q]) return q;
+    return 'dashboard';
+}
+function setActiveNav(id){
+    document.querySelectorAll('.admin-nav-item').forEach(function(a){ a.classList.toggle('active', a.dataset.page===id); });
+}
+function setTopbar(id){
+    var labels={dashboard:'系统概览',users:'用户管理',roles:'角色权限',authorization:'授权矩阵',blog:'博客管理',exhibitions:'作品管理',categories:'分类管理',comments:'评论管理',resources:'资源管理',cache:'缓存状态'};
+    var t=document.getElementById('topbar-title');
+    if(t) t.textContent=labels[id]||'后台管理';
+}
+
+function navigate(pageId, pushState){
+    if(!PAGES[pageId]) return;
+    if(pushState!==false){
+        var url=pageId==='dashboard'?'/admin/index.html':'/admin/index.html?page='+pageId;
+        window.history.pushState({page:pageId},'',url);
+    }
+    setActiveNav(pageId);
+    setTopbar(pageId);
+    var main=document.getElementById('admin-main');
+    main.innerHTML='<div class="admin-loading">加载中...</div>';
+    PAGES[pageId].render(main).catch(function(err){ main.innerHTML='<div class="admin-empty">渲染出错：'+esc(err.message)+'</div>'; });
+}
+
+// Build sidebar
+(function(){
+    var navEl=document.getElementById('admin-nav');
+    var html='';
+    NAV.forEach(function(item){
+        if(item.section) html+='<div class="admin-nav-section">'+esc(item.section)+'</div>';
+        else if(item.id) html+='<a href="javascript:;" class="admin-nav-item" data-page="'+item.id+'"><span class="nav-icon">'+item.icon+'</span><span>'+esc(item.label)+'</span></a>';
+    });
+    navEl.innerHTML=html;
+    navEl.addEventListener('click', function(e){ var a=e.target.closest('.admin-nav-item'); if(a) navigate(a.dataset.page); });
+})();
+
+window.addEventListener('popstate', function(e){ var pid=(e.state&&e.state.page)||getInitialPage(); navigate(pid,false); });
+navigate(getInitialPage(), false);
+
+})();
+</script>
+</body>
+</html>

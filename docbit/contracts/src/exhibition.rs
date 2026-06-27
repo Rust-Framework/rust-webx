@@ -59,3 +59,11 @@ pub struct UpsertExhibitionRequest {
 #[post("/api/exhibitions")]
 #[authorize(role = "admin")]
 impl IRequest<ExhibitionModel> for UpsertExhibitionRequest {}
+
+pub struct DeleteExhibitionRequest {
+    pub slug: String,
+}
+
+#[delete("/api/exhibitions/{slug}")]
+#[authorize(role = "admin")]
+impl IRequest<String> for DeleteExhibitionRequest {}

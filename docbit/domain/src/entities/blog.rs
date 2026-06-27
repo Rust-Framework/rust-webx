@@ -1,4 +1,6 @@
 //! Blog entity — DB-backed blog post with FKs to Category and User.
+//!
+//! `author_id` 是博客作者；`created_id`/`updated_id` 是运维审计操作人，语义分离。
 
 use rust_ef::prelude::*;
 
@@ -39,6 +41,13 @@ pub struct Blog {
     pub created_at: i64,
     #[required]
     pub updated_at: i64,
+    #[index]
+    pub created_id: Option<i32>, // 运维审计创建人（无 FK）
+    #[index]
+    pub updated_id: Option<i32>, // 运维审计更新人（无 FK）
+    #[required]
+    #[index]
+    pub is_deleted: bool,
     #[navigation]
     pub category: BelongsTo<Category>,
     #[navigation]

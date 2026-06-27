@@ -43,6 +43,13 @@ pub struct Exhibition {
     pub created_at: i64,
     #[required]
     pub updated_at: i64,
+    #[index]
+    pub created_id: Option<i32>, // 无 FK
+    #[index]
+    pub updated_id: Option<i32>, // 无 FK
+    #[required]
+    #[index]
+    pub is_deleted: bool,
     #[navigation]
     pub category: BelongsTo<Category>,
 }

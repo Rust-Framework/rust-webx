@@ -1,4 +1,4 @@
-//! RBAC contracts — roles, resources (route patterns), and authorizations.
+//! RBAC contracts — roles, resources (通用资源模型), and authorizations.
 
 use rust_webapp::*;
 use serde::{Deserialize, Serialize};
@@ -8,14 +8,24 @@ pub struct RoleModel {
     pub id: i32,
     pub name: String,
     pub description: String,
+    pub created_at: i64,
+    pub updated_at: i64,
 }
 
+/// 资源模型：通用 `type + value + properties` 三段式。
+/// - `type`：应用/模块/页面/操作/数据/其他
+/// - `value`：页面/操作类型时为路由
+/// - `properties`：配置属性 JSON，如 `{"method":"GET"}`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourceModel {
     pub id: i32,
-    pub route_pattern: String,
-    pub method: String,
+    pub name: String,
     pub description: String,
+    pub r#type: String,
+    pub value: String,
+    pub properties: String,
+    pub created_at: i64,
+    pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,6 +52,17 @@ pub struct CreateRoleRequest {
 #[post("/api/roles")]
 #[authorize(role = "admin")]
 impl IRequest<RoleModel> for CreateRoleRequest {}
+
+#[derive(Deserialize)]
+pub struct UpdateRoleRequest {
+    pub id: String,
+    pub name: Option<String>,
+    pub description: Option<String>,
+}
+
+#[put("/api/roles/{id}")]
+#[authorize(role = "admin")]
+impl IRequest<RoleModel> for UpdateRoleRequest {}
 
 pub struct DeleteRoleRequest {
     pub id: String,
@@ -72,7 +93,7 @@ pub struct RevokeRoleRequest {
 #[authorize(role = "admin")]
 impl IRequest<String> for RevokeRoleRequest {}
 
-// ── Resource CRUD (admin-maintained route patterns) ──
+// ── Resource CRUD (admin-maintained 通用资源) ──
 
 pub struct ListResourcesRequest;
 
@@ -82,14 +103,30 @@ impl IRequest<Vec<ResourceModel>> for ListResourcesRequest {}
 
 #[derive(Deserialize)]
 pub struct CreateResourceRequest {
-    pub route_pattern: String,
-    pub method: String,
+    pub name: String,
     pub description: String,
+    pub r#type: String,
+    pub value: String,
+    pub properties: String,
 }
 
 #[post("/api/resources")]
 #[authorize(role = "admin")]
 impl IRequest<ResourceModel> for CreateResourceRequest {}
+
+#[derive(Deserialize)]
+pub struct UpdateResourceRequest {
+    pub id: String,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub r#type: Option<String>,
+    pub value: Option<String>,
+    pub properties: Option<String>,
+}
+
+#[put("/api/resources/{id}")]
+#[authorize(role = "admin")]
+impl IRequest<ResourceModel> for UpdateResourceRequest {}
 
 pub struct DeleteResourceRequest {
     pub id: String,

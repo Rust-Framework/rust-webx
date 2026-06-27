@@ -1,4 +1,4 @@
-﻿//! SPA static file serving middleware.
+//! SPA static file serving middleware.
 //!
 //! Serves files from a configured root directory.
 //! For SPA routing, non-file requests fall back to index.html.
@@ -227,34 +227,23 @@ fn mime_type(path: &Path) -> &'static str {
     }
 }
 
-/// Resolve a SPA root path by first checking as-is, then walking up
-/// from cwd and checking each ancestor's immediate subdirectories.
+/// Resolve a SPA root path by first checking the application base directory
+/// (as resolved by `rust_webapp_core::paths::app_base`), then as-is.
 ///
 /// This mirrors the strategy used by `config::load_appsettings` so that
-/// `use_spa("wwwroot")` works whether the user runs from `demo/` or from
-/// the workspace root (`rust-webapp/`).
+/// `use_spa("wwwroot")` works whether the user runs from `demo/`, from
+/// the workspace root (`rust-webapp/`), or from a deployment directory
+/// (exe alongside `wwwroot/`).
 fn resolve_spa_root(root: PathBuf) -> PathBuf {
     // If the path is already absolute or exists, use it directly.
     if root.is_absolute() || root.exists() {
         return root;
     }
 
-    // Walk up from cwd; at each ancestor check immediate subdirectories.
-    if let Ok(cwd) = std::env::current_dir() {
-        let mut dir = Some(cwd.as_path());
-        while let Some(d) = dir {
-            if let Ok(entries) = std::fs::read_dir(d) {
-                for entry in entries.flatten() {
-                    if entry.path().is_dir() {
-                        let candidate = entry.path().join(&root);
-                        if candidate.exists() {
-                            return candidate;
-                        }
-                    }
-                }
-            }
-            dir = d.parent();
-        }
+    // 应用基准目录（exe 同级 / cwd / 上溯统一由 app_base 处理）。
+    let candidate = rust_webapp_core::paths::app_base().join(&root);
+    if candidate.exists() {
+        return candidate;
     }
 
     root

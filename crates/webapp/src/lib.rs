@@ -1,4 +1,4 @@
-﻿// rust-webapp â€?Umbrella crate for the Rust WebApi framework.
+// rust-webapp â€?Umbrella crate for the Rust WebApi framework.
 // Re-exports all types for a unified `use rust_webapp::*` experience.
 
 // --- Core traits ---
@@ -25,6 +25,7 @@ pub use rust_webapp_core::mediator::{IEventRequest, IMediator, IRequest};
 pub use rust_webapp_core::middleware::IMiddleware;
 pub use rust_webapp_core::mode::AppMode;
 pub use rust_webapp_core::pagination::{PagedRequest, PagedResponse};
+pub use rust_webapp_core::paths::{app_base, looks_like_app_base};
 pub use rust_webapp_core::pipeline::{IPipelineBehavior, IServiceResolver};
 pub use rust_webapp_core::problem::{FieldError, ProblemDetails};
 pub use rust_webapp_core::routing::{HttpMethod, IEndpoint, IRouter, RouteMeta};

@@ -128,6 +128,35 @@ impl HostBuilder {
         self
     }
 
+    /// 自动绑定 appsettings 配置节到 `T`，并以 `Arc<T>` 注册到 DI 容器。
+    ///
+    /// 参考 ASP.NET Core 的 `services.Configure<T>(configuration.GetSection(...))`：
+    /// 框架在 `build()` 时读取已合并的 appsettings（含 `{Mode}` overlay 与 env override），
+    /// 取 `section` 子节点反序列化为 `T`，注册为单例供 handler 通过 `Arc<T>` 注入。
+    ///
+    /// ```ignore
+    /// Host::builder()
+    ///     .bind_config::<SiteConfig>("Site")
+    ///     .build()
+    /// ```
+    pub fn bind_config<T>(self, section: &str) -> Self
+    where
+        T: for<'de> serde::Deserialize<'de> + Default + Send + Sync + 'static,
+    {
+        let mode = self.mode;
+        let section = section.to_string();
+        self.register(move |svc| {
+            let appsettings = config::load_appsettings(mode).unwrap_or_default();
+            let bound: T = config::bind_config(&appsettings, &section);
+            tracing::info!(
+                "[Host] bind_config<{}>(\"{}\") registered",
+                std::any::type_name::<T>(),
+                section
+            );
+            svc.instance(Arc::new(bound))
+        })
+    }
+
     pub fn use_spa(mut self, root: impl Into<String>) -> Self {
         self.spa_root = Some(root.into());
         self
@@ -232,7 +261,19 @@ impl HostBuilder {
         });
         pipeline.add_middleware(Arc::new(CorsMiddleware::new(cors)));
 
-        if let Some(ref spa_root) = self.spa_root {
+        // SPA 自动启用：若应用显式调用 `use_spa`，使用指定根目录；
+        // 否则框架自动检测应用基准目录下的 `wwwroot/`，存在即启用 SPA。
+        // 这样新应用无需在 main.rs 手写 `use_spa("wwwroot")` 样板。
+        let spa_root = self.spa_root.clone().or_else(|| {
+            let candidate = rust_webapp_core::paths::app_base().join("wwwroot");
+            if candidate.is_dir() {
+                tracing::info!("[Host] Auto-detected SPA root: {}", candidate.display());
+                Some(candidate.to_string_lossy().into_owned())
+            } else {
+                None
+            }
+        });
+        if let Some(ref spa_root) = spa_root {
             pipeline.add_middleware(Arc::new(SpaMiddleware::new(spa_root.clone())));
         }
 

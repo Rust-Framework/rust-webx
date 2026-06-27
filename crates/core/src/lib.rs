@@ -1,4 +1,4 @@
-﻿// lrwf-core â€” Core traits for the LRWF framework.
+// lrwf-core â€” Core traits for the LRWF framework.
 
 pub mod app;
 pub mod auth;
@@ -13,6 +13,7 @@ pub mod mediator_impl;
 pub mod middleware;
 pub mod mode;
 pub mod pagination;
+pub mod paths;
 pub mod pipeline;
 pub mod problem;
 pub mod routing;
@@ -32,6 +33,7 @@ pub use mediator_impl::*;
 pub use middleware::*;
 pub use mode::*;
 pub use pagination::*;
+pub use paths::*;
 pub use pipeline::*;
 pub use problem::*;
 pub use routing::*;

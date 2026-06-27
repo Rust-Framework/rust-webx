@@ -8,7 +8,7 @@ use rust_ef::interceptor::{
     ISaveChangesInterceptor, SaveChangesContext, SaveChangesResultContext,
 };
 
-pub(crate) struct AuditInterceptor;
+pub struct AuditInterceptor;
 
 #[async_trait::async_trait]
 impl ISaveChangesInterceptor for AuditInterceptor {

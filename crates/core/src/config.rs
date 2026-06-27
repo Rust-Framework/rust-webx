@@ -255,42 +255,17 @@ fn read_json_file(path: impl AsRef<Path>) -> Option<serde_json::Value> {
         serde_json::from_str(&content).ok()
     }
 
-    // 1. Try as-is (relative to current working directory)
-    if let Some(value) = try_read(path) {
+    // 1. 应用基准目录（exe 同级 / cwd / 上溯统一由 app_base 处理）。
+    //    部署与开发期均能定位到 appsettings.json 所在目录。
+    let base = crate::paths::app_base();
+    let candidate = base.join(path);
+    if let Some(value) = try_read(&candidate) {
         return Some(value);
     }
 
-    // 2. Try next to the running executable (deployment scenario: config
-    //    files sit alongside the binary, regardless of cwd).
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(exe_dir) = exe.parent() {
-            let candidate = exe_dir.join(path);
-            if let Some(value) = try_read(&candidate) {
-                return Some(value);
-            }
-        }
-    }
-
-    // 3. Walk up from cwd; at each ancestor, check its immediate
-    //    subdirectories.  This handles cargo workspace layouts where
-    //    config files live in a member crate (e.g.
-    //    workspace_root/demo/appsettings.json) and `cargo run` is
-    //    invoked from the workspace root.
-    if let Ok(cwd) = std::env::current_dir() {
-        let mut dir = Some(cwd.as_path());
-        while let Some(d) = dir {
-            if let Ok(entries) = std::fs::read_dir(d) {
-                for entry in entries.flatten() {
-                    if entry.path().is_dir() {
-                        let candidate = entry.path().join(path);
-                        if let Some(value) = try_read(&candidate) {
-                            return Some(value);
-                        }
-                    }
-                }
-            }
-            dir = d.parent();
-        }
+    // 2. Try as-is (relative to current working directory) — 兜底
+    if let Some(value) = try_read(path) {
+        return Some(value);
     }
 
     None

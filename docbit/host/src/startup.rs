@@ -5,6 +5,9 @@
 //! 2. 创建默认 admin 用户（如不存在），密码哈希用 bcrypt；
 //! 3. `ensure_all_indexes()` — 扫描 `docs/` 并补齐 INDEX.json；
 //! 4. `sync_portfolio_assets()` — 把每个作品的 logo 拷贝到 `wwwroot/assets/works/`。
+//!
+//! wwwroot 路径按框架约定写死为 `<app_base>/wwwroot`，与 SPA 中间件一致，
+//! 不再通过 `AppPaths` 注入。
 
 use std::sync::Arc;
 
@@ -16,8 +19,6 @@ use tokio::sync::Mutex;
 use docbit_contracts::docs::IDocumentService;
 use docbit_domain::seed::seed;
 
-use crate::paths::AppPaths;
-
 const ADMIN_EMAIL: &str = "admin@docbit.local";
 const ADMIN_DEFAULT_PASSWORD: &str = "admin123";
 
@@ -25,7 +26,6 @@ const ADMIN_DEFAULT_PASSWORD: &str = "admin123";
 pub struct DbInitService {
     ctx: Arc<Mutex<DbContext>>,
     docs: Arc<dyn IDocumentService>,
-    paths: Arc<AppPaths>,
 }
 
 #[async_trait]
@@ -50,8 +50,9 @@ impl IHostedService for DbInitService {
             .ensure_all_indexes()
             .map_err(|e| Error::Internal(format!("Doc index generation failed: {}", e)))?;
 
+        let wwwroot = rust_webapp::app_base().join("wwwroot");
         self.docs
-            .sync_portfolio_assets(&self.paths.wwwroot)
+            .sync_portfolio_assets(&wwwroot)
             .map_err(|e| Error::Internal(format!("Portfolio asset sync failed: {}", e)))?;
 
         tracing::info!("[DbInitService] Initialization complete.");

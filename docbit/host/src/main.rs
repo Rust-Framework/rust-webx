@@ -1,42 +1,38 @@
 //! Docbit host crate entry point — composition root.
 //!
-//! 启动流程：
-//! 1. 框架 `Host::builder()` 内部按 `APP_ENV` 环境变量自动解析运行模式，并据此
-//!    合并 `appsettings.{Mode}.json` overlay、定位配置文件（cwd / exe 同级 / 上溯）；
-//! 2. 应用侧同样读取 `APP_ENV` 决定数据库 Provider（MySQL / SQLite），传入
-//!    `bootstrap::configure(mode)`；
-//! 3. 解析 `AppPaths`（wwwroot/db/docs）；
-//! 4. 装配 DI / 中间件 / SPA / JWT / MemoryCache；
-//! 5. `Host::build()` 自动收集所有 `#[rust_dicore::inject_attr]` 标注的服务与 handler；
-//! 6. `host.run()` 启动 HTTP 服务，并在启动前执行 `IHostedService`（如 `DbInitService`）。
+//! 参考 ASP.NET Core 的极简启动：
+//! - 运行模式（`APP_ENV`）→ 框架在 `Host::builder()` 内部自动读取，应用无需感知
+//! - appsettings 加载、环境 overlay 合并、配置文件定位 → 框架自动
+//!   （`appsettings.{Mode}.json` 自动合并）
+//! - SPA 静态资源 → 框架自动检测 `wwwroot/`，无需 `use_spa`
+//! - DbContext 注册 → 应用级 `add_dbcontext(|o| ...)`，provider 由 appsettings
+//!   的 `Database:ConnectionString` 自动识别（框架本身不依赖 EF）
+//! - 应用专属配置（`SiteConfig`）→ 框架 `bind_config::<SiteConfig>("Site")` 自动绑定
+//! - handler / hosted service → `#[rust_dicore::inject_attr]` 编译期自动注册
 
 mod authorizer;
-mod bootstrap;
-mod config;
+mod db;
 mod doc_service;
 mod interceptor;
-mod paths;
 mod startup;
 
+use docbit_contracts::site::SiteConfig;
 use rust_webapp::*;
+
+use crate::db::HostBuilderDbExt;
 
 // 显式引用 handlers 与 domain crate，确保它们的 `#[rust_dicore::inject_attr]`
 // 与 `inventory::submit!` 注册被链接进最终二进制（否则链接器可能丢弃未使用 crate）。
 extern crate docbit_domain;
 extern crate docbit_handlers;
 
-use crate::paths::AppPaths;
-
 #[tokio::main]
 async fn main() {
-    // 应用侧读取运行模式以选择数据库 Provider；框架侧由 HostBuilder 自行读取同一变量。
-    let mode = AppMode::from_env();
-    tracing::info!("[docbit] running in {:?} mode", mode);
-    let wwwroot = AppPaths::resolve().wwwroot;
-
     let host = Host::builder()
-        .register(bootstrap::configure(mode))
-        .use_spa(wwwroot.to_string_lossy().into_owned())
+        .add_dbcontext(|o| {
+            o.add_interceptor(interceptor::AuditInterceptor);
+        })
+        .bind_config::<SiteConfig>("Site")
         .use_auth()
         .use_memory_cache()
         .build();

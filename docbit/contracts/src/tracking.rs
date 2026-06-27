@@ -29,11 +29,7 @@ pub struct GetTrackingSummaryRequest;
 #[authorize(role = "admin")]
 impl IRequest<TrackingSummary> for GetTrackingSummaryRequest {}
 
-#[derive(Deserialize)]
-pub struct ListTrackingRequest {
-    pub path: Option<String>,
-    pub limit: Option<i32>,
-}
+pub struct ListTrackingRequest;
 
 #[get("/api/tracking")]
 #[authorize(role = "admin")]

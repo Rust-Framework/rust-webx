@@ -1,11 +1,10 @@
 //! Exhibition entity — stores INDEX.json metadata for portfolio works.
 
 use rust_ef::prelude::*;
-use serde::{Deserialize, Serialize};
 
 use super::category::Category;
 
-#[derive(Debug, Clone, EntityType, Serialize, Deserialize)]
+#[derive(Debug, Clone, EntityType)]
 #[table("exhibitions")]
 pub struct Exhibition {
     #[primary_key]

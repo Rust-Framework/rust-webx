@@ -1,12 +1,11 @@
 //! Comment entity — dual self-referencing FKs for reply (`parent_id`) and quote (`quoted_id`).
 
 use rust_ef::prelude::*;
-use serde::{Deserialize, Serialize};
 
 use super::blog::Blog;
 use super::user::User;
 
-#[derive(Debug, Clone, EntityType, Serialize, Deserialize)]
+#[derive(Debug, Clone, EntityType)]
 #[table("comments")]
 pub struct Comment {
     #[primary_key]

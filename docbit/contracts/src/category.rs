@@ -40,7 +40,7 @@ impl IRequest<CategoryModel> for CreateCategoryRequest {}
 
 #[derive(Deserialize)]
 pub struct UpdateCategoryRequest {
-    pub id: i32,
+    pub id: String,
     pub name: Option<String>,
     pub sort_order: Option<i32>,
 }
@@ -50,7 +50,7 @@ pub struct UpdateCategoryRequest {
 impl IRequest<CategoryModel> for UpdateCategoryRequest {}
 
 pub struct DeleteCategoryRequest {
-    pub id: i32,
+    pub id: String,
 }
 
 #[delete("/api/categories/{id}")]

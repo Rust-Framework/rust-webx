@@ -1,9 +1,8 @@
 //! Tracking entity — site visit statistics.
 
 use rust_ef::prelude::*;
-use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, EntityType, Serialize, Deserialize)]
+#[derive(Debug, Clone, EntityType)]
 #[table("tracking")]
 pub struct Tracking {
     #[primary_key]

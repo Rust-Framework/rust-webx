@@ -1,13 +1,12 @@
 //! Blog entity — DB-backed blog post with FKs to Category and User.
 
 use rust_ef::prelude::*;
-use serde::{Deserialize, Serialize};
 
 use super::category::Category;
 use super::comment::Comment;
 use super::user::User;
 
-#[derive(Debug, Clone, EntityType, Serialize, Deserialize)]
+#[derive(Debug, Clone, EntityType)]
 #[table("blogs")]
 pub struct Blog {
     #[primary_key]

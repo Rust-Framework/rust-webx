@@ -44,7 +44,7 @@ pub struct CreateRoleRequest {
 impl IRequest<RoleModel> for CreateRoleRequest {}
 
 pub struct DeleteRoleRequest {
-    pub id: i32,
+    pub id: String,
 }
 
 #[delete("/api/roles/{id}")]
@@ -63,13 +63,12 @@ pub struct AssignRoleRequest {
 #[authorize(role = "admin")]
 impl IRequest<String> for AssignRoleRequest {}
 
-#[derive(Deserialize)]
 pub struct RevokeRoleRequest {
-    pub user_id: i32,
-    pub role_id: i32,
+    pub user_id: String,
+    pub role_id: String,
 }
 
-#[delete("/api/role-users")]
+#[delete("/api/role-users/{user_id}/{role_id}")]
 #[authorize(role = "admin")]
 impl IRequest<String> for RevokeRoleRequest {}
 
@@ -93,7 +92,7 @@ pub struct CreateResourceRequest {
 impl IRequest<ResourceModel> for CreateResourceRequest {}
 
 pub struct DeleteResourceRequest {
-    pub id: i32,
+    pub id: String,
 }
 
 #[delete("/api/resources/{id}")]
@@ -119,7 +118,7 @@ pub struct CreateAuthorizeRequest {
 impl IRequest<AuthorizeModel> for CreateAuthorizeRequest {}
 
 pub struct DeleteAuthorizeRequest {
-    pub id: i32,
+    pub id: String,
 }
 
 #[delete("/api/authorizes/{id}")]

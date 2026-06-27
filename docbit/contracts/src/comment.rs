@@ -16,10 +16,10 @@ pub struct CommentModel {
 }
 
 pub struct ListCommentsRequest {
-    pub blog_id: i32,
+    pub blog_id: String,
 }
 
-#[get("/api/comments")]
+#[get("/api/comments/{blog_id}")]
 impl IRequest<Vec<CommentModel>> for ListCommentsRequest {}
 
 #[derive(Deserialize)]
@@ -35,7 +35,7 @@ pub struct CreateCommentRequest {
 impl IRequest<CommentModel> for CreateCommentRequest {}
 
 pub struct DeleteCommentRequest {
-    pub id: i32,
+    pub id: String,
 }
 
 #[delete("/api/comments/{id}")]

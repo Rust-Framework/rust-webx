@@ -41,7 +41,7 @@ AI 生成的新模块可直接插入 `handlers/` 目录，框架通过编译时�
 ```rust
 Host::builder()
     .use_spa("wwwroot")   // 托管 React/Vue/Svelte 构建产物
-    .use_auth()
+    .add_authentication()
     .build()
 ```
 

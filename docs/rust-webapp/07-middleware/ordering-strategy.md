@@ -24,9 +24,9 @@
 | SPA 在路由之前 | 静态文件优先于 API 路由 |
 | 日志尽可能早 | 记录所有请求包括被拒绝的 |
 
-## use_auth() 自动编排
+## add_authentication() 自动编排
 
-`use_auth()` 自动按正确顺序注册 JWT + Resource Auth 中间件，无需手动排序。
+`add_authentication()` 自动按正确顺序注册 JWT + Resource Auth 中间件，无需手动排序。
 
 ## 小结
 

@@ -23,7 +23,7 @@
 //!     .add_dbcontext(|o| {
 //!         o.add_interceptor(AuditInterceptor);
 //!     })
-//!     .use_auth()
+//!     .add_authentication()
 //!     .build()
 //! ```
 

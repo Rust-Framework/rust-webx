@@ -20,7 +20,7 @@
 | Handler 注册样板代码 | `#[handler]` 宏自动向 DI 容器注册 |
 | 模块间强耦合 | `IMediator::send()` 调度请求，`publish()` 发布事件 |
 | 错误与 HTTP 状态码映射分散 | 统一 `Error` 类型 + 内置异常中间件 |
-| 认证授权各自为政 | `use_auth()` + `#[authorize]` 声明式授权 |
+| 认证授权各自为政 | `add_authentication()` + `#[authorize]` 声明式授权 |
 
 ## 产品形态：框架为你提供的应用骨架
 
@@ -62,7 +62,7 @@ async fn main() {
             // 注册你的服务与依赖
         })
         .use_spa("wwwroot")      // 可选：SPA 静态托管
-        .use_auth()              // 可选：JWT 认证
+        .add_authentication()              // 可选：JWT 认证
         .use_memory_cache()      // 可选：分布式缓存
         .build()
         .run()

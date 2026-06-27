@@ -39,7 +39,7 @@ wwwroot/
 ```rust
 Host::builder()
     .use_spa("wwwroot")
-    .use_auth()
+    .add_authentication()
     .build()
     .run()
     .await?;

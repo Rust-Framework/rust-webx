@@ -25,8 +25,8 @@
 | `IConfiguration` | `AppOptions` | 配置访问 |
 | `ProblemDetails` | `ProblemDetails` | RFC 7807 |
 | `UseMiddleware<T>()` | `add_middleware::<T>()` | 中间件注册 |
-| `UseAuthentication()` | `use_auth()` | 认证 |
-| `UseAuthorization()` | 自动（use_auth 包含） | 授权 |
+| `UseAuthentication()` | `add_authentication()` | 认证 |
+| `UseAuthorization()` | 自动（`#[authorize]` 宏编译期收集） | 授权 |
 | `UseCors()` | `use_cors()` | CORS |
 | `UseStaticFiles()` | `use_spa()` | 静态文件 |
 | `Controller` | 无（Request 即端点） | 路由处理 |

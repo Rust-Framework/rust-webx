@@ -39,7 +39,7 @@ Host::builder()
     .register(|svc| { ... })
     .configure(|app| app.useOptions(|o| { ... }))
     .use_spa("wwwroot")
-    .use_auth()
+    .add_authentication()
     .build()
     .run()
     .await?;

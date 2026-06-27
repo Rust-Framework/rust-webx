@@ -52,7 +52,7 @@ svc.singleton::<dyn IRequestHandler<HelloRequest, String>>(
 
 ## 6. 401/403 授权问题
 
-- 是否启用了 `use_auth()`？
+- 是否启用了 `add_authentication()`？
 - JWT Secret 是否一致？
 - `#[authorize(role = "...")]` 的 role 是否与 token 中的 roles 匹配？
 

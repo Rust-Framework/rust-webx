@@ -74,7 +74,7 @@ Host::builder()
     .register(|svc| {
         svc.singleton::<UserRepo>(|_| Arc::new(UserRepo::new()));
     })
-    .use_auth()
+    .add_authentication()
     .build()
     .run()
     .await?;

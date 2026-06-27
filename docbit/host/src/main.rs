@@ -32,9 +32,9 @@ async fn main() {
         .add_dbcontext(|o| {
             o.add_interceptor(interceptor::AuditInterceptor);
         })
-        .bind_config::<SiteConfig>("Site")
-        .use_auth()
-        .use_memory_cache()
+        .add_options::<SiteConfig>("Site")
+        .add_authentication()
+        .add_memory_cache()
         .build();
 
     host.run().await.expect("Server failed");

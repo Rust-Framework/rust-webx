@@ -3,7 +3,7 @@
 ## 一行启用
 
 ```rust
-Host::builder().use_auth().build().run().await?;
+Host::builder().add_authentication().build().run().await?;
 ```
 
 自动：
@@ -66,6 +66,6 @@ Docbit 的 `LoginHandler` 是完整示例。
 
 ## 小结
 
-`use_auth()` + `Jwt.Secret` 配置即可启用 JWT 认证，Claims 通过 `IHttpContext` 存取。
+`add_authentication()` + `Jwt.Secret` 配置即可启用 JWT 认证，Claims 通过 `IHttpContext` 存取。
 
 下一节：[基于资源的授权](resource-authorization.md)

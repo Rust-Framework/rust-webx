@@ -10,7 +10,6 @@ use jsonwebtoken::{encode, EncodingKey, Header};
 use rust_ef::{
     db_context::DbContext,
     prelude::*,
-    provider::DbValue,
 };
 use rust_webapp::*;
 use serde::{Deserialize, Serialize};
@@ -76,32 +75,32 @@ async fn load_user_by_id(ctx: &Mutex<DbContext>, id: i32) -> Result<Option<User>
     Ok(users.into_iter().next())
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct RegisterHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct LoginHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct AuthMeHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct ForgotPasswordHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct ResetPasswordHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<RegisterRequest, AuthResponse> for RegisterHandler {
     async fn handle(&self, req: RegisterRequest) -> Result<AuthResponse> {
@@ -164,7 +163,7 @@ impl IRequestHandler<RegisterRequest, AuthResponse> for RegisterHandler {
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
     async fn handle(&self, req: LoginRequest) -> Result<AuthResponse> {
@@ -191,7 +190,7 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<AuthMeRequest, UserView> for AuthMeHandler {
     async fn handle(&self, _: AuthMeRequest) -> Result<UserView> {
@@ -217,7 +216,7 @@ impl IRequestHandler<AuthMeRequest, UserView> for AuthMeHandler {
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<ForgotPasswordRequest, ForgotPasswordResponse> for ForgotPasswordHandler {
     async fn handle(&self, req: ForgotPasswordRequest) -> Result<ForgotPasswordResponse> {
@@ -264,7 +263,7 @@ impl IRequestHandler<ForgotPasswordRequest, ForgotPasswordResponse> for ForgotPa
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<ResetPasswordRequest, ResetPasswordResponse> for ResetPasswordHandler {
     async fn handle(&self, req: ResetPasswordRequest) -> Result<ResetPasswordResponse> {
@@ -272,11 +271,11 @@ impl IRequestHandler<ResetPasswordRequest, ResetPasswordResponse> for ResetPassw
             return Err(Error::Http("Password must be at least 6 characters".into()));
         }
 
+        let token = req.token.clone();
         let record = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<PasswordResetToken>()
-                .query()
-                .filter_column("token", "=", DbValue::String(req.token.clone()))
+            let q = token.clone();
+            linq!(ctx.set::<PasswordResetToken>(), |t: PasswordResetToken| t.token == q)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
@@ -309,9 +308,8 @@ impl IRequestHandler<ResetPasswordRequest, ResetPasswordResponse> for ResetPassw
         // 标记 token 已使用：先查回再更新（跟踪器在 save 后已清空）
         let mut used_record = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<PasswordResetToken>()
-                .query()
-                .filter_column("token", "=", DbValue::String(req.token.clone()))
+            let q = token.clone();
+            linq!(ctx.set::<PasswordResetToken>(), |t: PasswordResetToken| t.token == q)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?

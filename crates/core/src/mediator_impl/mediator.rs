@@ -1,28 +1,26 @@
-﻿//! IMediator implementation.
+//! IMediator implementation.
 //!
-//! The `Mediator` dispatches requests via the HandlerCache (compile-time registry)
-//! instead of runtime DI lookups. IEventHandler dispatch is kept via rust_dicore DI
-//! for backward compatibility (IMiddleware still uses dyn dispatch).
+//! The `Mediator` resolves `IRequestHandler<T, R>` and `IEventHandler<T>`
+//! from the rust_dicore DI container. Handlers are registered via
+//! `#[rust_dicore::inject]` on their impl blocks, unifying service
+//! registration under a single attribute macro.
 
-use crate::di::scan::HandlerCache;
 use crate::error::{Error, Result};
-use crate::handler::IEventHandler;
+use crate::handler::{IEventHandler, IRequestHandler};
 use crate::mediator::{IEventRequest, IMediator, IRequest};
 use rust_dicore::ServiceProvider;
 use std::sync::Arc;
 
 /// Default implementation of IMediator.
 ///
-/// Uses the HandlerCache for O(1) request dispatch.
+/// Resolves handlers from the DI container (`ServiceProvider`).
 pub struct Mediator {
-    cache: Arc<HandlerCache>,
-    /// Kept for IEventHandler resolution (still dyn-based via rust_dicore DI)
     provider: Arc<ServiceProvider>,
 }
 
 impl Mediator {
-    pub fn new(cache: Arc<HandlerCache>, provider: Arc<ServiceProvider>) -> Self {
-        Self { cache, provider }
+    pub fn new(provider: Arc<ServiceProvider>) -> Self {
+        Self { provider }
     }
 }
 
@@ -33,24 +31,17 @@ impl IMediator for Mediator {
         T: IRequest<R> + Send + 'static,
         R: serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
     {
-        let req_type_name = std::any::type_name::<T>();
-        let entry = self.cache.get(req_type_name).ok_or_else(|| {
-            Error::Di(format!(
-                "No handler registered for request {} â†’ {}",
-                req_type_name,
-                std::any::type_name::<R>(),
-            ))
-        })?;
-
-        // Box the request for the type-erased call bridge
-        let request_boxed: Box<dyn std::any::Any + Send> = Box::new(req);
-
-        // Call through the type-erased bridge
-        let response = (entry.call)(&entry.handler, request_boxed, None).await?;
-
-        // Deserialize the response
-        let result: R = serde_json::from_slice(&response.body).map_err(Error::Serialization)?;
-        Ok(result)
+        let handler: Arc<dyn IRequestHandler<T, R>> = self
+            .provider
+            .get_optional::<dyn IRequestHandler<T, R>>()
+            .ok_or_else(|| {
+                Error::Di(format!(
+                    "No handler registered for request {} -> {}",
+                    std::any::type_name::<T>(),
+                    std::any::type_name::<R>(),
+                ))
+            })?;
+        handler.handle(req).await
     }
 
     async fn publish<T: IEventRequest>(&self, event: T) -> Result<()> {

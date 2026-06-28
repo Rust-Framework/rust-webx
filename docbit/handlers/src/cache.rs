@@ -10,12 +10,12 @@ use rust_webapp::*;
 
 use docbit_contracts::cache::CacheStatsRequest;
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct CacheStatsHandler {
     cache: Arc<MemoryCache>,
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<CacheStatsRequest, String> for CacheStatsHandler {
     async fn handle(&self, _: CacheStatsRequest) -> Result<String> {

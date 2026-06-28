@@ -16,22 +16,22 @@ use docbit_domain::entities::Comment;
 
 use crate::util::{now_secs, operator_id, parse_id};
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct ListCommentsHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct CreateCommentHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct DeleteCommentHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<ListCommentsRequest, Vec<CommentModel>> for ListCommentsHandler {
     async fn handle(&self, req: ListCommentsRequest) -> Result<Vec<CommentModel>> {
@@ -51,7 +51,7 @@ impl IRequestHandler<ListCommentsRequest, Vec<CommentModel>> for ListCommentsHan
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<CreateCommentRequest, CommentModel> for CreateCommentHandler {
     async fn handle(&self, _: CreateCommentRequest) -> Result<CommentModel> {
@@ -124,7 +124,7 @@ impl IRequestHandler<CreateCommentRequest, CommentModel> for CreateCommentHandle
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<DeleteCommentRequest, String> for DeleteCommentHandler {
     async fn handle(&self, _: DeleteCommentRequest) -> Result<String> {

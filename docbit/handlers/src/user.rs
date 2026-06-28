@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use rust_ef::{db_context::DbContext, prelude::*, provider::DbValue};
+use rust_ef::{db_context::DbContext, prelude::*};
 use rust_webapp::*;
 use tokio::sync::Mutex;
 
@@ -11,37 +11,37 @@ use docbit_domain::entities::{RoleUser, User};
 
 use crate::util::{now_secs, operator_id, parse_id};
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct ListUsersHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct GetUserHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct CreateUserHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct UpdateUserHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct DeleteUserHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct InfoHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<ListUsersRequest, Vec<UserModel>> for ListUsersHandler {
     async fn handle(&self, _: ListUsersRequest) -> Result<Vec<UserModel>> {
@@ -56,7 +56,7 @@ impl IRequestHandler<ListUsersRequest, Vec<UserModel>> for ListUsersHandler {
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<GetUserRequest, UserModel> for GetUserHandler {
     async fn handle(&self, req: GetUserRequest) -> Result<UserModel> {
@@ -73,7 +73,7 @@ impl IRequestHandler<GetUserRequest, UserModel> for GetUserHandler {
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<CreateUserRequest, UserModel> for CreateUserHandler {
     async fn handle(&self, _: CreateUserRequest) -> Result<UserModel> {
@@ -109,9 +109,7 @@ impl IRequestHandler<CreateUserRequest, UserModel> for CreateUserHandler {
         // 回查拿到自增 id，并分配默认 user 角色
         let created = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<User>()
-                .query()
-                .filter_column("email", "=", DbValue::String(req.email.clone()))
+            linq!(ctx.set::<User>(), |u: User| u.email == req.email)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
@@ -142,7 +140,7 @@ impl IRequestHandler<CreateUserRequest, UserModel> for CreateUserHandler {
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<UpdateUserRequest, UserModel> for UpdateUserHandler {
     async fn handle(&self, _: UpdateUserRequest) -> Result<UserModel> {
@@ -156,9 +154,7 @@ impl IRequestHandler<UpdateUserRequest, UserModel> for UpdateUserHandler {
         let id = parse_id(&req.id)?;
         let mut user = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<User>()
-                .query()
-                .filter_column("id", "=", DbValue::I32(id))
+            linq!(ctx.set::<User>(), |u: User| u.id == id)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
@@ -195,7 +191,7 @@ impl IRequestHandler<UpdateUserRequest, UserModel> for UpdateUserHandler {
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<DeleteUserRequest, String> for DeleteUserHandler {
     async fn handle(&self, _: DeleteUserRequest) -> Result<String> {
@@ -209,9 +205,7 @@ impl IRequestHandler<DeleteUserRequest, String> for DeleteUserHandler {
         let id = parse_id(&req.id)?;
         let mut user = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<User>()
-                .query()
-                .filter_column("id", "=", DbValue::I32(id))
+            linq!(ctx.set::<User>(), |u: User| u.id == id)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
@@ -233,16 +227,13 @@ impl IRequestHandler<DeleteUserRequest, String> for DeleteUserHandler {
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<InfoRequest, String> for InfoHandler {
     async fn handle(&self, _: InfoRequest) -> Result<String> {
         let count = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<User>()
-                .query()
-                .filter_column("is_deleted", "=", DbValue::Bool(false))
-                .count()
+            linq!(ctx.set::<User>(), |u: User| !u.is_deleted; count)
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
         };

@@ -14,27 +14,27 @@ use docbit_domain::entities::Exhibition;
 
 use crate::util::{now_secs, operator_id};
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct ListExhibitionsHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct GetExhibitionHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct UpsertExhibitionHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct DeleteExhibitionHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<ListExhibitionsRequest, Vec<ExhibitionModel>> for ListExhibitionsHandler {
     async fn handle(&self, _: ListExhibitionsRequest) -> Result<Vec<ExhibitionModel>> {
@@ -49,7 +49,7 @@ impl IRequestHandler<ListExhibitionsRequest, Vec<ExhibitionModel>> for ListExhib
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<GetExhibitionRequest, ExhibitionModel> for GetExhibitionHandler {
     async fn handle(&self, req: GetExhibitionRequest) -> Result<ExhibitionModel> {
@@ -66,7 +66,7 @@ impl IRequestHandler<GetExhibitionRequest, ExhibitionModel> for GetExhibitionHan
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<UpsertExhibitionRequest, ExhibitionModel> for UpsertExhibitionHandler {
     async fn handle(&self, _: UpsertExhibitionRequest) -> Result<ExhibitionModel> {
@@ -159,7 +159,7 @@ impl IRequestHandler<UpsertExhibitionRequest, ExhibitionModel> for UpsertExhibit
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<DeleteExhibitionRequest, String> for DeleteExhibitionHandler {
     async fn handle_with_claims(

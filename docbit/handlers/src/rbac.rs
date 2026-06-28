@@ -16,27 +16,27 @@ use crate::util::{now_secs, operator_id, parse_id};
 
 // ── Role CRUD ──
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct ListRolesHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct CreateRoleHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct UpdateRoleHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct DeleteRoleHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<ListRolesRequest, Vec<RoleModel>> for ListRolesHandler {
     async fn handle(&self, _: ListRolesRequest) -> Result<Vec<RoleModel>> {
@@ -51,7 +51,7 @@ impl IRequestHandler<ListRolesRequest, Vec<RoleModel>> for ListRolesHandler {
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<CreateRoleRequest, RoleModel> for CreateRoleHandler {
     async fn handle(&self, _: CreateRoleRequest) -> Result<RoleModel> {
@@ -95,7 +95,7 @@ impl IRequestHandler<CreateRoleRequest, RoleModel> for CreateRoleHandler {
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<UpdateRoleRequest, RoleModel> for UpdateRoleHandler {
     async fn handle(&self, _: UpdateRoleRequest) -> Result<RoleModel> {
@@ -142,7 +142,7 @@ impl IRequestHandler<UpdateRoleRequest, RoleModel> for UpdateRoleHandler {
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<DeleteRoleRequest, String> for DeleteRoleHandler {
     async fn handle(&self, _: DeleteRoleRequest) -> Result<String> {
@@ -178,17 +178,17 @@ impl IRequestHandler<DeleteRoleRequest, String> for DeleteRoleHandler {
 
 // ── Role assignment (RoleUser join) ──
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct AssignRoleHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct RevokeRoleHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<AssignRoleRequest, String> for AssignRoleHandler {
     async fn handle(&self, req: AssignRoleRequest) -> Result<String> {
@@ -220,7 +220,7 @@ impl IRequestHandler<AssignRoleRequest, String> for AssignRoleHandler {
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<RevokeRoleRequest, String> for RevokeRoleHandler {
     async fn handle(&self, req: RevokeRoleRequest) -> Result<String> {
@@ -245,27 +245,27 @@ impl IRequestHandler<RevokeRoleRequest, String> for RevokeRoleHandler {
 
 // ── Resource CRUD ──
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct ListResourcesHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct CreateResourceHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct UpdateResourceHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct DeleteResourceHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<ListResourcesRequest, Vec<ResourceModel>> for ListResourcesHandler {
     async fn handle(&self, _: ListResourcesRequest) -> Result<Vec<ResourceModel>> {
@@ -280,7 +280,7 @@ impl IRequestHandler<ListResourcesRequest, Vec<ResourceModel>> for ListResources
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<CreateResourceRequest, ResourceModel> for CreateResourceHandler {
     async fn handle(&self, _: CreateResourceRequest) -> Result<ResourceModel> {
@@ -327,7 +327,7 @@ impl IRequestHandler<CreateResourceRequest, ResourceModel> for CreateResourceHan
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<UpdateResourceRequest, ResourceModel> for UpdateResourceHandler {
     async fn handle(&self, _: UpdateResourceRequest) -> Result<ResourceModel> {
@@ -383,7 +383,7 @@ impl IRequestHandler<UpdateResourceRequest, ResourceModel> for UpdateResourceHan
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<DeleteResourceRequest, String> for DeleteResourceHandler {
     async fn handle(&self, _: DeleteResourceRequest) -> Result<String> {
@@ -419,22 +419,22 @@ impl IRequestHandler<DeleteResourceRequest, String> for DeleteResourceHandler {
 
 // ── Authorize CRUD (role ↔ resource links) ──
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct ListAuthorizesHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct CreateAuthorizeHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct DeleteAuthorizeHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<ListAuthorizesRequest, Vec<AuthorizeModel>> for ListAuthorizesHandler {
     async fn handle(&self, _: ListAuthorizesRequest) -> Result<Vec<AuthorizeModel>> {
@@ -446,7 +446,7 @@ impl IRequestHandler<ListAuthorizesRequest, Vec<AuthorizeModel>> for ListAuthori
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<CreateAuthorizeRequest, AuthorizeModel> for CreateAuthorizeHandler {
     async fn handle(&self, req: CreateAuthorizeRequest) -> Result<AuthorizeModel> {
@@ -486,7 +486,7 @@ impl IRequestHandler<CreateAuthorizeRequest, AuthorizeModel> for CreateAuthorize
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<DeleteAuthorizeRequest, String> for DeleteAuthorizeHandler {
     async fn handle(&self, req: DeleteAuthorizeRequest) -> Result<String> {

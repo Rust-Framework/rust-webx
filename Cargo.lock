@@ -2220,9 +2220,9 @@ dependencies = [
 
 [[package]]
 name = "rust-dicore"
-version = "0.3.2"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a342b4a760a8430ebf6254b19a761e70263dc2a8c9eded92924bb8516089e2a"
+checksum = "6abcdd0635ab49dc35484418b6c1d1547d808f0ce6ea2602d2e2778d807b191a"
 dependencies = [
  "inventory",
  "rust-dicore-macros",
@@ -2231,9 +2231,9 @@ dependencies = [
 
 [[package]]
 name = "rust-dicore-macros"
-version = "0.3.2"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67e03fb1600cf1170f0733df493200fc3375358d31254e006578774f824b6072"
+checksum = "dccec87a7dbd2cf52f80614c829cd352517d8b007538d11d427071c27cd7ece9"
 dependencies = [
  "proc-macro2",
  "quote",

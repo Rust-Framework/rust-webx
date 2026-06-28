@@ -1,30 +1,27 @@
-﻿//! Tests for IMediator send/publish using the HandlerCache.
+//! Tests for IMediator send/publish using DI resolution.
 //!
 //! These tests verify that the Mediator correctly resolves handlers
-//! from the HandlerCache and dispatches requests and events.
+//! from the rust_dicore ServiceProvider and dispatches requests and events.
 
 use rust_dicore::ServiceCollection;
-use rust_webapp_core::di::scan::{HandlerCache, ResponseData};
 use rust_webapp_core::error::{Error, Result as LrwfResult};
-use rust_webapp_core::handler::IEventHandler;
-use rust_webapp_core::handler::IRequestHandler;
+use rust_webapp_core::handler::{IEventHandler, IRequestHandler};
 use rust_webapp_core::mediator::{IEventRequest, IMediator, IRequest};
 use rust_webapp_core::mediator_impl::Mediator;
-use std::any::Any;
-use std::collections::HashMap;
-use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
-// â”€â”€â”€ Request / Response Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- Request / Response Types ---
 
 struct HelloRequest;
+
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct HelloResponse {
     message: String,
 }
+
 impl IRequest<HelloResponse> for HelloRequest {}
 
-// â”€â”€â”€ Handler (native async fn â€?no #[async_trait]) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- Handlers ---
 
 #[derive(Default)]
 struct HelloHandler;
@@ -48,72 +45,7 @@ impl IRequestHandler<HelloRequest, HelloResponse> for FailingHandler {
     }
 }
 
-// â”€â”€â”€ Type-erased call bridge helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-#[allow(clippy::type_complexity)]
-fn make_call_bridge<T, R, H>() -> fn(
-    handler: &Arc<dyn Any + Send + Sync>,
-    request: Box<dyn Any + Send>,
-    claims: Option<Box<dyn rust_webapp_core::auth::IClaims>>,
-) -> Pin<
-    Box<dyn std::future::Future<Output = LrwfResult<ResponseData>> + Send>,
->
-where
-    T: IRequest<R> + Send + 'static,
-    R: serde::Serialize + Send + 'static,
-    H: IRequestHandler<T, R> + Default + 'static,
-{
-    |handler, request, _claims| {
-        let handler = Arc::clone(handler);
-        Box::pin(async move {
-            let h = handler
-                .downcast_ref::<Arc<H>>()
-                .expect("Handler downcast failed");
-            let req = *request.downcast::<T>().expect("Request downcast failed");
-            let result = h.handle(req).await?;
-            let json_bytes = serde_json::to_vec(&result).unwrap_or_default();
-            Ok(ResponseData {
-                status: 200,
-                content_type: "application/json".to_string(),
-                body: json_bytes,
-            })
-        })
-    }
-}
-
-fn build_cache(req_type_name: &'static str, handler_type: &str) -> HandlerCache {
-    let mut entries = HashMap::new();
-    if handler_type == "hello" {
-        #[allow(clippy::default_constructed_unit_structs)]
-        let handler: Arc<dyn Any + Send + Sync> = Arc::new(Arc::new(HelloHandler::default()));
-        entries.insert(
-            req_type_name,
-            Arc::new(rust_webapp_core::di::scan::HandlerEntry {
-                handler,
-                call: make_call_bridge::<HelloRequest, HelloResponse, HelloHandler>(),
-            }),
-        );
-    } else if handler_type == "failing" {
-        #[allow(clippy::default_constructed_unit_structs)]
-        let handler: Arc<dyn Any + Send + Sync> = Arc::new(Arc::new(FailingHandler::default()));
-        entries.insert(
-            req_type_name,
-            Arc::new(rust_webapp_core::di::scan::HandlerEntry {
-                handler,
-                call: make_call_bridge::<HelloRequest, HelloResponse, FailingHandler>(),
-            }),
-        );
-    }
-    HandlerCache { entries }
-}
-
-fn build_empty_cache() -> HandlerCache {
-    HandlerCache {
-        entries: HashMap::new(),
-    }
-}
-
-// â”€â”€â”€ Event types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- Event types ---
 
 #[derive(Clone)]
 struct TestEvent {
@@ -142,13 +74,19 @@ impl IEventHandler<TestEvent> for FailingEventHandler {
     }
 }
 
-// â”€â”€â”€ Mediator::send tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- Mediator::send tests ---
 
 #[tokio::test]
 async fn mediator_send_success() {
-    let cache = build_cache(std::any::type_name::<HelloRequest>(), "hello");
-    let provider = Arc::new(ServiceCollection::new().build().unwrap());
-    let mediator = Mediator::new(Arc::new(cache), provider);
+    let provider = Arc::new(
+        ServiceCollection::new()
+            .singleton::<dyn IRequestHandler<HelloRequest, HelloResponse>>(|_| {
+                Arc::new(HelloHandler::default())
+            })
+            .build()
+            .unwrap(),
+    );
+    let mediator = Mediator::new(provider);
     let result = mediator.send(HelloRequest).await;
     assert!(result.is_ok());
     assert_eq!(result.unwrap().message, "hello");
@@ -156,9 +94,8 @@ async fn mediator_send_success() {
 
 #[tokio::test]
 async fn mediator_send_handler_not_registered() {
-    let cache = build_empty_cache();
     let provider = Arc::new(ServiceCollection::new().build().unwrap());
-    let mediator = Mediator::new(Arc::new(cache), provider);
+    let mediator = Mediator::new(provider);
     let result = mediator.send(HelloRequest).await;
     assert!(result.is_err());
     match result.unwrap_err() {
@@ -169,9 +106,15 @@ async fn mediator_send_handler_not_registered() {
 
 #[tokio::test]
 async fn mediator_send_handler_returns_error() {
-    let cache = build_cache(std::any::type_name::<HelloRequest>(), "failing");
-    let provider = Arc::new(ServiceCollection::new().build().unwrap());
-    let mediator = Mediator::new(Arc::new(cache), provider);
+    let provider = Arc::new(
+        ServiceCollection::new()
+            .singleton::<dyn IRequestHandler<HelloRequest, HelloResponse>>(|_| {
+                Arc::new(FailingHandler::default())
+            })
+            .build()
+            .unwrap(),
+    );
+    let mediator = Mediator::new(provider);
     let result = mediator.send(HelloRequest).await;
     assert!(result.is_err());
     match result.unwrap_err() {
@@ -180,7 +123,7 @@ async fn mediator_send_handler_returns_error() {
     }
 }
 
-// â”€â”€â”€ Mediator::publish tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- Mediator::publish tests ---
 
 #[tokio::test]
 async fn mediator_publish_single_handler() {
@@ -197,8 +140,7 @@ async fn mediator_publish_single_handler() {
             .build()
             .unwrap(),
     );
-    let cache = build_empty_cache();
-    let mediator = Mediator::new(Arc::new(cache), provider);
+    let mediator = Mediator::new(provider);
     mediator
         .publish(TestEvent {
             payload: "event-1".into(),
@@ -232,8 +174,7 @@ async fn mediator_publish_multiple_handlers() {
             .build()
             .unwrap(),
     );
-    let cache = build_empty_cache();
-    let mediator = Mediator::new(Arc::new(cache), provider);
+    let mediator = Mediator::new(provider);
     mediator
         .publish(TestEvent {
             payload: "multi".into(),
@@ -255,8 +196,7 @@ async fn mediator_publish_handler_returns_error() {
             .build()
             .unwrap(),
     );
-    let cache = build_empty_cache();
-    let mediator = Mediator::new(Arc::new(cache), provider);
+    let mediator = Mediator::new(provider);
     let result = mediator
         .publish(TestEvent {
             payload: "will-fail".into(),
@@ -268,8 +208,7 @@ async fn mediator_publish_handler_returns_error() {
 #[tokio::test]
 async fn mediator_publish_empty_handler_list() {
     let provider = Arc::new(ServiceCollection::new().build().unwrap());
-    let cache = build_empty_cache();
-    let mediator = Mediator::new(Arc::new(cache), provider);
+    let mediator = Mediator::new(provider);
     let result = mediator
         .publish(TestEvent {
             payload: "no-handlers".into(),

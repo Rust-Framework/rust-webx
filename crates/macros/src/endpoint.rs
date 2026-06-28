@@ -1,4 +1,4 @@
-﻿use proc_macro::TokenStream;
+use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{
     parse_macro_input, Attribute, Expr, GenericArgument, ItemImpl, Lit, Meta, PathArguments, Type,
@@ -156,9 +156,14 @@ fn emit_endpoint(attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 /// Generate the dispatch function that runs the full request lifecycle.
+///
+/// Resolves the handler from the DI container (`global_provider`) as
+/// `dyn IRequestHandler<Req, Rsp>`, then calls `handle_with_claims`.
+/// This unifies service registration under `#[rust_dicore::inject]`,
+/// making `#[handler]` unnecessary.
 fn generate_dispatch_fn(
     ty: &Type,
-    _rsp_type: &syn::Type,
+    rsp_type: &syn::Type,
     type_name: &str,
     path_params: &[String],
     is_body: bool,
@@ -215,19 +220,25 @@ fn generate_dispatch_fn(
             Box::pin(async move {
                 let request: #ty = #build_request;
 
-                // Get the handler cache (initialized at Host::build() time)
-                let cache = ::rust_webapp::HandlerCache::get_or_init();
-
-                // Find the handler entry matching this request type
-                let entry = cache.get(#type_name)
-                    .ok_or_else(|| ::rust_webapp::Error::Di(
+                // Resolve the handler from the DI container.
+                // #[rust_dicore::inject] on impl IRequestHandler<Req, Rsp> registers
+                // the handler as dyn IRequestHandler<Req, Rsp> in the ServiceCollection.
+                let provider = ::rust_webapp::global_provider();
+                let handler: ::std::sync::Arc<dyn ::rust_webapp::IRequestHandler<#ty, #rsp_type>> =
+                    provider.get_optional().ok_or_else(|| ::rust_webapp::Error::Di(
                         format!("No handler registered for request type '{}'", #type_name)
                     ))?;
 
-                // Call through the type-erased bridge â€” the handler's native async fn
-                // is called inside, avoiding #[async_trait] Box::pin overhead per request.
-                let request_boxed: Box<dyn ::std::any::Any + Send> = Box::new(request);
-                (entry.call)(&entry.handler, request_boxed, claims).await
+                // Call through the trait object; handle_with_claims passes
+                // authentication claims to handlers that need them.
+                let result = handler.handle_with_claims(request, claims.as_deref()).await?;
+
+                let json_bytes = ::serde_json::to_vec(&result).unwrap_or_default();
+                Ok(::rust_webapp::ResponseData {
+                    status: 200,
+                    content_type: "application/json".to_string(),
+                    body: json_bytes,
+                })
             })
         }
     }

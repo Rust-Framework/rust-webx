@@ -12,19 +12,20 @@
 use std::sync::Arc;
 
 use bcrypt::{hash, DEFAULT_COST};
-use rust_ef::{db_context::DbContext, prelude::*, provider::DbValue};
+use rust_ef::{db_context::DbContext, prelude::*};
 use rust_webapp::*;
 use tokio::sync::Mutex;
 
 use docbit_contracts::docs::IDocumentService;
+use docbit_domain::entities::User;
 use docbit_domain::seed::seed;
 
 const ADMIN_EMAIL: &str = "admin@docbit.local";
 const ADMIN_DEFAULT_PASSWORD: &str = "admin123";
 
-// `#[inject]` 在 struct 上：生成 `__rdi_construct_DbInitService` 构造器，
+// `#[derive(Inject)]` 生成 `__rdi_construct_DbInitService` 构造器，
 // 自动从 DI 容器解析 `ctx: Arc<Mutex<DbContext>>` 与 `docs: Arc<dyn IDocumentService>`。
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct DbInitService {
     ctx: Arc<Mutex<DbContext>>,
     docs: Arc<dyn IDocumentService>,
@@ -32,7 +33,7 @@ pub struct DbInitService {
 
 // `#[inject]` 在 trait impl 上：注册为 `dyn IHostedService`（默认 singleton），
 // 框架在 `Host::build()` 时统一收集并启动。
-#[rust_dicore::inject]
+#[inject]
 #[async_trait]
 impl IHostedService for DbInitService {
     async fn start(&self) -> Result<()> {
@@ -74,9 +75,7 @@ impl DbInitService {
     async fn ensure_admin_user(&self) -> Result<()> {
         let existing = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<docbit_domain::entities::User>()
-                .query()
-                .filter_column("email", "=", DbValue::String(ADMIN_EMAIL.into()))
+            linq!(ctx.set::<User>(), |u: User| u.email == ADMIN_EMAIL)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
@@ -92,7 +91,7 @@ impl DbInitService {
         let password_hash =
             hash(ADMIN_DEFAULT_PASSWORD, DEFAULT_COST).map_err(|e| Error::Internal(e.to_string()))?;
 
-        let user = docbit_domain::entities::User {
+        let user = User {
             id: 0,
             name: "Administrator".into(),
             email: ADMIN_EMAIL.into(),
@@ -106,7 +105,7 @@ impl DbInitService {
         };
         {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<docbit_domain::entities::User>().add(user);
+            ctx.set::<User>().add(user);
             ctx.save_changes()
                 .await
                 .map_err(|e| Error::Internal(format!("Failed to create admin user: {}", e)))?;
@@ -115,9 +114,7 @@ impl DbInitService {
         // 关联 admin 角色（role_id=1）
         let admin_user = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<docbit_domain::entities::User>()
-                .query()
-                .filter_column("email", "=", DbValue::String(ADMIN_EMAIL.into()))
+            linq!(ctx.set::<User>(), |u: User| u.email == ADMIN_EMAIL)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?

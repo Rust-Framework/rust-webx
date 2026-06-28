@@ -1,11 +1,11 @@
 //! RBAC handlers — Role / Resource / Authorize / RoleUser CRUD.
 //!
 //! 主表（Role/Resource）用软删除；联结表（RoleUser/Authorize）用硬删除
-//! （通过 `load_all` + `remove_at` + `save_changes`）。
+//! （`linq!` 类型安全谓词 + `execute_delete` 直接 DB 删除，避免 load_all 三段式）。
 
 use std::sync::Arc;
 
-use rust_ef::{db_context::DbContext, prelude::*, provider::DbValue};
+use rust_ef::{db_context::DbContext, prelude::*};
 use rust_webapp::*;
 use tokio::sync::Mutex;
 
@@ -16,22 +16,22 @@ use crate::util::{now_secs, operator_id, parse_id};
 
 // ── Role CRUD ──
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<ListRolesRequest, Vec<RoleModel>>)]
+#[rust_dicore::inject]
 pub struct ListRolesHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<CreateRoleRequest, RoleModel>)]
+#[rust_dicore::inject]
 pub struct CreateRoleHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<UpdateRoleRequest, RoleModel>)]
+#[rust_dicore::inject]
 pub struct UpdateRoleHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<DeleteRoleRequest, String>)]
+#[rust_dicore::inject]
 pub struct DeleteRoleHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
@@ -42,9 +42,7 @@ impl IRequestHandler<ListRolesRequest, Vec<RoleModel>> for ListRolesHandler {
     async fn handle(&self, _: ListRolesRequest) -> Result<Vec<RoleModel>> {
         let roles = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<Role>()
-                .query()
-                .filter_column("is_deleted", "=", DbValue::Bool(false))
+            linq!(ctx.set::<Role>(), |r: Role| !r.is_deleted)
                 .to_list()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
@@ -87,9 +85,7 @@ impl IRequestHandler<CreateRoleRequest, RoleModel> for CreateRoleHandler {
         }
         let created = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<Role>()
-                .query()
-                .filter_column("name", "=", DbValue::String(req.name.clone()))
+            linq!(ctx.set::<Role>(), |r: Role| r.name == req.name)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
@@ -113,9 +109,7 @@ impl IRequestHandler<UpdateRoleRequest, RoleModel> for UpdateRoleHandler {
         let id = parse_id(&req.id)?;
         let mut role = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<Role>()
-                .query()
-                .filter_column("id", "=", DbValue::I32(id))
+            linq!(ctx.set::<Role>(), |r: Role| r.id == id)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
@@ -138,9 +132,7 @@ impl IRequestHandler<UpdateRoleRequest, RoleModel> for UpdateRoleHandler {
         }
         let updated = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<Role>()
-                .query()
-                .filter_column("id", "=", DbValue::I32(id))
+            linq!(ctx.set::<Role>(), |r: Role| r.id == id)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
@@ -164,9 +156,7 @@ impl IRequestHandler<DeleteRoleRequest, String> for DeleteRoleHandler {
         let id = parse_id(&req.id)?;
         let mut role = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<Role>()
-                .query()
-                .filter_column("id", "=", DbValue::I32(id))
+            linq!(ctx.set::<Role>(), |r: Role| r.id == id)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
@@ -188,12 +178,12 @@ impl IRequestHandler<DeleteRoleRequest, String> for DeleteRoleHandler {
 
 // ── Role assignment (RoleUser join) ──
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<AssignRoleRequest, String>)]
+#[rust_dicore::inject]
 pub struct AssignRoleHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<RevokeRoleRequest, String>)]
+#[rust_dicore::inject]
 pub struct RevokeRoleHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
@@ -205,10 +195,7 @@ impl IRequestHandler<AssignRoleRequest, String> for AssignRoleHandler {
         // 幂等：若已存在则跳过
         let exists = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<RoleUser>()
-                .query()
-                .filter_column("user_id", "=", DbValue::I32(req.user_id))
-                .filter_column("role_id", "=", DbValue::I32(req.role_id))
+            linq!(ctx.set::<RoleUser>(), |r: RoleUser| r.user_id == req.user_id && r.role_id == req.role_id)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
@@ -239,46 +226,41 @@ impl IRequestHandler<RevokeRoleRequest, String> for RevokeRoleHandler {
     async fn handle(&self, req: RevokeRoleRequest) -> Result<String> {
         let uid = parse_id(&req.user_id)?;
         let rid = parse_id(&req.role_id)?;
-        {
+        // rust-ef 最佳实践：用 `linq!` 类型安全谓词 + `execute_delete` 直接 DB 删除，
+        // 避免旧的 `load_all` + `tracked_entries` + `remove_at` + `save_changes` 三段式。
+        let affected = {
             let mut ctx = self.ctx.lock().await;
-            let set = ctx.set::<RoleUser>();
-            set.load_all()
+            linq!(ctx.set::<RoleUser>(), |r: RoleUser| r.user_id == uid && r.role_id == rid)
+                .execute_delete()
                 .await
-                .map_err(|e| Error::Internal(e.to_string()))?;
-            let idx = set
-                .tracked_entries()
-                .position(|r| r.user_id == uid && r.role_id == rid);
-            if let Some(i) = idx {
-                set.remove_at(i).map_err(|e| Error::Internal(e.to_string()))?;
-                ctx.save_changes()
-                    .await
-                    .map_err(|e| Error::Internal(e.to_string()))?;
-                Ok(format!("Revoked role {} from user {}", rid, uid))
-            } else {
-                Ok(format!("Role {} not assigned to user {}", rid, uid))
-            }
+                .map_err(|e| Error::Internal(e.to_string()))?
+        };
+        if affected > 0 {
+            Ok(format!("Revoked role {} from user {}", rid, uid))
+        } else {
+            Ok(format!("Role {} not assigned to user {}", rid, uid))
         }
     }
 }
 
 // ── Resource CRUD ──
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<ListResourcesRequest, Vec<ResourceModel>>)]
+#[rust_dicore::inject]
 pub struct ListResourcesHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<CreateResourceRequest, ResourceModel>)]
+#[rust_dicore::inject]
 pub struct CreateResourceHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<UpdateResourceRequest, ResourceModel>)]
+#[rust_dicore::inject]
 pub struct UpdateResourceHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<DeleteResourceRequest, String>)]
+#[rust_dicore::inject]
 pub struct DeleteResourceHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
@@ -289,9 +271,7 @@ impl IRequestHandler<ListResourcesRequest, Vec<ResourceModel>> for ListResources
     async fn handle(&self, _: ListResourcesRequest) -> Result<Vec<ResourceModel>> {
         let items = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<Resource>()
-                .query()
-                .filter_column("is_deleted", "=", DbValue::Bool(false))
+            linq!(ctx.set::<Resource>(), |r: Resource| !r.is_deleted)
                 .to_list()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
@@ -337,9 +317,7 @@ impl IRequestHandler<CreateResourceRequest, ResourceModel> for CreateResourceHan
         // 回查（name 可能重复，按 value 过滤更精确）
         let created = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<Resource>()
-                .query()
-                .filter_column("value", "=", DbValue::String(req.value.clone()))
+            linq!(ctx.set::<Resource>(), |r: Resource| r.value == req.value)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
@@ -363,9 +341,7 @@ impl IRequestHandler<UpdateResourceRequest, ResourceModel> for UpdateResourceHan
         let id = parse_id(&req.id)?;
         let mut res = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<Resource>()
-                .query()
-                .filter_column("id", "=", DbValue::I32(id))
+            linq!(ctx.set::<Resource>(), |r: Resource| r.id == id)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
@@ -397,9 +373,7 @@ impl IRequestHandler<UpdateResourceRequest, ResourceModel> for UpdateResourceHan
         }
         let updated = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<Resource>()
-                .query()
-                .filter_column("id", "=", DbValue::I32(id))
+            linq!(ctx.set::<Resource>(), |r: Resource| r.id == id)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
@@ -423,9 +397,7 @@ impl IRequestHandler<DeleteResourceRequest, String> for DeleteResourceHandler {
         let id = parse_id(&req.id)?;
         let mut res = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<Resource>()
-                .query()
-                .filter_column("id", "=", DbValue::I32(id))
+            linq!(ctx.set::<Resource>(), |r: Resource| r.id == id)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
@@ -447,17 +419,17 @@ impl IRequestHandler<DeleteResourceRequest, String> for DeleteResourceHandler {
 
 // ── Authorize CRUD (role ↔ resource links) ──
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<ListAuthorizesRequest, Vec<AuthorizeModel>>)]
+#[rust_dicore::inject]
 pub struct ListAuthorizesHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<CreateAuthorizeRequest, AuthorizeModel>)]
+#[rust_dicore::inject]
 pub struct CreateAuthorizeHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<DeleteAuthorizeRequest, String>)]
+#[rust_dicore::inject]
 pub struct DeleteAuthorizeHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
@@ -481,10 +453,7 @@ impl IRequestHandler<CreateAuthorizeRequest, AuthorizeModel> for CreateAuthorize
         // 幂等：若已存在则返回现有
         let exists = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<Authorize>()
-                .query()
-                .filter_column("role_id", "=", DbValue::I32(req.role_id))
-                .filter_column("resource_id", "=", DbValue::I32(req.resource_id))
+            linq!(ctx.set::<Authorize>(), |a: Authorize| a.role_id == req.role_id && a.resource_id == req.resource_id)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
@@ -507,10 +476,7 @@ impl IRequestHandler<CreateAuthorizeRequest, AuthorizeModel> for CreateAuthorize
         }
         let created = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<Authorize>()
-                .query()
-                .filter_column("role_id", "=", DbValue::I32(req.role_id))
-                .filter_column("resource_id", "=", DbValue::I32(req.resource_id))
+            linq!(ctx.set::<Authorize>(), |a: Authorize| a.role_id == req.role_id && a.resource_id == req.resource_id)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
@@ -525,22 +491,19 @@ impl IRequestHandler<CreateAuthorizeRequest, AuthorizeModel> for CreateAuthorize
 impl IRequestHandler<DeleteAuthorizeRequest, String> for DeleteAuthorizeHandler {
     async fn handle(&self, req: DeleteAuthorizeRequest) -> Result<String> {
         let id = parse_id(&req.id)?;
-        {
+        // rust-ef 最佳实践：`linq!` 类型安全谓词 + `execute_delete` 直接 DB 删除，
+        // 避免旧的 `load_all` + `tracked_entries` + `remove_at` + `save_changes` 三段式。
+        let affected = {
             let mut ctx = self.ctx.lock().await;
-            let set = ctx.set::<Authorize>();
-            set.load_all()
+            linq!(ctx.set::<Authorize>(), |a: Authorize| a.id == id)
+                .execute_delete()
                 .await
-                .map_err(|e| Error::Internal(e.to_string()))?;
-            let idx = set.tracked_entries().position(|a| a.id == id);
-            if let Some(i) = idx {
-                set.remove_at(i).map_err(|e| Error::Internal(e.to_string()))?;
-                ctx.save_changes()
-                    .await
-                    .map_err(|e| Error::Internal(e.to_string()))?;
-                Ok(format!("Deleted authorize {}", id))
-            } else {
-                Err(Error::NotFound("Authorize not found".into()))
-            }
+                .map_err(|e| Error::Internal(e.to_string()))?
+        };
+        if affected > 0 {
+            Ok(format!("Deleted authorize {}", id))
+        } else {
+            Err(Error::NotFound("Authorize not found".into()))
         }
     }
 }

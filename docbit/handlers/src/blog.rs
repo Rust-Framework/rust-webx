@@ -32,37 +32,37 @@ fn is_admin(roles: &[String]) -> bool {
 
 // ── Handlers ──
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<ListBlogPostsRequest, Vec<BlogPostSummary>>)]
+#[rust_dicore::inject]
 pub struct ListBlogPostsHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<ListBlogCategoriesRequest, Vec<BlogCategoryCount>>)]
+#[rust_dicore::inject]
 pub struct ListBlogCategoriesHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<ListMyBlogPostsRequest, Vec<BlogPostSummary>>)]
+#[rust_dicore::inject]
 pub struct ListMyBlogPostsHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<GetBlogPostRequest, BlogPostModel>)]
+#[rust_dicore::inject]
 pub struct GetBlogPostHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<CreateBlogPostRequest, BlogPostModel>)]
+#[rust_dicore::inject]
 pub struct CreateBlogPostHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<UpdateBlogPostRequest, BlogPostModel>)]
+#[rust_dicore::inject]
 pub struct UpdateBlogPostHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<DeleteBlogPostRequest, String>)]
+#[rust_dicore::inject]
 pub struct DeleteBlogPostHandler {
     ctx: Arc<Mutex<DbContext>>,
 }

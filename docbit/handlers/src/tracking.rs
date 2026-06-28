@@ -13,12 +13,12 @@ use docbit_domain::entities::Tracking;
 
 use crate::util::now_secs;
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<GetTrackingSummaryRequest, TrackingSummary>)]
+#[rust_dicore::inject]
 pub struct GetTrackingSummaryHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<ListTrackingRequest, Vec<docbit_contracts::tracking::TrackingModel>>)]
+#[rust_dicore::inject]
 pub struct ListTrackingHandler {
     ctx: Arc<Mutex<DbContext>>,
 }

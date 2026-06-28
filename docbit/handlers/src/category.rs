@@ -15,22 +15,22 @@ use docbit_domain::entities::Category;
 
 use crate::util::{now_secs, operator_id, parse_id};
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<ListCategoriesRequest, Vec<CategoryTreeNode>>)]
+#[rust_dicore::inject]
 pub struct ListCategoriesHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<CreateCategoryRequest, CategoryModel>)]
+#[rust_dicore::inject]
 pub struct CreateCategoryHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<UpdateCategoryRequest, CategoryModel>)]
+#[rust_dicore::inject]
 pub struct UpdateCategoryHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<DeleteCategoryRequest, String>)]
+#[rust_dicore::inject]
 pub struct DeleteCategoryHandler {
     ctx: Arc<Mutex<DbContext>>,
 }

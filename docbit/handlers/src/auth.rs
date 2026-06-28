@@ -76,33 +76,27 @@ async fn load_user_by_id(ctx: &Mutex<DbContext>, id: i32) -> Result<Option<User>
     Ok(users.into_iter().next())
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<RegisterRequest, AuthResponse>)]
+#[rust_dicore::inject]
 pub struct RegisterHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<LoginRequest, AuthResponse>)]
+#[rust_dicore::inject]
 pub struct LoginHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<AuthMeRequest, UserView>)]
+#[rust_dicore::inject]
 pub struct AuthMeHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(
-    singleton,
-    as = dyn IRequestHandler<ForgotPasswordRequest, ForgotPasswordResponse>
-)]
+#[rust_dicore::inject]
 pub struct ForgotPasswordHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(
-    singleton,
-    as = dyn IRequestHandler<ResetPasswordRequest, ResetPasswordResponse>
-)]
+#[rust_dicore::inject]
 pub struct ResetPasswordHandler {
     ctx: Arc<Mutex<DbContext>>,
 }

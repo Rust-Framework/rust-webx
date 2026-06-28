@@ -16,17 +16,17 @@ use docbit_domain::entities::Comment;
 
 use crate::util::{now_secs, operator_id, parse_id};
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<ListCommentsRequest, Vec<CommentModel>>)]
+#[rust_dicore::inject]
 pub struct ListCommentsHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<CreateCommentRequest, CommentModel>)]
+#[rust_dicore::inject]
 pub struct CreateCommentHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<DeleteCommentRequest, String>)]
+#[rust_dicore::inject]
 pub struct DeleteCommentHandler {
     ctx: Arc<Mutex<DbContext>>,
 }

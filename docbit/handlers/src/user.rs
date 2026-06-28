@@ -11,32 +11,32 @@ use docbit_domain::entities::{RoleUser, User};
 
 use crate::util::{now_secs, operator_id, parse_id};
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<ListUsersRequest, Vec<UserModel>>)]
+#[rust_dicore::inject]
 pub struct ListUsersHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<GetUserRequest, UserModel>)]
+#[rust_dicore::inject]
 pub struct GetUserHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<CreateUserRequest, UserModel>)]
+#[rust_dicore::inject]
 pub struct CreateUserHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<UpdateUserRequest, UserModel>)]
+#[rust_dicore::inject]
 pub struct UpdateUserHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<DeleteUserRequest, String>)]
+#[rust_dicore::inject]
 pub struct DeleteUserHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<InfoRequest, String>)]
+#[rust_dicore::inject]
 pub struct InfoHandler {
     ctx: Arc<Mutex<DbContext>>,
 }

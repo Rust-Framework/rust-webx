@@ -12,17 +12,17 @@ use docbit_contracts::docs::{
     ListDocWorksRequest,
 };
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<ListDocWorksRequest, Vec<String>>)]
+#[rust_dicore::inject]
 pub struct ListDocWorksHandler {
     docs: Arc<dyn IDocumentService>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<GetDocIndexRequest, DocIndex>)]
+#[rust_dicore::inject]
 pub struct GetDocIndexHandler {
     docs: Arc<dyn IDocumentService>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<GetDocContentRequest, DocContent>)]
+#[rust_dicore::inject]
 pub struct GetDocContentHandler {
     docs: Arc<dyn IDocumentService>,
 }

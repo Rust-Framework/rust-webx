@@ -6,9 +6,8 @@
 //! - SPA 静态资源 → 框架自动检测 `wwwroot/`，无需 `use_spa`
 //! - DbContext → 应用层直接注册（Development=SQLite, Production=MySQL）
 //! - 应用专属配置（`SiteConfig`）→ 框架 `add_options::<SiteConfig>("Site")` 自动绑定
-//! - handler / hosted service / dynamic authorizer → `#[rust_dicore::inject_attr]` 编译期自动注册
+//! - handler / hosted service / dynamic authorizer / document service → `#[rust_dicore::inject]` 编译期自动注册
 
-mod doc_service;
 mod startup;
 
 use std::sync::Arc;
@@ -21,7 +20,7 @@ use rust_webapp::*;
 use rust_webapp::rust_dicore::ServiceCollection;
 use tokio::sync::Mutex;
 
-// 显式引用 handlers 与 domain crate，确保它们的 `#[rust_dicore::inject_attr]`
+// 显式引用 handlers 与 domain crate，确保它们的 `#[rust_dicore::inject]`
 // 与 `inventory::submit!` 注册被链接进最终二进制（否则链接器可能丢弃未使用 crate）。
 extern crate docbit_domain;
 extern crate docbit_handlers;

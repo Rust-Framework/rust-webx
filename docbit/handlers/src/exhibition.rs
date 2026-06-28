@@ -14,22 +14,22 @@ use docbit_domain::entities::Exhibition;
 
 use crate::util::{now_secs, operator_id};
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<ListExhibitionsRequest, Vec<ExhibitionModel>>)]
+#[rust_dicore::inject]
 pub struct ListExhibitionsHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<GetExhibitionRequest, ExhibitionModel>)]
+#[rust_dicore::inject]
 pub struct GetExhibitionHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<UpsertExhibitionRequest, ExhibitionModel>)]
+#[rust_dicore::inject]
 pub struct UpsertExhibitionHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<DeleteExhibitionRequest, String>)]
+#[rust_dicore::inject]
 pub struct DeleteExhibitionHandler {
     ctx: Arc<Mutex<DbContext>>,
 }

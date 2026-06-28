@@ -10,7 +10,7 @@ use rust_webapp::*;
 
 use docbit_contracts::cache::CacheStatsRequest;
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<CacheStatsRequest, String>)]
+#[rust_dicore::inject]
 pub struct CacheStatsHandler {
     cache: Arc<MemoryCache>,
 }

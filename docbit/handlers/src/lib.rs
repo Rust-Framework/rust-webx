@@ -5,6 +5,7 @@
 //! 与文档服务（IDocumentService 由 host 提供）按需注入。
 
 pub mod auth;
+pub mod authorizer;
 pub mod blog;
 pub mod cache;
 pub mod category;

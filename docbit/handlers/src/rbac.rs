@@ -87,8 +87,9 @@ impl IRequestHandler<UpdateRoleRequest, RoleModel> for UpdateRoleHandler {
         let id = parse_id(&req.id)?;
         let mut role = {
             let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<Role>(), |r: Role| r.id == id)
-                .first_or_default()
+            ctx.set::<Role>()
+                .query()
+                .find(id)
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
         }
@@ -104,8 +105,9 @@ impl IRequestHandler<UpdateRoleRequest, RoleModel> for UpdateRoleHandler {
         }
         let updated = {
             let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<Role>(), |r: Role| r.id == id)
-                .first_or_default()
+            ctx.set::<Role>()
+                .query()
+                .find(id)
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
         }
@@ -121,8 +123,9 @@ impl IRequestHandler<DeleteRoleRequest, String> for DeleteRoleHandler {
         let id = parse_id(&req.id)?;
         let mut role = {
             let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<Role>(), |r: Role| r.id == id)
-                .first_or_default()
+            ctx.set::<Role>()
+                .query()
+                .find(id)
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
         }
@@ -281,8 +284,9 @@ impl IRequestHandler<UpdateResourceRequest, ResourceModel> for UpdateResourceHan
         let id = parse_id(&req.id)?;
         let mut res = {
             let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<Resource>(), |r: Resource| r.id == id)
-                .first_or_default()
+            ctx.set::<Resource>()
+                .query()
+                .find(id)
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
         }
@@ -298,8 +302,9 @@ impl IRequestHandler<UpdateResourceRequest, ResourceModel> for UpdateResourceHan
         }
         let updated = {
             let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<Resource>(), |r: Resource| r.id == id)
-                .first_or_default()
+            ctx.set::<Resource>()
+                .query()
+                .find(id)
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
         }
@@ -315,8 +320,9 @@ impl IRequestHandler<DeleteResourceRequest, String> for DeleteResourceHandler {
         let id = parse_id(&req.id)?;
         let mut res = {
             let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<Resource>(), |r: Resource| r.id == id)
-                .first_or_default()
+            ctx.set::<Resource>()
+                .query()
+                .find(id)
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
         }

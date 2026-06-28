@@ -139,8 +139,9 @@ impl IRequestHandler<UpdateCategoryRequest, CategoryModel> for UpdateCategoryHan
         let id = parse_id(&req.id)?;
         let mut cat = {
             let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<Category>(), |c: Category| c.id == id)
-                .first_or_default()
+            ctx.set::<Category>()
+                .query()
+                .find(id)
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
         }
@@ -157,8 +158,9 @@ impl IRequestHandler<UpdateCategoryRequest, CategoryModel> for UpdateCategoryHan
         }
         let updated = {
             let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<Category>(), |c: Category| c.id == id)
-                .first_or_default()
+            ctx.set::<Category>()
+                .query()
+                .find(id)
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
         }
@@ -174,8 +176,9 @@ impl IRequestHandler<DeleteCategoryRequest, String> for DeleteCategoryHandler {
         let id = parse_id(&req.id)?;
         let mut cat = {
             let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<Category>(), |c: Category| c.id == id)
-                .first_or_default()
+            ctx.set::<Category>()
+                .query()
+                .find(id)
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
         }

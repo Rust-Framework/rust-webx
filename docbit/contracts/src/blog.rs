@@ -64,11 +64,9 @@ pub struct ListBlogCategoriesRequest;
 #[get("/api/blog/categories")]
 impl IRequest<Vec<BlogCategoryCount>> for ListBlogCategoriesRequest {}
 
+#[claims]
 #[derive(Default)]
-pub struct ListMyBlogPostsRequest {
-    pub claims: Option<Box<dyn IClaims>>,
-}
-impl_claims_carrier!(ListMyBlogPostsRequest);
+pub struct ListMyBlogPostsRequest;
 
 #[get("/api/blog/my")]
 #[authorize]
@@ -82,10 +80,9 @@ pub struct GetBlogPostRequest {
 #[get("/api/blog/{slug}")]
 impl IRequest<BlogPostModel> for GetBlogPostRequest {}
 
+#[claims]
 #[derive(Default, Deserialize)]
 pub struct CreateBlogPostRequest {
-    #[serde(skip)]
-    pub claims: Option<Box<dyn IClaims>>,
     pub slug: String,
     pub title: String,
     pub summary: String,
@@ -94,16 +91,14 @@ pub struct CreateBlogPostRequest {
     pub category_id: Option<i32>,
     pub published_at: i64,
 }
-impl_claims_carrier!(CreateBlogPostRequest);
 
 #[post("/api/blog")]
 #[authorize]
 impl IRequest<BlogPostModel> for CreateBlogPostRequest {}
 
+#[claims]
 #[derive(Default, Deserialize)]
 pub struct UpdateBlogPostRequest {
-    #[serde(skip)]
-    pub claims: Option<Box<dyn IClaims>>,
     pub slug: String,
     pub title: Option<String>,
     pub summary: Option<String>,
@@ -112,18 +107,16 @@ pub struct UpdateBlogPostRequest {
     pub category_id: Option<i32>,
     pub published_at: Option<i64>,
 }
-impl_claims_carrier!(UpdateBlogPostRequest);
 
 #[put("/api/blog/{slug}")]
 #[authorize]
 impl IRequest<BlogPostModel> for UpdateBlogPostRequest {}
 
+#[claims]
 #[derive(Default)]
 pub struct DeleteBlogPostRequest {
-    pub claims: Option<Box<dyn IClaims>>,
     pub slug: String,
 }
-impl_claims_carrier!(DeleteBlogPostRequest);
 
 #[delete("/api/blog/{slug}")]
 #[authorize]

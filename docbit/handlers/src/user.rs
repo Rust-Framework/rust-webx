@@ -133,8 +133,9 @@ impl IRequestHandler<UpdateUserRequest, UserModel> for UpdateUserHandler {
         let id = parse_id(&req.id)?;
         let mut user = {
             let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<User>(), |u: User| u.id == id)
-                .first_or_default()
+            ctx.set::<User>()
+                .query()
+                .find(id)
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
         }
@@ -171,8 +172,9 @@ impl IRequestHandler<DeleteUserRequest, String> for DeleteUserHandler {
         let id = parse_id(&req.id)?;
         let mut user = {
             let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<User>(), |u: User| u.id == id)
-                .first_or_default()
+            ctx.set::<User>()
+                .query()
+                .find(id)
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
         }

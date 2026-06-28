@@ -70,8 +70,8 @@ pub use rust_webapp_openapi::{generate_openapi_spec, APIUI_HTML};
 
 // --- Macros ---
 pub use rust_webapp_macros::{
-    authorize, controller, delete, endpoint, from_body, from_query, from_route, get, handler,
-    http_delete, http_get, http_post, http_put, post, put, request,
+    authorize, claims, controller, delete, endpoint, from_body, from_query, from_route,
+    get, handler, http_delete, http_get, http_post, http_put, post, put, request,
 };
 
 // --- Re-export rust_dicore (for manual registration, #[inject] auto-registration, and module blocks) ---

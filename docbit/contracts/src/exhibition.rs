@@ -42,10 +42,9 @@ pub struct GetExhibitionRequest {
 #[get("/api/exhibitions/{slug}")]
 impl IRequest<ExhibitionModel> for GetExhibitionRequest {}
 
+#[claims]
 #[derive(Default, Deserialize)]
 pub struct UpsertExhibitionRequest {
-    #[serde(skip)]
-    pub claims: Option<Box<dyn IClaims>>,
     pub slug: String,
     pub title: String,
     pub subtitle: String,
@@ -59,18 +58,16 @@ pub struct UpsertExhibitionRequest {
     pub sort_order: i32,
     pub logo_url: Option<String>,
 }
-impl_claims_carrier!(UpsertExhibitionRequest);
 
 #[post("/api/exhibitions")]
 #[authorize(role = "admin")]
 impl IRequest<ExhibitionModel> for UpsertExhibitionRequest {}
 
+#[claims]
 #[derive(Default)]
 pub struct DeleteExhibitionRequest {
-    pub claims: Option<Box<dyn IClaims>>,
     pub slug: String,
 }
-impl_claims_carrier!(DeleteExhibitionRequest);
 
 #[delete("/api/exhibitions/{slug}")]
 #[authorize(role = "admin")]

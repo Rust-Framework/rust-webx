@@ -23,27 +23,24 @@ pub struct ListCommentsRequest {
 #[get("/api/comments/{blog_id}")]
 impl IRequest<Vec<CommentModel>> for ListCommentsRequest {}
 
+#[claims]
 #[derive(Default, Deserialize)]
 pub struct CreateCommentRequest {
-    #[serde(skip)]
-    pub claims: Option<Box<dyn IClaims>>,
     pub blog_id: i32,
     pub content: String,
     pub parent_id: Option<i32>,
     pub quoted_id: Option<i32>,
 }
-impl_claims_carrier!(CreateCommentRequest);
 
 #[post("/api/comments")]
 #[authorize]
 impl IRequest<CommentModel> for CreateCommentRequest {}
 
+#[claims]
 #[derive(Default)]
 pub struct DeleteCommentRequest {
-    pub claims: Option<Box<dyn IClaims>>,
     pub id: String,
 }
-impl_claims_carrier!(DeleteCommentRequest);
 
 #[delete("/api/comments/{id}")]
 #[authorize]

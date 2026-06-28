@@ -58,16 +58,31 @@ where
 ///
 /// # Usage in contracts
 ///
+/// Use the `#[claims]` attribute macro to automatically inject the `claims`
+/// field and generate the inherent `set_claims` method:
+///
 /// ```ignore
-/// #[derive(Deserialize)]
+/// use rust_webapp::*;
+/// use serde::Deserialize;
+///
+/// #[claims]
+/// #[derive(Default, Deserialize)]
 /// pub struct CreateBlogPostRequest {
-///     #[serde(skip)]
-///     pub claims: Option<Box<dyn IClaims>>,
 ///     pub slug: String,
 ///     // ...
 /// }
+/// ```
 ///
-/// // Inherent method — shadows `IClaimsCarrier::set_claims` for this type.
+/// The macro expands to (conceptually):
+///
+/// ```ignore
+/// pub struct CreateBlogPostRequest {
+///     pub slug: String,
+///     // ...
+///     #[serde(skip)]
+///     pub claims: Option<Box<dyn IClaims>>,
+/// }
+///
 /// impl CreateBlogPostRequest {
 ///     pub fn set_claims(&mut self, claims: Option<Box<dyn IClaims>>) {
 ///         self.claims = claims;

@@ -193,15 +193,8 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
 #[inject]
 #[async_trait]
 impl IRequestHandler<AuthMeRequest, UserView> for AuthMeHandler {
-    async fn handle(&self, _: AuthMeRequest) -> Result<UserView> {
-        unreachable!("handle_with_claims is always called by the dispatcher")
-    }
-    async fn handle_with_claims(
-        &self,
-        _: AuthMeRequest,
-        claims: Option<&dyn IClaims>,
-    ) -> Result<UserView> {
-        let uid = operator_id(claims)
+    async fn handle(&self, req: AuthMeRequest) -> Result<UserView> {
+        let uid = operator_id(req.claims.as_deref())
             .ok_or_else(|| Error::Http("Not authenticated".into()))?;
         let user = load_user_by_id(&self.ctx, uid)
             .await?

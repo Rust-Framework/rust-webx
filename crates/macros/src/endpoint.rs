@@ -158,7 +158,7 @@ fn emit_endpoint(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Generate the dispatch function that runs the full request lifecycle.
 ///
 /// Resolves the handler from the DI container (`global_provider`) as
-/// `dyn IRequestHandler<Req, Rsp>`, then calls `handle_with_claims`.
+/// `dyn IRequestHandler<Req, Rsp>`, then injects claims and calls `handle`.
 /// This unifies service registration under `#[rust_dicore::inject]`,
 /// making `#[handler]` unnecessary.
 fn generate_dispatch_fn(
@@ -204,10 +204,12 @@ fn generate_dispatch_fn(
             })
             .collect();
         quote! {
-            #ty { #(#field_assignments),* }
+            #ty { #(#field_assignments,)* ..::std::default::Default::default() }
         }
     } else {
-        quote! { #ty {} }
+        quote! {
+            <#ty as ::std::default::Default>::default()
+        }
     };
 
     quote! {
@@ -218,7 +220,7 @@ fn generate_dispatch_fn(
             claims: Option<Box<dyn ::rust_webapp::IClaims>>,
         ) -> ::std::pin::Pin<Box<dyn ::std::future::Future<Output = ::rust_webapp::Result<::rust_webapp::ResponseData>> + Send>> {
             Box::pin(async move {
-                let request: #ty = #build_request;
+                let mut request: #ty = #build_request;
 
                 // Resolve the handler from the DI container.
                 // #[rust_dicore::inject] on impl IRequestHandler<Req, Rsp> registers
@@ -229,9 +231,13 @@ fn generate_dispatch_fn(
                         format!("No handler registered for request type '{}'", #type_name)
                     ))?;
 
-                // Call through the trait object; handle_with_claims passes
-                // authentication claims to handlers that need them.
-                let result = handler.handle_with_claims(request, claims.as_deref()).await?;
+                // Inject claims into the request (no-op if the request type
+                // has no inherent `set_claims`), then dispatch via `handle`.
+                {
+                    use ::rust_webapp::IClaimsCarrier;
+                    request.set_claims(claims);
+                }
+                let result = handler.handle(request).await?;
 
                 let json_bytes = ::serde_json::to_vec(&result).unwrap_or_default();
                 Ok(::rust_webapp::ResponseData {

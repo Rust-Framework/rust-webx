@@ -2,6 +2,7 @@
 
 use rust_webapp::*;
 
+#[derive(Default)]
 pub struct CacheStatsRequest;
 
 #[get("/api/cache/stats")]

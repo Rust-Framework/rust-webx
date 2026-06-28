@@ -1,4 +1,4 @@
-﻿use proc_macro::TokenStream;
+use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{parse_macro_input, GenericArgument, ItemImpl, PathArguments, Type};
 
@@ -78,10 +78,16 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
                 let h = handler
                     .downcast_ref::<::std::sync::Arc<#handler_ty>>()
                     .expect("Handler downcast failed");
-                let req = *request
+                let mut req = *request
                     .downcast::<#req_ty>()
                     .expect("Request downcast failed");
-                let result = h.handle_with_claims(req, _claims.as_deref()).await?;
+                // Inject claims (no-op if the request has no inherent set_claims),
+                // then dispatch via handle.
+                {
+                    use ::rust_webapp::IClaimsCarrier;
+                    req.set_claims(_claims);
+                }
+                let result = h.handle(req).await?;
                 let json_bytes = ::serde_json::to_vec(&result).unwrap_or_default();
                 Ok(::rust_webapp::ResponseData {
                     status: 200,

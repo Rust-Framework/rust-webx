@@ -8,6 +8,7 @@ use tokio::sync::Mutex;
 
 use docbit_contracts::user::*;
 use docbit_domain::entities::{RoleUser, User};
+use docbit_domain::{ApplyTo, ToEntity, ToModel};
 
 use crate::util::{now_secs, operator_id, parse_id};
 
@@ -76,28 +77,12 @@ impl IRequestHandler<GetUserRequest, UserModel> for GetUserHandler {
 #[inject]
 #[async_trait]
 impl IRequestHandler<CreateUserRequest, UserModel> for CreateUserHandler {
-    async fn handle(&self, _: CreateUserRequest) -> Result<UserModel> {
-        unreachable!("handle_with_claims is always called")
-    }
-    async fn handle_with_claims(
-        &self,
-        req: CreateUserRequest,
-        claims: Option<&dyn IClaims>,
-    ) -> Result<UserModel> {
-        let op = operator_id(claims);
+    async fn handle(&self, req: CreateUserRequest) -> Result<UserModel> {
+        let op = operator_id(req.claims.as_deref());
         let now = now_secs();
-        let user = User {
-            id: 0,
-            name: req.name.clone(),
-            email: req.email.clone(),
-            password_hash: String::new(),
-            created_id: op,
-            created_at: now,
-            updated_id: op,
-            updated_at: now,
-            is_deleted: false,
-            roles: HasMany::new(),
-        };
+        let email = req.email.clone();
+        let name = req.name.clone();
+        let user = req.to_entity(op.unwrap_or(0), now);
         {
             let mut ctx = self.ctx.lock().await;
             ctx.set::<User>().add(user);
@@ -109,7 +94,8 @@ impl IRequestHandler<CreateUserRequest, UserModel> for CreateUserHandler {
         // 回查拿到自增 id，并分配默认 user 角色
         let created = {
             let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<User>(), |u: User| u.email == req.email)
+            let q = email.clone();
+            linq!(ctx.set::<User>(), |u: User| u.email == q)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
@@ -129,7 +115,7 @@ impl IRequestHandler<CreateUserRequest, UserModel> for CreateUserHandler {
                 .map_err(|e| Error::Internal(format!("Failed to assign role: {}", e)))?;
         }
 
-        tracing::info!("[User] Created: {} ({}) by {:?}", req.name, created.id, op);
+        tracing::info!("[User] Created: {} ({}) by {:?}", name, created.id, op);
         Ok(UserModel {
             id: created.id,
             name: created.name,
@@ -143,14 +129,7 @@ impl IRequestHandler<CreateUserRequest, UserModel> for CreateUserHandler {
 #[inject]
 #[async_trait]
 impl IRequestHandler<UpdateUserRequest, UserModel> for UpdateUserHandler {
-    async fn handle(&self, _: UpdateUserRequest) -> Result<UserModel> {
-        unreachable!("handle_with_claims is always called")
-    }
-    async fn handle_with_claims(
-        &self,
-        req: UpdateUserRequest,
-        claims: Option<&dyn IClaims>,
-    ) -> Result<UserModel> {
+    async fn handle(&self, req: UpdateUserRequest) -> Result<UserModel> {
         let id = parse_id(&req.id)?;
         let mut user = {
             let mut ctx = self.ctx.lock().await;
@@ -161,14 +140,8 @@ impl IRequestHandler<UpdateUserRequest, UserModel> for UpdateUserHandler {
         }
         .ok_or_else(|| Error::NotFound("User not found".into()))?;
 
-        if let Some(n) = req.name {
-            user.name = n;
-        }
-        if let Some(e) = req.email {
-            user.email = e;
-        }
-        user.updated_id = operator_id(claims);
-        user.updated_at = now_secs();
+        let op = operator_id(req.claims.as_deref()).unwrap_or(0);
+        req.apply_to(&mut user, op, now_secs());
 
         {
             let mut ctx = self.ctx.lock().await;
@@ -187,21 +160,14 @@ impl IRequestHandler<UpdateUserRequest, UserModel> for UpdateUserHandler {
                 .map_err(|e| Error::Internal(e.to_string()))?
         }
         .ok_or_else(|| Error::NotFound("User not found after update".into()))?;
-        Ok(UserModel::from(updated))
+        Ok(updated.to_model())
     }
 }
 
 #[inject]
 #[async_trait]
 impl IRequestHandler<DeleteUserRequest, String> for DeleteUserHandler {
-    async fn handle(&self, _: DeleteUserRequest) -> Result<String> {
-        unreachable!("handle_with_claims is always called")
-    }
-    async fn handle_with_claims(
-        &self,
-        req: DeleteUserRequest,
-        claims: Option<&dyn IClaims>,
-    ) -> Result<String> {
+    async fn handle(&self, req: DeleteUserRequest) -> Result<String> {
         let id = parse_id(&req.id)?;
         let mut user = {
             let mut ctx = self.ctx.lock().await;
@@ -213,7 +179,7 @@ impl IRequestHandler<DeleteUserRequest, String> for DeleteUserHandler {
         .ok_or_else(|| Error::NotFound("User not found".into()))?;
 
         user.is_deleted = true;
-        user.updated_id = operator_id(claims);
+        user.updated_id = operator_id(req.claims.as_deref());
         user.updated_at = now_secs();
         {
             let mut ctx = self.ctx.lock().await;

@@ -1,4 +1,4 @@
-﻿//! Handler traits: IRequestHandler and IEventHandler.
+//! Handler traits: IRequestHandler and IEventHandler.
 //!
 //! ## IRequestHandler<T, R>
 //!
@@ -18,6 +18,11 @@ use crate::mediator::{IEventRequest, IRequest};
 
 /// Handles a single `IRequest<R>`, producing its associated response `R`.
 ///
+/// Authentication claims are NOT passed as a method parameter — this trait stays
+/// free of auth concerns. Instead, requests that need claims implement the
+/// inherent `set_claims` method (see `IClaimsCarrier`); the dispatcher injects
+/// claims into the request *before* calling `handle`.
+///
 /// Register via `#[handler]` proc macro for compile-time collection,
 /// or use `register_handlers!` for manual DI registration.
 ///
@@ -33,15 +38,60 @@ where
     T: IRequest<R> + Send + 'static,
     R: serde::Serialize + Send + 'static,
 {
-    /// Handle the request without claims.
+    /// Handle the request. Claims (if any) are already in `req` via `set_claims`.
     async fn handle(&self, req: T) -> Result<R>;
-
-    /// Handle the request with optional authentication claims.
-    async fn handle_with_claims(&self, req: T, claims: Option<&dyn IClaims>) -> Result<R> {
-        let _ = claims;
-        self.handle(req).await
-    }
 }
+
+/// Blanket trait that enables claims injection on request structs.
+///
+/// The default implementation is a **no-op**, so every `T: Send` satisfies it
+/// without any boilerplate. Requests that actually carry claims shadow the
+/// trait method with an **inherent** `set_claims(&mut self, …)` method; Rust's
+/// method resolution picks the inherent method over the trait default at
+/// compile time, with zero runtime cost.
+///
+/// # Why not specialization?
+///
+/// Stable Rust has no specialization. The inherent-method-shadows-trait-default
+/// pattern achieves the same "override per-type" behavior without nightly
+/// features.
+///
+/// # Usage in contracts
+///
+/// ```ignore
+/// #[derive(Deserialize)]
+/// pub struct CreateBlogPostRequest {
+///     #[serde(skip)]
+///     pub claims: Option<Box<dyn IClaims>>,
+///     pub slug: String,
+///     // ...
+/// }
+///
+/// // Inherent method — shadows `IClaimsCarrier::set_claims` for this type.
+/// impl CreateBlogPostRequest {
+///     pub fn set_claims(&mut self, claims: Option<Box<dyn IClaims>>) {
+///         self.claims = claims;
+///     }
+/// }
+/// ```
+///
+/// # Usage in handlers
+///
+/// ```ignore
+/// async fn handle(&self, req: CreateBlogPostRequest) -> Result<BlogPostModel> {
+///     let uid = req.claims.as_ref()
+///         .and_then(|c| c.subject().parse().ok())
+///         .ok_or(Error::Unauthorized)?;
+///     // ...
+/// }
+/// ```
+pub trait IClaimsCarrier: Send {
+    /// Default no-op. Overridden by inherent `set_claims` on types that carry claims.
+    fn set_claims(&mut self, _claims: Option<Box<dyn IClaims>>) {}
+}
+
+/// Blanket no-op implementation — every `Send` type is a carrier by default.
+impl<T: Send> IClaimsCarrier for T {}
 
 /// Handles a single `IEventRequest`, performing side effects.
 ///

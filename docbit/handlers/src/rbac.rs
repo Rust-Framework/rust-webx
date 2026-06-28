@@ -11,6 +11,7 @@ use tokio::sync::Mutex;
 
 use docbit_contracts::rbac::*;
 use docbit_domain::entities::{Authorize, Resource, Role, RoleUser};
+use docbit_domain::{ApplyTo, ToEntity, ToModel};
 
 use crate::util::{now_secs, operator_id, parse_id};
 
@@ -54,28 +55,11 @@ impl IRequestHandler<ListRolesRequest, Vec<RoleModel>> for ListRolesHandler {
 #[inject]
 #[async_trait]
 impl IRequestHandler<CreateRoleRequest, RoleModel> for CreateRoleHandler {
-    async fn handle(&self, _: CreateRoleRequest) -> Result<RoleModel> {
-        unreachable!("handle_with_claims is always called")
-    }
-    async fn handle_with_claims(
-        &self,
-        req: CreateRoleRequest,
-        claims: Option<&dyn IClaims>,
-    ) -> Result<RoleModel> {
-        let op = operator_id(claims);
+    async fn handle(&self, req: CreateRoleRequest) -> Result<RoleModel> {
+        let op = operator_id(req.claims.as_deref()).unwrap_or(0);
         let now = now_secs();
-        let role = Role {
-            id: 0,
-            name: req.name.clone(),
-            description: req.description.clone(),
-            created_id: op,
-            created_at: now,
-            updated_id: op,
-            updated_at: now,
-            is_deleted: false,
-            users: HasMany::new(),
-            resources: HasMany::new(),
-        };
+        let name = req.name.clone();
+        let role = req.to_entity(op, now);
         {
             let mut ctx = self.ctx.lock().await;
             ctx.set::<Role>().add(role);
@@ -85,27 +69,21 @@ impl IRequestHandler<CreateRoleRequest, RoleModel> for CreateRoleHandler {
         }
         let created = {
             let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<Role>(), |r: Role| r.name == req.name)
+            let q = name.clone();
+            linq!(ctx.set::<Role>(), |r: Role| r.name == q)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
         }
         .ok_or_else(|| Error::Internal("Role disappeared after insert".into()))?;
-        Ok(RoleModel::from(created))
+        Ok(created.to_model())
     }
 }
 
 #[inject]
 #[async_trait]
 impl IRequestHandler<UpdateRoleRequest, RoleModel> for UpdateRoleHandler {
-    async fn handle(&self, _: UpdateRoleRequest) -> Result<RoleModel> {
-        unreachable!("handle_with_claims is always called")
-    }
-    async fn handle_with_claims(
-        &self,
-        req: UpdateRoleRequest,
-        claims: Option<&dyn IClaims>,
-    ) -> Result<RoleModel> {
+    async fn handle(&self, req: UpdateRoleRequest) -> Result<RoleModel> {
         let id = parse_id(&req.id)?;
         let mut role = {
             let mut ctx = self.ctx.lock().await;
@@ -115,14 +93,8 @@ impl IRequestHandler<UpdateRoleRequest, RoleModel> for UpdateRoleHandler {
                 .map_err(|e| Error::Internal(e.to_string()))?
         }
         .ok_or_else(|| Error::NotFound("Role not found".into()))?;
-        if let Some(n) = req.name {
-            role.name = n;
-        }
-        if let Some(d) = req.description {
-            role.description = d;
-        }
-        role.updated_id = operator_id(claims);
-        role.updated_at = now_secs();
+        let op = operator_id(req.claims.as_deref()).unwrap_or(0);
+        req.apply_to(&mut role, op, now_secs());
         {
             let mut ctx = self.ctx.lock().await;
             ctx.set::<Role>().update(role);
@@ -138,21 +110,14 @@ impl IRequestHandler<UpdateRoleRequest, RoleModel> for UpdateRoleHandler {
                 .map_err(|e| Error::Internal(e.to_string()))?
         }
         .ok_or_else(|| Error::NotFound("Role not found after update".into()))?;
-        Ok(RoleModel::from(updated))
+        Ok(updated.to_model())
     }
 }
 
 #[inject]
 #[async_trait]
 impl IRequestHandler<DeleteRoleRequest, String> for DeleteRoleHandler {
-    async fn handle(&self, _: DeleteRoleRequest) -> Result<String> {
-        unreachable!("handle_with_claims is always called")
-    }
-    async fn handle_with_claims(
-        &self,
-        req: DeleteRoleRequest,
-        claims: Option<&dyn IClaims>,
-    ) -> Result<String> {
+    async fn handle(&self, req: DeleteRoleRequest) -> Result<String> {
         let id = parse_id(&req.id)?;
         let mut role = {
             let mut ctx = self.ctx.lock().await;
@@ -163,7 +128,7 @@ impl IRequestHandler<DeleteRoleRequest, String> for DeleteRoleHandler {
         }
         .ok_or_else(|| Error::NotFound("Role not found".into()))?;
         role.is_deleted = true;
-        role.updated_id = operator_id(claims);
+        role.updated_id = operator_id(req.claims.as_deref());
         role.updated_at = now_secs();
         {
             let mut ctx = self.ctx.lock().await;
@@ -283,30 +248,11 @@ impl IRequestHandler<ListResourcesRequest, Vec<ResourceModel>> for ListResources
 #[inject]
 #[async_trait]
 impl IRequestHandler<CreateResourceRequest, ResourceModel> for CreateResourceHandler {
-    async fn handle(&self, _: CreateResourceRequest) -> Result<ResourceModel> {
-        unreachable!("handle_with_claims is always called")
-    }
-    async fn handle_with_claims(
-        &self,
-        req: CreateResourceRequest,
-        claims: Option<&dyn IClaims>,
-    ) -> Result<ResourceModel> {
-        let op = operator_id(claims);
+    async fn handle(&self, req: CreateResourceRequest) -> Result<ResourceModel> {
+        let op = operator_id(req.claims.as_deref()).unwrap_or(0);
         let now = now_secs();
-        let res = Resource {
-            id: 0,
-            name: req.name.clone(),
-            description: req.description.clone(),
-            resource_type: req.r#type.clone(),
-            value: req.value.clone(),
-            properties: req.properties.clone(),
-            created_id: op,
-            created_at: now,
-            updated_id: op,
-            updated_at: now,
-            is_deleted: false,
-            roles: HasMany::new(),
-        };
+        let value = req.value.clone();
+        let res = req.to_entity(op, now);
         {
             let mut ctx = self.ctx.lock().await;
             ctx.set::<Resource>().add(res);
@@ -317,27 +263,21 @@ impl IRequestHandler<CreateResourceRequest, ResourceModel> for CreateResourceHan
         // 回查（name 可能重复，按 value 过滤更精确）
         let created = {
             let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<Resource>(), |r: Resource| r.value == req.value)
+            let q = value.clone();
+            linq!(ctx.set::<Resource>(), |r: Resource| r.value == q)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
         }
         .ok_or_else(|| Error::Internal("Resource disappeared after insert".into()))?;
-        Ok(ResourceModel::from(created))
+        Ok(created.to_model())
     }
 }
 
 #[inject]
 #[async_trait]
 impl IRequestHandler<UpdateResourceRequest, ResourceModel> for UpdateResourceHandler {
-    async fn handle(&self, _: UpdateResourceRequest) -> Result<ResourceModel> {
-        unreachable!("handle_with_claims is always called")
-    }
-    async fn handle_with_claims(
-        &self,
-        req: UpdateResourceRequest,
-        claims: Option<&dyn IClaims>,
-    ) -> Result<ResourceModel> {
+    async fn handle(&self, req: UpdateResourceRequest) -> Result<ResourceModel> {
         let id = parse_id(&req.id)?;
         let mut res = {
             let mut ctx = self.ctx.lock().await;
@@ -347,23 +287,8 @@ impl IRequestHandler<UpdateResourceRequest, ResourceModel> for UpdateResourceHan
                 .map_err(|e| Error::Internal(e.to_string()))?
         }
         .ok_or_else(|| Error::NotFound("Resource not found".into()))?;
-        if let Some(n) = req.name {
-            res.name = n;
-        }
-        if let Some(d) = req.description {
-            res.description = d;
-        }
-        if let Some(t) = req.r#type {
-            res.resource_type = t;
-        }
-        if let Some(v) = req.value {
-            res.value = v;
-        }
-        if let Some(p) = req.properties {
-            res.properties = p;
-        }
-        res.updated_id = operator_id(claims);
-        res.updated_at = now_secs();
+        let op = operator_id(req.claims.as_deref()).unwrap_or(0);
+        req.apply_to(&mut res, op, now_secs());
         {
             let mut ctx = self.ctx.lock().await;
             ctx.set::<Resource>().update(res);
@@ -379,21 +304,14 @@ impl IRequestHandler<UpdateResourceRequest, ResourceModel> for UpdateResourceHan
                 .map_err(|e| Error::Internal(e.to_string()))?
         }
         .ok_or_else(|| Error::NotFound("Resource not found after update".into()))?;
-        Ok(ResourceModel::from(updated))
+        Ok(updated.to_model())
     }
 }
 
 #[inject]
 #[async_trait]
 impl IRequestHandler<DeleteResourceRequest, String> for DeleteResourceHandler {
-    async fn handle(&self, _: DeleteResourceRequest) -> Result<String> {
-        unreachable!("handle_with_claims is always called")
-    }
-    async fn handle_with_claims(
-        &self,
-        req: DeleteResourceRequest,
-        claims: Option<&dyn IClaims>,
-    ) -> Result<String> {
+    async fn handle(&self, req: DeleteResourceRequest) -> Result<String> {
         let id = parse_id(&req.id)?;
         let mut res = {
             let mut ctx = self.ctx.lock().await;
@@ -404,7 +322,7 @@ impl IRequestHandler<DeleteResourceRequest, String> for DeleteResourceHandler {
         }
         .ok_or_else(|| Error::NotFound("Resource not found".into()))?;
         res.is_deleted = true;
-        res.updated_id = operator_id(claims);
+        res.updated_id = operator_id(req.claims.as_deref());
         res.updated_at = now_secs();
         {
             let mut ctx = self.ctx.lock().await;
@@ -451,38 +369,35 @@ impl IRequestHandler<ListAuthorizesRequest, Vec<AuthorizeModel>> for ListAuthori
 impl IRequestHandler<CreateAuthorizeRequest, AuthorizeModel> for CreateAuthorizeHandler {
     async fn handle(&self, req: CreateAuthorizeRequest) -> Result<AuthorizeModel> {
         // 幂等：若已存在则返回现有
+        let (role_id, resource_id) = (req.role_id, req.resource_id);
         let exists = {
             let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<Authorize>(), |a: Authorize| a.role_id == req.role_id && a.resource_id == req.resource_id)
+            linq!(ctx.set::<Authorize>(), |a: Authorize| a.role_id == role_id && a.resource_id == resource_id)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
         };
         if let Some(e) = exists {
-            return Ok(AuthorizeModel::from(e));
+            return Ok(e.to_model());
         }
         let now = now_secs();
+        let authorize = req.to_entity(0, now);
         {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<Authorize>().add(Authorize {
-                id: 0,
-                role_id: req.role_id,
-                resource_id: req.resource_id,
-                created_at: now,
-            });
+            ctx.set::<Authorize>().add(authorize);
             ctx.save_changes()
                 .await
                 .map_err(|e| Error::Internal(format!("Failed to create authorize: {}", e)))?;
         }
         let created = {
             let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<Authorize>(), |a: Authorize| a.role_id == req.role_id && a.resource_id == req.resource_id)
+            linq!(ctx.set::<Authorize>(), |a: Authorize| a.role_id == role_id && a.resource_id == resource_id)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
         }
         .ok_or_else(|| Error::Internal("Authorize disappeared after insert".into()))?;
-        Ok(AuthorizeModel::from(created))
+        Ok(created.to_model())
     }
 }
 

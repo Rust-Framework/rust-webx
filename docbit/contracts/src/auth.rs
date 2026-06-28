@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 // ── Register ──
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 pub struct RegisterRequest {
     pub name: String,
     pub email: String,
@@ -39,7 +39,7 @@ impl IRequest<AuthResponse> for RegisterRequest {}
 
 // ── Login ──
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 pub struct LoginRequest {
     pub email: String,
     pub password: String,
@@ -50,7 +50,11 @@ impl IRequest<AuthResponse> for LoginRequest {}
 
 // ── Auth Me (get current user from token) ──
 
-pub struct AuthMeRequest;
+#[derive(Default)]
+pub struct AuthMeRequest {
+    pub claims: Option<Box<dyn IClaims>>,
+}
+impl_claims_carrier!(AuthMeRequest);
 
 /// Returns the current user's info based on the JWT token claims.
 #[get("/api/auth/me")]
@@ -59,7 +63,7 @@ impl IRequest<UserView> for AuthMeRequest {}
 
 // ── Forgot / reset password ──
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 pub struct ForgotPasswordRequest {
     pub email: String,
 }
@@ -74,7 +78,7 @@ pub struct ForgotPasswordResponse {
 #[post("/api/auth/forgot-password")]
 impl IRequest<ForgotPasswordResponse> for ForgotPasswordRequest {}
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 pub struct ResetPasswordRequest {
     pub token: String,
     pub password: String,

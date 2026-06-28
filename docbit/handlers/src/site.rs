@@ -9,7 +9,7 @@ use rust_webapp::*;
 
 use docbit_contracts::site::{SiteConfig, SiteInfoRequest};
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<SiteInfoRequest, SiteConfig>)]
+#[rust_dicore::inject]
 pub struct SiteInfoHandler {
     config: Arc<SiteConfig>,
 }

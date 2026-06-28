@@ -6,6 +6,11 @@
 //! `list_portfolio` / `get_portfolio` 从文件系统 INDEX.json 读取元数据并
 //! 返回 `ExhibitionModel`；DB 专属字段（id、category_id、created_at 等）
 //! 填占位值，运行时实际展示用 exhibition handlers 从 DB 取。
+//!
+//! 架构分层：服务实现归属 `handlers` 层（contracts 定义 `IDocumentService`，
+//! 此处提供 `DocService` 实现，通过 `#[rust_dicore::inject]` 自动注册为
+//! `dyn IDocumentService` 单例，供 `docs.rs` handlers 与 `startup.rs`
+//! `DbInitService` 注入使用）。
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -16,7 +21,9 @@ use docbit_contracts::docs::{DocContent, DocIndex, DocIndexItem, IDocumentServic
 use docbit_contracts::exhibition::ExhibitionModel;
 use rust_webapp::app_base;
 
-#[rust_dicore::inject_attr(singleton, as = dyn IDocumentService)]
+// `#[inject]` 在 struct 上：生成 `__rdi_construct_DocService` 构造器，
+// 并以默认 `singleton` 生命周期注册为具体类型 `DocService`。
+#[rust_dicore::inject]
 pub struct DocService;
 
 impl DocService {
@@ -141,6 +148,9 @@ impl DocService {
     }
 }
 
+// `#[inject]` 在 trait impl 上：复用 `__rdi_construct_DocService` 构造器，
+// 注册为 `dyn IDocumentService`（默认 singleton），供 handlers/hosted service 注入。
+#[rust_dicore::inject]
 impl IDocumentService for DocService {
     fn list_works(&self) -> Result<Vec<String>, String> {
         if !Self::root().is_dir() {

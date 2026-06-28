@@ -22,12 +22,17 @@ use docbit_domain::seed::seed;
 const ADMIN_EMAIL: &str = "admin@docbit.local";
 const ADMIN_DEFAULT_PASSWORD: &str = "admin123";
 
-#[rust_dicore::inject_attr(singleton, as = dyn IHostedService)]
+// `#[inject]` 在 struct 上：生成 `__rdi_construct_DbInitService` 构造器，
+// 自动从 DI 容器解析 `ctx: Arc<Mutex<DbContext>>` 与 `docs: Arc<dyn IDocumentService>`。
+#[rust_dicore::inject]
 pub struct DbInitService {
     ctx: Arc<Mutex<DbContext>>,
     docs: Arc<dyn IDocumentService>,
 }
 
+// `#[inject]` 在 trait impl 上：注册为 `dyn IHostedService`（默认 singleton），
+// 框架在 `Host::build()` 时统一收集并启动。
+#[rust_dicore::inject]
 #[async_trait]
 impl IHostedService for DbInitService {
     async fn start(&self) -> Result<()> {

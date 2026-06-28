@@ -39,8 +39,8 @@ docbit-domain = { version = "0.1.0", path = "docbit/domain" }
 docbit-handlers = { version = "0.1.0", path = "docbit/handlers" }
 
 # DI framework (crates.io — no local path required)
-rust-dicore = { version = "0.3.2" }
-rust-dicore-macros = { version = "0.3.2" }
+rust-dicore = "0.3.3"
+rust-dicore-macros = "0.3.3"
 
 # rust-ef 1.1.0 GA ORM framework
 rust-ef = "1.1"

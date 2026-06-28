@@ -55,11 +55,11 @@ impl IRequestHandler<CreateCommentRequest, CommentModel> for CreateCommentHandle
     async fn handle(&self, req: CreateCommentRequest) -> Result<CommentModel> {
         let claims_ref = req.claims.as_deref();
         let claims = claims_ref.ok_or_else(|| Error::Http("Not authenticated".into()))?;
-        let content = req.content.trim();
-        if content.is_empty() {
+        let content_owned: String = req.content.trim().to_string();
+        if content_owned.is_empty() {
             return Err(Error::Http("Comment cannot be empty".into()));
         }
-        if content.len() > 4000 {
+        if content_owned.len() > 4000 {
             return Err(Error::Http("Comment too long".into()));
         }
         let user_id = claims
@@ -76,7 +76,7 @@ impl IRequestHandler<CreateCommentRequest, CommentModel> for CreateCommentHandle
         let blog_id = req.blog_id;
         let mut comment = req.to_entity(user_id, now);
         comment.user_name = user_name.clone();
-        comment.content = content.to_string();
+        comment.content = content_owned;
         {
             let mut ctx = self.ctx.lock().await;
             ctx.set::<Comment>().add(comment);
@@ -107,8 +107,9 @@ impl IRequestHandler<DeleteCommentRequest, String> for DeleteCommentHandler {
         let id = parse_id(&req.id)?;
         let mut comment = {
             let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<Comment>(), |c: Comment| c.id == id)
-                .first_or_default()
+            ctx.set::<Comment>()
+                .query()
+                .find(id)
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
         }

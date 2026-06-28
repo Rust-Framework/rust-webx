@@ -1,4 +1,4 @@
-﻿// rust-webapp-macros â€” Procedural macros for the Rust WebApi framework.
+// rust-webapp-macros â€” Procedural macros for the Rust WebApi framework.
 // - #[controller] / #[controller("/base")]
 // - #[endpoint(HttpMethod, "/path")] â€” full form
 // - #[get("/path")], #[post("/path")], #[put("/path")], #[delete("/path")] â€” shortcuts
@@ -6,6 +6,7 @@
 // - #[FromBody], #[FromRoute], #[FromQuery] â€” parameter binding
 // - rust_webapp::request! declaration macro
 
+mod claims;
 mod controller;
 mod endpoint;
 mod handler;
@@ -158,6 +159,33 @@ pub fn from_query(_attr: TokenStream, item: TokenStream) -> TokenStream {
 // ---------------------------------------------------------------------------
 // Declaration macros
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Claims attribute
+// ---------------------------------------------------------------------------
+
+/// Marks a request struct as carrying authentication claims.
+///
+/// Appends a `#[serde(skip)] pub claims: Option<Box<dyn IClaims>>` field to
+/// the struct and generates an inherent `set_claims` method that shadows the
+/// blanket no-op `IClaimsCarrier::set_claims`. The dispatcher injects claims
+/// into the request *before* calling `IRequestHandler::handle`.
+///
+/// Must be the outermost attribute so that `#[derive(...)]` sees the injected
+/// field:
+///
+/// ```ignore
+/// #[claims]
+/// #[derive(Default, Deserialize)]
+/// pub struct CreateCommentRequest {
+///     pub blog_id: i32,
+///     pub content: String,
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn claims(attr: TokenStream, item: TokenStream) -> TokenStream {
+    claims::claims_impl(attr, item)
+}
 
 // ---------------------------------------------------------------------------
 // Authorization attribute (declarative, handled by emit_endpoint)

@@ -44,39 +44,34 @@ pub struct ListRolesRequest;
 #[authorize(role = "admin")]
 impl IRequest<Vec<RoleModel>> for ListRolesRequest {}
 
+#[claims]
 #[derive(Default, Deserialize)]
 pub struct CreateRoleRequest {
-    #[serde(skip)]
-    pub claims: Option<Box<dyn IClaims>>,
     pub name: String,
     pub description: String,
 }
-impl_claims_carrier!(CreateRoleRequest);
 
 #[post("/api/roles")]
 #[authorize(role = "admin")]
 impl IRequest<RoleModel> for CreateRoleRequest {}
 
+#[claims]
 #[derive(Default, Deserialize)]
 pub struct UpdateRoleRequest {
-    #[serde(skip)]
-    pub claims: Option<Box<dyn IClaims>>,
     pub id: String,
     pub name: Option<String>,
     pub description: Option<String>,
 }
-impl_claims_carrier!(UpdateRoleRequest);
 
 #[put("/api/roles/{id}")]
 #[authorize(role = "admin")]
 impl IRequest<RoleModel> for UpdateRoleRequest {}
 
+#[claims]
 #[derive(Default)]
 pub struct DeleteRoleRequest {
-    pub claims: Option<Box<dyn IClaims>>,
     pub id: String,
 }
-impl_claims_carrier!(DeleteRoleRequest);
 
 #[delete("/api/roles/{id}")]
 #[authorize(role = "admin")]
@@ -113,26 +108,23 @@ pub struct ListResourcesRequest;
 #[authorize(role = "admin")]
 impl IRequest<Vec<ResourceModel>> for ListResourcesRequest {}
 
+#[claims]
 #[derive(Default, Deserialize)]
 pub struct CreateResourceRequest {
-    #[serde(skip)]
-    pub claims: Option<Box<dyn IClaims>>,
     pub name: String,
     pub description: String,
     pub r#type: String,
     pub value: String,
     pub properties: String,
 }
-impl_claims_carrier!(CreateResourceRequest);
 
 #[post("/api/resources")]
 #[authorize(role = "admin")]
 impl IRequest<ResourceModel> for CreateResourceRequest {}
 
+#[claims]
 #[derive(Default, Deserialize)]
 pub struct UpdateResourceRequest {
-    #[serde(skip)]
-    pub claims: Option<Box<dyn IClaims>>,
     pub id: String,
     pub name: Option<String>,
     pub description: Option<String>,
@@ -140,18 +132,16 @@ pub struct UpdateResourceRequest {
     pub value: Option<String>,
     pub properties: Option<String>,
 }
-impl_claims_carrier!(UpdateResourceRequest);
 
 #[put("/api/resources/{id}")]
 #[authorize(role = "admin")]
 impl IRequest<ResourceModel> for UpdateResourceRequest {}
 
+#[claims]
 #[derive(Default)]
 pub struct DeleteResourceRequest {
-    pub claims: Option<Box<dyn IClaims>>,
     pub id: String,
 }
-impl_claims_carrier!(DeleteResourceRequest);
 
 #[delete("/api/resources/{id}")]
 #[authorize(role = "admin")]
@@ -166,14 +156,12 @@ pub struct ListAuthorizesRequest;
 #[authorize(role = "admin")]
 impl IRequest<Vec<AuthorizeModel>> for ListAuthorizesRequest {}
 
+#[claims]
 #[derive(Default, Deserialize)]
 pub struct CreateAuthorizeRequest {
-    #[serde(skip)]
-    pub claims: Option<Box<dyn IClaims>>,
     pub role_id: i32,
     pub resource_id: i32,
 }
-impl_claims_carrier!(CreateAuthorizeRequest);
 
 #[post("/api/authorizes")]
 #[authorize(role = "admin")]

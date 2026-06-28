@@ -44,41 +44,36 @@ pub struct GetUserRequest {
 #[authorize(role = "admin")]
 impl IRequest<UserModel> for GetUserRequest {}
 
+#[claims]
 #[derive(Default, Deserialize)]
 pub struct CreateUserRequest {
-    #[serde(skip)]
-    pub claims: Option<Box<dyn IClaims>>,
     pub name: String,
     pub email: String,
 }
-impl_claims_carrier!(CreateUserRequest);
 
 /// Create a new user with name and email address (admin-created, no password)
 #[post("/api/users")]
 #[authorize(role = "admin")]
 impl IRequest<UserModel> for CreateUserRequest {}
 
+#[claims]
 #[derive(Default, Deserialize)]
 pub struct UpdateUserRequest {
-    #[serde(skip)]
-    pub claims: Option<Box<dyn IClaims>>,
     pub id: String,
     pub name: Option<String>,
     pub email: Option<String>,
 }
-impl_claims_carrier!(UpdateUserRequest);
 
 /// Update an existing user's name and/or email
 #[put("/api/users/{id}")]
 #[authorize(role = "admin")]
 impl IRequest<UserModel> for UpdateUserRequest {}
 
+#[claims]
 #[derive(Default)]
 pub struct DeleteUserRequest {
-    pub claims: Option<Box<dyn IClaims>>,
     pub id: String,
 }
-impl_claims_carrier!(DeleteUserRequest);
 
 /// Delete a user by their unique ID
 #[delete("/api/users/{id}")]

@@ -31,14 +31,11 @@ impl IRequestHandler<GetTrackingSummaryRequest, TrackingSummary>
     async fn handle(&self, _: GetTrackingSummaryRequest) -> Result<TrackingSummary> {
         let (total, unique_paths, today_visits) = {
             let mut ctx = self.ctx.lock().await;
-            let total = ctx
-                .set::<Tracking>()
-                .query()
-                .count()
+            // rust-ef 最佳实践：用 `linq!` 多子句形式做聚合终端。
+            let total: i64 = linq!(ctx.set::<Tracking>(); count)
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?;
             // 唯一路径数：distinct path 在 rust-ef 当前无内置 API，按 path 分组在内存侧归约。
-            // 通过 filter_column 仅用于条件过滤；这里直接 to_list 后去重。
             let all = ctx
                 .set::<Tracking>()
                 .query()
@@ -50,19 +47,12 @@ impl IRequestHandler<GetTrackingSummaryRequest, TrackingSummary>
                 .map(|t| t.path.as_str())
                 .collect::<std::collections::BTreeSet<_>>()
                 .len() as i64;
+            // 今日访问数：`>=` 谓词用 `linq!` 类型安全表达式。
             let today_start = today_start_secs();
-            let today = ctx
-                .set::<Tracking>()
-                .query()
-                .filter_column(
-                    "visited_at",
-                    ">=",
-                    DbValue::I64(today_start),
-                )
-                .count()
+            let today: i64 = linq!(ctx.set::<Tracking>(), |t: Tracking| t.visited_at >= today_start; count)
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?;
-            (total as i64, unique, today as i64)
+            (total, unique, today)
         };
         Ok(TrackingSummary {
             total_visits: total,

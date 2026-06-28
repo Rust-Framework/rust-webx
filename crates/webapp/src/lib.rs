@@ -16,7 +16,7 @@ pub use rust_webapp_core::config::{
     JwtSection, TlsSection,
 };
 pub use rust_webapp_core::error::{Error, Result};
-pub use rust_webapp_core::handler::{IEventHandler, IHostedService, IRequestHandler};
+pub use rust_webapp_core::handler::{IClaimsCarrier, IEventHandler, IHostedService, IRequestHandler};
 pub use rust_webapp_core::http::{
     read_json_body, write_json_response, FromHttpContext, HttpStatus, IClaimsExt, IHttpContext,
     IHttpRequest, IHttpResponse, Json,

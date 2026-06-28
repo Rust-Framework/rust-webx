@@ -5,4 +5,7 @@
 
 pub mod conversions;
 pub mod entities;
+pub mod mapper;
 pub mod seed;
+
+pub use mapper::{ApplyTo, ToEntity, ToModel};

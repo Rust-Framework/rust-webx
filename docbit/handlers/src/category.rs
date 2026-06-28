@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use rust_ef::{db_context::DbContext, prelude::*, provider::DbValue};
+use rust_ef::{db_context::DbContext, prelude::*};
 use rust_webapp::*;
 use tokio::sync::Mutex;
 
@@ -12,6 +12,7 @@ use docbit_contracts::category::{
     ListCategoriesRequest, UpdateCategoryRequest,
 };
 use docbit_domain::entities::Category;
+use docbit_domain::{ApplyTo, ToEntity, ToModel};
 
 use crate::util::{now_secs, operator_id, parse_id};
 
@@ -92,9 +93,7 @@ impl IRequestHandler<ListCategoriesRequest, Vec<CategoryTreeNode>> for ListCateg
     async fn handle(&self, _: ListCategoriesRequest) -> Result<Vec<CategoryTreeNode>> {
         let cats = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<Category>()
-                .query()
-                .filter_column("is_deleted", "=", DbValue::Bool(false))
+            linq!(ctx.set::<Category>(), |c: Category| !c.is_deleted)
                 .to_list()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
@@ -107,30 +106,11 @@ impl IRequestHandler<ListCategoriesRequest, Vec<CategoryTreeNode>> for ListCateg
 #[inject]
 #[async_trait]
 impl IRequestHandler<CreateCategoryRequest, CategoryModel> for CreateCategoryHandler {
-    async fn handle(&self, _: CreateCategoryRequest) -> Result<CategoryModel> {
-        unreachable!("handle_with_claims is always called")
-    }
-    async fn handle_with_claims(
-        &self,
-        req: CreateCategoryRequest,
-        claims: Option<&dyn IClaims>,
-    ) -> Result<CategoryModel> {
-        let op = operator_id(claims);
+    async fn handle(&self, req: CreateCategoryRequest) -> Result<CategoryModel> {
+        let op = operator_id(req.claims.as_deref()).unwrap_or(0);
         let now = now_secs();
-        let cat = Category {
-            id: 0,
-            name: req.name.clone(),
-            slug: req.slug.clone(),
-            parent_id: req.parent_id,
-            sort_order: req.sort_order,
-            created_id: op,
-            created_at: now,
-            updated_id: op,
-            updated_at: now,
-            is_deleted: false,
-            parent: BelongsTo::new(),
-            children: HasMany::new(),
-        };
+        let slug = req.slug.clone();
+        let cat = req.to_entity(op, now);
         {
             let mut ctx = self.ctx.lock().await;
             ctx.set::<Category>().add(cat);
@@ -140,50 +120,34 @@ impl IRequestHandler<CreateCategoryRequest, CategoryModel> for CreateCategoryHan
         }
         let created = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<Category>()
-                .query()
-                .filter_column("slug", "=", DbValue::String(req.slug.clone()))
+            let q = slug.clone();
+            linq!(ctx.set::<Category>(), |c: Category| c.slug == q)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
         }
         .ok_or_else(|| Error::Internal("Category disappeared after insert".into()))?;
         tracing::info!("[Category] Created: {} ({})", created.name, created.id);
-        Ok(CategoryModel::from(created))
+        Ok(created.to_model())
     }
 }
 
 #[inject]
 #[async_trait]
 impl IRequestHandler<UpdateCategoryRequest, CategoryModel> for UpdateCategoryHandler {
-    async fn handle(&self, _: UpdateCategoryRequest) -> Result<CategoryModel> {
-        unreachable!("handle_with_claims is always called")
-    }
-    async fn handle_with_claims(
-        &self,
-        req: UpdateCategoryRequest,
-        claims: Option<&dyn IClaims>,
-    ) -> Result<CategoryModel> {
+    async fn handle(&self, req: UpdateCategoryRequest) -> Result<CategoryModel> {
         let id = parse_id(&req.id)?;
         let mut cat = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<Category>()
-                .query()
-                .filter_column("id", "=", DbValue::I32(id))
+            linq!(ctx.set::<Category>(), |c: Category| c.id == id)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
         }
         .ok_or_else(|| Error::NotFound("Category not found".into()))?;
 
-        if let Some(n) = req.name {
-            cat.name = n;
-        }
-        if let Some(s) = req.sort_order {
-            cat.sort_order = s;
-        }
-        cat.updated_id = operator_id(claims);
-        cat.updated_at = now_secs();
+        let op = operator_id(req.claims.as_deref()).unwrap_or(0);
+        req.apply_to(&mut cat, op, now_secs());
         {
             let mut ctx = self.ctx.lock().await;
             ctx.set::<Category>().update(cat);
@@ -193,42 +157,31 @@ impl IRequestHandler<UpdateCategoryRequest, CategoryModel> for UpdateCategoryHan
         }
         let updated = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<Category>()
-                .query()
-                .filter_column("id", "=", DbValue::I32(id))
+            linq!(ctx.set::<Category>(), |c: Category| c.id == id)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
         }
         .ok_or_else(|| Error::NotFound("Category not found after update".into()))?;
-        Ok(CategoryModel::from(updated))
+        Ok(updated.to_model())
     }
 }
 
 #[inject]
 #[async_trait]
 impl IRequestHandler<DeleteCategoryRequest, String> for DeleteCategoryHandler {
-    async fn handle(&self, _: DeleteCategoryRequest) -> Result<String> {
-        unreachable!("handle_with_claims is always called")
-    }
-    async fn handle_with_claims(
-        &self,
-        req: DeleteCategoryRequest,
-        claims: Option<&dyn IClaims>,
-    ) -> Result<String> {
+    async fn handle(&self, req: DeleteCategoryRequest) -> Result<String> {
         let id = parse_id(&req.id)?;
         let mut cat = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<Category>()
-                .query()
-                .filter_column("id", "=", DbValue::I32(id))
+            linq!(ctx.set::<Category>(), |c: Category| c.id == id)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
         }
         .ok_or_else(|| Error::NotFound("Category not found".into()))?;
         cat.is_deleted = true;
-        cat.updated_id = operator_id(claims);
+        cat.updated_id = operator_id(req.claims.as_deref());
         cat.updated_at = now_secs();
         {
             let mut ctx = self.ctx.lock().await;

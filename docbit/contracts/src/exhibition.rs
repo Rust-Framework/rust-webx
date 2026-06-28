@@ -28,11 +28,13 @@ pub struct ExhibitionModel {
     pub updated_at: i64,
 }
 
+#[derive(Default)]
 pub struct ListExhibitionsRequest;
 
 #[get("/api/exhibitions")]
 impl IRequest<Vec<ExhibitionModel>> for ListExhibitionsRequest {}
 
+#[derive(Default)]
 pub struct GetExhibitionRequest {
     pub slug: String,
 }
@@ -40,8 +42,10 @@ pub struct GetExhibitionRequest {
 #[get("/api/exhibitions/{slug}")]
 impl IRequest<ExhibitionModel> for GetExhibitionRequest {}
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 pub struct UpsertExhibitionRequest {
+    #[serde(skip)]
+    pub claims: Option<Box<dyn IClaims>>,
     pub slug: String,
     pub title: String,
     pub subtitle: String,
@@ -55,14 +59,18 @@ pub struct UpsertExhibitionRequest {
     pub sort_order: i32,
     pub logo_url: Option<String>,
 }
+impl_claims_carrier!(UpsertExhibitionRequest);
 
 #[post("/api/exhibitions")]
 #[authorize(role = "admin")]
 impl IRequest<ExhibitionModel> for UpsertExhibitionRequest {}
 
+#[derive(Default)]
 pub struct DeleteExhibitionRequest {
+    pub claims: Option<Box<dyn IClaims>>,
     pub slug: String,
 }
+impl_claims_carrier!(DeleteExhibitionRequest);
 
 #[delete("/api/exhibitions/{slug}")]
 #[authorize(role = "admin")]

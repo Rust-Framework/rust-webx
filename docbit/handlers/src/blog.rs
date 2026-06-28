@@ -12,6 +12,7 @@ use tokio::sync::Mutex;
 
 use docbit_contracts::blog::*;
 use docbit_domain::entities::{Blog, Category};
+use docbit_domain::{ApplyTo, ToEntity, ToModel};
 
 use crate::util::now_secs;
 
@@ -121,15 +122,8 @@ impl IRequestHandler<ListBlogCategoriesRequest, Vec<BlogCategoryCount>> for List
 #[inject]
 #[async_trait]
 impl IRequestHandler<ListMyBlogPostsRequest, Vec<BlogPostSummary>> for ListMyBlogPostsHandler {
-    async fn handle(&self, _: ListMyBlogPostsRequest) -> Result<Vec<BlogPostSummary>> {
-        unreachable!("handle_with_claims is always called")
-    }
-    async fn handle_with_claims(
-        &self,
-        _: ListMyBlogPostsRequest,
-        claims: Option<&dyn IClaims>,
-    ) -> Result<Vec<BlogPostSummary>> {
-        let uid = uid_from_claims(claims)?;
+    async fn handle(&self, req: ListMyBlogPostsRequest) -> Result<Vec<BlogPostSummary>> {
+        let uid = uid_from_claims(req.claims.as_deref())?;
         let blogs = {
             let mut ctx = self.ctx.lock().await;
             linq!(ctx.set::<Blog>(), |b: Blog| b.author_id == uid && !b.is_deleted; include b.category; include b.author; order_by b.published_at desc)
@@ -154,22 +148,15 @@ impl IRequestHandler<GetBlogPostRequest, BlogPostModel> for GetBlogPostHandler {
                 .map_err(|e| Error::Internal(e.to_string()))?
         }
         .ok_or_else(|| Error::NotFound(format!("Blog post not found: {}", slug)))?;
-        Ok(BlogPostModel::from(blog))
+        Ok(blog.to_model())
     }
 }
 
 #[inject]
 #[async_trait]
 impl IRequestHandler<CreateBlogPostRequest, BlogPostModel> for CreateBlogPostHandler {
-    async fn handle(&self, _: CreateBlogPostRequest) -> Result<BlogPostModel> {
-        unreachable!("handle_with_claims is always called")
-    }
-    async fn handle_with_claims(
-        &self,
-        req: CreateBlogPostRequest,
-        claims: Option<&dyn IClaims>,
-    ) -> Result<BlogPostModel> {
-        let uid = uid_from_claims(claims)?;
+    async fn handle(&self, req: CreateBlogPostRequest) -> Result<BlogPostModel> {
+        let uid = uid_from_claims(req.claims.as_deref())?;
         // slug 唯一性校验
         let slug = req.slug.clone();
         let exists = {
@@ -185,28 +172,7 @@ impl IRequestHandler<CreateBlogPostRequest, BlogPostModel> for CreateBlogPostHan
         }
 
         let now = now_secs();
-        let tags_json = serde_json::to_string(&req.tags)
-            .map_err(|e| Error::Internal(format!("tags serialize: {}", e)))?;
-        let category_id = req.category_id.unwrap_or(1);
-        let blog = Blog {
-            id: 0,
-            slug: req.slug.clone(),
-            title: req.title,
-            summary: req.summary,
-            content: req.content,
-            tags: tags_json,
-            category_id,
-            author_id: uid,
-            published_at: req.published_at,
-            created_at: now,
-            updated_at: now,
-            created_id: Some(uid),
-            updated_id: Some(uid),
-            is_deleted: false,
-            category: BelongsTo::new(),
-            author: BelongsTo::new(),
-            comments: HasMany::new(),
-        };
+        let blog = req.to_entity(uid, now);
         {
             let mut ctx = self.ctx.lock().await;
             ctx.set::<Blog>().add(blog);
@@ -217,34 +183,29 @@ impl IRequestHandler<CreateBlogPostRequest, BlogPostModel> for CreateBlogPostHan
         // 回查以装载导航字段
         let saved = {
             let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<Blog>(), |b: Blog| b.slug == req.slug && !b.is_deleted; include b.category; include b.author)
+            let q = slug.clone();
+            linq!(ctx.set::<Blog>(), |b: Blog| b.slug == q && !b.is_deleted; include b.category; include b.author)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
         }
         .ok_or_else(|| Error::Internal("Blog vanished after insert".into()))?;
         tracing::info!("[Blog] Created: {} by {}", saved.slug, uid);
-        Ok(BlogPostModel::from(saved))
+        Ok(saved.to_model())
     }
 }
 
 #[inject]
 #[async_trait]
 impl IRequestHandler<UpdateBlogPostRequest, BlogPostModel> for UpdateBlogPostHandler {
-    async fn handle(&self, _: UpdateBlogPostRequest) -> Result<BlogPostModel> {
-        unreachable!("handle_with_claims is always called")
-    }
-    async fn handle_with_claims(
-        &self,
-        req: UpdateBlogPostRequest,
-        claims: Option<&dyn IClaims>,
-    ) -> Result<BlogPostModel> {
-        let uid = uid_from_claims(claims)?;
-        let roles = roles_from_claims(claims);
+    async fn handle(&self, req: UpdateBlogPostRequest) -> Result<BlogPostModel> {
+        let uid = uid_from_claims(req.claims.as_deref())?;
+        let roles = roles_from_claims(req.claims.as_deref());
         let slug = req.slug.clone();
         let mut blog = {
             let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<Blog>(), |b: Blog| b.slug == req.slug && !b.is_deleted; include b.category; include b.author)
+            let q = slug.clone();
+            linq!(ctx.set::<Blog>(), |b: Blog| b.slug == q && !b.is_deleted; include b.category; include b.author)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
@@ -255,27 +216,7 @@ impl IRequestHandler<UpdateBlogPostRequest, BlogPostModel> for UpdateBlogPostHan
             return Err(Error::Http("Forbidden: not the author".into()));
         }
 
-        if let Some(t) = req.title {
-            blog.title = t;
-        }
-        if let Some(s) = req.summary {
-            blog.summary = s;
-        }
-        if let Some(c) = req.content {
-            blog.content = c;
-        }
-        if let Some(t) = req.tags {
-            blog.tags = serde_json::to_string(&t)
-                .map_err(|e| Error::Internal(format!("tags serialize: {}", e)))?;
-        }
-        if let Some(c) = req.category_id {
-            blog.category_id = c;
-        }
-        if let Some(p) = req.published_at {
-            blog.published_at = p;
-        }
-        blog.updated_id = Some(uid);
-        blog.updated_at = now_secs();
+        req.apply_to(&mut blog, uid, now_secs());
         {
             let mut ctx = self.ctx.lock().await;
             ctx.set::<Blog>().update(blog);
@@ -285,29 +226,23 @@ impl IRequestHandler<UpdateBlogPostRequest, BlogPostModel> for UpdateBlogPostHan
         }
         let saved = {
             let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<Blog>(), |b: Blog| b.slug == slug && !b.is_deleted; include b.category; include b.author)
+            let q = slug.clone();
+            linq!(ctx.set::<Blog>(), |b: Blog| b.slug == q && !b.is_deleted; include b.category; include b.author)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
         }
         .ok_or_else(|| Error::NotFound("Blog not found after update".into()))?;
-        Ok(BlogPostModel::from(saved))
+        Ok(saved.to_model())
     }
 }
 
 #[inject]
 #[async_trait]
 impl IRequestHandler<DeleteBlogPostRequest, String> for DeleteBlogPostHandler {
-    async fn handle(&self, _: DeleteBlogPostRequest) -> Result<String> {
-        unreachable!("handle_with_claims is always called")
-    }
-    async fn handle_with_claims(
-        &self,
-        req: DeleteBlogPostRequest,
-        claims: Option<&dyn IClaims>,
-    ) -> Result<String> {
-        let uid = uid_from_claims(claims)?;
-        let roles = roles_from_claims(claims);
+    async fn handle(&self, req: DeleteBlogPostRequest) -> Result<String> {
+        let uid = uid_from_claims(req.claims.as_deref())?;
+        let roles = roles_from_claims(req.claims.as_deref());
         let slug = req.slug.clone();
         let mut blog = {
             let mut ctx = self.ctx.lock().await;
@@ -333,7 +268,7 @@ impl IRequestHandler<DeleteBlogPostRequest, String> for DeleteBlogPostHandler {
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?;
         }
-        tracing::info!("[Blog] Soft-deleted: {}", req.slug);
-        Ok(format!("Deleted blog post {}", req.slug))
+        tracing::info!("[Blog] Soft-deleted: {}", slug);
+        Ok(format!("Deleted blog post {}", slug))
     }
 }

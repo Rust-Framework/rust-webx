@@ -43,11 +43,13 @@ pub trait IDocumentService: Send + Sync {
     fn sync_portfolio_assets(&self, wwwroot: &Path) -> std::result::Result<(), String>;
 }
 
+#[derive(Default)]
 pub struct ListDocWorksRequest;
 
 #[get("/api/docs")]
 impl IRequest<Vec<String>> for ListDocWorksRequest {}
 
+#[derive(Default)]
 pub struct GetDocIndexRequest {
     pub work: String,
 }
@@ -55,6 +57,7 @@ pub struct GetDocIndexRequest {
 #[get("/api/docs/{work}/index")]
 impl IRequest<DocIndex> for GetDocIndexRequest {}
 
+#[derive(Default)]
 pub struct GetDocContentRequest {
     pub work: String,
     /// Document path with `/` encoded as `:` (e.g. `01-introduction:hello-world.md`)

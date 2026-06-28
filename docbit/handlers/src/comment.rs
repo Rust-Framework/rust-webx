@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use rust_ef::{db_context::DbContext, prelude::*, provider::DbValue};
+use rust_ef::{db_context::DbContext, prelude::*};
 use rust_webapp::*;
 use tokio::sync::Mutex;
 
@@ -13,6 +13,7 @@ use docbit_contracts::comment::{
     CommentModel, CreateCommentRequest, DeleteCommentRequest, ListCommentsRequest,
 };
 use docbit_domain::entities::Comment;
+use docbit_domain::{ToEntity, ToModel};
 
 use crate::util::{now_secs, operator_id, parse_id};
 
@@ -38,10 +39,7 @@ impl IRequestHandler<ListCommentsRequest, Vec<CommentModel>> for ListCommentsHan
         let blog_id = parse_id(&req.blog_id)?;
         let mut rows = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<Comment>()
-                .query()
-                .filter_column("blog_id", "=", DbValue::I32(blog_id))
-                .filter_column("is_deleted", "=", DbValue::Bool(false))
+            linq!(ctx.set::<Comment>(), |c: Comment| c.blog_id == blog_id && !c.is_deleted)
                 .to_list()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
@@ -54,15 +52,9 @@ impl IRequestHandler<ListCommentsRequest, Vec<CommentModel>> for ListCommentsHan
 #[inject]
 #[async_trait]
 impl IRequestHandler<CreateCommentRequest, CommentModel> for CreateCommentHandler {
-    async fn handle(&self, _: CreateCommentRequest) -> Result<CommentModel> {
-        unreachable!("handle_with_claims is always called")
-    }
-    async fn handle_with_claims(
-        &self,
-        req: CreateCommentRequest,
-        claims: Option<&dyn IClaims>,
-    ) -> Result<CommentModel> {
-        let claims = claims.ok_or_else(|| Error::Http("Not authenticated".into()))?;
+    async fn handle(&self, req: CreateCommentRequest) -> Result<CommentModel> {
+        let claims_ref = req.claims.as_deref();
+        let claims = claims_ref.ok_or_else(|| Error::Http("Not authenticated".into()))?;
         let content = req.content.trim();
         if content.is_empty() {
             return Err(Error::Http("Comment cannot be empty".into()));
@@ -81,23 +73,10 @@ impl IRequestHandler<CreateCommentRequest, CommentModel> for CreateCommentHandle
             .unwrap_or_else(|| "User".to_string());
 
         let now = now_secs();
-        let comment = Comment {
-            id: 0,
-            blog_id: req.blog_id,
-            user_id,
-            user_name: user_name.clone(),
-            content: content.to_string(),
-            parent_id: req.parent_id,
-            quoted_id: req.quoted_id,
-            created_at: now,
-            updated_id: Some(user_id),
-            updated_at: now,
-            is_deleted: false,
-            blog: BelongsTo::new(),
-            user: BelongsTo::new(),
-            parent: BelongsTo::new(),
-            quoted: BelongsTo::new(),
-        };
+        let blog_id = req.blog_id;
+        let mut comment = req.to_entity(user_id, now);
+        comment.user_name = user_name.clone();
+        comment.content = content.to_string();
         {
             let mut ctx = self.ctx.lock().await;
             ctx.set::<Comment>().add(comment);
@@ -107,10 +86,7 @@ impl IRequestHandler<CreateCommentRequest, CommentModel> for CreateCommentHandle
         }
         let created = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<Comment>()
-                .query()
-                .filter_column("blog_id", "=", DbValue::I32(req.blog_id))
-                .filter_column("user_id", "=", DbValue::I32(user_id))
+            linq!(ctx.set::<Comment>(), |c: Comment| c.blog_id == blog_id && c.user_id == user_id)
                 .to_list()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
@@ -119,28 +95,19 @@ impl IRequestHandler<CreateCommentRequest, CommentModel> for CreateCommentHandle
             .into_iter()
             .max_by_key(|c| c.id)
             .ok_or_else(|| Error::Internal("Comment disappeared after insert".into()))?;
-        tracing::info!("[Comment] Created by {} on blog {}", user_name, req.blog_id);
-        Ok(CommentModel::from(last))
+        tracing::info!("[Comment] Created by {} on blog {}", user_name, blog_id);
+        Ok(last.to_model())
     }
 }
 
 #[inject]
 #[async_trait]
 impl IRequestHandler<DeleteCommentRequest, String> for DeleteCommentHandler {
-    async fn handle(&self, _: DeleteCommentRequest) -> Result<String> {
-        unreachable!("handle_with_claims is always called")
-    }
-    async fn handle_with_claims(
-        &self,
-        req: DeleteCommentRequest,
-        claims: Option<&dyn IClaims>,
-    ) -> Result<String> {
+    async fn handle(&self, req: DeleteCommentRequest) -> Result<String> {
         let id = parse_id(&req.id)?;
         let mut comment = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<Comment>()
-                .query()
-                .filter_column("id", "=", DbValue::I32(id))
+            linq!(ctx.set::<Comment>(), |c: Comment| c.id == id)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
@@ -148,7 +115,10 @@ impl IRequestHandler<DeleteCommentRequest, String> for DeleteCommentHandler {
         .ok_or_else(|| Error::NotFound("Comment not found".into()))?;
 
         // 鉴权：admin 或评论作者可删除
-        let claims = claims.ok_or_else(|| Error::Http("Not authenticated".into()))?;
+        let claims = req
+            .claims
+            .as_deref()
+            .ok_or_else(|| Error::Http("Not authenticated".into()))?;
         let uid = claims
             .subject()
             .parse::<i32>()

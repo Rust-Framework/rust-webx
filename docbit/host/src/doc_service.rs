@@ -1,7 +1,7 @@
 //! Documentation filesystem service — scans `docs/` and serves INDEX.json + markdown.
 //!
 //! 实现合约层的 `IDocumentService`。无需任何外部路径注入 ——
-//! docs 目录按框架约定写死为 `<app_base>/docs`，并在缺失时上溯查找。
+//! docs 目录按 docbit 业务约定写死为 `<app_base>/docs`。
 //!
 //! `list_portfolio` / `get_portfolio` 从文件系统 INDEX.json 读取元数据并
 //! 返回 `ExhibitionModel`；DB 专属字段（id、category_id、created_at 等）
@@ -20,12 +20,11 @@ use rust_webapp::app_base;
 pub struct DocService;
 
 impl DocService {
-    /// 文档数据目录：约定为 `<app_base>/docs`，缺失时上溯 cwd 各祖先查找。
+    /// 文档数据目录：docbit 业务约定为 `<app_base>/docs`。
     ///
-    /// 这是本服务的特定约定，与 ASP.NET Core 中 `wwwroot` 的硬编码约定一致，
-    /// 不通过 DI 注入路径。
+    /// 与 ASP.NET Core 中 `wwwroot` 的硬编码约定一致，不通过 DI 注入路径。
     fn root() -> PathBuf {
-        resolve_data_path("docs", &app_base())
+        app_base().join("docs")
     }
 
     fn work_dir(work: &str) -> PathBuf {
@@ -506,43 +505,4 @@ fn title_from_markdown(path: &Path) -> Option<String> {
         }
     }
     None
-}
-
-/// 解析相对数据目录（如 `docs`）。
-///
-/// 约定优先：先看 `<base>/<relative>`，再看 `<base>/../<relative>`（workspace 级），
-/// 最后从 cwd 向上遍历查找。命中即返回；都未命中返回 `<base>/<relative>`。
-fn resolve_data_path(relative: &str, base: &Path) -> PathBuf {
-    let rel = Path::new(relative);
-
-    let direct = base.join(rel);
-    if direct.exists() {
-        return direct;
-    }
-
-    if let Some(workspace) = base.parent() {
-        let workspace_path = workspace.join(rel);
-        if workspace_path.exists() {
-            return workspace_path;
-        }
-    }
-
-    if let Ok(cwd) = std::env::current_dir() {
-        let mut dir: Option<&Path> = Some(cwd.as_path());
-        while let Some(d) = dir {
-            if let Ok(entries) = std::fs::read_dir(d) {
-                for entry in entries.flatten() {
-                    if entry.path().is_dir() {
-                        let candidate = entry.path().join(rel);
-                        if candidate.exists() {
-                            return candidate;
-                        }
-                    }
-                }
-            }
-            dir = d.parent();
-        }
-    }
-
-    direct
 }

@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     发布 docbit 站点到指定目录。
 
@@ -28,9 +28,9 @@
     仅在跨仓库移动脚本时需要显式指定。
 
 .PARAMETER Production
-    生成生产模式启动脚本 run.cmd（设置 APP_ENV=Production 后启动 exe）。
-    生产环境通过该脚本启动，框架据此自动加载 appsettings.Production.json overlay
-    并切换到 MySQL。未指定此开关时，默认按 Development 启动（SQLite）。
+    生成生产模式启动脚本 run.cmd（设置 APP_ENV=Production 与 DATABASE_URL 后启动 exe）。
+    生产环境通过该脚本启动，框架据此自动加载 appsettings.Production.json overlay，
+    并通过 DATABASE_URL 环境变量连接 MySQL。未指定此开关时，默认按 Development 启动（SQLite）。
 
 .EXAMPLE
     .\publish.ps1 -Destination D:\deploy\docbit
@@ -186,14 +186,16 @@ if (-not (Test-Path $DocsDest)) {
 
 # ---------- 6. 生成生产启动脚本 ----------
 if ($Production) {
-    Write-Host "[6/6] 生成生产启动脚本 run.cmd (APP_ENV=Production)" -ForegroundColor Green
+    Write-Host "[6/6] 生成生产启动脚本 run.cmd (APP_ENV=Production + DATABASE_URL)" -ForegroundColor Green
     $runCmdPath = Join-Path $Destination 'run.cmd'
     # 用 %~dp0 引用脚本所在目录，确保从任意位置启动都能定位 exe
+    # DATABASE_URL 需部署时填入真实 MySQL 连接串（mysql://user:pwd@host:port/db）
     $runCmdContent = @(
         '@echo off',
-        'rem 自动生成：设置 APP_ENV=Production 后启动 docbit-host.exe',
-        'rem 框架据此加载 appsettings.Production.json overlay 并切换到 MySQL',
+        'rem 自动生成：设置 APP_ENV=Production 与 DATABASE_URL 后启动 docbit-host.exe',
+        'rem 框架据此加载 appsettings.Production.json overlay，并通过 DATABASE_URL 连接 MySQL',
         'set APP_ENV=Production',
+        'rem set DATABASE_URL=mysql://user:password@host:port/docbit',
         '"%~dp0docbit-host.exe"',
         'pause'
     ) -join "`r`n"
@@ -219,11 +221,11 @@ Write-Host ""
 Write-Host "运行方式:" -ForegroundColor Yellow
 if ($Production) {
     Write-Host "  生产模式: 双击 run.cmd（或命令行执行 run.cmd）" -ForegroundColor Green
-    Write-Host "    => 框架读 APP_ENV=Production，合并 appsettings.Production.json，使用 MySQL"
+    Write-Host "    => 框架读 APP_ENV=Production，合并 appsettings.Production.json，通过 DATABASE_URL 连 MySQL"
+    Write-Host "    => 部署前需在 run.cmd 中填入真实的 DATABASE_URL（mysql://user:pwd@host:port/db）" -ForegroundColor Yellow
 } else {
     Write-Host "  开发模式: cd `"$Destination`" && .\docbit-host.exe"
     Write-Host "    => APP_ENV 未设置，默认 Development，使用 SQLite"
-    Write-Host "  切换生产: 设置环境变量 APP_ENV=Production 后再启动 exe，或带 -Production 重新发布生成 run.cmd" -ForegroundColor DarkGray
+    Write-Host "  切换生产: 设置 APP_ENV=Production 与 DATABASE_URL 后再启动 exe，或带 -Production 重新发布生成 run.cmd" -ForegroundColor DarkGray
 }
 Write-Host ""
-Write-Host "提示: 确认 appsettings.Production.json 中的 Database:ConnectionString 已配置正确的 MySQL 账号密码。" -ForegroundColor Yellow

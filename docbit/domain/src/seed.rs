@@ -26,7 +26,7 @@ pub const RES_TYPE_OTHER: &str = "其他";
 /// Register seed data on the DbContext. Call `ctx.ensure_created().await?`
 /// afterwards to create tables and insert the seed rows.
 pub fn seed(ctx: &mut DbContext) {
-    let now = 0i64; // 种子时间戳用 0，运行时由 AuditInterceptor 在实际写入时覆盖
+    let now = 0i64; // 种子时间戳用 0，运行时由首次更新覆盖
 
     // 默认角色：admin + user
     ctx.model().entity::<Role>().has_data(&[

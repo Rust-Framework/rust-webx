@@ -15,22 +15,22 @@ use docbit_domain::entities::Category;
 
 use crate::util::{now_secs, operator_id, parse_id};
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct ListCategoriesHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct CreateCategoryHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct UpdateCategoryHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct DeleteCategoryHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
@@ -86,7 +86,7 @@ fn attach_children(
     node
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<ListCategoriesRequest, Vec<CategoryTreeNode>> for ListCategoriesHandler {
     async fn handle(&self, _: ListCategoriesRequest) -> Result<Vec<CategoryTreeNode>> {
@@ -104,7 +104,7 @@ impl IRequestHandler<ListCategoriesRequest, Vec<CategoryTreeNode>> for ListCateg
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<CreateCategoryRequest, CategoryModel> for CreateCategoryHandler {
     async fn handle(&self, _: CreateCategoryRequest) -> Result<CategoryModel> {
@@ -153,7 +153,7 @@ impl IRequestHandler<CreateCategoryRequest, CategoryModel> for CreateCategoryHan
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<UpdateCategoryRequest, CategoryModel> for UpdateCategoryHandler {
     async fn handle(&self, _: UpdateCategoryRequest) -> Result<CategoryModel> {
@@ -205,7 +205,7 @@ impl IRequestHandler<UpdateCategoryRequest, CategoryModel> for UpdateCategoryHan
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<DeleteCategoryRequest, String> for DeleteCategoryHandler {
     async fn handle(&self, _: DeleteCategoryRequest) -> Result<String> {

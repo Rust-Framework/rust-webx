@@ -77,7 +77,6 @@ pub use rust_webapp_macros::{
 // --- Re-export rust_dicore (for manual registration, #[inject] auto-registration, and module blocks) ---
 pub use rust_dicore;
 pub use rust_dicore::inject;
-pub use rust_dicore::inject_attr;
 pub use rust_dicore_macros;
 pub use rust_dicore_macros::{module, Inject};
 

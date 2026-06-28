@@ -19,11 +19,10 @@ use serde::Deserialize;
 
 use docbit_contracts::docs::{DocContent, DocIndex, DocIndexItem, IDocumentService};
 use docbit_contracts::exhibition::ExhibitionModel;
-use rust_webapp::app_base;
+use rust_webapp::{app_base, inject, Inject};
 
-// `#[inject]` 在 struct 上：生成 `__rdi_construct_DocService` 构造器，
-// 并以默认 `singleton` 生命周期注册为具体类型 `DocService`。
-#[rust_dicore::inject]
+// `#[derive(Inject)]` 生成 `__rdi_construct_DocService` 构造器。
+#[derive(Inject)]
 pub struct DocService;
 
 impl DocService {
@@ -150,7 +149,7 @@ impl DocService {
 
 // `#[inject]` 在 trait impl 上：复用 `__rdi_construct_DocService` 构造器，
 // 注册为 `dyn IDocumentService`（默认 singleton），供 handlers/hosted service 注入。
-#[rust_dicore::inject]
+#[inject]
 impl IDocumentService for DocService {
     fn list_works(&self) -> Result<Vec<String>, String> {
         if !Self::root().is_dir() {

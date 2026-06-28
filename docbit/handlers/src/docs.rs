@@ -12,22 +12,22 @@ use docbit_contracts::docs::{
     ListDocWorksRequest,
 };
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct ListDocWorksHandler {
     docs: Arc<dyn IDocumentService>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct GetDocIndexHandler {
     docs: Arc<dyn IDocumentService>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct GetDocContentHandler {
     docs: Arc<dyn IDocumentService>,
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<ListDocWorksRequest, Vec<String>> for ListDocWorksHandler {
     async fn handle(&self, _: ListDocWorksRequest) -> Result<Vec<String>> {
@@ -35,7 +35,7 @@ impl IRequestHandler<ListDocWorksRequest, Vec<String>> for ListDocWorksHandler {
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<GetDocIndexRequest, DocIndex> for GetDocIndexHandler {
     async fn handle(&self, req: GetDocIndexRequest) -> Result<DocIndex> {
@@ -43,7 +43,7 @@ impl IRequestHandler<GetDocIndexRequest, DocIndex> for GetDocIndexHandler {
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<GetDocContentRequest, DocContent> for GetDocContentHandler {
     async fn handle(&self, req: GetDocContentRequest) -> Result<DocContent> {

@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use rust_ef::{db_context::DbContext, provider::DbValue};
+use rust_ef::{db_context::DbContext, prelude::*};
 use rust_webapp::*;
 use tokio::sync::Mutex;
 
@@ -13,17 +13,17 @@ use docbit_domain::entities::Tracking;
 
 use crate::util::now_secs;
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct GetTrackingSummaryHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct ListTrackingHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<GetTrackingSummaryRequest, TrackingSummary>
     for GetTrackingSummaryHandler
@@ -72,7 +72,7 @@ impl IRequestHandler<GetTrackingSummaryRequest, TrackingSummary>
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<ListTrackingRequest, Vec<docbit_contracts::tracking::TrackingModel>>
     for ListTrackingHandler

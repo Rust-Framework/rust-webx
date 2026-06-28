@@ -1,6 +1,6 @@
 //! Role-based dynamic authorizer — gates admin routes.
 //!
-//! 通过 `#[rust_dicore::inject]` 自动注册为 `dyn IDynamicAuthorizer` 单例，
+//! 通过 `#[inject]` 自动注册为 `dyn IDynamicAuthorizer` 单例，
 //! 框架在 `Host::build()` 时统一收集并应用到所有 `#[authorize]` 路由。
 //!
 //! 鉴权策略：
@@ -10,12 +10,12 @@
 
 use rust_webapp::*;
 
-// `#[inject]` 在 struct 上：生成 `__rdi_construct_RoleAuthorizer` 构造器。
-#[rust_dicore::inject]
+// `#[derive(Inject)]` 生成 `__rdi_construct_RoleAuthorizer` 构造器。
+#[derive(Inject)]
 pub struct RoleAuthorizer;
 
 // `#[inject]` 在 trait impl 上：注册为 `dyn IDynamicAuthorizer`（默认 singleton）。
-#[rust_dicore::inject]
+#[inject]
 #[async_trait]
 impl IDynamicAuthorizer for RoleAuthorizer {
     async fn authorize(

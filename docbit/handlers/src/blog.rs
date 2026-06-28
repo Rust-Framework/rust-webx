@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use rust_ef::{db_context::DbContext, prelude::*, provider::DbValue};
+use rust_ef::{db_context::DbContext, prelude::*};
 use rust_webapp::*;
 use tokio::sync::Mutex;
 
@@ -32,42 +32,42 @@ fn is_admin(roles: &[String]) -> bool {
 
 // ── Handlers ──
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct ListBlogPostsHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct ListBlogCategoriesHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct ListMyBlogPostsHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct GetBlogPostHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct CreateBlogPostHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct UpdateBlogPostHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct DeleteBlogPostHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<ListBlogPostsRequest, Vec<BlogPostSummary>> for ListBlogPostsHandler {
     async fn handle(&self, _: ListBlogPostsRequest) -> Result<Vec<BlogPostSummary>> {
@@ -82,15 +82,13 @@ impl IRequestHandler<ListBlogPostsRequest, Vec<BlogPostSummary>> for ListBlogPos
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<ListBlogCategoriesRequest, Vec<BlogCategoryCount>> for ListBlogCategoriesHandler {
     async fn handle(&self, _: ListBlogCategoriesRequest) -> Result<Vec<BlogCategoryCount>> {
         let blogs = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<Blog>()
-                .query()
-                .filter_column("is_deleted", "=", DbValue::Bool(false))
+            linq!(ctx.set::<Blog>(), |b: Blog| !b.is_deleted)
                 .to_list()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
@@ -101,9 +99,7 @@ impl IRequestHandler<ListBlogCategoriesRequest, Vec<BlogCategoryCount>> for List
         }
         let cats = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<Category>()
-                .query()
-                .filter_column("is_deleted", "=", DbValue::Bool(false))
+            linq!(ctx.set::<Category>(), |c: Category| !c.is_deleted)
                 .to_list()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
@@ -122,7 +118,7 @@ impl IRequestHandler<ListBlogCategoriesRequest, Vec<BlogCategoryCount>> for List
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<ListMyBlogPostsRequest, Vec<BlogPostSummary>> for ListMyBlogPostsHandler {
     async fn handle(&self, _: ListMyBlogPostsRequest) -> Result<Vec<BlogPostSummary>> {
@@ -145,7 +141,7 @@ impl IRequestHandler<ListMyBlogPostsRequest, Vec<BlogPostSummary>> for ListMyBlo
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<GetBlogPostRequest, BlogPostModel> for GetBlogPostHandler {
     async fn handle(&self, req: GetBlogPostRequest) -> Result<BlogPostModel> {
@@ -162,7 +158,7 @@ impl IRequestHandler<GetBlogPostRequest, BlogPostModel> for GetBlogPostHandler {
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<CreateBlogPostRequest, BlogPostModel> for CreateBlogPostHandler {
     async fn handle(&self, _: CreateBlogPostRequest) -> Result<BlogPostModel> {
@@ -175,18 +171,17 @@ impl IRequestHandler<CreateBlogPostRequest, BlogPostModel> for CreateBlogPostHan
     ) -> Result<BlogPostModel> {
         let uid = uid_from_claims(claims)?;
         // slug 唯一性校验
+        let slug = req.slug.clone();
         let exists = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<Blog>()
-                .query()
-                .filter_column("slug", "=", DbValue::String(req.slug.clone()))
-                .filter_column("is_deleted", "=", DbValue::Bool(false))
+            let q = slug.clone();
+            linq!(ctx.set::<Blog>(), |b: Blog| b.slug == q && !b.is_deleted)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
         };
         if exists.is_some() {
-            return Err(Error::Http(format!("Slug already exists: {}", req.slug)));
+            return Err(Error::Http(format!("Slug already exists: {}", slug)));
         }
 
         let now = now_secs();
@@ -233,7 +228,7 @@ impl IRequestHandler<CreateBlogPostRequest, BlogPostModel> for CreateBlogPostHan
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<UpdateBlogPostRequest, BlogPostModel> for UpdateBlogPostHandler {
     async fn handle(&self, _: UpdateBlogPostRequest) -> Result<BlogPostModel> {
@@ -300,7 +295,7 @@ impl IRequestHandler<UpdateBlogPostRequest, BlogPostModel> for UpdateBlogPostHan
     }
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<DeleteBlogPostRequest, String> for DeleteBlogPostHandler {
     async fn handle(&self, _: DeleteBlogPostRequest) -> Result<String> {
@@ -313,17 +308,16 @@ impl IRequestHandler<DeleteBlogPostRequest, String> for DeleteBlogPostHandler {
     ) -> Result<String> {
         let uid = uid_from_claims(claims)?;
         let roles = roles_from_claims(claims);
+        let slug = req.slug.clone();
         let mut blog = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<Blog>()
-                .query()
-                .filter_column("slug", "=", DbValue::String(req.slug.clone()))
-                .filter_column("is_deleted", "=", DbValue::Bool(false))
+            let q = slug.clone();
+            linq!(ctx.set::<Blog>(), |b: Blog| b.slug == q && !b.is_deleted)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
         }
-        .ok_or_else(|| Error::NotFound(format!("Blog post not found: {}", req.slug)))?;
+        .ok_or_else(|| Error::NotFound(format!("Blog post not found: {}", slug)))?;
 
         if !is_admin(&roles) && blog.author_id != uid {
             return Err(Error::Http("Forbidden: not the author".into()));

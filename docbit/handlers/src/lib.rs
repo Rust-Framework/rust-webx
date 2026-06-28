@@ -1,8 +1,8 @@
 //! Docbit handlers crate — service implementations and HTTP handlers.
 //!
 //! Each module contains `IRequestHandler` implementations auto-registered via
-//! `#[rust_dicore::inject]` (on struct, generates constructor) +
-//! `#[handler(inject)]` (on impl, registers in LRWF HandlerCache).
+//! `#[derive(Inject)]` on the struct (generates constructor) and `#[inject]`
+//! on the impl block (registers as `dyn IRequestHandler<T, R>` in the DI container).
 //! 业务服务（`IDocumentService` 由本 crate 的 `doc_service` 提供）按需注入。
 
 pub mod auth;

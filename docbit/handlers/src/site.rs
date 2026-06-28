@@ -9,12 +9,12 @@ use rust_webapp::*;
 
 use docbit_contracts::site::{SiteConfig, SiteInfoRequest};
 
-#[rust_dicore::inject]
+#[derive(Inject)]
 pub struct SiteInfoHandler {
     config: Arc<SiteConfig>,
 }
 
-#[handler(inject)]
+#[inject]
 #[async_trait]
 impl IRequestHandler<SiteInfoRequest, SiteConfig> for SiteInfoHandler {
     async fn handle(&self, _: SiteInfoRequest) -> Result<SiteConfig> {

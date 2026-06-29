@@ -42,10 +42,10 @@ docbit-handlers = { version = "0.1.0", path = "docbit/handlers" }
 rust-dicore = "0.3.3"
 rust-dicore-macros = "0.3.3"
 
-# rust-ef 1.1.0 GA ORM framework
-rust-ef = "1.1"
-rust-ef-sqlite = "1.1"
-rust-ef-mysql = "1.1"
+# rust-ef 1.2.0 GA ORM framework
+rust-ef = "1.2"
+rust-ef-sqlite = "1.2"
+rust-ef-mysql = "1.2"
 
 # External dependencies
 async-trait = "0.1"

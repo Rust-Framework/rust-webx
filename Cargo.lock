@@ -2242,9 +2242,9 @@ dependencies = [
 
 [[package]]
 name = "rust-ef"
-version = "1.1.0"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f33ae78b757a8f5e127e6f9c69f1bfb25b381af58c9895feca2762e19ef6e8c"
+checksum = "762aba4a425a12f0bed93318c89605f9c1c04e29dd9322e59235b3521bfe1900"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2270,9 +2270,9 @@ dependencies = [
 
 [[package]]
 name = "rust-ef-mysql"
-version = "1.1.0"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b0d17a16b1c3deb1090c498af77dcb53d99075b85f258e42e0d2d331b50f006"
+checksum = "15657c40d6a3102204cf9ae06e90dd1446b207b18d9d6264b143017df143c4a8"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2285,9 +2285,9 @@ dependencies = [
 
 [[package]]
 name = "rust-ef-sqlite"
-version = "1.1.0"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39447d768eea1ac7e399240e7522cda74f1183f027bf5f7c47ddfe762ca97d4e"
+checksum = "af3911ff3d6395eb5c6c38739a92a9f2724c9ca701bdf72e8e0acbaa0bdc6289"
 dependencies = [
  "async-trait",
  "chrono",

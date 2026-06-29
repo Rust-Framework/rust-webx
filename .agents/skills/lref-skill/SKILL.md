@@ -1,5 +1,5 @@
 ---
-name: lref
+name: lref-skill
 description: |
   Rust Entity Framework (REF) ORM 框架开发指南。涵盖实体定义、linq! 查询、DbContext/DI 集成、Web 应用集成、软删除、变更追踪。当用户编写或修改 REF 相关代码时使用。
 ---

@@ -114,7 +114,7 @@ impl DbInitService {
         // 关联 admin 角色（role_id=1）
         let admin_user = {
             let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<User>(), |u: User| u.email == ADMIN_EMAIL)
+            linq!(ctx.set::<User>(), |u: User| u.email == ADMIN_EMAIL && !u.is_deleted)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?

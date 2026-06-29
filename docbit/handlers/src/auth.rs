@@ -100,7 +100,7 @@ pub struct ResetPasswordHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<RegisterRequest, AuthResponse> for RegisterHandler {
     async fn handle(&self, req: RegisterRequest) -> Result<AuthResponse> {
@@ -163,7 +163,7 @@ impl IRequestHandler<RegisterRequest, AuthResponse> for RegisterHandler {
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
     async fn handle(&self, req: LoginRequest) -> Result<AuthResponse> {
@@ -190,7 +190,7 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<AuthMeRequest, UserView> for AuthMeHandler {
     async fn handle(&self, req: AuthMeRequest) -> Result<UserView> {
@@ -209,7 +209,7 @@ impl IRequestHandler<AuthMeRequest, UserView> for AuthMeHandler {
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<ForgotPasswordRequest, ForgotPasswordResponse> for ForgotPasswordHandler {
     async fn handle(&self, req: ForgotPasswordRequest) -> Result<ForgotPasswordResponse> {
@@ -256,7 +256,7 @@ impl IRequestHandler<ForgotPasswordRequest, ForgotPasswordResponse> for ForgotPa
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<ResetPasswordRequest, ResetPasswordResponse> for ResetPasswordHandler {
     async fn handle(&self, req: ResetPasswordRequest) -> Result<ResetPasswordResponse> {

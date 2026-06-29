@@ -15,7 +15,7 @@ pub struct CacheStatsHandler {
     cache: Arc<MemoryCache>,
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<CacheStatsRequest, String> for CacheStatsHandler {
     async fn handle(&self, _: CacheStatsRequest) -> Result<String> {

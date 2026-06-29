@@ -665,7 +665,7 @@ dependencies = [
  "docbit-domain",
  "inventory",
  "jsonwebtoken",
- "rust-dicore",
+ "rust-dicore 0.4.1",
  "rust-ef",
  "rust-webapp",
  "serde",
@@ -684,7 +684,7 @@ dependencies = [
  "docbit-domain",
  "docbit-handlers",
  "inventory",
- "rust-dicore",
+ "rust-dicore 0.4.1",
  "rust-ef",
  "rust-ef-mysql",
  "rust-ef-sqlite",
@@ -2225,7 +2225,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6abcdd0635ab49dc35484418b6c1d1547d808f0ce6ea2602d2e2778d807b191a"
 dependencies = [
  "inventory",
- "rust-dicore-macros",
+ "rust-dicore-macros 0.3.3",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "rust-dicore"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b23031910f0ecd8654bfb4981c435a6d1281bed8e4f107d89469ebf331494507"
+dependencies = [
+ "inventory",
+ "rust-dicore-macros 0.4.1",
  "thiserror 1.0.69",
 ]
 
@@ -2241,6 +2252,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust-dicore-macros"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb8d71fd3106583229035ba237c6933882405bed210ad5bbc266e84473505751"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "rust-ef"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2249,7 +2271,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "inventory",
- "rust-dicore",
+ "rust-dicore 0.3.3",
  "rust-ef-macros",
  "rust_decimal",
  "thiserror 2.0.18",
@@ -2306,8 +2328,8 @@ dependencies = [
  "hyper",
  "inventory",
  "jsonwebtoken",
- "rust-dicore",
- "rust-dicore-macros",
+ "rust-dicore 0.4.1",
+ "rust-dicore-macros 0.4.1",
  "rust-webapp-core",
  "rust-webapp-host",
  "rust-webapp-macros",
@@ -2324,7 +2346,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "inventory",
- "rust-dicore",
+ "rust-dicore 0.4.1",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -2347,7 +2369,7 @@ dependencies = [
  "jsonwebtoken",
  "matchit",
  "reqwest",
- "rust-dicore",
+ "rust-dicore 0.4.1",
  "rust-webapp-core",
  "rust-webapp-openapi",
  "rust-webapp-spa",

@@ -23,7 +23,7 @@ pub struct ListTrackingHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<GetTrackingSummaryRequest, TrackingSummary>
     for GetTrackingSummaryHandler
@@ -62,7 +62,7 @@ impl IRequestHandler<GetTrackingSummaryRequest, TrackingSummary>
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<ListTrackingRequest, Vec<docbit_contracts::tracking::TrackingModel>>
     for ListTrackingHandler
@@ -70,9 +70,7 @@ impl IRequestHandler<ListTrackingRequest, Vec<docbit_contracts::tracking::Tracki
     async fn handle(&self, _: ListTrackingRequest) -> Result<Vec<docbit_contracts::tracking::TrackingModel>> {
         let items = {
             let mut ctx = self.ctx.lock().await;
-            ctx.set::<Tracking>()
-                .query()
-                .order_by_desc_column("visited_at")
+            linq!(ctx.set::<Tracking>(); order_by t.visited_at desc)
                 .to_list()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?

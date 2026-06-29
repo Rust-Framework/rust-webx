@@ -222,12 +222,16 @@ fn generate_dispatch_fn(
             Box::pin(async move {
                 let mut request: #ty = #build_request;
 
-                // Resolve the handler from the DI container.
+                // Resolve the handler from a per-request DI scope.
                 // #[rust_dicore::inject] on impl IRequestHandler<Req, Rsp> registers
                 // the handler as dyn IRequestHandler<Req, Rsp> in the ServiceCollection.
+                // create_scope() ensures Scoped services (DbContext, handlers declared
+                // #[inject(scoped)]) bind to this request — EFCore-style unit-of-work
+                // isolation. The scope lives for the duration of this dispatch.
                 let provider = ::rust_webapp::global_provider();
+                let scope = provider.create_scope();
                 let handler: ::std::sync::Arc<dyn ::rust_webapp::IRequestHandler<#ty, #rsp_type>> =
-                    provider.get_optional().ok_or_else(|| ::rust_webapp::Error::Di(
+                    scope.get_optional().ok_or_else(|| ::rust_webapp::Error::Di(
                         format!("No handler registered for request type '{}'", #type_name)
                     ))?;
 

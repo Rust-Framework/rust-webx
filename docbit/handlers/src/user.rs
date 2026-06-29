@@ -42,7 +42,7 @@ pub struct InfoHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<ListUsersRequest, Vec<UserModel>> for ListUsersHandler {
     async fn handle(&self, _: ListUsersRequest) -> Result<Vec<UserModel>> {
@@ -57,7 +57,7 @@ impl IRequestHandler<ListUsersRequest, Vec<UserModel>> for ListUsersHandler {
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<GetUserRequest, UserModel> for GetUserHandler {
     async fn handle(&self, req: GetUserRequest) -> Result<UserModel> {
@@ -74,7 +74,7 @@ impl IRequestHandler<GetUserRequest, UserModel> for GetUserHandler {
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<CreateUserRequest, UserModel> for CreateUserHandler {
     async fn handle(&self, req: CreateUserRequest) -> Result<UserModel> {
@@ -126,7 +126,7 @@ impl IRequestHandler<CreateUserRequest, UserModel> for CreateUserHandler {
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<UpdateUserRequest, UserModel> for UpdateUserHandler {
     async fn handle(&self, req: UpdateUserRequest) -> Result<UserModel> {
@@ -165,7 +165,7 @@ impl IRequestHandler<UpdateUserRequest, UserModel> for UpdateUserHandler {
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<DeleteUserRequest, String> for DeleteUserHandler {
     async fn handle(&self, req: DeleteUserRequest) -> Result<String> {
@@ -195,7 +195,7 @@ impl IRequestHandler<DeleteUserRequest, String> for DeleteUserHandler {
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<InfoRequest, String> for InfoHandler {
     async fn handle(&self, _: InfoRequest) -> Result<String> {

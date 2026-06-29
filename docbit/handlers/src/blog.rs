@@ -68,7 +68,7 @@ pub struct DeleteBlogPostHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<ListBlogPostsRequest, Vec<BlogPostSummary>> for ListBlogPostsHandler {
     async fn handle(&self, _: ListBlogPostsRequest) -> Result<Vec<BlogPostSummary>> {
@@ -83,7 +83,7 @@ impl IRequestHandler<ListBlogPostsRequest, Vec<BlogPostSummary>> for ListBlogPos
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<ListBlogCategoriesRequest, Vec<BlogCategoryCount>> for ListBlogCategoriesHandler {
     async fn handle(&self, _: ListBlogCategoriesRequest) -> Result<Vec<BlogCategoryCount>> {
@@ -119,7 +119,7 @@ impl IRequestHandler<ListBlogCategoriesRequest, Vec<BlogCategoryCount>> for List
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<ListMyBlogPostsRequest, Vec<BlogPostSummary>> for ListMyBlogPostsHandler {
     async fn handle(&self, req: ListMyBlogPostsRequest) -> Result<Vec<BlogPostSummary>> {
@@ -135,7 +135,7 @@ impl IRequestHandler<ListMyBlogPostsRequest, Vec<BlogPostSummary>> for ListMyBlo
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<GetBlogPostRequest, BlogPostModel> for GetBlogPostHandler {
     async fn handle(&self, req: GetBlogPostRequest) -> Result<BlogPostModel> {
@@ -152,7 +152,7 @@ impl IRequestHandler<GetBlogPostRequest, BlogPostModel> for GetBlogPostHandler {
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<CreateBlogPostRequest, BlogPostModel> for CreateBlogPostHandler {
     async fn handle(&self, req: CreateBlogPostRequest) -> Result<BlogPostModel> {
@@ -195,7 +195,7 @@ impl IRequestHandler<CreateBlogPostRequest, BlogPostModel> for CreateBlogPostHan
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<UpdateBlogPostRequest, BlogPostModel> for UpdateBlogPostHandler {
     async fn handle(&self, req: UpdateBlogPostRequest) -> Result<BlogPostModel> {
@@ -237,7 +237,7 @@ impl IRequestHandler<UpdateBlogPostRequest, BlogPostModel> for UpdateBlogPostHan
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<DeleteBlogPostRequest, String> for DeleteBlogPostHandler {
     async fn handle(&self, req: DeleteBlogPostRequest) -> Result<String> {

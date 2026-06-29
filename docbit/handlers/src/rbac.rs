@@ -37,7 +37,7 @@ pub struct DeleteRoleHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<ListRolesRequest, Vec<RoleModel>> for ListRolesHandler {
     async fn handle(&self, _: ListRolesRequest) -> Result<Vec<RoleModel>> {
@@ -52,7 +52,7 @@ impl IRequestHandler<ListRolesRequest, Vec<RoleModel>> for ListRolesHandler {
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<CreateRoleRequest, RoleModel> for CreateRoleHandler {
     async fn handle(&self, req: CreateRoleRequest) -> Result<RoleModel> {
@@ -70,7 +70,7 @@ impl IRequestHandler<CreateRoleRequest, RoleModel> for CreateRoleHandler {
         let created = {
             let mut ctx = self.ctx.lock().await;
             let q = name.clone();
-            linq!(ctx.set::<Role>(), |r: Role| r.name == q)
+            linq!(ctx.set::<Role>(), |r: Role| r.name == q && !r.is_deleted)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
@@ -80,7 +80,7 @@ impl IRequestHandler<CreateRoleRequest, RoleModel> for CreateRoleHandler {
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<UpdateRoleRequest, RoleModel> for UpdateRoleHandler {
     async fn handle(&self, req: UpdateRoleRequest) -> Result<RoleModel> {
@@ -116,7 +116,7 @@ impl IRequestHandler<UpdateRoleRequest, RoleModel> for UpdateRoleHandler {
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<DeleteRoleRequest, String> for DeleteRoleHandler {
     async fn handle(&self, req: DeleteRoleRequest) -> Result<String> {
@@ -156,7 +156,7 @@ pub struct RevokeRoleHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<AssignRoleRequest, String> for AssignRoleHandler {
     async fn handle(&self, req: AssignRoleRequest) -> Result<String> {
@@ -188,7 +188,7 @@ impl IRequestHandler<AssignRoleRequest, String> for AssignRoleHandler {
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<RevokeRoleRequest, String> for RevokeRoleHandler {
     async fn handle(&self, req: RevokeRoleRequest) -> Result<String> {
@@ -233,7 +233,7 @@ pub struct DeleteResourceHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<ListResourcesRequest, Vec<ResourceModel>> for ListResourcesHandler {
     async fn handle(&self, _: ListResourcesRequest) -> Result<Vec<ResourceModel>> {
@@ -248,7 +248,7 @@ impl IRequestHandler<ListResourcesRequest, Vec<ResourceModel>> for ListResources
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<CreateResourceRequest, ResourceModel> for CreateResourceHandler {
     async fn handle(&self, req: CreateResourceRequest) -> Result<ResourceModel> {
@@ -256,28 +256,29 @@ impl IRequestHandler<CreateResourceRequest, ResourceModel> for CreateResourceHan
         let now = now_secs();
         let value = req.value.clone();
         let res = req.to_entity(op, now);
-        {
+        // 单 lock scope：insert + 回查在同一临界区内。
+        // FIXME(framework): rust-ef 1.2.0 不回填自增 id（见 comment.rs 注释），
+        // 无法 `find(id)`。`Resource.value` 无 `#[unique]`，按 value 回查
+        // 在并发下可能取到他人记录。长期修复：框架暴露 last-insert-id
+        // + 为 `value` 加 `#[unique]`（需先验证历史数据无重复）。
+        let created = {
             let mut ctx = self.ctx.lock().await;
             ctx.set::<Resource>().add(res);
             ctx.save_changes()
                 .await
                 .map_err(|e| Error::Internal(format!("Failed to create resource: {}", e)))?;
-        }
-        // 回查（name 可能重复，按 value 过滤更精确）
-        let created = {
-            let mut ctx = self.ctx.lock().await;
             let q = value.clone();
             linq!(ctx.set::<Resource>(), |r: Resource| r.value == q)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
-        }
-        .ok_or_else(|| Error::Internal("Resource disappeared after insert".into()))?;
+                .ok_or_else(|| Error::Internal("Resource disappeared after insert".into()))?
+        };
         Ok(created.to_model())
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<UpdateResourceRequest, ResourceModel> for UpdateResourceHandler {
     async fn handle(&self, req: UpdateResourceRequest) -> Result<ResourceModel> {
@@ -313,7 +314,7 @@ impl IRequestHandler<UpdateResourceRequest, ResourceModel> for UpdateResourceHan
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<DeleteResourceRequest, String> for DeleteResourceHandler {
     async fn handle(&self, req: DeleteResourceRequest) -> Result<String> {
@@ -358,7 +359,7 @@ pub struct DeleteAuthorizeHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<ListAuthorizesRequest, Vec<AuthorizeModel>> for ListAuthorizesHandler {
     async fn handle(&self, _: ListAuthorizesRequest) -> Result<Vec<AuthorizeModel>> {
@@ -370,7 +371,7 @@ impl IRequestHandler<ListAuthorizesRequest, Vec<AuthorizeModel>> for ListAuthori
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<CreateAuthorizeRequest, AuthorizeModel> for CreateAuthorizeHandler {
     async fn handle(&self, req: CreateAuthorizeRequest) -> Result<AuthorizeModel> {
@@ -407,7 +408,7 @@ impl IRequestHandler<CreateAuthorizeRequest, AuthorizeModel> for CreateAuthorize
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<DeleteAuthorizeRequest, String> for DeleteAuthorizeHandler {
     async fn handle(&self, req: DeleteAuthorizeRequest) -> Result<String> {

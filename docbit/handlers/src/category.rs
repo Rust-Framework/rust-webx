@@ -87,7 +87,7 @@ fn attach_children(
     node
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<ListCategoriesRequest, Vec<CategoryTreeNode>> for ListCategoriesHandler {
     async fn handle(&self, _: ListCategoriesRequest) -> Result<Vec<CategoryTreeNode>> {
@@ -103,7 +103,7 @@ impl IRequestHandler<ListCategoriesRequest, Vec<CategoryTreeNode>> for ListCateg
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<CreateCategoryRequest, CategoryModel> for CreateCategoryHandler {
     async fn handle(&self, req: CreateCategoryRequest) -> Result<CategoryModel> {
@@ -121,7 +121,7 @@ impl IRequestHandler<CreateCategoryRequest, CategoryModel> for CreateCategoryHan
         let created = {
             let mut ctx = self.ctx.lock().await;
             let q = slug.clone();
-            linq!(ctx.set::<Category>(), |c: Category| c.slug == q)
+            linq!(ctx.set::<Category>(), |c: Category| c.slug == q && !c.is_deleted)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
@@ -132,7 +132,7 @@ impl IRequestHandler<CreateCategoryRequest, CategoryModel> for CreateCategoryHan
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<UpdateCategoryRequest, CategoryModel> for UpdateCategoryHandler {
     async fn handle(&self, req: UpdateCategoryRequest) -> Result<CategoryModel> {
@@ -169,7 +169,7 @@ impl IRequestHandler<UpdateCategoryRequest, CategoryModel> for UpdateCategoryHan
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<DeleteCategoryRequest, String> for DeleteCategoryHandler {
     async fn handle(&self, req: DeleteCategoryRequest) -> Result<String> {

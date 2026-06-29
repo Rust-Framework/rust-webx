@@ -57,7 +57,11 @@ fn register_db_context(svc: ServiceCollection) -> ServiceCollection {
         }
     }
     let options = Arc::new(builder.build());
-    svc.singleton::<Mutex<DbContext>>(move |_| {
+    // Scoped：每个 HTTP 请求获得独立的 DbContext（per-request unit-of-work）。
+    // endpoint.rs 的 dispatch 通过 `provider.create_scope()` 创建请求级 Scope，
+    // 此处注册的 Mutex<DbContext> 在该 Scope 内缓存，请求结束自动释放。
+    // 这消除了全局单例导致的跨请求变更追踪污染、虚假并发争用与性能退化（R1）。
+    svc.scoped::<Mutex<DbContext>>(move |_| {
         let ctx = DbContext::from_options(&options)
             .expect("Failed to create DbContext from options");
         Arc::new(Mutex::new(ctx))

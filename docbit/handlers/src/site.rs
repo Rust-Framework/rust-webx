@@ -14,7 +14,7 @@ pub struct SiteInfoHandler {
     config: Arc<SiteConfig>,
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<SiteInfoRequest, SiteConfig> for SiteInfoHandler {
     async fn handle(&self, _: SiteInfoRequest) -> Result<SiteConfig> {

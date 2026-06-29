@@ -35,7 +35,7 @@ pub struct DeleteExhibitionHandler {
     ctx: Arc<Mutex<DbContext>>,
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<ListExhibitionsRequest, Vec<ExhibitionModel>> for ListExhibitionsHandler {
     async fn handle(&self, _: ListExhibitionsRequest) -> Result<Vec<ExhibitionModel>> {
@@ -50,7 +50,7 @@ impl IRequestHandler<ListExhibitionsRequest, Vec<ExhibitionModel>> for ListExhib
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<GetExhibitionRequest, ExhibitionModel> for GetExhibitionHandler {
     async fn handle(&self, req: GetExhibitionRequest) -> Result<ExhibitionModel> {
@@ -67,7 +67,7 @@ impl IRequestHandler<GetExhibitionRequest, ExhibitionModel> for GetExhibitionHan
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<UpsertExhibitionRequest, ExhibitionModel> for UpsertExhibitionHandler {
     async fn handle(&self, req: UpsertExhibitionRequest) -> Result<ExhibitionModel> {
@@ -119,7 +119,7 @@ impl IRequestHandler<UpsertExhibitionRequest, ExhibitionModel> for UpsertExhibit
     }
 }
 
-#[inject]
+#[inject(scoped)]
 #[async_trait]
 impl IRequestHandler<DeleteExhibitionRequest, String> for DeleteExhibitionHandler {
     async fn handle(&self, req: DeleteExhibitionRequest) -> Result<String> {

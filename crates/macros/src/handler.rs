@@ -2,30 +2,35 @@ use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{parse_macro_input, GenericArgument, ItemImpl, PathArguments, Type};
 
-/// `#[handler]` proc macro attribute â€” placed on `impl IRequestHandler<T, R> for Handler` blocks.
+/// `#[handler]` proc macro attribute — placed on `impl IRequestHandler<T, R> for Handler` blocks.
 ///
 /// Generates compile-time inventory registration with a type-erased call bridge
 /// so the handler can be dispatched without `#[async_trait]` overhead.
 ///
-/// The handler struct MUST implement `Default`.
-///
 /// # DI injection
 ///
-/// Use `#[handler(inject)]` when the handler struct has `#[rust_dicore::inject_attr]`:
+/// Use `#[handler(inject)]` when the handler struct has `#[derive(Inject)]`:
 ///
 /// ```ignore
-/// #[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<MyReq, MyRsp>)]
-/// pub struct MyHandler { ctx: Arc<AppDbContext> }
+/// #[derive(Inject)]
+/// pub struct MyHandler { ctx: DbContext }
 ///
 /// #[handler(inject)]
 /// #[async_trait]
-/// impl IRequestHandler<MyReq, MyRsp> for MyHandler { ... }
+/// impl IRequestHandler<MyReq, MyRsp> for MyHandler {
+///     async fn handle(&mut self, req: MyReq) -> Result<MyRsp> { ... }
+/// }
 /// ```
+///
+/// The factory calls `__rdi_construct_<Handler>(resolver)` per request, which
+/// resolves bare owned fields (e.g. `ctx: DbContext`) via `resolver.get_owned`.
+/// The resulting `Arc<Handler>` is `try_unwrap`-ed to obtain an owned `Handler`,
+/// enabling `handle(&mut self, ...)` without `Arc<Mutex>`.
 pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     let item_impl = parse_macro_input!(item as ItemImpl);
     let handler_ty = &item_impl.self_ty;
 
-    // Check for #[handler(inject)] â€” signals DI-based construction via #[inject_attr]
+    // Check for #[handler(inject)] — signals DI-based construction via #[derive(Inject)]
     let use_inject = !attr.is_empty();
 
     // Extract T (request type) and R (response type) from IRequestHandler<T, R>
@@ -35,7 +40,7 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let default_type = syn::parse_str::<Type>("()").unwrap();
     let req_ty = req_ty_opt.unwrap_or(&default_type);
-    let _rsp_ty = rsp_ty_opt.unwrap_or(&default_type);
+    let rsp_ty = rsp_ty_opt.unwrap_or(&default_type);
 
     let req_ty_name = type_to_string(req_ty);
 
@@ -45,17 +50,26 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     let call_fn = format_ident!("__lrwf_call_{}", handler_ty_name.replace("::", "_"));
 
     // Choose factory body: DI injection vs Default
+    //
+    // `__rdi_construct_<Handler>(resolver)` returns `Arc<Handler>` (per rust-dicore 0.5).
+    // The Arc is freshly created inside the constructor, so refcount == 1 and
+    // `Arc::try_unwrap` succeeds — yielding an owned `Handler` that supports
+    // `handle(&mut self, ...)`.
     let factory_body = if use_inject {
         let constructor_fn =
             format_ident!("__rdi_construct_{}", handler_ty_name.replace("::", "_"));
         quote! {
-            let provider = ::rust_webapp::global_provider();
-            let handler: ::std::sync::Arc<#handler_ty> = #constructor_fn(provider.as_ref() as &dyn rust_dicore::IServiceResolver);
-            ::std::sync::Arc::new(handler) as ::std::sync::Arc<dyn ::std::any::Any + Send + Sync>
+            let arc: ::std::sync::Arc<#handler_ty> = #constructor_fn(resolver);
+            let owned: #handler_ty = match ::std::sync::Arc::try_unwrap(arc) {
+                Ok(o) => o,
+                Err(_) => panic!("handler Arc must be uniquely owned after fresh construction"),
+            };
+            ::std::boxed::Box::new(owned) as ::std::boxed::Box<dyn ::std::any::Any + Send>
         }
     } else {
         quote! {
-            ::std::sync::Arc::new(::std::sync::Arc::new(<#handler_ty>::default())) as ::std::sync::Arc<dyn ::std::any::Any + Send + Sync>
+            ::std::boxed::Box::new(<#handler_ty as ::std::default::Default>::default())
+                as ::std::boxed::Box<dyn ::std::any::Any + Send>
         }
     };
 
@@ -63,44 +77,33 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
         #item_impl
 
         #[doc(hidden)]
-        fn #factory_fn() -> ::std::sync::Arc<dyn ::std::any::Any + Send + Sync> {
+        fn #factory_fn(
+            resolver: &dyn ::rust_webapp::rust_dicore::IServiceResolver,
+        ) -> ::std::boxed::Box<dyn ::std::any::Any + Send> {
             #factory_body
         }
 
         #[doc(hidden)]
         fn #call_fn(
-            handler: &::std::sync::Arc<dyn ::std::any::Any + Send + Sync>,
-            request: Box<dyn ::std::any::Any + Send>,
-            _claims: Option<Box<dyn ::rust_webapp::IClaims>>,
-        ) -> ::std::pin::Pin<Box<dyn ::std::future::Future<Output = ::rust_webapp::Result<::rust_webapp::ResponseData>> + Send>> {
-            let handler = ::std::sync::Arc::clone(handler);
+            handler: ::std::boxed::Box<dyn ::std::any::Any + Send>,
+            request: ::std::boxed::Box<dyn ::std::any::Any + Send>,
+        ) -> ::std::pin::Pin<Box<dyn ::std::future::Future<Output = ::rust_webapp::Result<::std::boxed::Box<dyn ::std::any::Any + Send>>> + Send>> {
             Box::pin(async move {
-                let h = handler
-                    .downcast_ref::<::std::sync::Arc<#handler_ty>>()
+                let mut h = *handler
+                    .downcast::<#handler_ty>()
                     .expect("Handler downcast failed");
-                let mut req = *request
+                let req = *request
                     .downcast::<#req_ty>()
                     .expect("Request downcast failed");
-                // Inject claims (no-op if the request has no inherent set_claims),
-                // then dispatch via handle.
-                {
-                    use ::rust_webapp::IClaimsCarrier;
-                    req.set_claims(_claims);
-                }
-                let result = h.handle(req).await?;
-                let json_bytes = ::serde_json::to_vec(&result).unwrap_or_default();
-                Ok(::rust_webapp::ResponseData {
-                    status: 200,
-                    content_type: "application/json".to_string(),
-                    body: json_bytes,
-                })
+                let result: #rsp_ty = h.handle(req).await?;
+                Ok(::std::boxed::Box::new(result) as ::std::boxed::Box<dyn ::std::any::Any + Send>)
             })
         }
 
         ::inventory::submit! {
             ::rust_webapp::HandlerRegistration {
                 req_type_name: #req_ty_name,
-                factory: #factory_fn as fn() -> ::std::sync::Arc<dyn ::std::any::Any + Send + Sync>,
+                factory: #factory_fn,
                 call: #call_fn,
             }
         }

@@ -14,10 +14,10 @@ pub struct SiteInfoHandler {
     config: Arc<SiteConfig>,
 }
 
-#[inject(scoped)]
+#[handler(inject)]
 #[async_trait]
 impl IRequestHandler<SiteInfoRequest, SiteConfig> for SiteInfoHandler {
-    async fn handle(&self, _: SiteInfoRequest) -> Result<SiteConfig> {
+    async fn handle(&mut self, _: SiteInfoRequest) -> Result<SiteConfig> {
         Ok((*self.config).clone())
     }
 }

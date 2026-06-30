@@ -2,12 +2,11 @@
 //!
 //! Comment 的 `parent`/`quoted` 双自外键导航**不在 linq! 中 include**
 //! （多 FK 导航绑定缺陷），列表仅返回扁平记录，前端按 id 二次拉取引用内容。
-
-use std::sync::Arc;
+//!
+//! 每个 handler 持有 owned `DbContext`，`handle(&mut self, ...)` 直接操作 `self.ctx`。
 
 use rust_ef::{db_context::DbContext, prelude::*};
 use rust_webapp::*;
-use tokio::sync::Mutex;
 
 use docbit_contracts::comment::{
     CommentModel, CreateCommentRequest, DeleteCommentRequest, ListCommentsRequest,
@@ -19,40 +18,37 @@ use crate::util::{now_secs, operator_id, parse_id};
 
 #[derive(Inject)]
 pub struct ListCommentsHandler {
-    ctx: Arc<Mutex<DbContext>>,
+    ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct CreateCommentHandler {
-    ctx: Arc<Mutex<DbContext>>,
+    ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct DeleteCommentHandler {
-    ctx: Arc<Mutex<DbContext>>,
+    ctx: DbContext,
 }
 
-#[inject(scoped)]
+#[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ListCommentsRequest, Vec<CommentModel>> for ListCommentsHandler {
-    async fn handle(&self, req: ListCommentsRequest) -> Result<Vec<CommentModel>> {
+    async fn handle(&mut self, req: ListCommentsRequest) -> Result<Vec<CommentModel>> {
         let blog_id = parse_id(&req.blog_id)?;
-        let mut rows = {
-            let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<Comment>(), |c: Comment| c.blog_id == blog_id && !c.is_deleted)
-                .to_list()
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?
-        };
+        let mut rows = linq!(self.ctx.set::<Comment>(), |c: Comment| c.blog_id == blog_id && !c.is_deleted)
+            .to_list()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?;
         rows.sort_by(|a, b| a.created_at.cmp(&b.created_at));
         Ok(rows.into_iter().map(CommentModel::from).collect())
     }
 }
 
-#[inject(scoped)]
+#[handler(inject)]
 #[async_trait]
 impl IRequestHandler<CreateCommentRequest, CommentModel> for CreateCommentHandler {
-    async fn handle(&self, req: CreateCommentRequest) -> Result<CommentModel> {
+    async fn handle(&mut self, req: CreateCommentRequest) -> Result<CommentModel> {
         let claims_ref = req.claims.as_deref();
         let claims = claims_ref.ok_or_else(|| Error::Http("Not authenticated".into()))?;
         let content_owned: String = req.content.trim().to_string();
@@ -77,47 +73,41 @@ impl IRequestHandler<CreateCommentRequest, CommentModel> for CreateCommentHandle
         let mut comment = req.to_entity(user_id, now);
         comment.user_name = user_name.clone();
         comment.content = content_owned;
-        // 单 lock scope：insert + 回查在同一临界区内。
-        // FIXME(framework): rust-ef 1.2.0 的 `save_changes` 不回填自增 id
-        // (`execute_inserts` 的 `on_key_backfill` 回调以 `0` 占位，
-        // `IAsyncConnection` 亦无 `last_insert_rowid()`)，
+        // FIXME(framework): rust-ef 1.3.0 的 `save_changes` 不回填自增 id，
         // 故无法用 `find(inserted_id)` 精确回查。当前以 `max_by_key(c.id)`
-        // 近似——per-request Scoped DbContext 消除了请求内竞态，
+        // 近似——per-request owned DbContext 消除了请求内竞态，
         // 但跨请求 DB 层竞态仍存在（并发同 (blog_id, user_id) 插入可能取到他人记录）。
         // 待框架暴露 last-insert-id 后改为 `find(id)`。
-        let last = {
-            let mut ctx = self.ctx.lock().await;
-            ctx.set::<Comment>().add(comment);
-            ctx.save_changes()
-                .await
-                .map_err(|e| Error::Internal(format!("Failed to create comment: {}", e)))?;
-            linq!(ctx.set::<Comment>(), |c: Comment| c.blog_id == blog_id && c.user_id == user_id)
-                .to_list()
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?
-                .into_iter()
-                .max_by_key(|c| c.id)
-                .ok_or_else(|| Error::Internal("Comment disappeared after insert".into()))?
-        };
+        self.ctx.set::<Comment>().add(comment);
+        self.ctx
+            .save_changes()
+            .await
+            .map_err(|e| Error::Internal(format!("Failed to create comment: {}", e)))?;
+        let last = linq!(self.ctx.set::<Comment>(), |c: Comment| c.blog_id == blog_id && c.user_id == user_id)
+            .to_list()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?
+            .into_iter()
+            .max_by_key(|c| c.id)
+            .ok_or_else(|| Error::Internal("Comment disappeared after insert".into()))?;
         tracing::info!("[Comment] Created by {} on blog {}", user_name, blog_id);
         Ok(last.to_model())
     }
 }
 
-#[inject(scoped)]
+#[handler(inject)]
 #[async_trait]
 impl IRequestHandler<DeleteCommentRequest, String> for DeleteCommentHandler {
-    async fn handle(&self, req: DeleteCommentRequest) -> Result<String> {
+    async fn handle(&mut self, req: DeleteCommentRequest) -> Result<String> {
         let id = parse_id(&req.id)?;
-        let mut comment = {
-            let mut ctx = self.ctx.lock().await;
-            ctx.set::<Comment>()
-                .query()
-                .find(id)
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?
-        }
-        .ok_or_else(|| Error::NotFound("Comment not found".into()))?;
+        let mut comment = self
+            .ctx
+            .set::<Comment>()
+            .query()
+            .find(id)
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?
+            .ok_or_else(|| Error::NotFound("Comment not found".into()))?;
 
         // 鉴权：admin 或评论作者可删除
         let claims = req
@@ -135,13 +125,11 @@ impl IRequestHandler<DeleteCommentRequest, String> for DeleteCommentHandler {
         comment.is_deleted = true;
         comment.updated_id = operator_id(Some(claims));
         comment.updated_at = now_secs();
-        {
-            let mut ctx = self.ctx.lock().await;
-            ctx.set::<Comment>().update(comment);
-            ctx.save_changes()
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?;
-        }
+        self.ctx.set::<Comment>().update(comment);
+        self.ctx
+            .save_changes()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?;
         tracing::info!("[Comment] Soft-deleted: {}", id);
         Ok(format!("Deleted comment {}", id))
     }

@@ -14,11 +14,13 @@ use crate::util::now_secs;
 
 #[derive(Inject)]
 pub struct GetTrackingSummaryHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct ListTrackingHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 

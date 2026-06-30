@@ -14,31 +14,37 @@ use crate::util::{now_secs, operator_id, parse_id};
 
 #[derive(Inject)]
 pub struct ListUsersHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct GetUserHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct CreateUserHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct UpdateUserHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct DeleteUserHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct InfoHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 

@@ -42,36 +42,43 @@ fn is_admin(roles: &[String]) -> bool {
 
 #[derive(Inject)]
 pub struct ListBlogPostsHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct ListBlogCategoriesHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct ListMyBlogPostsHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct GetBlogPostHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct CreateBlogPostHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct UpdateBlogPostHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct DeleteBlogPostHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 

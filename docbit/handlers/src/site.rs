@@ -11,6 +11,7 @@ use docbit_contracts::site::{SiteConfig, SiteInfoRequest};
 
 #[derive(Inject)]
 pub struct SiteInfoHandler {
+    #[inject]
     config: Arc<SiteConfig>,
 }
 

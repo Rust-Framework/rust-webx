@@ -12,6 +12,7 @@ use docbit_contracts::cache::CacheStatsRequest;
 
 #[derive(Inject)]
 pub struct CacheStatsHandler {
+    #[inject]
     cache: Arc<MemoryCache>,
 }
 

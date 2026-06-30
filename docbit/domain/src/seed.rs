@@ -6,7 +6,7 @@
 //! bcrypt hashing is a runtime concern.
 //!
 //! API (rust-ef 1.1.0):
-//! ```
+//! ```ignore
 //! ctx.model().entity::<T>().has_data(&[ ... ]);
 //! ctx.ensure_created().await?;
 //! ```

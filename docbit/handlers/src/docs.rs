@@ -14,16 +14,19 @@ use docbit_contracts::docs::{
 
 #[derive(Inject)]
 pub struct ListDocWorksHandler {
+    #[inject]
     docs: Arc<dyn IDocumentService>,
 }
 
 #[derive(Inject)]
 pub struct GetDocIndexHandler {
+    #[inject]
     docs: Arc<dyn IDocumentService>,
 }
 
 #[derive(Inject)]
 pub struct GetDocContentHandler {
+    #[inject]
     docs: Arc<dyn IDocumentService>,
 }
 

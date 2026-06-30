@@ -18,16 +18,19 @@ use crate::util::{now_secs, operator_id, parse_id};
 
 #[derive(Inject)]
 pub struct ListCommentsHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct CreateCommentHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct DeleteCommentHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 

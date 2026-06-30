@@ -18,21 +18,25 @@ use crate::util::{now_secs, operator_id, parse_id};
 
 #[derive(Inject)]
 pub struct ListRolesHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct CreateRoleHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct UpdateRoleHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct DeleteRoleHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
@@ -135,11 +139,13 @@ impl IRequestHandler<DeleteRoleRequest, String> for DeleteRoleHandler {
 
 #[derive(Inject)]
 pub struct AssignRoleHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct RevokeRoleHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
@@ -194,21 +200,25 @@ impl IRequestHandler<RevokeRoleRequest, String> for RevokeRoleHandler {
 
 #[derive(Inject)]
 pub struct ListResourcesHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct CreateResourceHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct UpdateResourceHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct DeleteResourceHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
@@ -313,16 +323,19 @@ impl IRequestHandler<DeleteResourceRequest, String> for DeleteResourceHandler {
 
 #[derive(Inject)]
 pub struct ListAuthorizesHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct CreateAuthorizeHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct DeleteAuthorizeHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 

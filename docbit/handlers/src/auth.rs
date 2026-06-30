@@ -69,26 +69,31 @@ async fn load_user_by_id(ctx: &mut DbContext, id: i32) -> Result<Option<User>> {
 
 #[derive(Inject)]
 pub struct RegisterHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct LoginHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct AuthMeHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct ForgotPasswordHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct ResetPasswordHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 

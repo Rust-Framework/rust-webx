@@ -34,6 +34,7 @@ const ADMIN_DEFAULT_PASSWORD: &str = "admin123";
 // 改在 `start()` 中通过 `global_provider().get_owned()` 获取 owned 实例。
 #[derive(Inject)]
 pub struct DbInitService {
+    #[inject]
     docs: Arc<dyn IDocumentService>,
 }
 

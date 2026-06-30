@@ -16,21 +16,25 @@ use crate::util::{now_secs, operator_id};
 
 #[derive(Inject)]
 pub struct ListExhibitionsHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct GetExhibitionHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct UpsertExhibitionHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct DeleteExhibitionHandler {
+    #[inject(owned)]
     ctx: DbContext,
 }
 

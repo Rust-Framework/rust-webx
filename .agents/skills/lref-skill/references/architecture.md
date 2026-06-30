@@ -5,13 +5,12 @@
 ```
 Object-safe (dyn compatible)          Non-object-safe (Sized required)
 ─────────────────────────────────     ───────────────────────────────
-IDbContext                            IEntityType
-IDatabaseProvider                     IFromRow
-ISqlGenerator                         IGetKeyValues
-IAsyncConnection                      IEntitySnapshot
-ISaveChangesInterceptor               IDbSet<T>
+IDatabaseProvider                     IEntityType
+ISqlGenerator                         IFromRow
+IAsyncConnection                      IGetKeyValues
+ISaveChangesInterceptor               IEntitySnapshot
+                                      IDbSet<T>
                                       IQueryable<T>
-                                      IDbContextExt
                                       IEntityTypeConfiguration<T>
 ```
 
@@ -25,7 +24,7 @@ User Code
     │    └── add_dbcontext_keyed("key", |o| ...)
     │          └── keyed registration for multi-DB
     │
-    └── Arc<dyn IDbContext> (from provider.get() or provider.get_keyed("key"))
+    └── DbContext (owned via get_owned(), or Arc<DbContext> via get())
           └── DbContext
                 ├── set::<T>() → type-map, lazy-create DbSet<T>
                 ├── save_changes() → SetOps<T> dispatchers + interceptor pipeline
@@ -56,7 +55,7 @@ Multiple interceptors run in registration order; the first error aborts the chai
 
 ## Multi-DB Context (Keyed Registration)
 
-Uses lrdi's `keyed_transient` mechanism:
+Uses lrdi's `keyed_scoped` mechanism:
 
 ```rust
 .add_dbcontext_keyed("primary", |o| o.use_postgres(...))
@@ -65,8 +64,13 @@ Uses lrdi's `keyed_transient` mechanism:
 
 Resolution:
 ```rust
-let primary: Arc<dyn IDbContext> = provider.get_keyed("primary");
-let logs: Arc<dyn IDbContext> = provider.get_keyed("logs");
+// Owned (recommended for handlers — &mut self access):
+let mut primary: DbContext = provider.get_keyed_owned("primary");
+let mut logs: DbContext = provider.get_keyed_owned("logs");
+
+// Shared (within a scope — Arc<DbContext>, &self only):
+// let primary: Arc<DbContext> = scope.get_keyed("primary");
+// let logs: Arc<DbContext> = scope.get_keyed("logs");
 ```
 
 ## Why No DbSet<Blog> Fields?
@@ -76,11 +80,11 @@ let logs: Arc<dyn IDbContext> = provider.get_keyed("logs");
 - **After (type-map):** `ctx.set::<Blog>()` lazy-creates `DbSet<Blog>`
   from entity metadata → no struct changes needed
 
-## Why Object-Safe IDbContext?
+## DbContext 是具体上下文类型
 
-- Enables `Arc<dyn IDbContext>` DI resolution
-- Generic methods (`use_transaction`) moved to `IDbContextExt`
-- `type Provider` removed; `provider()` returns `&dyn IDatabaseProvider`
+`DbContext` 是具体上下文类型，无需 trait 抽象，直接通过 DI 注册为 Scoped。
+推荐使用 `get_owned()` 获取 owned `DbContext`（`&mut self` 访问），也可使用 `get()` 获取 `Arc<DbContext>`（共享，`&self` 访问）。
+`use_transaction` 等方法是 `DbContext` 的固有方法；`provider()` 返回 `&dyn IDatabaseProvider`。
 
 ## Constraint Rules
 

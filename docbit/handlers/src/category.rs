@@ -1,11 +1,11 @@
 //! Category handlers — CRUD plus hierarchical tree assembly.
+//!
+//! 每个 handler 持有 owned `DbContext`，`handle(&mut self, ...)` 直接操作 `self.ctx`。
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use rust_ef::{db_context::DbContext, prelude::*};
 use rust_webapp::*;
-use tokio::sync::Mutex;
 
 use docbit_contracts::category::{
     CategoryModel, CategoryTreeNode, CreateCategoryRequest, DeleteCategoryRequest,
@@ -18,22 +18,22 @@ use crate::util::{now_secs, operator_id, parse_id};
 
 #[derive(Inject)]
 pub struct ListCategoriesHandler {
-    ctx: Arc<Mutex<DbContext>>,
+    ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct CreateCategoryHandler {
-    ctx: Arc<Mutex<DbContext>>,
+    ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct UpdateCategoryHandler {
-    ctx: Arc<Mutex<DbContext>>,
+    ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct DeleteCategoryHandler {
-    ctx: Arc<Mutex<DbContext>>,
+    ctx: DbContext,
 }
 
 /// 把扁平分类列表组装为森林，按 `sort_order` 升序、`id` 升序排序。
@@ -87,41 +87,36 @@ fn attach_children(
     node
 }
 
-#[inject(scoped)]
+#[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ListCategoriesRequest, Vec<CategoryTreeNode>> for ListCategoriesHandler {
-    async fn handle(&self, _: ListCategoriesRequest) -> Result<Vec<CategoryTreeNode>> {
-        let cats = {
-            let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<Category>(), |c: Category| !c.is_deleted)
-                .to_list()
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?
-        };
+    async fn handle(&mut self, _: ListCategoriesRequest) -> Result<Vec<CategoryTreeNode>> {
+        let cats = linq!(self.ctx.set::<Category>(), |c: Category| !c.is_deleted)
+            .to_list()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?;
         let models: Vec<CategoryModel> = cats.into_iter().map(CategoryModel::from).collect();
         Ok(build_tree(models))
     }
 }
 
-#[inject(scoped)]
+#[handler(inject)]
 #[async_trait]
 impl IRequestHandler<CreateCategoryRequest, CategoryModel> for CreateCategoryHandler {
-    async fn handle(&self, req: CreateCategoryRequest) -> Result<CategoryModel> {
+    async fn handle(&mut self, req: CreateCategoryRequest) -> Result<CategoryModel> {
         let op = operator_id(req.claims.as_deref()).unwrap_or(0);
         let now = now_secs();
         let slug = req.slug.clone();
         let cat = req.to_entity(op, now);
-        {
-            let mut ctx = self.ctx.lock().await;
-            ctx.set::<Category>().add(cat);
-            ctx.save_changes()
-                .await
-                .map_err(|e| Error::Internal(format!("Failed to create category: {}", e)))?;
-        }
+        self.ctx.set::<Category>().add(cat);
+        self.ctx
+            .save_changes()
+            .await
+            .map_err(|e| Error::Internal(format!("Failed to create category: {}", e)))?;
+        // FIXME(framework): rust-ef 1.3.0 save_changes 不回填自增 id，按 slug 回查。
         let created = {
-            let mut ctx = self.ctx.lock().await;
             let q = slug.clone();
-            linq!(ctx.set::<Category>(), |c: Category| c.slug == q && !c.is_deleted)
+            linq!(self.ctx.set::<Category>(), |c: Category| c.slug == q && !c.is_deleted)
                 .first_or_default()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?
@@ -132,67 +127,60 @@ impl IRequestHandler<CreateCategoryRequest, CategoryModel> for CreateCategoryHan
     }
 }
 
-#[inject(scoped)]
+#[handler(inject)]
 #[async_trait]
 impl IRequestHandler<UpdateCategoryRequest, CategoryModel> for UpdateCategoryHandler {
-    async fn handle(&self, req: UpdateCategoryRequest) -> Result<CategoryModel> {
+    async fn handle(&mut self, req: UpdateCategoryRequest) -> Result<CategoryModel> {
         let id = parse_id(&req.id)?;
-        let mut cat = {
-            let mut ctx = self.ctx.lock().await;
-            ctx.set::<Category>()
-                .query()
-                .find(id)
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?
-        }
-        .ok_or_else(|| Error::NotFound("Category not found".into()))?;
+        let mut cat = self
+            .ctx
+            .set::<Category>()
+            .query()
+            .find(id)
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?
+            .ok_or_else(|| Error::NotFound("Category not found".into()))?;
 
         let op = operator_id(req.claims.as_deref()).unwrap_or(0);
         req.apply_to(&mut cat, op, now_secs());
-        {
-            let mut ctx = self.ctx.lock().await;
-            ctx.set::<Category>().update(cat);
-            ctx.save_changes()
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?;
-        }
-        let updated = {
-            let mut ctx = self.ctx.lock().await;
-            ctx.set::<Category>()
-                .query()
-                .find(id)
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?
-        }
-        .ok_or_else(|| Error::NotFound("Category not found after update".into()))?;
+        self.ctx.set::<Category>().update(cat);
+        self.ctx
+            .save_changes()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?;
+        let updated = self
+            .ctx
+            .set::<Category>()
+            .query()
+            .find(id)
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?
+            .ok_or_else(|| Error::NotFound("Category not found after update".into()))?;
         Ok(updated.to_model())
     }
 }
 
-#[inject(scoped)]
+#[handler(inject)]
 #[async_trait]
 impl IRequestHandler<DeleteCategoryRequest, String> for DeleteCategoryHandler {
-    async fn handle(&self, req: DeleteCategoryRequest) -> Result<String> {
+    async fn handle(&mut self, req: DeleteCategoryRequest) -> Result<String> {
         let id = parse_id(&req.id)?;
-        let mut cat = {
-            let mut ctx = self.ctx.lock().await;
-            ctx.set::<Category>()
-                .query()
-                .find(id)
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?
-        }
-        .ok_or_else(|| Error::NotFound("Category not found".into()))?;
+        let mut cat = self
+            .ctx
+            .set::<Category>()
+            .query()
+            .find(id)
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?
+            .ok_or_else(|| Error::NotFound("Category not found".into()))?;
         cat.is_deleted = true;
         cat.updated_id = operator_id(req.claims.as_deref());
         cat.updated_at = now_secs();
-        {
-            let mut ctx = self.ctx.lock().await;
-            ctx.set::<Category>().update(cat);
-            ctx.save_changes()
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?;
-        }
+        self.ctx.set::<Category>().update(cat);
+        self.ctx
+            .save_changes()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?;
         tracing::info!("[Category] Soft-deleted: {}", id);
         Ok(format!("Deleted category {}", id))
     }

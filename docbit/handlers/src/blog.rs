@@ -2,13 +2,16 @@
 //!
 //! Tags 序列化为 JSON 字符串存库；列表查询 include `category`+`author`
 //! 以填充 `category_name`/`author_name`。
+//!
+//! 每个 handler 持有 owned `DbContext`（通过 `#[derive(Inject)]` 的 bare T 字段
+//! 自动以 `get_owned` 解析），实现 EFCore 风格的 per-request unit-of-work。
+//! `handle(&mut self, ...)` 直接调用 `self.ctx.set::<T>()` / `save_changes()`，
+//! 无需 `Arc<Mutex>` 内部可变性。
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use rust_ef::{db_context::DbContext, prelude::*};
 use rust_webapp::*;
-use tokio::sync::Mutex;
 
 use docbit_contracts::blog::*;
 use docbit_domain::entities::{Blog, Category};
@@ -32,79 +35,74 @@ fn is_admin(roles: &[String]) -> bool {
 }
 
 // ── Handlers ──
+//
+// `ctx: DbContext`（bare T）由 `#[derive(Inject)]` 通过 `resolver.get_owned`
+// 解析为 owned 实例。`#[handler(inject)]` 生成 per-request factory + call bridge，
+// 使 dispatch 通过 `HandlerCache` 调用 `handle(&mut self, ...)`。
 
 #[derive(Inject)]
 pub struct ListBlogPostsHandler {
-    ctx: Arc<Mutex<DbContext>>,
+    ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct ListBlogCategoriesHandler {
-    ctx: Arc<Mutex<DbContext>>,
+    ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct ListMyBlogPostsHandler {
-    ctx: Arc<Mutex<DbContext>>,
+    ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct GetBlogPostHandler {
-    ctx: Arc<Mutex<DbContext>>,
+    ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct CreateBlogPostHandler {
-    ctx: Arc<Mutex<DbContext>>,
+    ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct UpdateBlogPostHandler {
-    ctx: Arc<Mutex<DbContext>>,
+    ctx: DbContext,
 }
 
 #[derive(Inject)]
 pub struct DeleteBlogPostHandler {
-    ctx: Arc<Mutex<DbContext>>,
+    ctx: DbContext,
 }
 
-#[inject(scoped)]
+#[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ListBlogPostsRequest, Vec<BlogPostSummary>> for ListBlogPostsHandler {
-    async fn handle(&self, _: ListBlogPostsRequest) -> Result<Vec<BlogPostSummary>> {
-        let blogs = {
-            let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<Blog>(), |b: Blog| !b.is_deleted; include b.category; include b.author; order_by b.published_at desc)
-                .to_list()
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?
-        };
+    async fn handle(&mut self, _: ListBlogPostsRequest) -> Result<Vec<BlogPostSummary>> {
+        let blogs = linq!(self.ctx.set::<Blog>(), |b: Blog| !b.is_deleted; include b.category; include b.author; order_by b.published_at desc)
+            .to_list()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?;
         Ok(blogs.into_iter().map(BlogPostSummary::from).collect())
     }
 }
 
-#[inject(scoped)]
+#[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ListBlogCategoriesRequest, Vec<BlogCategoryCount>> for ListBlogCategoriesHandler {
-    async fn handle(&self, _: ListBlogCategoriesRequest) -> Result<Vec<BlogCategoryCount>> {
-        let blogs = {
-            let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<Blog>(), |b: Blog| !b.is_deleted)
-                .to_list()
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?
-        };
+    async fn handle(&mut self, _: ListBlogCategoriesRequest) -> Result<Vec<BlogCategoryCount>> {
+        let blogs = linq!(self.ctx.set::<Blog>(), |b: Blog| !b.is_deleted)
+            .to_list()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?;
         let mut counts: HashMap<i32, usize> = HashMap::new();
         for b in &blogs {
             *counts.entry(b.category_id).or_insert(0) += 1;
         }
-        let cats = {
-            let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<Category>(), |c: Category| !c.is_deleted)
-                .to_list()
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?
-        };
+        let cats = linq!(self.ctx.set::<Category>(), |c: Category| !c.is_deleted)
+            .to_list()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?;
         let mut result: Vec<BlogCategoryCount> = cats
             .into_iter()
             .map(|c| BlogCategoryCount {
@@ -119,140 +117,115 @@ impl IRequestHandler<ListBlogCategoriesRequest, Vec<BlogCategoryCount>> for List
     }
 }
 
-#[inject(scoped)]
+#[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ListMyBlogPostsRequest, Vec<BlogPostSummary>> for ListMyBlogPostsHandler {
-    async fn handle(&self, req: ListMyBlogPostsRequest) -> Result<Vec<BlogPostSummary>> {
+    async fn handle(&mut self, req: ListMyBlogPostsRequest) -> Result<Vec<BlogPostSummary>> {
         let uid = uid_from_claims(req.claims.as_deref())?;
-        let blogs = {
-            let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<Blog>(), |b: Blog| b.author_id == uid && !b.is_deleted; include b.category; include b.author; order_by b.published_at desc)
-                .to_list()
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?
-        };
+        let blogs = linq!(self.ctx.set::<Blog>(), |b: Blog| b.author_id == uid && !b.is_deleted; include b.category; include b.author; order_by b.published_at desc)
+            .to_list()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?;
         Ok(blogs.into_iter().map(BlogPostSummary::from).collect())
     }
 }
 
-#[inject(scoped)]
+#[handler(inject)]
 #[async_trait]
 impl IRequestHandler<GetBlogPostRequest, BlogPostModel> for GetBlogPostHandler {
-    async fn handle(&self, req: GetBlogPostRequest) -> Result<BlogPostModel> {
+    async fn handle(&mut self, req: GetBlogPostRequest) -> Result<BlogPostModel> {
         let slug = req.slug.clone();
-        let blog = {
-            let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<Blog>(), |b: Blog| b.slug == req.slug && !b.is_deleted; include b.category; include b.author)
-                .first_or_default()
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?
-        }
-        .ok_or_else(|| Error::NotFound(format!("Blog post not found: {}", slug)))?;
+        let blog = linq!(self.ctx.set::<Blog>(), |b: Blog| b.slug == req.slug && !b.is_deleted; include b.category; include b.author)
+            .first_or_default()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?
+            .ok_or_else(|| Error::NotFound(format!("Blog post not found: {}", slug)))?;
         Ok(blog.to_model())
     }
 }
 
-#[inject(scoped)]
+#[handler(inject)]
 #[async_trait]
 impl IRequestHandler<CreateBlogPostRequest, BlogPostModel> for CreateBlogPostHandler {
-    async fn handle(&self, req: CreateBlogPostRequest) -> Result<BlogPostModel> {
+    async fn handle(&mut self, req: CreateBlogPostRequest) -> Result<BlogPostModel> {
         let uid = uid_from_claims(req.claims.as_deref())?;
         // slug 唯一性校验
         let slug = req.slug.clone();
-        let exists = {
-            let mut ctx = self.ctx.lock().await;
-            let q = slug.clone();
-            linq!(ctx.set::<Blog>(), |b: Blog| b.slug == q && !b.is_deleted)
-                .first_or_default()
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?
-        };
+        let q = slug.clone();
+        let exists = linq!(self.ctx.set::<Blog>(), |b: Blog| b.slug == q && !b.is_deleted)
+            .first_or_default()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?;
         if exists.is_some() {
             return Err(Error::Http(format!("Slug already exists: {}", slug)));
         }
 
         let now = now_secs();
         let blog = req.to_entity(uid, now);
-        {
-            let mut ctx = self.ctx.lock().await;
-            ctx.set::<Blog>().add(blog);
-            ctx.save_changes()
-                .await
-                .map_err(|e| Error::Internal(format!("Failed to create blog: {}", e)))?;
-        }
+        self.ctx.set::<Blog>().add(blog);
+        self.ctx
+            .save_changes()
+            .await
+            .map_err(|e| Error::Internal(format!("Failed to create blog: {}", e)))?;
         // 回查以装载导航字段
-        let saved = {
-            let mut ctx = self.ctx.lock().await;
-            let q = slug.clone();
-            linq!(ctx.set::<Blog>(), |b: Blog| b.slug == q && !b.is_deleted; include b.category; include b.author)
-                .first_or_default()
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?
-        }
-        .ok_or_else(|| Error::Internal("Blog vanished after insert".into()))?;
+        let q = slug.clone();
+        let saved = linq!(self.ctx.set::<Blog>(), |b: Blog| b.slug == q && !b.is_deleted; include b.category; include b.author)
+            .first_or_default()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?
+            .ok_or_else(|| Error::Internal("Blog vanished after insert".into()))?;
         tracing::info!("[Blog] Created: {} by {}", saved.slug, uid);
         Ok(saved.to_model())
     }
 }
 
-#[inject(scoped)]
+#[handler(inject)]
 #[async_trait]
 impl IRequestHandler<UpdateBlogPostRequest, BlogPostModel> for UpdateBlogPostHandler {
-    async fn handle(&self, req: UpdateBlogPostRequest) -> Result<BlogPostModel> {
+    async fn handle(&mut self, req: UpdateBlogPostRequest) -> Result<BlogPostModel> {
         let uid = uid_from_claims(req.claims.as_deref())?;
         let roles = roles_from_claims(req.claims.as_deref());
         let slug = req.slug.clone();
-        let mut blog = {
-            let mut ctx = self.ctx.lock().await;
-            let q = slug.clone();
-            linq!(ctx.set::<Blog>(), |b: Blog| b.slug == q && !b.is_deleted; include b.category; include b.author)
-                .first_or_default()
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?
-        }
-        .ok_or_else(|| Error::NotFound(format!("Blog post not found: {}", slug)))?;
+        let q = slug.clone();
+        let mut blog = linq!(self.ctx.set::<Blog>(), |b: Blog| b.slug == q && !b.is_deleted; include b.category; include b.author)
+            .first_or_default()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?
+            .ok_or_else(|| Error::NotFound(format!("Blog post not found: {}", slug)))?;
 
         if !is_admin(&roles) && blog.author_id != uid {
             return Err(Error::Http("Forbidden: not the author".into()));
         }
 
         req.apply_to(&mut blog, uid, now_secs());
-        {
-            let mut ctx = self.ctx.lock().await;
-            ctx.set::<Blog>().update(blog);
-            ctx.save_changes()
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?;
-        }
-        let saved = {
-            let mut ctx = self.ctx.lock().await;
-            let q = slug.clone();
-            linq!(ctx.set::<Blog>(), |b: Blog| b.slug == q && !b.is_deleted; include b.category; include b.author)
-                .first_or_default()
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?
-        }
-        .ok_or_else(|| Error::NotFound("Blog not found after update".into()))?;
+        self.ctx.set::<Blog>().update(blog);
+        self.ctx
+            .save_changes()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?;
+        let q = slug.clone();
+        let saved = linq!(self.ctx.set::<Blog>(), |b: Blog| b.slug == q && !b.is_deleted; include b.category; include b.author)
+            .first_or_default()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?
+            .ok_or_else(|| Error::NotFound("Blog not found after update".into()))?;
         Ok(saved.to_model())
     }
 }
 
-#[inject(scoped)]
+#[handler(inject)]
 #[async_trait]
 impl IRequestHandler<DeleteBlogPostRequest, String> for DeleteBlogPostHandler {
-    async fn handle(&self, req: DeleteBlogPostRequest) -> Result<String> {
+    async fn handle(&mut self, req: DeleteBlogPostRequest) -> Result<String> {
         let uid = uid_from_claims(req.claims.as_deref())?;
         let roles = roles_from_claims(req.claims.as_deref());
         let slug = req.slug.clone();
-        let mut blog = {
-            let mut ctx = self.ctx.lock().await;
-            let q = slug.clone();
-            linq!(ctx.set::<Blog>(), |b: Blog| b.slug == q && !b.is_deleted)
-                .first_or_default()
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?
-        }
-        .ok_or_else(|| Error::NotFound(format!("Blog post not found: {}", slug)))?;
+        let q = slug.clone();
+        let mut blog = linq!(self.ctx.set::<Blog>(), |b: Blog| b.slug == q && !b.is_deleted)
+            .first_or_default()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?
+            .ok_or_else(|| Error::NotFound(format!("Blog post not found: {}", slug)))?;
 
         if !is_admin(&roles) && blog.author_id != uid {
             return Err(Error::Http("Forbidden: not the author".into()));
@@ -261,13 +234,11 @@ impl IRequestHandler<DeleteBlogPostRequest, String> for DeleteBlogPostHandler {
         blog.is_deleted = true;
         blog.updated_id = Some(uid);
         blog.updated_at = now_secs();
-        {
-            let mut ctx = self.ctx.lock().await;
-            ctx.set::<Blog>().update(blog);
-            ctx.save_changes()
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?;
-        }
+        self.ctx.set::<Blog>().update(blog);
+        self.ctx
+            .save_changes()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?;
         tracing::info!("[Blog] Soft-deleted: {}", slug);
         Ok(format!("Deleted blog post {}", slug))
     }

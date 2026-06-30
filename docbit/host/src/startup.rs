@@ -8,13 +8,18 @@
 //!
 //! wwwroot 路径按框架约定写死为 `<app_base>/wwwroot`，与 SPA 中间件一致，
 //! 不再通过 `AppPaths` 注入。
+//!
+//! `DbInitService` 是 Singleton（`#[inject]` on `impl IHostedService`），不能在
+//! 构造时持有 Scoped 的 `DbContext`（captive dependency）。改为在 `start()` 中
+//! 通过 `global_provider().get_owned::<DbContext>()` 获取 owned 实例——按
+//! rust-ef 文档，从 root provider 无 scope 解析时退化为 transient（每次全新），
+//! 正适合启动期的一次性种子任务。
 
 use std::sync::Arc;
 
 use bcrypt::{hash, DEFAULT_COST};
 use rust_ef::{db_context::DbContext, prelude::*};
 use rust_webapp::*;
-use tokio::sync::Mutex;
 
 use docbit_contracts::docs::IDocumentService;
 use docbit_domain::entities::User;
@@ -24,10 +29,11 @@ const ADMIN_EMAIL: &str = "admin@docbit.local";
 const ADMIN_DEFAULT_PASSWORD: &str = "admin123";
 
 // `#[derive(Inject)]` 生成 `__rdi_construct_DbInitService` 构造器，
-// 自动从 DI 容器解析 `ctx: Arc<Mutex<DbContext>>` 与 `docs: Arc<dyn IDocumentService>`。
+// 自动从 DI 容器解析 `docs: Arc<dyn IDocumentService>`。
+// `DbContext` 不在构造期注入（避免 Singleton 持有 Scoped 服务的 captive dependency），
+// 改在 `start()` 中通过 `global_provider().get_owned()` 获取 owned 实例。
 #[derive(Inject)]
 pub struct DbInitService {
-    ctx: Arc<Mutex<DbContext>>,
     docs: Arc<dyn IDocumentService>,
 }
 
@@ -39,17 +45,16 @@ impl IHostedService for DbInitService {
     async fn start(&self) -> Result<()> {
         tracing::info!("[DbInitService] Starting initialization...");
 
-        {
-            let mut ctx = self.ctx.lock().await;
-            seed(&mut ctx); // 注册种子数据到 model builder
-            ctx.ensure_created()
-                .await
-                .map_err(|e| Error::Internal(format!("ensure_created failed: {}", e)))?;
-            tracing::info!("[DbInitService] Tables created and seed data applied.");
-        }
+        // 从 root provider 解析 owned DbContext（transient：全新实例）。
+        let mut ctx: DbContext = global_provider().get_owned();
+        seed(&mut ctx); // 注册种子数据到 model builder
+        ctx.ensure_created()
+            .await
+            .map_err(|e| Error::Internal(format!("ensure_created failed: {}", e)))?;
+        tracing::info!("[DbInitService] Tables created and seed data applied.");
 
         // 创建默认 admin 用户（仅当不存在时）
-        self.ensure_admin_user().await?;
+        self.ensure_admin_user(&mut ctx).await?;
 
         // 文档索引补齐 + 作品 logo 同步
         self.docs
@@ -72,14 +77,11 @@ impl IHostedService for DbInitService {
 }
 
 impl DbInitService {
-    async fn ensure_admin_user(&self) -> Result<()> {
-        let existing = {
-            let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<User>(), |u: User| u.email == ADMIN_EMAIL)
-                .first_or_default()
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?
-        };
+    async fn ensure_admin_user(&self, ctx: &mut DbContext) -> Result<()> {
+        let existing = linq!(ctx.set::<User>(), |u: User| u.email == ADMIN_EMAIL)
+            .first_or_default()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?;
         if existing.is_some() {
             return Ok(());
         }
@@ -103,23 +105,18 @@ impl DbInitService {
             is_deleted: false,
             roles: HasMany::new(),
         };
-        {
-            let mut ctx = self.ctx.lock().await;
-            ctx.set::<User>().add(user);
-            ctx.save_changes()
-                .await
-                .map_err(|e| Error::Internal(format!("Failed to create admin user: {}", e)))?;
-        }
+        ctx.set::<User>().add(user);
+        ctx.save_changes()
+            .await
+            .map_err(|e| Error::Internal(format!("Failed to create admin user: {}", e)))?;
 
         // 关联 admin 角色（role_id=1）
-        let admin_user = {
-            let mut ctx = self.ctx.lock().await;
-            linq!(ctx.set::<User>(), |u: User| u.email == ADMIN_EMAIL && !u.is_deleted)
-                .first_or_default()
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?
-        }
-        .ok_or_else(|| Error::Internal("Admin user disappeared after insert".into()))?;
+        // FIXME(framework): rust-ef 1.3.0 save_changes 不回填自增 id，按 email 回查。
+        let admin_user = linq!(ctx.set::<User>(), |u: User| u.email == ADMIN_EMAIL && !u.is_deleted)
+            .first_or_default()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?
+            .ok_or_else(|| Error::Internal("Admin user disappeared after insert".into()))?;
 
         let role_user = docbit_domain::entities::RoleUser {
             id: 0,
@@ -127,13 +124,10 @@ impl DbInitService {
             role_id: 1, // admin
             created_at: now,
         };
-        {
-            let mut ctx = self.ctx.lock().await;
-            ctx.set::<docbit_domain::entities::RoleUser>().add(role_user);
-            ctx.save_changes()
-                .await
-                .map_err(|e| Error::Internal(format!("Failed to assign admin role: {}", e)))?;
-        }
+        ctx.set::<docbit_domain::entities::RoleUser>().add(role_user);
+        ctx.save_changes()
+            .await
+            .map_err(|e| Error::Internal(format!("Failed to assign admin role: {}", e)))?;
 
         tracing::info!(
             "[DbInitService] Created default admin user: {} / {}",

@@ -27,26 +27,26 @@ pub struct GetDocContentHandler {
     docs: Arc<dyn IDocumentService>,
 }
 
-#[inject(scoped)]
+#[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ListDocWorksRequest, Vec<String>> for ListDocWorksHandler {
-    async fn handle(&self, _: ListDocWorksRequest) -> Result<Vec<String>> {
+    async fn handle(&mut self, _: ListDocWorksRequest) -> Result<Vec<String>> {
         self.docs.list_works().map_err(Error::Internal)
     }
 }
 
-#[inject(scoped)]
+#[handler(inject)]
 #[async_trait]
 impl IRequestHandler<GetDocIndexRequest, DocIndex> for GetDocIndexHandler {
-    async fn handle(&self, req: GetDocIndexRequest) -> Result<DocIndex> {
+    async fn handle(&mut self, req: GetDocIndexRequest) -> Result<DocIndex> {
         self.docs.index(&req.work).map_err(Error::NotFound)
     }
 }
 
-#[inject(scoped)]
+#[handler(inject)]
 #[async_trait]
 impl IRequestHandler<GetDocContentRequest, DocContent> for GetDocContentHandler {
-    async fn handle(&self, req: GetDocContentRequest) -> Result<DocContent> {
+    async fn handle(&mut self, req: GetDocContentRequest) -> Result<DocContent> {
         // 路径编码约定：`/` 在 URL 路径段中以 `:` 替代，这里还原。
         let path = percent_decode(&req.path).replace(':', "/");
         self.docs.content(&req.work, &path).map_err(Error::NotFound)

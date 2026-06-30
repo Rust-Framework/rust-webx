@@ -1,10 +1,10 @@
-﻿//! Type scanning and automatic service registration logic.
+//! Type scanning and automatic service registration logic.
 //!
 //! In the LRWF framework, "scanning" is achieved at compile time via:
 //!
-//! 1. `#[rust_dicore::module]` + `rust_dicore::inject!` â€” declare handlers in a module group
-//! 2. `#[endpoint]` â€” register route metadata via `inventory::submit!`
-//! 3. `#[controller]` â€” register controller metadata via `inventory::submit!`
+//! 1. `#[rust_dicore::module]` + `rust_dicore::inject!` — declare handlers in a module group
+//! 2. `#[endpoint]` — register route metadata via `inventory::submit!`
+//! 3. `#[controller]` — register controller metadata via `inventory::submit!`
 //!
 //! This module provides the `RouteEntry` type that connects compile-time
 //! macro output to runtime routing.
@@ -14,7 +14,7 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
-// â”€â”€â”€ Global Service Provider (for DI-based handler construction) â”€â”€â”€
+// --- Global Service Provider (for DI-based handler construction) ---
 
 static GLOBAL_PROVIDER: OnceLock<Arc<rust_dicore::ServiceProvider>> = OnceLock::new();
 
@@ -94,22 +94,24 @@ inventory::collect!(RouteEntry);
 /// Handler registration collected at compile time.
 /// Each `#[handler]` annotation submits one of these to inventory.
 ///
-/// After Phase 2, this stores a type-erased factory + call bridge
-/// instead of registering into rust_dicore DI as `dyn IRequestHandler`.
+/// The factory is called **per request** with the request-scoped `IServiceResolver`
+/// so it can resolve Scoped dependencies (e.g. `DbContext`) via `get_owned`.
+/// The result is an owned, type-erased handler — no `Arc<dyn Trait>` caching,
+/// so `handle(&mut self)` works without interior mutability.
 pub struct HandlerRegistration {
-    /// Request type name (e.g., "hello_request::HelloRequest") â€” used to match RouteDispatch.
+    /// Request type name (e.g., "hello_request::HelloRequest") — used to match RouteDispatch.
     pub req_type_name: &'static str,
-    /// Creates the concrete handler, wrapped in dyn Any.
-    pub factory: fn() -> std::sync::Arc<dyn std::any::Any + Send + Sync>,
-    /// Type-erased call bridge: receives the already-constructed request via Box<dyn Any>,
-    /// calls native async fn, returns serialized response.
+    /// Constructs a fresh owned handler, boxed as `Box<dyn Any + Send>`.
+    /// Called per-request with the per-request scope as resolver.
+    pub factory: fn(&dyn rust_dicore::IServiceResolver) -> Box<dyn std::any::Any + Send>,
+    /// Type-erased call bridge: receives the owned handler and the boxed request,
+    /// invokes `handle(&mut self, req)`, and returns the boxed response.
     #[allow(clippy::type_complexity)]
     pub call: fn(
-        handler: &std::sync::Arc<dyn std::any::Any + Send + Sync>,
+        handler: Box<dyn std::any::Any + Send>,
         request: Box<dyn std::any::Any + Send>,
-        claims: Option<Box<dyn crate::auth::IClaims>>,
     ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = crate::error::Result<ResponseData>> + Send>,
+        Box<dyn std::future::Future<Output = crate::error::Result<Box<dyn std::any::Any + Send>>> + Send>,
     >,
 }
 
@@ -199,14 +201,18 @@ impl RouteEntry {
     }
 }
 
-// â”€â”€â”€ Handler Cache â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- Handler Cache ---
 
-/// Runtime cache of compiled handler registrations.
+/// Runtime registry of compiled handler registrations.
 ///
 /// Built at startup from `HandlerRegistration` inventory items.
-/// Maps request type name â†’ handler entry (factory + call bridge).
+/// Maps request type name to handler entry (factory + call bridge).
+///
+/// Unlike the previous design, entries do **not** cache a handler instance:
+/// the factory is invoked per request with the request-scoped resolver so
+/// Scoped dependencies (DbContext) are freshly owned each time.
 pub struct HandlerCache {
-    pub entries: HashMap<&'static str, Arc<HandlerEntry>>,
+    pub entries: HashMap<&'static str, HandlerEntry>,
 }
 
 static HANDLER_CACHE: OnceLock<HandlerCache> = OnceLock::new();
@@ -216,13 +222,12 @@ impl HandlerCache {
     pub fn build() -> Self {
         let mut entries = HashMap::new();
         for reg in inventory::iter::<HandlerRegistration> {
-            let handler = (reg.factory)();
             entries.insert(
                 reg.req_type_name,
-                Arc::new(HandlerEntry {
-                    handler,
+                HandlerEntry {
+                    factory: reg.factory,
                     call: reg.call,
-                }),
+                },
             );
         }
         Self { entries }
@@ -241,22 +246,24 @@ impl HandlerCache {
     }
 
     /// Look up a handler entry by request type name.
-    pub fn get(&self, req_type_name: &str) -> Option<&Arc<HandlerEntry>> {
+    pub fn get(&self, req_type_name: &str) -> Option<&HandlerEntry> {
         self.entries.get(req_type_name)
     }
 }
 
-/// A single compiled handler entry in the cache.
+/// A single compiled handler entry in the registry.
+///
+/// Stores only the factory and call bridge — no cached instance.
+/// The factory is called per request to produce a fresh owned handler.
 pub struct HandlerEntry {
-    /// The concrete handler instance (type-erased).
-    pub handler: Arc<dyn Any + Send + Sync>,
-    /// Type-erased call bridge.
+    /// Per-request factory: receives the scoped resolver, returns an owned handler.
+    pub factory: fn(&dyn rust_dicore::IServiceResolver) -> Box<dyn Any + Send>,
+    /// Type-erased call bridge: invokes `handle(&mut self, req)` on the owned handler.
     #[allow(clippy::type_complexity)]
     pub call: fn(
-        handler: &Arc<dyn Any + Send + Sync>,
+        handler: Box<dyn Any + Send>,
         request: Box<dyn Any + Send>,
-        claims: Option<Box<dyn crate::auth::IClaims>>,
     ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = crate::error::Result<ResponseData>> + Send>,
+        Box<dyn std::future::Future<Output = crate::error::Result<Box<dyn Any + Send>>> + Send>,
     >,
 }

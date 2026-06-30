@@ -157,10 +157,10 @@ fn emit_endpoint(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 /// Generate the dispatch function that runs the full request lifecycle.
 ///
-/// Resolves the handler from the DI container (`global_provider`) as
-/// `dyn IRequestHandler<Req, Rsp>`, then injects claims and calls `handle`.
-/// This unifies service registration under `#[rust_dicore::inject]`,
-/// making `#[handler]` unnecessary.
+/// Looks up the `HandlerRegistration` (collected via `#[handler]`) by request
+/// type name, calls its factory with a per-request scope to obtain an owned
+/// handler (Scoped dependencies like `DbContext` are resolved via `get_owned`),
+/// then invokes `handle(&mut self, req)` through the call bridge.
 fn generate_dispatch_fn(
     ty: &Type,
     rsp_type: &syn::Type,
@@ -222,26 +222,34 @@ fn generate_dispatch_fn(
             Box::pin(async move {
                 let mut request: #ty = #build_request;
 
-                // Resolve the handler from a per-request DI scope.
-                // #[rust_dicore::inject] on impl IRequestHandler<Req, Rsp> registers
-                // the handler as dyn IRequestHandler<Req, Rsp> in the ServiceCollection.
-                // create_scope() ensures Scoped services (DbContext, handlers declared
-                // #[inject(scoped)]) bind to this request — EFCore-style unit-of-work
-                // isolation. The scope lives for the duration of this dispatch.
-                let provider = ::rust_webapp::global_provider();
-                let scope = provider.create_scope();
-                let handler: ::std::sync::Arc<dyn ::rust_webapp::IRequestHandler<#ty, #rsp_type>> =
-                    scope.get_optional().ok_or_else(|| ::rust_webapp::Error::Di(
-                        format!("No handler registered for request type '{}'", #type_name)
-                    ))?;
-
-                // Inject claims into the request (no-op if the request type
-                // has no inherent `set_claims`), then dispatch via `handle`.
+                // Inject claims into the request *before* dispatch (no-op if the
+                // request type has no inherent `set_claims`).
                 {
                     use ::rust_webapp::IClaimsCarrier;
                     request.set_claims(claims);
                 }
-                let result = handler.handle(request).await?;
+
+                // Look up the HandlerRegistration by request type name.
+                // `#[handler]` on `impl IRequestHandler<Req, Rsp> for Handler` submits
+                // an entry to inventory at compile time; the entry's factory constructs
+                // a fresh owned Handler per request, resolving Scoped dependencies
+                // (DbContext) via `resolver.get_owned` — EFCore-style per-request UoW.
+                let cache = ::rust_webapp::HandlerCache::get_or_init();
+                let entry = cache.get(#type_name).ok_or_else(|| ::rust_webapp::Error::Di(
+                    format!("No #[handler] registered for request type '{}'", #type_name)
+                ))?;
+
+                // Create a per-request DI scope and construct the owned handler.
+                let provider = ::rust_webapp::global_provider();
+                let scope = provider.create_scope();
+                let resolver: &dyn ::rust_webapp::rust_dicore::IServiceResolver = &scope;
+                let handler = (entry.factory)(resolver);
+
+                // Invoke `handle(&mut self, req)` via the call bridge.
+                let result_box = (entry.call)(handler, ::std::boxed::Box::new(request)).await?;
+                let result = *result_box
+                    .downcast::<#rsp_type>()
+                    .expect("Response type mismatch in handler call bridge");
 
                 let json_bytes = ::serde_json::to_vec(&result).unwrap_or_default();
                 Ok(::rust_webapp::ResponseData {

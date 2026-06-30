@@ -5,10 +5,14 @@
 //! Dual-type-parameter handler: `T` is the request type, `R` is the response type.
 //! The constraint `T: IRequest<R>` ensures type safety between request and response.
 //!
+//! `handle` takes `&mut self` so handlers that own a `DbContext` (resolved via
+//! `get_owned` — EFCore-style per-request unit-of-work) can call `ctx.set::<T>()`
+//! and `ctx.save_changes()` which require `&mut self`.
+//!
 //! ```ignore
 //! #[async_trait]
 //! impl IRequestHandler<GetUserRequest, UserModel> for GetUserHandler {
-//!     async fn handle(&self, req: GetUserRequest) -> Result<UserModel> { ... }
+//!     async fn handle(&mut self, req: GetUserRequest) -> Result<UserModel> { ... }
 //! }
 //! ```
 
@@ -26,10 +30,14 @@ use crate::mediator::{IEventRequest, IRequest};
 /// Register via `#[handler]` proc macro for compile-time collection,
 /// or use `register_handlers!` for manual DI registration.
 ///
+/// `handle(&mut self, ...)` enables the EFCore-style owned-DbContext pattern:
+/// handlers declare a bare `ctx: DbContext` field, resolved per-request via
+/// `IServiceResolver::get_owned`, and mutate it directly without `Arc<Mutex>`.
+///
 /// ```ignore
 /// #[async_trait]
 /// impl IRequestHandler<GetUserRequest, UserModel> for GetUserHandler {
-///     async fn handle(&self, req: GetUserRequest) -> Result<UserModel> { ... }
+///     async fn handle(&mut self, req: GetUserRequest) -> Result<UserModel> { ... }
 /// }
 /// ```
 #[async_trait::async_trait]
@@ -39,7 +47,7 @@ where
     R: serde::Serialize + Send + 'static,
 {
     /// Handle the request. Claims (if any) are already in `req` via `set_claims`.
-    async fn handle(&self, req: T) -> Result<R>;
+    async fn handle(&mut self, req: T) -> Result<R>;
 }
 
 /// Blanket trait that enables claims injection on request structs.
@@ -93,7 +101,7 @@ where
 /// # Usage in handlers
 ///
 /// ```ignore
-/// async fn handle(&self, req: CreateBlogPostRequest) -> Result<BlogPostModel> {
+/// async fn handle(&mut self, req: CreateBlogPostRequest) -> Result<BlogPostModel> {
 ///     let uid = req.claims.as_ref()
 ///         .and_then(|c| c.subject().parse().ok())
 ///         .ok_or(Error::Unauthorized)?;

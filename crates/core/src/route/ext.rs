@@ -1,4 +1,4 @@
-﻿//! IServiceCollectionExt â€” Extension trait for rust_dicore ServiceCollection.
+//! IServiceCollectionExt — Extension trait for rust_dicore ServiceCollection.
 
 use crate::handler::IHostedService;
 use crate::middleware::IMiddleware;

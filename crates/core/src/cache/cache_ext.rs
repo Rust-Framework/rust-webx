@@ -1,4 +1,4 @@
-﻿//! Typed cache extensions â€” matches ASP.NET Core's `DistributedCacheExtensions`.
+//! Typed cache extensions — matches ASP.NET Core's `DistributedCacheExtensions`.
 //!
 //| ASP.NET Core                          | LRWF                                    |
 //|---------------------------------------|-----------------------------------------|

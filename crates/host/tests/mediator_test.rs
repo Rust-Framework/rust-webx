@@ -1,17 +1,23 @@
 //! Tests for IMediator send/publish using HandlerCache + DI resolution.
 //!
 //! `send` tests verify that the Mediator correctly resolves handlers via the
-//! `HandlerCache` (populated by `#[handler]` inventory submissions) and
-//! dispatches requests through the factory + call bridge.
+//! `HandlerCache` (populated by `HandlerRegistration` inventory submissions)
+//! and dispatches requests through the factory + call bridge.
 //!
 //! `publish` tests verify event-handler resolution from the rust_dicore
 //! ServiceProvider.
+//!
+//! Handlers are registered manually via `inventory::submit!` with
+//! `HandlerRegistration` (same mechanism as `#[handler]` macro) using
+//! `rust_webapp_core::` paths directly, since `rust-webapp-host` cannot
+//! depend on the `rust_webapp` umbrella crate (circular dependency).
 
 use rust_dicore::ServiceCollection;
 use rust_webapp_core::error::{Error, Result as LrwfResult};
 use rust_webapp_core::handler::{IEventHandler, IRequestHandler};
 use rust_webapp_core::mediator::{IEventRequest, IMediator, IRequest};
-use rust_webapp_core::mediator_impl::Mediator;
+use rust_webapp_core::mediator::Mediator;
+use rust_webapp_core::route::scan::HandlerRegistration;
 use std::sync::{Arc, Mutex};
 
 // --- Request / Response Types ---
@@ -27,15 +33,12 @@ impl IRequest<HelloResponse> for HelloRequest {}
 
 // --- Handlers ---
 //
-// `#[handler]` submits a HandlerRegistration to inventory at compile time,
-// enabling Mediator::send to find the factory + call bridge by request type
-// name. The handler struct must implement Default for the non-inject factory
-// path.
+// Manually registered via `inventory::submit!` — equivalent to what the
+// `#[handler]` macro generates, but using `rust_webapp_core::` paths.
 
 #[derive(Default)]
 struct HelloHandler;
 
-#[rust_webapp_macros::handler]
 #[async_trait::async_trait]
 impl IRequestHandler<HelloRequest, HelloResponse> for HelloHandler {
     async fn handle(&mut self, _req: HelloRequest) -> LrwfResult<HelloResponse> {
@@ -45,14 +48,83 @@ impl IRequestHandler<HelloRequest, HelloResponse> for HelloHandler {
     }
 }
 
+fn __factory_hello_handler(
+    _resolver: &dyn rust_dicore::IServiceResolver,
+) -> Box<dyn std::any::Any + Send> {
+    Box::new(HelloHandler::default()) as Box<dyn std::any::Any + Send>
+}
+
+fn __call_hello_handler(
+    handler: Box<dyn std::any::Any + Send>,
+    request: Box<dyn std::any::Any + Send>,
+) -> std::pin::Pin<
+    Box<
+        dyn std::future::Future<Output = LrwfResult<Box<dyn std::any::Any + Send>>>
+            + Send,
+    >,
+> {
+    Box::pin(async move {
+        let mut h = *handler
+            .downcast::<HelloHandler>()
+            .expect("Handler downcast failed");
+        let req = *request
+            .downcast::<HelloRequest>()
+            .expect("Request downcast failed");
+        let result: HelloResponse = h.handle(req).await?;
+        Ok(Box::new(result) as Box<dyn std::any::Any + Send>)
+    })
+}
+
+inventory::submit! {
+    HandlerRegistration {
+        req_type_name: "HelloRequest",
+        factory: __factory_hello_handler,
+        call: __call_hello_handler,
+    }
+}
+
 #[derive(Default)]
 struct FailingHandler;
 
-#[rust_webapp_macros::handler]
 #[async_trait::async_trait]
 impl IRequestHandler<HelloRequest, HelloResponse> for FailingHandler {
     async fn handle(&mut self, _req: HelloRequest) -> LrwfResult<HelloResponse> {
         Err(Error::Internal("handler failure".into()))
+    }
+}
+
+fn __factory_failing_handler(
+    _resolver: &dyn rust_dicore::IServiceResolver,
+) -> Box<dyn std::any::Any + Send> {
+    Box::new(FailingHandler::default()) as Box<dyn std::any::Any + Send>
+}
+
+fn __call_failing_handler(
+    handler: Box<dyn std::any::Any + Send>,
+    request: Box<dyn std::any::Any + Send>,
+) -> std::pin::Pin<
+    Box<
+        dyn std::future::Future<Output = LrwfResult<Box<dyn std::any::Any + Send>>>
+            + Send,
+    >,
+> {
+    Box::pin(async move {
+        let mut h = *handler
+            .downcast::<FailingHandler>()
+            .expect("Handler downcast failed");
+        let req = *request
+            .downcast::<HelloRequest>()
+            .expect("Request downcast failed");
+        let result: HelloResponse = h.handle(req).await?;
+        Ok(Box::new(result) as Box<dyn std::any::Any + Send>)
+    })
+}
+
+inventory::submit! {
+    HandlerRegistration {
+        req_type_name: "HelloRequest",
+        factory: __factory_failing_handler,
+        call: __call_failing_handler,
     }
 }
 
@@ -93,7 +165,7 @@ impl IEventHandler<TestEvent> for FailingEventHandler {
 // build but not guaranteed across rebuilds). These tests therefore only assert
 // the success/failure shape, not which handler ran. The
 // `mediator_send_handler_not_registered` test uses a dedicated request type
-// with no #[handler] to verify the not-registered error path.
+// with no registration to verify the not-registered error path.
 
 fn build_provider() -> Arc<rust_dicore::ServiceProvider> {
     Arc::new(ServiceCollection::new().build().unwrap())
@@ -101,10 +173,6 @@ fn build_provider() -> Arc<rust_dicore::ServiceProvider> {
 
 #[tokio::test]
 async fn mediator_send_success_or_failure() {
-    // With HelloHandler and FailingHandler both registered for HelloRequest,
-    // Mediator::send resolves to one of them. We only assert that the call
-    // completes (Ok or matching Err variant) — the specific handler chosen
-    // depends on inventory iteration order.
     let mediator = Mediator::new(build_provider());
     let result = mediator.send(HelloRequest).await;
     match result {
@@ -114,7 +182,7 @@ async fn mediator_send_success_or_failure() {
     }
 }
 
-// Dedicated request type with NO #[handler] — for testing the not-registered path.
+// Dedicated request type with NO handler registration.
 struct UnregisteredRequest;
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct UnregisteredResponse;

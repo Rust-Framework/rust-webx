@@ -1,4 +1,4 @@
-﻿//! Per-IP token-bucket rate-limiting middleware.
+//! Per-IP token-bucket rate-limiting middleware.
 //!
 //! Limits the number of requests per client IP using a classic
 //! token-bucket algorithm.  Configure via:
@@ -22,7 +22,7 @@ use std::time::Instant;
 use tokio::sync::Mutex;
 
 // ---------------------------------------------------------------------------
-// TokenBucket â€?per-IP state
+// TokenBucket —per-IP state
 // ---------------------------------------------------------------------------
 
 struct TokenBucket {
@@ -58,7 +58,7 @@ impl TokenBucket {
 }
 
 // ---------------------------------------------------------------------------
-// RateLimiter â€?inner state shared across middleware instances
+// RateLimiter —inner state shared across middleware instances
 // ---------------------------------------------------------------------------
 
 /// Inner rate-limiting state shared behind a [`Mutex`].
@@ -71,8 +71,8 @@ pub struct RateLimiter {
 impl RateLimiter {
     /// Create a new limiter.
     ///
-    /// * `requests_per_second` â€?sustained request rate (e.g. `10.0`).
-    /// * `burst_size` â€?maximum burst before throttling kicks in.
+    /// * `requests_per_second` —sustained request rate (e.g. `10.0`).
+    /// * `burst_size` —maximum burst before throttling kicks in.
     pub fn new(requests_per_second: f64, burst_size: u32) -> Self {
         Self {
             buckets: Mutex::new(HashMap::new()),
@@ -158,6 +158,6 @@ fn extract_client_ip(ctx: &dyn IHttpContext) -> IpAddr {
         }
     }
 
-    // Last resort â€?this should never happen behind a proper reverse proxy.
+    // Last resort —this should never happen behind a proper reverse proxy.
     IpAddr::from_str("127.0.0.1").unwrap()
 }

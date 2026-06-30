@@ -1,4 +1,4 @@
-﻿// lrwf-web â€” SPA static file serving middleware.
+// lrwf-web — SPA static file serving middleware.
 
 mod spa;
 

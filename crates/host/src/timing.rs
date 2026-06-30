@@ -1,4 +1,4 @@
-﻿//! Timing middleware â€?demonstrates the after hook by injecting a per-request counter.
+//! Timing middleware —demonstrates the after hook by injecting a per-request counter.
 
 use rust_webapp_core::error::Result;
 use rust_webapp_core::http::IHttpContext;

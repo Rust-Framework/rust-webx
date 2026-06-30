@@ -1,9 +1,9 @@
-// rust-webapp-macros â€” Procedural macros for the Rust WebApi framework.
+// rust-webapp-macros — Procedural macros for the Rust WebApi framework.
 // - #[controller] / #[controller("/base")]
-// - #[endpoint(HttpMethod, "/path")] â€” full form
-// - #[get("/path")], #[post("/path")], #[put("/path")], #[delete("/path")] â€” shortcuts
-// - #[HttpGet], #[HttpPost], #[HttpPut], #[HttpDelete] â€” controller method attrs
-// - #[FromBody], #[FromRoute], #[FromQuery] â€” parameter binding
+// - #[endpoint(HttpMethod, "/path")] — full form
+// - #[get("/path")], #[post("/path")], #[put("/path")], #[delete("/path")] — shortcuts
+// - #[HttpGet], #[HttpPost], #[HttpPut], #[HttpDelete] — controller method attrs
+// - #[FromBody], #[FromRoute], #[FromQuery] — parameter binding
 // - rust_webapp::request! declaration macro
 
 mod claims;
@@ -204,7 +204,7 @@ pub fn claims(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// ```
 #[proc_macro_attribute]
 pub fn authorize(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    // Pass through â€” the attribute is read by emit_endpoint inside
+    // Pass through — the attribute is read by emit_endpoint inside
     // the route macro (get, post, etc.) via item_impl.attrs.
     item
 }

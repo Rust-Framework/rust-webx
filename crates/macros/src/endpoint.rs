@@ -5,7 +5,7 @@ use syn::{
 };
 
 // =====================================================================
-// Generic #[endpoint(HttpMethod, "/path")] â€” full form
+// Generic #[endpoint(HttpMethod, "/path")] — full form
 // =====================================================================
 
 pub fn endpoint_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -385,7 +385,7 @@ fn extract_path_params(path: &str) -> Vec<String> {
 }
 
 /// Generate a human-readable summary from a type name.
-/// "GetUserRequest" â†’ "Get user", "ListUsersRequest" â†’ "List users".
+/// "GetUserRequest" → "Get user", "ListUsersRequest" → "List users".
 fn generate_summary(type_name: &str) -> String {
     let name = type_name.strip_suffix("Request").unwrap_or(type_name);
     let mut result = String::new();

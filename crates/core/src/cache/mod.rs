@@ -1,4 +1,4 @@
-﻿//! Unified caching abstraction â€” `IDistributedCache` trait + `MemoryCache` implementation.
+//! Unified caching abstraction — `IDistributedCache` trait + `MemoryCache` implementation.
 //!
 //| ASP.NET Core                  | LRWF                                    |
 //|-------------------------------|-----------------------------------------|

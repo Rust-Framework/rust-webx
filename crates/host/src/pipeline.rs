@@ -1,4 +1,4 @@
-﻿//! Middleware pipeline â€?Sequential execution model.
+//! Middleware pipeline —Sequential execution model.
 //!
 //! Middlewares are called in registration order. Each middleware can
 //! inspect or modify the request. The final handler (router) is called

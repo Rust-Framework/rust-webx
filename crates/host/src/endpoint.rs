@@ -1,4 +1,4 @@
-﻿//! Endpoint â€?IEndpoint implementations for dual-mode dispatch.
+//! Endpoint —IEndpoint implementations for dual-mode dispatch.
 
 use rust_webapp_core::error::Result;
 use rust_webapp_core::http::IHttpContext;
@@ -63,7 +63,7 @@ pub struct StubEndpoint {
             std::collections::HashMap<String, String>,
             Option<Box<dyn rust_webapp_core::auth::IClaims>>,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<rust_webapp_core::di::scan::ResponseData>> + Send>,
+            Box<dyn std::future::Future<Output = Result<rust_webapp_core::route::scan::ResponseData>> + Send>,
         >,
     >,
     pub auth_required_role: &'static str,

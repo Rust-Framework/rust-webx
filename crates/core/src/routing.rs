@@ -1,4 +1,4 @@
-﻿//! Routing traits: IRouter and IEndpoint.
+//! Routing traits: IRouter and IEndpoint.
 
 use crate::error::Result;
 use crate::http::IHttpContext;
@@ -78,9 +78,9 @@ pub trait IRouter: Send + Sync {
     /// Match an incoming request to a registered endpoint.
     ///
     /// Returns a tuple of:
-    /// - `Arc<dyn IEndpoint>` â€” the matched endpoint handler.
-    /// - `HashMap<String, String>` â€” route parameter values.
-    /// - `String` â€” the original route pattern (e.g., `"/api/users/{id}"`).
+    /// - `Arc<dyn IEndpoint>` — the matched endpoint handler.
+    /// - `HashMap<String, String>` — route parameter values.
+    /// - `String` — the original route pattern (e.g., `"/api/users/{id}"`).
     async fn match_route(
         &self,
         ctx: &mut dyn IHttpContext,

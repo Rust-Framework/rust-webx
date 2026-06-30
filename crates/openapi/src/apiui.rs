@@ -1,4 +1,4 @@
-﻿//! API discovery UI â€” interactive Swagger-like explorer page.
+//! API discovery UI — interactive Swagger-like explorer page.
 //!
 //! A single-page HTML/CSS/JS application served at `/api/openapi.html`.
 //! Fetches `/api/openapi.json` and renders endpoints grouped by tag

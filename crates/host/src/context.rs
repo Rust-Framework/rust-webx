@@ -1,4 +1,4 @@
-﻿//! HttpContext â€?Runtime implementation of IHttpContext, IHttpRequest, IHttpResponse.
+//! HttpContext —Runtime implementation of IHttpContext, IHttpRequest, IHttpResponse.
 
 use http_body_util::Full;
 use hyper::body::{Bytes, Incoming};

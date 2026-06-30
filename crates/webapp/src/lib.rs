@@ -1,4 +1,4 @@
-// rust-webapp â€?Umbrella crate for the Rust WebApi framework.
+// rust-webapp —Umbrella crate for the Rust WebApi framework.
 // Re-exports all types for a unified `use rust_webapp::*` experience.
 
 // --- Core traits ---
@@ -31,8 +31,8 @@ pub use rust_webapp_core::problem::{FieldError, ProblemDetails};
 pub use rust_webapp_core::routing::{HttpMethod, IEndpoint, IRouter, RouteMeta};
 
 // --- DI extensions ---
-pub use rust_webapp_core::di::ext::{is_mediator_active, should_scan_endpoints, IServiceCollectionExt};
-pub use rust_webapp_core::di::scan::{
+pub use rust_webapp_core::route::ext::{is_mediator_active, should_scan_endpoints, IServiceCollectionExt};
+pub use rust_webapp_core::route::scan::{
     global_provider, set_global_provider, HandlerCache, HandlerEntry, HandlerRegistration,
     ParamMeta, ResponseData, RouteDispatch, RouteEntry, RouteSource,
 };
@@ -60,7 +60,7 @@ pub use rust_webapp_host::server::{Host, HostAppBuilder, HostBuilder, Server, Se
 pub use rust_webapp_host::timing::TimingMiddleware;
 
 // --- Mediator ---
-pub use rust_webapp_core::mediator_impl::Mediator;
+pub use rust_webapp_core::mediator::Mediator;
 
 // --- Web (SPA) ---
 pub use rust_webapp_spa::SpaMiddleware;

@@ -1,4 +1,4 @@
-﻿// lrwf-http â€” HTTP server, middleware pipeline, and routing.
+// lrwf-http — HTTP server, middleware pipeline, and routing.
 
 pub mod auth_jwt;
 pub mod authz;

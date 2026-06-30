@@ -1,24 +1,15 @@
-﻿//! Mediator traits: IMediator, IRequest, IEventRequest.
-//!
-//! ## IRequest<TResponse> â€” structured return pattern
-//!
-//! Each request type carries its response type as a generic parameter.
-//! The framework serializes `T` to JSON and sets HTTP 200.
-//!
-//! For commands with no return value, implement `IRequest<()>`.
-//! The framework detects `()` and returns HTTP 204 No Content.
-//!
-//! ```ignore
-//! impl IRequest<UserModel> for GetUserRequest {}
-//! impl IRequest<()> for DeleteUserRequest {}   // â†’ 204
-//! ```
+//! Mediator traits: IMediator, IRequest, IEventRequest.
+
+pub mod default;
+pub mod pipeline;
+pub use default::Mediator;
 
 use crate::error::Result;
 
 /// Marker trait for a request (command or query) carrying a structured response `TResponse`.
 ///
-/// - `TResponse: Serialize` â†’ framework writes JSON and sets status 200
-/// - `TResponse = ()`        â†’ framework writes no body and sets status 204
+/// - `TResponse: Serialize` → framework writes JSON and sets status 200
+/// - `TResponse = ()`        → framework writes no body and sets status 204
 ///
 /// ```ignore
 /// impl IRequest<UserModel> for GetUserRequest {}
@@ -49,7 +40,7 @@ pub trait IMediator: Send + Sync {
     async fn send<T, R>(&self, req: T) -> Result<R>
     where
         T: IRequest<R> + Send + 'static,
-        R: serde::Serialize + serde::de::DeserializeOwned + Send + 'static;
+        R: serde::Serialize + Send + 'static;
 
     /// Publish an event to all registered handlers.
     async fn publish<T: IEventRequest>(&self, event: T) -> Result<()>;

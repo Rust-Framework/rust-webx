@@ -9,10 +9,10 @@
 //! container (events remain `&self` since they typically don't need owned
 //! `DbContext` access).
 
-use crate::di::scan::HandlerCache;
+use crate::route::scan::HandlerCache;
 use crate::error::{Error, Result};
 use crate::handler::IEventHandler;
-use crate::mediator::{IEventRequest, IMediator, IRequest};
+use super::{IEventRequest, IMediator, IRequest};
 use rust_dicore::{IServiceResolver, ServiceProvider};
 use std::sync::Arc;
 
@@ -35,16 +35,22 @@ impl IMediator for Mediator {
     async fn send<T, R>(&self, req: T) -> Result<R>
     where
         T: IRequest<R> + Send + 'static,
-        R: serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
+        R: serde::Serialize + Send + 'static,
     {
         let cache = HandlerCache::get_or_init();
-        let type_name = std::any::type_name::<T>();
-        let entry = cache.get(type_name).ok_or_else(|| {
+        let full_name = std::any::type_name::<T>();
+        // #[handler] registers with the source-code type name (e.g. "HelloRequest"),
+        // but type_name returns the full path (e.g. "crate::module::HelloRequest").
+        // Try full match first, then fall back to the last segment.
+        let entry = cache.get(full_name).or_else(|| {
+            let short = full_name.rsplit("::").next().unwrap_or(full_name);
+            cache.get(short)
+        }).ok_or_else(|| {
             Error::Di(format!(
                 "No #[handler] registered for request {} -> {} (looked up as '{}')",
                 std::any::type_name::<T>(),
                 std::any::type_name::<R>(),
-                type_name,
+                full_name,
             ))
         })?;
 

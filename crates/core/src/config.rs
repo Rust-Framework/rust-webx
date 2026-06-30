@@ -13,7 +13,7 @@ use std::path::Path;
 // IAppOptions trait (for user-defined option types)
 // ---------------------------------------------------------------------------
 
-/// Application options â€” binds to a section of appsettings.json.
+/// Application options — binds to a section of appsettings.json.
 ///
 /// Users define their own structs implementing this trait,
 /// then call `AppConfig::bind()` to bind values.

@@ -1,4 +1,4 @@
-﻿//! Request ID middleware â€?injects a unique `x-request-id` header into every response.
+//! Request ID middleware —injects a unique `x-request-id` header into every response.
 
 use rust_webapp_core::error::Result;
 use rust_webapp_core::http::IHttpContext;

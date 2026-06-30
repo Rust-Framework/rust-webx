@@ -1,10 +1,10 @@
-﻿//! OpenAPI 3.0.3 specification generator.
+//! OpenAPI 3.0.3 specification generator.
 //!
 //! Scans the inventory for all registered routes and builds
 //! a rich OpenAPI JSON document with parameters, request bodies,
 //! response schemas, and summaries.
 
-use rust_webapp_core::di::scan::RouteEntry;
+use rust_webapp_core::route::scan::RouteEntry;
 use serde_json::{json, Value as JsonValue};
 use std::collections::BTreeSet;
 
@@ -131,7 +131,7 @@ fn build_responses(rsp_type: &str) -> JsonValue {
 /// Uses the last non-parameter segment as the tag, so routes like
 /// `/api/users/{id}` and `/api/users` both map to tag `"Users"`.
 ///
-/// e.g., "/api/users/{id}" â†?"Users", "/health" â†?"Health"
+/// e.g., "/api/users/{id}" →"Users", "/health" →"Health"
 fn extract_tag(path: &str) -> String {
     let tag = path
         .trim_start_matches('/')
@@ -142,7 +142,7 @@ fn extract_tag(path: &str) -> String {
 }
 
 /// Convert a handler type name to a camelCase operation ID.
-/// "GetUserRequest" â†?"getUserRequest", "ListUsersRequest" â†?"listUsersRequest"
+/// "GetUserRequest" →"getUserRequest", "ListUsersRequest" →"listUsersRequest"
 fn to_operation_id(handler_type: &str) -> String {
     let name = handler_type.strip_suffix("Request").unwrap_or(handler_type);
     let mut chars = name.chars();

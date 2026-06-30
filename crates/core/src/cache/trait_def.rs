@@ -1,4 +1,4 @@
-﻿//! Core caching trait â€” `IDistributedCache`.
+//! Core caching trait — `IDistributedCache`.
 //!
 //! Matches ASP.NET Core `IDistributedCache` interface:
 //| ASP.NET Core                    | LRWF                            |

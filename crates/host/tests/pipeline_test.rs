@@ -1,4 +1,4 @@
-﻿mod test_utils;
+mod test_utils;
 
 use rust_webapp_core::error::Result as LrwfResult;
 use rust_webapp_core::http::IHttpContext;
@@ -227,7 +227,7 @@ async fn pipeline_short_circuit_on_invoke_error() {
         result.is_err(),
         "Error from invoke should short-circuit the pipeline"
     );
-    // Body must NOT be written â€?the final handler never ran.
+    // Body must NOT be written —the final handler never ran.
     let (_status, _headers, body) = ctx.into_response_parts();
     assert!(
         body.is_none(),

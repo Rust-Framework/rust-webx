@@ -1,4 +1,4 @@
-﻿// lrwf-core DI extensions â€” automatic service registration and module scanning.
+﻿// lrwf-core DI extensions — automatic service registration and module scanning.
 
 pub mod ext;
 pub mod scan;

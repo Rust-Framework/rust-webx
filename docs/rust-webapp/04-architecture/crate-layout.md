@@ -32,8 +32,8 @@
 | `middleware` | `IMiddleware` |
 | `routing` | `IRouter`, `IEndpoint`, `RouteMeta` |
 | `auth` | `IClaims`, `IAuthenticationHandler`, `IAuthorizationPolicy` |
-| `di` | 扫描类型、`HandlerCache`、`RouteEntry` |
-| `mediator_impl` | `Mediator` 具体实现 |
+| `route` | 扫描类型、`HandlerCache`、`RouteEntry` |
+| `mediator` | `IMediator` trait + `Mediator` 具体实现 |
 
 ## host — 运行时层
 

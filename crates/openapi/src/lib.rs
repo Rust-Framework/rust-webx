@@ -1,4 +1,4 @@
-﻿// lrwf-openapi â€” OpenAPI specification generation and API docs UI.
+// lrwf-openapi — OpenAPI specification generation and API docs UI.
 
 mod apiui;
 mod openapi;

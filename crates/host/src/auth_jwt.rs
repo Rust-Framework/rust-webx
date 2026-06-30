@@ -1,6 +1,6 @@
 //! JWT authentication module for the LRWF framework.
 //!
-//! Provides `JwtAuth` â€?an `IAuthenticationHandler` implementation that reads
+//! Provides `JwtAuth` —an `IAuthenticationHandler` implementation that reads
 //! a Bearer token from the `Authorization` header and validates it using
 //! the `jsonwebtoken` crate.
 //!
@@ -27,7 +27,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
 // ---------------------------------------------------------------------------
-// JwtClaims â€?IClaims implementation backed by JWT payload
+// JwtClaims —IClaims implementation backed by JWT payload
 // ---------------------------------------------------------------------------
 
 /// Claims extracted from a JWT token.
@@ -122,7 +122,7 @@ impl IClaims for JwtClaims {
 }
 
 // ---------------------------------------------------------------------------
-// JwtAuth â€?IAuthenticationHandler implementation
+// JwtAuth —IAuthenticationHandler implementation
 // ---------------------------------------------------------------------------
 
 /// JWT-based authentication handler.
@@ -147,7 +147,7 @@ impl JwtAuth {
 #[async_trait::async_trait]
 impl IAuthenticationHandler for JwtAuth {
     async fn authenticate(&self, ctx: &mut dyn IHttpContext) -> Result<Option<Box<dyn IClaims>>> {
-        // Extract token synchronously â€?avoids holding &dyn IHttpContext
+        // Extract token synchronously —avoids holding &dyn IHttpContext
         // across any async boundary, keeping the future Send.
         let token = match ctx.request().header("authorization") {
             Some(h) => h.strip_prefix("Bearer ").map(|t| t.trim().to_string()),

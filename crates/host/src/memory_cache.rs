@@ -1,4 +1,4 @@
-﻿//! In-process memory cache â€?matches ASP.NET Core's `MemoryCache`.
+//! In-process memory cache —matches ASP.NET Core's `MemoryCache`.
 //!
 //! Implements [`IDistributedCache`] and provides typed access
 //! via [`DistributedCacheExtensions`].

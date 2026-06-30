@@ -5,7 +5,7 @@
 mod test_utils;
 
 use rust_webapp_core::auth::{IClaims, IDynamicAuthorizer};
-use rust_webapp_core::di::scan::ResponseData;
+use rust_webapp_core::route::scan::ResponseData;
 use rust_webapp_core::error::{Error, Result as LrwfResult};
 use rust_webapp_core::http::{IClaimsExt, IHttpContext};
 use rust_webapp_core::routing::IEndpoint;

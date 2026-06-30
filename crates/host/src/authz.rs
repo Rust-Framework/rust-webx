@@ -1,10 +1,10 @@
-﻿//! Resource-based authorization module for the LRWF framework.
+//! Resource-based authorization module for the LRWF framework.
 //!
 //! Provides:
-//! - `ResourceAuthorization` â€?an `IAuthorizationPolicy` that checks
+//! - `ResourceAuthorization` —an `IAuthorizationPolicy` that checks
 //!   whether a user's roles or permissions grant access to a specific
 //!   resource (identified by the matched route pattern).
-//! - `AuthorizerSet` â€?collects all `IDynamicAuthorizer` instances from DI
+//! - `AuthorizerSet` —collects all `IDynamicAuthorizer` instances from DI
 //!   and runs them in sequence on protected routes.
 //!
 //! # Example
@@ -50,13 +50,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
-// ResourceAuthorization â€?IAuthorizationPolicy implementation
+// ResourceAuthorization —IAuthorizationPolicy implementation
 // ---------------------------------------------------------------------------
 
 /// Authorization policy that maps route patterns to allowed roles and permissions.
 ///
-/// * `resource_key` â†?`allowed_roles`: users with ANY of these roles are granted access.
-/// * `resource_key` â†?`required_permissions`: users with ANY of these permissions are granted access.
+/// * `resource_key` →`allowed_roles`: users with ANY of these roles are granted access.
+/// * `resource_key` →`required_permissions`: users with ANY of these permissions are granted access.
 ///
 /// A user is authorized if they have at least one matching role OR at least one
 /// matching permission.
@@ -127,7 +127,7 @@ impl IAuthorizationPolicy for ResourceAuthorization {
             }
         }
 
-        // No matching policies found â€?deny by default
+        // No matching policies found —deny by default
         Err(rust_webapp_core::error::Error::Http(format!(
             "Forbidden: no policy grants access to '{} {}'",
             _method, resource_key
@@ -154,7 +154,7 @@ impl IMiddleware for ResourceAuthMiddleware {
         let route_pattern = match ctx.request().route_pattern() {
             Some(p) => p.to_string(),
             None => {
-                // No route matched â€?skip authorization (e.g., static files, health checks)
+                // No route matched —skip authorization (e.g., static files, health checks)
                 return Ok(());
             }
         };
@@ -182,7 +182,7 @@ pub fn resource_auth_middleware(policy: Arc<dyn IAuthorizationPolicy>) -> impl I
 }
 
 // ---------------------------------------------------------------------------
-// AuthorizerSet â€?dynamic authorizer collection
+// AuthorizerSet —dynamic authorizer collection
 // ---------------------------------------------------------------------------
 
 /// A set of `IDynamicAuthorizer` instances collected from the DI container.

@@ -1,4 +1,4 @@
-﻿//! Authentication and authorization traits for the LRWF framework.
+//! Authentication and authorization traits for the LRWF framework.
 //!
 //! Provides:
 //! - `IClaims`: Extracted auth claims (JWT or other token types).
@@ -39,7 +39,7 @@ pub trait IClaims: Send + Sync {
         self.roles().iter().any(|r| r == role)
     }
 
-    /// Alias for `subject()` â€” returns the user identifier.
+    /// Alias for `subject()` — returns the user identifier.
     fn get_userid(&self) -> &str {
         self.subject()
     }
@@ -75,7 +75,7 @@ pub trait IAuthenticationHandler: Send + Sync {
     /// Authenticate the request and return claims, or `None` if not authenticated.
     ///
     /// Uses `&mut dyn IHttpContext` so the returned future is `Send`
-    /// (required by `tokio::spawn` â€” `&dyn IHttpContext` is `!Send`
+    /// (required by `tokio::spawn` — `&dyn IHttpContext` is `!Send`
     /// because `IHttpContext` is not `Sync`).
     async fn authenticate(&self, ctx: &mut dyn IHttpContext) -> Result<Option<Box<dyn IClaims>>>;
 }
@@ -89,16 +89,16 @@ pub trait IAuthenticationHandler: Send + Sync {
 pub trait IAuthorizationPolicy: Send + Sync {
     /// Check if the authenticated user can access the resource.
     ///
-    /// * `claims`  â€” the user's authentication claims.
-    /// * `resource_key` â€” the original route pattern string.
-    /// * `method` â€” the HTTP method.
+    /// * `claims`  — the user's authentication claims.
+    /// * `resource_key` — the original route pattern string.
+    /// * `method` — the HTTP method.
     ///
     /// Returns `Ok(())` if authorized, or an `Err` if forbidden.
     async fn authorize(&self, claims: &dyn IClaims, resource_key: &str, method: &str)
         -> Result<()>;
 }
 
-/// Dynamic authorizer interface â€” pluggable authorization for protected routes.
+/// Dynamic authorizer interface — pluggable authorization for protected routes.
 ///
 /// Implement this trait and register it in the DI container:
 ///
@@ -112,7 +112,7 @@ pub trait IAuthorizationPolicy: Send + Sync {
 ///
 /// # Method
 ///
-/// * `authorize` â€” receives the user's claims, matched route pattern, and HTTP method.
+/// * `authorize` — receives the user's claims, matched route pattern, and HTTP method.
 ///   Returns `Ok(())` if allowed, or `Err` with details if denied.
 #[async_trait::async_trait]
 pub trait IDynamicAuthorizer: Send + Sync {

@@ -28,7 +28,7 @@ use crate::memory_cache::MemoryCache;
 use crate::pipeline::{HandlerFn, MiddlewarePipeline};
 use crate::router::Router;
 use jsonwebtoken::{DecodingKey, Validation};
-use rust_webapp_core::di::scan::RouteEntry;
+use rust_webapp_core::route::scan::RouteEntry;
 use rust_webapp_openapi::{generate_openapi_spec, APIUI_HTML};
 use rust_webapp_spa::SpaMiddleware;
 
@@ -48,7 +48,7 @@ pub struct Host {
     /// The matchit router (retained for introspection).
     #[allow(dead_code)]
     router: Arc<Router>,
-    /// Pre-built router handler â€?eliminates per-request Arc::new.
+    /// Pre-built router handler —eliminates per-request Arc::new.
     router_handler: HandlerFn,
     mode: AppMode,
     #[allow(dead_code)]
@@ -211,7 +211,7 @@ impl HostBuilder {
 
     pub fn build(self) -> Host {
         // Initialize structured logging based on app mode.
-        // This is idempotent â€?subsequent calls are no-ops.
+        // This is idempotent —subsequent calls are no-ops.
         let env_filter = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into());
         if self.mode == AppMode::Development {
             let _ = tracing_subscriber::fmt()
@@ -239,13 +239,13 @@ impl HostBuilder {
         }));
 
         // Set the global provider so #[handler] factories can resolve DI dependencies.
-        rust_webapp_core::di::scan::set_global_provider(Arc::clone(&provider));
+        rust_webapp_core::route::scan::set_global_provider(Arc::clone(&provider));
 
         // Initialize the global handler cache from inventory registrations.
         // Handlers registered via #[handler] are collected into HandlerCache.
         // If a handler struct also has #[inject_attr], its factory will resolve
         // dependencies via the global provider set above.
-        rust_webapp_core::di::scan::HandlerCache::init_global();
+        rust_webapp_core::route::scan::HandlerCache::init_global();
 
         let mut pipeline = MiddlewarePipeline::new();
         let middlewares: Vec<Arc<dyn IMiddleware>> = provider.get_all::<dyn IMiddleware>();
@@ -331,7 +331,7 @@ impl HostBuilder {
         let mut router = Router::new();
         let mut route_count = 0usize;
 
-        // Build dispatch map: handler_type â†?dispatch function
+        // Build dispatch map: handler_type →dispatch function
         #[allow(clippy::type_complexity)]
         let mut dispatch_map: std::collections::HashMap<
             &'static str,
@@ -343,13 +343,13 @@ impl HostBuilder {
             ) -> std::pin::Pin<
                 Box<
                     dyn std::future::Future<
-                            Output = rust_webapp_core::error::Result<rust_webapp_core::di::scan::ResponseData>,
+                            Output = rust_webapp_core::error::Result<rust_webapp_core::route::scan::ResponseData>,
                         > + Send,
                 >,
             >,
         > = std::collections::HashMap::new();
 
-        for dispatch in inventory::iter::<rust_webapp_core::di::scan::RouteDispatch> {
+        for dispatch in inventory::iter::<rust_webapp_core::route::scan::RouteDispatch> {
             dispatch_map.insert(dispatch.handler_type, dispatch.dispatch);
         }
 
@@ -847,7 +847,7 @@ async fn drain_connections(
 // ---------------------------------------------------------------------------
 
 /// Parse a URL string into (scheme, addr) pair.
-/// e.g., "https://0.0.0.0:5030" â†?("https", "0.0.0.0:5030")
+/// e.g., "https://0.0.0.0:5030" →("https", "0.0.0.0:5030")
 fn parse_url(url: &str) -> Result<(&str, String)> {
     if let Some(rest) = url.strip_prefix("https://") {
         Ok(("https", rest.to_string()))

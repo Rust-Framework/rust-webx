@@ -1,4 +1,4 @@
-﻿use proc_macro::TokenStream;
+use proc_macro::TokenStream;
 use quote::quote;
 
 /// Handles #[controller("/base")] on struct definitions or #[controller] on impl blocks.
@@ -33,7 +33,7 @@ pub fn controller_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
         return TokenStream::from(expanded);
     }
 
-    // Try to parse as an impl block â€” pass through unchanged
+    // Try to parse as an impl block — pass through unchanged
     if syn::parse2::<syn::ItemImpl>(proc_macro2::TokenStream::from(item.clone())).is_ok() {
         return item;
     }

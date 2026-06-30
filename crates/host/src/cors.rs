@@ -1,4 +1,4 @@
-﻿//! Cross-Origin Resource Sharing (CORS) middleware.
+//! Cross-Origin Resource Sharing (CORS) middleware.
 //!
 //! Automatically configured from `appsettings.json` `Cors` section.
 //! Handles preflight OPTIONS requests and sets CORS response headers.
@@ -43,7 +43,7 @@ impl Default for CorsConfig {
 
 /// Built-in CORS middleware.
 ///
-/// Reads config from `appsettings.json` â†?`Cors` section at build time
+/// Reads config from `appsettings.json` →`Cors` section at build time
 /// and applies CORS headers to every response. Handles preflight OPTIONS.
 pub struct CorsMiddleware {
     config: CorsConfig,

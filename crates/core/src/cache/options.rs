@@ -1,4 +1,4 @@
-﻿//! Distributed cache entry options â€” matches ASP.NET Core's `DistributedCacheEntryOptions`.
+//! Distributed cache entry options — matches ASP.NET Core's `DistributedCacheEntryOptions`.
 
 use std::time::Duration;
 

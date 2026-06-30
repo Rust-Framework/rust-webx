@@ -1,4 +1,4 @@
-﻿//! HTTP abstraction traits: IHttpContext, IHttpRequest, IHttpResponse.
+//! HTTP abstraction traits: IHttpContext, IHttpRequest, IHttpResponse.
 //!
 //! This module defines the core interfaces for HTTP request/response handling
 //! in the LRWF framework. All types are defined as traits to enable testability
@@ -6,17 +6,17 @@
 //!
 //! # Traits
 //!
-//! - [`IHttpContext`] â€” The central context for a single HTTP request, providing
+//! - [`IHttpContext`] — The central context for a single HTTP request, providing
 //!   access to request, response, and authentication claims.
-//! - [`IHttpRequest`] â€” Read-only access to the incoming HTTP request.
-//! - [`IHttpResponse`] â€” Mutable access to the outgoing HTTP response.
-//! - [`IClaimsExt`] â€” Extension for storing/retrieving authentication claims.
-//! - [`FromHttpContext`] â€” Build a request struct from HTTP request data.
+//! - [`IHttpRequest`] — Read-only access to the incoming HTTP request.
+//! - [`IHttpResponse`] — Mutable access to the outgoing HTTP response.
+//! - [`IClaimsExt`] — Extension for storing/retrieving authentication claims.
+//! - [`FromHttpContext`] — Build a request struct from HTTP request data.
 //!
 //! # Helpers
 //!
-//! - [`read_json_body`] â€” Deserialize JSON from the request body.
-//! - [`write_json_response`] â€” Serialize a value as JSON into the response.
+//! - [`read_json_body`] — Deserialize JSON from the request body.
+//! - [`write_json_response`] — Serialize a value as JSON into the response.
 
 use crate::auth::IClaims;
 use crate::error::Result;
@@ -37,7 +37,7 @@ impl HttpStatus {
 }
 
 // ---------------------------------------------------------------------------
-// Claims extension for IHttpContext â€” MUST be defined before IHttpContext
+// Claims extension for IHttpContext — MUST be defined before IHttpContext
 // ---------------------------------------------------------------------------
 
 /// Extension trait that adds claims storage to an `IHttpContext`.

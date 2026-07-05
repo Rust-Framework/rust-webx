@@ -24,6 +24,7 @@ use crate::authz::collect_authorizers;
 use crate::context::HttpContext;
 use crate::cors::{CorsConfig, CorsMiddleware};
 use crate::endpoint::{StaticHtmlEndpoint, StaticJsonEndpoint, StubEndpoint};
+use crate::health::{HealthCheckRegistry, HealthStatus};
 use crate::memory_cache::MemoryCache;
 use crate::pipeline::{HandlerFn, MiddlewarePipeline};
 use crate::router::Router;
@@ -64,9 +65,11 @@ pub struct HostBuilder {
     service_configs: Vec<Box<dyn FnOnce(ServiceCollection) -> ServiceCollection + Send>>,
     mode: AppMode,
     spa_root: Option<String>,
+    spa_disabled: bool,
     options_modifiers: Vec<Box<dyn FnOnce(&mut AppOptions) + Send>>,
     cors_config: Option<CorsConfig>,
     auth_enabled: bool,
+    health_registry: Arc<HealthCheckRegistry>,
 }
 
 #[allow(clippy::type_complexity)]
@@ -98,9 +101,11 @@ impl HostBuilder {
             // 应用可通过 `.mode()` 显式覆盖。
             mode: AppMode::from_env(),
             spa_root: None,
+            spa_disabled: false,
             options_modifiers: Vec::new(),
             cors_config: None,
             auth_enabled: false,
+            health_registry: HealthCheckRegistry::new(),
         }
     }
 
@@ -162,6 +167,16 @@ impl HostBuilder {
         self
     }
 
+    /// Explicitly disable SPA, including auto-detection.
+    ///
+    /// By default, the framework auto-detects `wwwroot/` under `app_base()`.
+    /// Call this when you want a pure API host without SPA fallback,
+    /// or in tests to isolate framework behavior from filesystem state.
+    pub fn no_spa(mut self) -> Self {
+        self.spa_disabled = true;
+        self
+    }
+
     pub fn use_cors(mut self, config: CorsConfig) -> Self {
         self.cors_config = Some(config);
         self
@@ -209,6 +224,65 @@ impl HostBuilder {
         self
     }
 
+    /// Register a middleware by type.
+    ///
+    /// Middleware `T` is registered as Singleton in the DI container and
+    /// automatically collected by `provider.get_all::<dyn IMiddleware>()`
+    /// during `build()`.
+    ///
+    /// ```ignore
+    /// Host::builder()
+    ///     .use_middleware::<RequestIdMiddleware>()
+    ///     .build()
+    /// ```
+    pub fn use_middleware<T: IMiddleware + Default + 'static>(mut self) -> Self {
+        self.service_configs.push(Box::new(|svc| {
+            svc.singleton::<dyn IMiddleware>(|_| Arc::new(T::default()) as Arc<dyn IMiddleware>)
+        }));
+        self
+    }
+
+    /// Register a middleware with a custom factory function.
+    ///
+    /// Use this when the middleware requires constructor parameters:
+    ///
+    /// ```ignore
+    /// Host::builder()
+    ///     .use_middleware_with(|| {
+    ///         Arc::new(RateLimitMiddleware::new(10.0, 20)) as Arc<dyn IMiddleware>
+    ///     })
+    ///     .build()
+    /// ```
+    pub fn use_middleware_with<F>(mut self, factory: F) -> Self
+    where
+        F: Fn() -> Arc<dyn IMiddleware> + Send + Sync + 'static,
+    {
+        self.service_configs.push(Box::new(move |svc| {
+            svc.singleton::<dyn IMiddleware>(move |_| factory())
+        }));
+        self
+    }
+
+    /// Register a health check probe.
+    ///
+    /// Health checks are exposed via `/health` and `/health/ready` endpoints
+    /// following RFC 8407 (`application/health+json` content type).
+    ///
+    /// ```ignore
+    /// Host::builder()
+    ///     .add_health_check("database", || -> HealthStatus {
+    ///         if db_ping() { HealthStatus::pass() } else { HealthStatus::fail("db unreachable") }
+    ///     })
+    ///     .build()
+    /// ```
+    pub fn add_health_check<F>(self, name: impl Into<String>, check: F) -> Self
+    where
+        F: Fn() -> HealthStatus + Send + Sync + 'static,
+    {
+        self.health_registry.register(name, Arc::new(check));
+        self
+    }
+
     pub fn build(self) -> Host {
         // Initialize structured logging based on app mode.
         // This is idempotent —subsequent calls are no-ops.
@@ -231,6 +305,10 @@ impl HostBuilder {
             svc = cfg(svc);
         }
 
+        // Register HealthCheckRegistry as a singleton for handler injection.
+        let health_registry = Arc::clone(&self.health_registry);
+        svc = svc.instance(health_registry);
+
         let provider = Arc::new(svc.build().unwrap_or_else(|e| {
             panic!(
                 "Failed to build ServiceProvider: {}. Check your DI registrations.",
@@ -248,6 +326,14 @@ impl HostBuilder {
         rust_webapp_core::route::scan::HandlerCache::init_global();
 
         let mut pipeline = MiddlewarePipeline::new();
+
+        // Default security & observability middleware (zero-config safe defaults).
+        // Order: SecurityHeaders → RequestId → user middleware → CORS → SPA → Auth
+        // - SecurityHeaders first so every response (including short-circuited) gets headers
+        // - RequestId first so every response carries a trace ID
+        pipeline.add_middleware(Arc::new(crate::security_headers::SecurityHeadersMiddleware::new()));
+        pipeline.add_middleware(Arc::new(crate::request_id::RequestIdMiddleware::new()));
+
         let middlewares: Vec<Arc<dyn IMiddleware>> = provider.get_all::<dyn IMiddleware>();
         for mw in middlewares {
             pipeline.add_middleware(mw);
@@ -275,15 +361,20 @@ impl HostBuilder {
         // SPA 自动启用：若应用显式调用 `use_spa`，使用指定根目录；
         // 否则框架自动检测应用基准目录下的 `wwwroot/`，存在即启用 SPA。
         // 这样新应用无需在 main.rs 手写 `use_spa("wwwroot")` 样板。
-        let spa_root = self.spa_root.clone().or_else(|| {
-            let candidate = rust_webapp_core::paths::app_base().join("wwwroot");
-            if candidate.is_dir() {
-                tracing::info!("[Host] Auto-detected SPA root: {}", candidate.display());
-                Some(candidate.to_string_lossy().into_owned())
-            } else {
-                None
-            }
-        });
+        // `no_spa()` 可显式禁用此行为（含自动检测），用于纯 API 主机或测试隔离。
+        let spa_root = if self.spa_disabled {
+            None
+        } else {
+            self.spa_root.clone().or_else(|| {
+                let candidate = rust_webapp_core::paths::app_base().join("wwwroot");
+                if candidate.is_dir() {
+                    tracing::info!("[Host] Auto-detected SPA root: {}", candidate.display());
+                    Some(candidate.to_string_lossy().into_owned())
+                } else {
+                    None
+                }
+            })
+        };
         if let Some(ref spa_root) = spa_root {
             pipeline.add_middleware(Arc::new(SpaMiddleware::new(spa_root.clone())));
         }
@@ -371,9 +462,7 @@ impl HostBuilder {
         router.register(
             HttpMethod::Get,
             "/api/openapi.json",
-            Arc::new(StaticJsonEndpoint {
-                body: openapi_bytes,
-            }),
+            Arc::new(StaticJsonEndpoint::new(openapi_bytes)),
         );
         router.register(
             HttpMethod::Get,
@@ -381,30 +470,37 @@ impl HostBuilder {
             Arc::new(StaticHtmlEndpoint { body: APIUI_HTML }),
         );
 
-        // Health check endpoints for monitoring / container orchestration
-        let health_json =
-            serde_json::to_vec(&serde_json::json!({"status":"ok"})).unwrap_or_default();
-        let health_endpoint: Arc<dyn IEndpoint> =
-            Arc::new(StaticJsonEndpoint { body: health_json });
+        // Health check endpoints (RFC 8407 application/health+json)
+        // /health and /healthz: aggregate status from registered probes
+        let health_body = build_health_response(&self.health_registry);
+        let health_endpoint: Arc<dyn IEndpoint> = Arc::new(StaticJsonEndpoint {
+            body: health_body,
+            content_type: "application/health+json",
+        });
         router.register(HttpMethod::Get, "/health", Arc::clone(&health_endpoint));
         router.register(HttpMethod::Get, "/healthz", health_endpoint);
 
-        // Kubernetes liveness endpoint (always returns OK as long as process is alive)
-        let live_json =
-            serde_json::to_vec(&serde_json::json!({"status":"alive"})).unwrap_or_default();
+        // /health/live: liveness (process alive → pass, no probe queries)
+        let live_body = serde_json::to_vec(&serde_json::json!({"status":"pass"}))
+            .unwrap_or_default();
         router.register(
             HttpMethod::Get,
             "/health/live",
-            Arc::new(StaticJsonEndpoint { body: live_json }),
+            Arc::new(StaticJsonEndpoint {
+                body: live_body,
+                content_type: "application/health+json",
+            }),
         );
 
-        // Kubernetes readiness endpoint (checks registered health probes)
-        let ready_json =
-            serde_json::to_vec(&serde_json::json!({"status":"ready"})).unwrap_or_default();
+        // /health/ready: readiness (queries Registry, same as /health)
+        let ready_body = build_health_response(&self.health_registry);
         router.register(
             HttpMethod::Get,
             "/health/ready",
-            Arc::new(StaticJsonEndpoint { body: ready_json }),
+            Arc::new(StaticJsonEndpoint {
+                body: ready_body,
+                content_type: "application/health+json",
+            }),
         );
 
         if self.mode == AppMode::Development {
@@ -1089,4 +1185,26 @@ fn build_tls_acceptor(cert_path: &str, key_path: &str) -> Result<TlsAcceptor> {
         .map_err(|e| rust_webapp_core::error::Error::Http(format!("TLS config error: {}", e)))?;
 
     Ok(TlsAcceptor::from(std::sync::Arc::new(config)))
+}
+
+// ---------------------------------------------------------------------------
+// Health response helper (RFC 8407)
+// ---------------------------------------------------------------------------
+
+/// Build an RFC 8407 health+json response body from the registry.
+///
+/// When the registry has no checks, returns `{"status":"pass"}`.
+/// Otherwise returns `{"status":<overall>,"checks":[...]}`.
+fn build_health_response(registry: &HealthCheckRegistry) -> Vec<u8> {
+    let entries = registry.snapshot();
+    let overall = registry.overall_status();
+    let body = if entries.is_empty() {
+        serde_json::json!({ "status": overall })
+    } else {
+        serde_json::json!({
+            "status": overall,
+            "checks": entries
+        })
+    };
+    serde_json::to_vec(&body).unwrap_or_default()
 }

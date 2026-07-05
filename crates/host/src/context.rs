@@ -263,6 +263,14 @@ impl IHttpResponse for HttpResponse {
         self.body = Some(text.as_bytes().to_vec());
         Ok(())
     }
+
+    fn body_bytes(&self) -> Vec<u8> {
+        self.body.clone().unwrap_or_default()
+    }
+
+    fn header(&self, key: &str) -> Option<&str> {
+        self.headers.get(key).map(|s| s.as_str())
+    }
 }
 
 /// Parse a query string like "key1=val1&key2=val2" into a HashMap.

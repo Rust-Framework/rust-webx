@@ -1,10 +1,9 @@
 //! Type scanning and automatic service registration logic.
 //!
-//! In the LRWF framework, "scanning" is achieved at compile time via:
+//! In the rust-webapp framework, "scanning" is achieved at compile time via:
 //!
 //! 1. `#[rust_dicore::module]` + `rust_dicore::inject!` — declare handlers in a module group
-//! 2. `#[endpoint]` — register route metadata via `inventory::submit!`
-//! 3. `#[controller]` — register controller metadata via `inventory::submit!`
+//! 2. `#[endpoint]` (or shortcuts `#[get]`, `#[post]`, `#[put]`, `#[delete]`) — register route metadata via `inventory::submit!`
 //!
 //! This module provides the `RouteEntry` type that connects compile-time
 //! macro output to runtime routing.
@@ -44,7 +43,7 @@ pub struct ParamMeta {
     pub type_hint: &'static str,
 }
 
-/// A route entry registered at compile time via `#[endpoint]` or `#[controller]`.
+/// A route entry registered at compile time via `#[endpoint]` (or its shortcuts `#[get]`/`#[post]`/...).
 ///
 /// Collected by the `inventory` crate and read at application startup.
 #[derive(Debug, Clone)]
@@ -55,7 +54,7 @@ pub struct RouteEntry {
     /// Route path pattern (e.g., "/users/{id}").
     pub path: &'static str,
 
-    /// Type name of the request or controller handler.
+    /// Type name of the request handler.
     /// Used to dispatch to the correct handler at runtime.
     pub handler_type: &'static str,
 
@@ -71,21 +70,8 @@ pub struct RouteEntry {
     /// OpenAPI parameter metadata: path params, body params, etc.
     pub params: &'static [ParamMeta],
 
-    /// Source kind: "request" for IRequest endpoints, "controller" for controller methods.
-    pub source: RouteSource,
-
     /// "" = public, "authenticated" = any valid JWT, otherwise specific role name.
     pub required_role: &'static str,
-}
-
-/// Distinguishes between IRequest-based and Controller-based endpoints.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RouteSource {
-    /// Endpoint registered via `#[endpoint]` on an `impl IRequest` block.
-    RequestEndpoint,
-
-    /// Endpoint registered via `#[controller]` with method attributes.
-    ControllerMethod,
 }
 
 // Collect RouteEntry instances at compile time using `inventory`.
@@ -150,9 +136,9 @@ unsafe impl Sync for RouteDispatch {}
 unsafe impl Send for RouteDispatch {}
 
 impl RouteEntry {
-    /// Create a new request-based route entry.
+    /// Create a new route entry.
     #[allow(clippy::too_many_arguments)]
-    pub const fn request(
+    pub const fn new(
         method: HttpMethod,
         path: &'static str,
         handler_type: &'static str,
@@ -170,32 +156,6 @@ impl RouteEntry {
             summary,
             description,
             params,
-            source: RouteSource::RequestEndpoint,
-            required_role,
-        }
-    }
-
-    /// Create a new controller-based route entry.
-    #[allow(clippy::too_many_arguments)]
-    pub const fn controller(
-        method: HttpMethod,
-        path: &'static str,
-        handler_type: &'static str,
-        rsp_type: &'static str,
-        summary: &'static str,
-        description: &'static str,
-        params: &'static [ParamMeta],
-        required_role: &'static str,
-    ) -> Self {
-        Self {
-            method,
-            path,
-            handler_type,
-            rsp_type,
-            summary,
-            description,
-            params,
-            source: RouteSource::ControllerMethod,
             required_role,
         }
     }

@@ -47,6 +47,7 @@ use rust_webapp_core::error::Result;
 use rust_webapp_core::http::IHttpContext;
 use rust_webapp_core::middleware::IMiddleware;
 use std::collections::HashMap;
+use std::ops::ControlFlow;
 use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
@@ -149,13 +150,13 @@ struct ResourceAuthMiddleware {
 
 #[async_trait::async_trait]
 impl IMiddleware for ResourceAuthMiddleware {
-    async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<()> {
+    async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
         // Get the matched route pattern (set by the router)
         let route_pattern = match ctx.request().route_pattern() {
             Some(p) => p.to_string(),
             None => {
                 // No route matched —skip authorization (e.g., static files, health checks)
-                return Ok(());
+                return Ok(ControlFlow::Continue(()));
             }
         };
 
@@ -164,7 +165,7 @@ impl IMiddleware for ResourceAuthMiddleware {
         // Get claims from context (set by authentication middleware)
         // IHttpContext extends IClaimsExt, so claims() is available directly.
         match ctx.claims() {
-            Some(claims) => self.policy.authorize(claims, &route_pattern, &method).await,
+            Some(claims) => self.policy.authorize(claims, &route_pattern, &method).await.map(|_| ControlFlow::Continue(())),
             None => Err(rust_webapp_core::error::Error::Http(
                 "Unauthorized: no authentication claims found".to_string(),
             )),

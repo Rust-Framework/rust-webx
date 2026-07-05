@@ -1,4 +1,4 @@
-﻿//! Test utilities for the lrwf-http test suite.
+//! Test utilities for the lrwf-http test suite.
 //!
 //! Provides a mock IHttpContext that can be used to test middleware,
 //! routers, and other HTTP-layer components without spawning a hyper server.
@@ -175,5 +175,16 @@ impl IHttpResponse for TestHttpResponse {
     async fn write_text(&mut self, text: &str) -> rust_webapp_core::error::Result<()> {
         self.body = Some(text.as_bytes().to_vec());
         Ok(())
+    }
+
+    fn body_bytes(&self) -> Vec<u8> {
+        self.body.clone().unwrap_or_default()
+    }
+
+    fn header(&self, key: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(key))
+            .map(|(_, v)| v.as_str())
     }
 }

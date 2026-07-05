@@ -4,6 +4,7 @@ use rust_webapp_core::error::Result as LrwfResult;
 use rust_webapp_core::http::IHttpContext;
 use rust_webapp_core::middleware::IMiddleware;
 use rust_webapp_host::pipeline::{HandlerFn, MiddlewarePipeline};
+use std::ops::ControlFlow;
 use std::sync::Arc;
 
 #[allow(dead_code)]
@@ -19,8 +20,8 @@ impl CounterMiddleware {
 
 #[async_trait::async_trait]
 impl IMiddleware for CounterMiddleware {
-    async fn invoke(&self, _ctx: &mut dyn IHttpContext) -> LrwfResult<()> {
-        Ok(())
+    async fn invoke(&self, _ctx: &mut dyn IHttpContext) -> LrwfResult<ControlFlow<()>> {
+        Ok(ControlFlow::Continue(()))
     }
 }
 
@@ -72,9 +73,9 @@ async fn pipeline_middleware_can_modify_context() {
 
     #[async_trait::async_trait]
     impl IMiddleware for HeaderMiddleware {
-        async fn invoke(&self, ctx: &mut dyn IHttpContext) -> LrwfResult<()> {
+        async fn invoke(&self, ctx: &mut dyn IHttpContext) -> LrwfResult<ControlFlow<()>> {
             ctx.response_mut().set_header("x-powered-by", "lrwf-test");
-            Ok(())
+            Ok(ControlFlow::Continue(()))
         }
     }
 
@@ -106,8 +107,8 @@ async fn pipeline_after_hook_executed() {
 
     #[async_trait::async_trait]
     impl IMiddleware for AfterMiddleware {
-        async fn invoke(&self, _ctx: &mut dyn IHttpContext) -> LrwfResult<()> {
-            Ok(())
+        async fn invoke(&self, _ctx: &mut dyn IHttpContext) -> LrwfResult<ControlFlow<()>> {
+            Ok(ControlFlow::Continue(()))
         }
 
         async fn after(&self, ctx: &mut dyn IHttpContext) -> LrwfResult<()> {
@@ -153,9 +154,9 @@ async fn pipeline_after_hooks_executed_in_reverse_order() {
 
     #[async_trait::async_trait]
     impl IMiddleware for OrderMiddleware {
-        async fn invoke(&self, _ctx: &mut dyn IHttpContext) -> LrwfResult<()> {
+        async fn invoke(&self, _ctx: &mut dyn IHttpContext) -> LrwfResult<ControlFlow<()>> {
             self.order.lock().unwrap().push(self.name);
-            Ok(())
+            Ok(ControlFlow::Continue(()))
         }
 
         async fn after(&self, _ctx: &mut dyn IHttpContext) -> LrwfResult<()> {
@@ -205,7 +206,7 @@ async fn pipeline_short_circuit_on_invoke_error() {
 
     #[async_trait::async_trait]
     impl IMiddleware for FailingMiddleware {
-        async fn invoke(&self, _ctx: &mut dyn IHttpContext) -> LrwfResult<()> {
+        async fn invoke(&self, _ctx: &mut dyn IHttpContext) -> LrwfResult<ControlFlow<()>> {
             Err(rust_webapp_core::error::Error::Http("blocked".into()))
         }
     }
@@ -243,8 +244,8 @@ async fn pipeline_after_hooks_skipped_on_final_handler_error() {
 
     #[async_trait::async_trait]
     impl IMiddleware for ObserveMiddleware {
-        async fn invoke(&self, _ctx: &mut dyn IHttpContext) -> LrwfResult<()> {
-            Ok(())
+        async fn invoke(&self, _ctx: &mut dyn IHttpContext) -> LrwfResult<ControlFlow<()>> {
+            Ok(ControlFlow::Continue(()))
         }
         async fn after(&self, _ctx: &mut dyn IHttpContext) -> LrwfResult<()> {
             self.after_ran
@@ -275,4 +276,86 @@ async fn pipeline_after_hooks_skipped_on_final_handler_error() {
     // after hooks are NOT called when the final handler returns Err
     // (because `?` short-circuits before the reverse pass loop)
     assert!(!after_ran.load(std::sync::atomic::Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn pipeline_short_circuit_via_control_flow_break() {
+    struct BreakMiddleware;
+
+    #[async_trait::async_trait]
+    impl IMiddleware for BreakMiddleware {
+        async fn invoke(&self, ctx: &mut dyn IHttpContext) -> LrwfResult<ControlFlow<()>> {
+            ctx.response_mut().set_status(204);
+            Ok(ControlFlow::Break(()))
+        }
+    }
+
+    let mut pipeline = MiddlewarePipeline::new();
+    pipeline.add_middleware(Arc::new(BreakMiddleware));
+
+    let mut ctx = test_utils::TestHttpContext::new("GET", "/test");
+
+    let final_handler: HandlerFn = Arc::new(move |ctx: &mut dyn IHttpContext| {
+        Box::pin(async move {
+            ctx.response_mut().write_text("should-not-reach").await?;
+            Ok(())
+        })
+    });
+
+    let result = pipeline.execute(&mut ctx, final_handler).await;
+    assert!(result.is_ok(), "Break is not an error");
+
+    let (status, _headers, body) = ctx.into_response_parts();
+    assert_eq!(status, 204, "Break should preserve the response set by middleware");
+    assert!(body.is_none(), "final handler should be skipped on Break");
+}
+
+#[tokio::test]
+async fn pipeline_break_runs_after_hooks_on_executed_middleware() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct ContinueThenAfter {
+        after_ran: Arc<AtomicBool>,
+    }
+
+    #[async_trait::async_trait]
+    impl IMiddleware for ContinueThenAfter {
+        async fn invoke(&self, _ctx: &mut dyn IHttpContext) -> LrwfResult<ControlFlow<()>> {
+            Ok(ControlFlow::Continue(()))
+        }
+        async fn after(&self, _ctx: &mut dyn IHttpContext) -> LrwfResult<()> {
+            self.after_ran.store(true, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    struct BreakMiddleware;
+
+    #[async_trait::async_trait]
+    impl IMiddleware for BreakMiddleware {
+        async fn invoke(&self, _ctx: &mut dyn IHttpContext) -> LrwfResult<ControlFlow<()>> {
+            Ok(ControlFlow::Break(()))
+        }
+    }
+
+    let after_ran = Arc::new(AtomicBool::new(false));
+
+    let mut pipeline = MiddlewarePipeline::new();
+    pipeline.add_middleware(Arc::new(ContinueThenAfter { after_ran: Arc::clone(&after_ran) }));
+    pipeline.add_middleware(Arc::new(BreakMiddleware));
+
+    let mut ctx = test_utils::TestHttpContext::new("GET", "/test");
+
+    let final_handler: HandlerFn = Arc::new(move |ctx: &mut dyn IHttpContext| {
+        Box::pin(async move {
+            ctx.response_mut().write_text("should-not-reach").await?;
+            Ok(())
+        })
+    });
+
+    pipeline.execute(&mut ctx, final_handler).await.unwrap();
+
+    // The first middleware's after hook should still run even though
+    // the second middleware short-circuited.
+    assert!(after_ran.load(Ordering::SeqCst), "after hooks on executed middleware should run");
 }

@@ -41,18 +41,6 @@ pub fn shortcut_delete(attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 // =====================================================================
-// rust_webapp::request! declaration macro (stub)
-// =====================================================================
-
-pub fn request_macro_impl(input: TokenStream) -> TokenStream {
-    let _tokens = proc_macro2::TokenStream::from(input);
-    let expanded = quote! {
-        compile_error!("rust_webapp::request! not yet implemented. Use #[get(\"/path\")] on impl IRequest<T>.");
-    };
-    TokenStream::from(expanded)
-}
-
-// =====================================================================
 // Internal helpers
 // =====================================================================
 
@@ -139,7 +127,7 @@ fn emit_endpoint(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
 
         ::inventory::submit! {
-            ::rust_webapp::RouteEntry::request(
+            ::rust_webapp::RouteEntry::new(
                 ::rust_webapp::HttpMethod::#method_ident,
                 #path_str,
                 #req_type_name,

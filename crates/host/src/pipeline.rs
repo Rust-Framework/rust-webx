@@ -36,21 +36,38 @@ impl MiddlewarePipeline {
     }
 
     /// Execute middleware onion: invoke forward, final handler, after hooks reverse.
+    ///
+    /// Supports short-circuit: if a middleware's `invoke` returns `ControlFlow::Break(())`,
+    /// remaining middleware and the final handler are skipped. `after` hooks on
+    /// already-executed middleware still run in reverse order.
     pub async fn execute(
         &self,
         ctx: &mut dyn IHttpContext,
         final_handler: HandlerFn,
     ) -> Result<()> {
-        // Forward pass: invoke each middleware
+        use std::ops::ControlFlow;
+
+        let mut executed: Vec<Arc<dyn IMiddleware>> = Vec::new();
+        let mut short_circuited = false;
+
+        // Forward pass: invoke each middleware, track executed for after hooks
         for middleware in &self.middlewares {
-            middleware.invoke(ctx).await?;
+            match middleware.invoke(ctx).await? {
+                ControlFlow::Continue(()) => executed.push(Arc::clone(middleware)),
+                ControlFlow::Break(()) => {
+                    short_circuited = true;
+                    break;
+                }
+            }
         }
 
-        // Run the final handler (router)
-        final_handler(ctx).await?;
+        // Run the final handler (router) only if not short-circuited
+        if !short_circuited {
+            final_handler(ctx).await?;
+        }
 
-        // Reverse pass: after hooks
-        for middleware in self.middlewares.iter().rev() {
+        // Reverse pass: after hooks on executed middleware only
+        for middleware in executed.into_iter().rev() {
             middleware.after(ctx).await?;
         }
 

@@ -33,7 +33,7 @@
 | `ActionResult<T>` | `Result<T>` | 返回类型 |
 | `NotFound()` | `Error::NotFound` | 404 |
 | `BadRequest()` | `Error::Validation` | 400 |
-| `IApplicationBuilder` | `HostAppBuilder` | 应用配置 |
+| `IApplicationBuilder` | `HostBuilder`（含 `use_middleware`） | 应用配置 |
 
 ## Axum ↔ rust-webapp
 

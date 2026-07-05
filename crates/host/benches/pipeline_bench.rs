@@ -1,4 +1,4 @@
-﻿//! Benchmark: Middleware pipeline execution.
+//! Benchmark: Middleware pipeline execution.
 //!
 //! Measures pipeline throughput with varying numbers of middleware.
 
@@ -7,6 +7,7 @@ use rust_webapp_core::error::Result as LrwfResult;
 use rust_webapp_core::http::IHttpContext;
 use rust_webapp_core::middleware::IMiddleware;
 use rust_webapp_host::pipeline::{HandlerFn, MiddlewarePipeline};
+use std::ops::ControlFlow;
 use std::sync::Arc;
 
 /// No-op middleware for benchmarking.
@@ -14,8 +15,8 @@ struct NoopMiddleware;
 
 #[async_trait::async_trait]
 impl IMiddleware for NoopMiddleware {
-    async fn invoke(&self, _ctx: &mut dyn IHttpContext) -> LrwfResult<()> {
-        Ok(())
+    async fn invoke(&self, _ctx: &mut dyn IHttpContext) -> LrwfResult<ControlFlow<()>> {
+        Ok(ControlFlow::Continue(()))
     }
 }
 

@@ -6,6 +6,7 @@
 use rust_webapp_core::error::Result;
 use rust_webapp_core::http::IHttpContext;
 use rust_webapp_core::middleware::IMiddleware;
+use std::ops::ControlFlow;
 
 /// CORS configuration loaded from appsettings.json.
 #[derive(Debug, Clone)]
@@ -58,7 +59,7 @@ impl CorsMiddleware {
 
 #[async_trait::async_trait]
 impl IMiddleware for CorsMiddleware {
-    async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<()> {
+    async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
         let origin = ctx.request().header("origin");
 
         // Determine allowed origin
@@ -100,18 +101,21 @@ impl IMiddleware for CorsMiddleware {
             );
             ctx.response_mut()
                 .set_header("access-control-max-age", &self.config.max_age.to_string());
-        } else {
-            // For normal requests, expose headers
-            if let Some(ref expose) = allowed {
-                if expose != "*" {
-                    ctx.response_mut().set_header(
-                        "access-control-expose-headers",
-                        &self.config.headers.join(", "),
-                    );
-                }
+            // Short-circuit: preflight response is complete, no need to
+            // continue to router or final handler.
+            return Ok(ControlFlow::Break(()));
+        }
+
+        // For normal requests, expose headers
+        if let Some(ref expose) = allowed {
+            if expose != "*" {
+                ctx.response_mut().set_header(
+                    "access-control-expose-headers",
+                    &self.config.headers.join(", "),
+                );
             }
         }
 
-        Ok(())
+        Ok(ControlFlow::Continue(()))
     }
 }

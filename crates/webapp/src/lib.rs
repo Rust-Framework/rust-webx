@@ -2,7 +2,7 @@
 // Re-exports all types for a unified `use rust_webapp::*` experience.
 
 // --- Core traits ---
-pub use rust_webapp_core::app::{IApplicationBuilder, IHost};
+pub use rust_webapp_core::app::IHost;
 pub use rust_webapp_core::auth::{
     IAuthenticationHandler, IAuthorizationPolicy, IClaims, IDynamicAuthorizer,
 };
@@ -26,7 +26,7 @@ pub use rust_webapp_core::middleware::IMiddleware;
 pub use rust_webapp_core::mode::AppMode;
 pub use rust_webapp_core::pagination::{PagedRequest, PagedResponse};
 pub use rust_webapp_core::paths::{app_base, looks_like_app_base};
-pub use rust_webapp_core::pipeline::{IPipelineBehavior, IServiceResolver};
+pub use rust_webapp_core::pipeline::IPipelineBehavior;
 pub use rust_webapp_core::problem::{FieldError, ProblemDetails};
 pub use rust_webapp_core::routing::{HttpMethod, IEndpoint, IRouter, RouteMeta};
 
@@ -34,7 +34,7 @@ pub use rust_webapp_core::routing::{HttpMethod, IEndpoint, IRouter, RouteMeta};
 pub use rust_webapp_core::route::ext::{is_mediator_active, should_scan_endpoints, IServiceCollectionExt};
 pub use rust_webapp_core::route::scan::{
     global_provider, set_global_provider, HandlerCache, HandlerEntry, HandlerRegistration,
-    ParamMeta, ResponseData, RouteDispatch, RouteEntry, RouteSource,
+    ParamMeta, ResponseData, RouteDispatch, RouteEntry,
 };
 
 // --- HTTP layer ---
@@ -42,13 +42,13 @@ pub use rust_webapp_host::auth_jwt::{init_jwt_secret, jwt_middleware, jwt_secret
 pub use rust_webapp_host::authz::{
     collect_authorizers, resource_auth_middleware, AuthorizerSet, ResourceAuthorization,
 };
-pub use rust_webapp_host::compression::{compress_gzip, CompressionConfig};
+pub use rust_webapp_host::compression::{compress_gzip, CompressionConfig, CompressionMiddleware};
 pub use rust_webapp_host::context::{HttpContext, HttpRequest, HttpResponse};
 pub use rust_webapp_host::cors::{CorsConfig, CorsMiddleware};
 pub use rust_webapp_host::endpoint::{
     ControllerEndpoint, RequestEndpoint, StaticHtmlEndpoint, StaticJsonEndpoint,
 };
-pub use rust_webapp_host::health::{HealthCheckFn, HealthCheckRegistry, HealthStatus};
+pub use rust_webapp_host::health::{HealthCheckEntry, HealthCheckFn, HealthCheckRegistry, HealthStatus};
 pub use rust_webapp_host::memory_cache::MemoryCache;
 pub use rust_webapp_host::pipeline::{HandlerFn, MiddlewarePipeline};
 pub use rust_webapp_host::rate_limit::{RateLimitMiddleware, RateLimiter};
@@ -70,8 +70,8 @@ pub use rust_webapp_openapi::{generate_openapi_spec, APIUI_HTML};
 
 // --- Macros ---
 pub use rust_webapp_macros::{
-    authorize, claims, controller, delete, endpoint, from_body, from_query, from_route,
-    get, handler, http_delete, http_get, http_post, http_put, post, put, request,
+    authorize, claims, delete, endpoint, from_body, from_query, from_route,
+    get, handler, post, put,
 };
 
 // --- Re-export rust_dicore (for manual registration, #[inject] auto-registration, and module blocks) ---

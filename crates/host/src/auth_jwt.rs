@@ -24,6 +24,7 @@ use rust_webapp_core::http::IHttpContext;
 use rust_webapp_core::middleware::IMiddleware;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::ops::ControlFlow;
 use std::sync::{Arc, OnceLock};
 
 // ---------------------------------------------------------------------------
@@ -159,8 +160,10 @@ impl IAuthenticationHandler for JwtAuth {
             _ => return Ok(None),
         };
 
-        let token_data = decode::<RawClaims>(&token, &self.decoding_key, &self.validation)
-            .map_err(|e| rust_webapp_core::error::Error::Http(format!("JWT decode error: {}", e)))?;
+        let token_data = match decode::<RawClaims>(&token, &self.decoding_key, &self.validation) {
+            Ok(d) => d,
+            Err(_) => return Ok(None),
+        };
 
         let claims: JwtClaims = token_data.claims.into();
         Ok(Some(Box::new(claims)))
@@ -179,12 +182,12 @@ struct AuthMiddleware {
 
 #[async_trait::async_trait]
 impl IMiddleware for AuthMiddleware {
-    async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<()> {
+    async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
         if let Some(claims) = self.handler.authenticate(ctx).await? {
             // IHttpContext extends IClaimsExt, so set_claims is available directly.
             ctx.set_claims(claims);
         }
-        Ok(())
+        Ok(ControlFlow::Continue(()))
     }
 }
 
@@ -206,12 +209,9 @@ static JWT_ENCODING_SECRET: OnceLock<String> = OnceLock::new();
 /// This is called automatically by `.add_authentication()` on the `HostBuilder`,
 /// but can also be called manually if needed.
 ///
-/// # Panics
-/// Panics if called more than once (it is intended to be set once at startup).
+/// Idempotent: subsequent calls are no-ops (the first secret wins).
 pub fn init_jwt_secret(secret: &str) {
-    JWT_ENCODING_SECRET
-        .set(secret.to_owned())
-        .expect("init_jwt_secret has already been called");
+    let _ = JWT_ENCODING_SECRET.set(secret.to_owned());
 }
 
 /// Retrieve the global JWT encoding secret previously set via [`init_jwt_secret`].

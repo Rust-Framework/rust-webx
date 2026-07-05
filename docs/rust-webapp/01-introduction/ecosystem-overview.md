@@ -85,7 +85,6 @@ graph BT
 | `#[get("/path")]` 等 | 路由注册 + HTTP 方法 |
 | `#[handler]` | Handler 自动 DI 注册 |
 | `#[authorize]` | 声明式授权元数据 |
-| `#[controller]` | 控制器风格路由分组 |
 | `#[from_body]` 等 | 参数绑定元数据（预留） |
 
 ### rust-webapp-spa

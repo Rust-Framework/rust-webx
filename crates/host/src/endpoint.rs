@@ -202,9 +202,22 @@ impl ControllerEndpoint {
 
 /// Endpoint that serves a static JSON payload.
 ///
-/// Used for built-in endpoints like `/openapi.json`.
+/// Used for built-in endpoints like `/openapi.json` and `/health`.
+/// The `content_type` field allows RFC 8407 `application/health+json`
+/// for health endpoints while defaulting to `application/json`.
 pub struct StaticJsonEndpoint {
     pub body: Vec<u8>,
+    pub content_type: &'static str,
+}
+
+impl StaticJsonEndpoint {
+    /// Create a new endpoint with the default `application/json` content type.
+    pub fn new(body: Vec<u8>) -> Self {
+        Self {
+            body,
+            content_type: "application/json",
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -212,7 +225,7 @@ impl IEndpoint for StaticJsonEndpoint {
     async fn handle(&self, ctx: &mut dyn IHttpContext) -> Result<()> {
         ctx.response_mut().set_status(200);
         ctx.response_mut()
-            .set_header("content-type", "application/json");
+            .set_header("content-type", self.content_type);
         ctx.response_mut().write_bytes(self.body.clone()).await
     }
 }

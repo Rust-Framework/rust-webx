@@ -120,6 +120,22 @@ pub trait IHttpResponse: Send {
     async fn write_text(&mut self, text: &str) -> Result<()> {
         self.write_bytes(text.as_bytes().to_vec()).await
     }
+
+    /// Read the current response body bytes.
+    ///
+    /// Returns an empty Vec if no body has been written.
+    /// Used by post-processing middleware (e.g. compression) in `after` hooks.
+    fn body_bytes(&self) -> Vec<u8> {
+        Vec::new()
+    }
+
+    /// Read a response header value by name.
+    ///
+    /// Returns None if the header is not set.
+    /// Used by post-processing middleware (e.g. compression) to inspect content-type.
+    fn header(&self, _key: &str) -> Option<&str> {
+        None
+    }
 }
 
 /// Helper: build a JSON response by serializing a value and writing it.

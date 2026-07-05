@@ -17,6 +17,7 @@ use rust_webapp_core::http::IHttpContext;
 use rust_webapp_core::middleware::IMiddleware;
 use std::collections::HashMap;
 use std::net::IpAddr;
+use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::time::Instant;
 use tokio::sync::Mutex;
@@ -120,7 +121,7 @@ impl RateLimitMiddleware {
 
 #[async_trait::async_trait]
 impl IMiddleware for RateLimitMiddleware {
-    async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<()> {
+    async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
         let ip = extract_client_ip(ctx);
 
         if !self.limiter.allow(ip).await {
@@ -135,9 +136,10 @@ impl IMiddleware for RateLimitMiddleware {
                 .response_mut()
                 .write_bytes(serde_json::to_vec(&body).unwrap_or_default())
                 .await;
+            return Ok(ControlFlow::Break(()));
         }
 
-        Ok(())
+        Ok(ControlFlow::Continue(()))
     }
 }
 

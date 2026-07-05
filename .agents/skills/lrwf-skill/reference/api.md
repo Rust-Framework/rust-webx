@@ -257,17 +257,19 @@ pub trait IRouter: Send + Sync {
 - `HashMap<String, String>` — 路由参数值（如 `{id}` → 具体值）。
 - `String` — 原始路由模式字符串（如 `"/api/users/{id}"`），供授权中间件使用。
 
-### `IApplicationBuilder`
+### `HostBuilder::use_middleware`
 
-应用构建器。
+注册中间件到管道。中间件以 Singleton 注册到 DI，`build()` 时通过
+`provider.get_all::<dyn IMiddleware>()` 自动收集。
 
 ```rust
-pub trait IApplicationBuilder: Send + Sync {
-    fn use_middleware<T: IMiddleware + 'static>(&mut self) -> &mut Self;
-    fn use_router(&mut self) -> &mut Self;
-    fn build(self: Arc<Self>) -> Box<dyn IHost>;
+impl HostBuilder {
+    pub fn use_middleware<T: IMiddleware + Default + 'static>(mut self) -> Self { ... }
 }
 ```
+
+约束：`T` 必须实现 `Default`。需配置的中间件（如 `CorsMiddleware`）请使用
+`use_cors()` 或在 `register()` 中手动注册工厂。
 
 ### `IHost`
 

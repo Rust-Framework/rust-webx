@@ -61,7 +61,7 @@ async fn main() {
 │+ authz   │          │          │                          │
 ├──────────┴──────────┴──────────┴─────────────────────────┤
 │                    lrwf-core                             │
-│  IApplicationBuilder / IHost / IHttpContext / IHttpRequest│
+│  IHost / IHttpContext / IHttpRequest                      │
 │  IHttpResponse / IMiddleware / IRouter / IEndpoint       │
 │  IMediator / IRequest / IEventRequest / IRequestHandler  │
 │  IEventHandler / IPipelineBehavior / Error / HttpMethod  │
@@ -82,14 +82,13 @@ async fn main() {
 lrwf/
 ├── Cargo.toml              # workspace root
 ├── examples/
-│   ├── hello_request.rs    # #[handler] 零配置样例
-│   └── crud_controller.rs  # CRUD + 手动 DI + LoggingMiddleware
+│   └── hello_request.rs    # #[handler] 零配置样例
 └── crates/
     ├── lrwf-core/          # 核心 trait 定义（零实现依赖）
     ├── lrwf-di/            # DI 扩展 + 编译时扫描类型
     ├── lrwf-http/          # Host 构建器 + 管道 + 路由器 + HTTP 上下文
     ├── lrwf-mediator/      # IMediator 实现 + 管道行为骨架
-    ├── lrwf-macros/        # 过程宏（路由/控制器/参数绑定/处理器注册）
+    ├── lrwf-macros/        # 过程宏（路由快捷键/参数绑定/处理器注册）
     └── lrwf/               # 伞 crate，统一导出所有类型
 ```
 
@@ -160,7 +159,6 @@ JSON 响应: {"error": "msg", "status": code}
 | 示例 | 路径 | 说明 |
 |------|------|------|
 | hello_request | `examples/hello_request.rs` | Hello World API，演示 `#[get]` + `#[handler]` 零配置自动注册 |
-| crud_controller | `examples/crud_controller.rs` | 完整 CRUD API，演示多方法路由 + 手动 DI + LoggingMiddleware |
 | auth_example | `examples/auth_example.rs` | JWT 认证 + 资源授权，演示 jwt_middleware + resource_auth_middleware |
 
 ### 运行示例

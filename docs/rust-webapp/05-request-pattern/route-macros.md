@@ -29,8 +29,6 @@ impl IRequest<()> for DeleteUserRequest {}
 | `#[post("/path")]` | POST |
 | `#[put("/path")]` | PUT |
 | `#[delete("/path")]` | DELETE |
-| `#[http_get("/path")]` | GET（别名） |
-| `#[http_post("/path")]` | POST（别名） |
 
 ## 路径参数
 
@@ -106,17 +104,6 @@ struct GetUserRequest { id: String }
 #[get("/api/users")]  // 缺少 {id}，字段无法绑定
 impl IRequest<UserDto> for GetUserRequest {}
 ```
-
-## controller 宏（分组路由）
-
-```rust
-#[controller("/api/v1")]
-mod user_routes {
-    // 路由自动加前缀 /api/v1
-}
-```
-
-适用于大型项目的版本化 API。
 
 ## 小结
 

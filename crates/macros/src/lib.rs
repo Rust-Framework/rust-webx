@@ -1,30 +1,17 @@
 // rust-webapp-macros — Procedural macros for the Rust WebApi framework.
-// - #[controller] / #[controller("/base")]
 // - #[endpoint(HttpMethod, "/path")] — full form
 // - #[get("/path")], #[post("/path")], #[put("/path")], #[delete("/path")] — shortcuts
-// - #[HttpGet], #[HttpPost], #[HttpPut], #[HttpDelete] — controller method attrs
+// - #[handler] — auto-registration via inventory
 // - #[FromBody], #[FromRoute], #[FromQuery] — parameter binding
-// - rust_webapp::request! declaration macro
+// - #[claims] — authentication claims injection
+// - #[authorize] — declarative authorization
 
 mod claims;
-mod controller;
 mod endpoint;
 mod handler;
 mod param;
-mod route;
 
 use proc_macro::TokenStream;
-
-/// Marks a struct as a controller with an optional base path.
-///
-/// ```ignore
-/// #[controller("/api/users")]
-/// struct UserController { mediator: Arc<dyn IMediator> }
-/// ```
-#[proc_macro_attribute]
-pub fn controller(attr: TokenStream, item: TokenStream) -> TokenStream {
-    controller::controller_impl(attr, item)
-}
 
 // ---------------------------------------------------------------------------
 // Route macros: full form + shortcuts
@@ -107,34 +94,6 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 // ---------------------------------------------------------------------------
-// Controller method attributes
-// ---------------------------------------------------------------------------
-
-/// Marks a controller method as HTTP GET with optional path.
-#[proc_macro_attribute]
-pub fn http_get(attr: TokenStream, item: TokenStream) -> TokenStream {
-    route::http_method_impl("GET", attr, item)
-}
-
-/// Marks a controller method as HTTP POST with optional path.
-#[proc_macro_attribute]
-pub fn http_post(attr: TokenStream, item: TokenStream) -> TokenStream {
-    route::http_method_impl("POST", attr, item)
-}
-
-/// Marks a controller method as HTTP PUT with optional path.
-#[proc_macro_attribute]
-pub fn http_put(attr: TokenStream, item: TokenStream) -> TokenStream {
-    route::http_method_impl("PUT", attr, item)
-}
-
-/// Marks a controller method as HTTP DELETE with optional path.
-#[proc_macro_attribute]
-pub fn http_delete(attr: TokenStream, item: TokenStream) -> TokenStream {
-    route::http_method_impl("DELETE", attr, item)
-}
-
-// ---------------------------------------------------------------------------
 // Parameter binding
 // ---------------------------------------------------------------------------
 
@@ -207,20 +166,4 @@ pub fn authorize(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // Pass through — the attribute is read by emit_endpoint inside
     // the route macro (get, post, etc.) via item_impl.attrs.
     item
-}
-
-/// One-shot macro to generate a Request struct, its IRequest impl with
-/// route metadata, and parameter binding code.
-///
-/// ```ignore
-/// rust_webapp::request! {
-///     #[Http(Get, "/users/{id}")]
-///     GetUserRequest => UserModel {
-///         #[FromRoute] id: String,
-///     }
-/// }
-/// ```
-#[proc_macro]
-pub fn request(input: TokenStream) -> TokenStream {
-    endpoint::request_macro_impl(input)
 }

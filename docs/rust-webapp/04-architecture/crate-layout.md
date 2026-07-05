@@ -25,7 +25,7 @@
 
 | 模块 | 职责 |
 |------|------|
-| `app` | `IHost`, `IApplicationBuilder` |
+| `app` | `IHost` |
 | `mediator` | `IRequest`, `IMediator`, `IEventRequest` |
 | `handler` | `IRequestHandler`, `IEventHandler`, `IHostedService` |
 | `http` | `IHttpContext`, `IHttpRequest`, `IHttpResponse` |
@@ -47,7 +47,7 @@
 | 管道 | `MiddlewarePipeline` |
 | 认证 | `JwtAuth`, `jwt_middleware` |
 | 授权 | `ResourceAuthorization`, `resource_auth_middleware` |
-| 端点 | `RequestEndpoint`, `ControllerEndpoint` |
+| 端点 | `RequestEndpoint`, `ControllerEndpoint`, `StaticJsonEndpoint`, `StaticHtmlEndpoint` |
 | 宿主 | `Host`, `HostBuilder`, `Server` |
 
 ## macros — 编译时层

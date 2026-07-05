@@ -1,8 +1,9 @@
-﻿//! Structured request tracing middleware with trace_id injection.
+//! Structured request tracing middleware with trace_id injection.
 
 use rust_webapp_core::error::Result;
 use rust_webapp_core::http::IHttpContext;
 use rust_webapp_core::middleware::IMiddleware;
+use std::ops::ControlFlow;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
 
@@ -29,10 +30,10 @@ impl Default for RequestTracing {
 
 #[async_trait::async_trait]
 impl IMiddleware for RequestTracing {
-    async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<()> {
+    async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
         let tid = next_trace_id();
         ctx.response_mut().set_header("x-trace-id", &tid);
-        Ok(())
+        Ok(ControlFlow::Continue(()))
     }
 
     async fn after(&self, ctx: &mut dyn IHttpContext) -> Result<()> {

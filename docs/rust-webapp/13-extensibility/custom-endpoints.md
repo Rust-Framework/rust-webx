@@ -14,7 +14,7 @@ pub trait IEndpoint: Send + Sync {
 | 类型 | 用途 |
 |------|------|
 | `RequestEndpoint` | 标准 IRequest → Handler 调度 |
-| `ControllerEndpoint` | 控制器风格分组 |
+| `ControllerEndpoint` | 自定义函数式 endpoint（接受闭包） |
 | `StaticJsonEndpoint` | 返回固定 JSON |
 | `StaticHtmlEndpoint` | 返回固定 HTML |
 

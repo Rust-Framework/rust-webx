@@ -9,9 +9,11 @@
 //! container (events remain `&self` since they typically don't need owned
 //! `DbContext` access).
 
+use crate::pipeline::{BoxedNextFn, BoxedPipelineFuture, IPipelineBehavior};
 use crate::route::scan::HandlerCache;
 use crate::error::{Error, Result};
 use crate::handler::IEventHandler;
+use super::pipeline::build_chain;
 use super::{IEventRequest, IMediator, IRequest};
 use rust_dicore::{IServiceResolver, ServiceProvider};
 use std::sync::Arc;
@@ -54,12 +56,29 @@ impl IMediator for Mediator {
             ))
         })?;
 
-        // Use the root provider as resolver. Scoped services resolved from root
-        // degrade to transient (fresh instance per call) per rust-dicore 0.5
-        // semantics — sufficient for in-process Mediator dispatch.
-        let resolver: &dyn IServiceResolver = self.provider.as_ref();
+        // Create a per-call scope so Scoped services (e.g. Mutex<DbContext>) resolve
+        // to a fresh instance per `send` invocation, matching the HTTP dispatch path
+        // which also creates a scope per request (see crates/macros/src/endpoint.rs).
+        let scope = self.provider.create_scope();
+        let resolver: &dyn IServiceResolver = &scope;
         let handler = (entry.factory)(resolver);
-        let result_box = (entry.call)(handler, Box::new(req)).await?;
+
+        // Collect registered IPipelineBehavior instances from the scope.
+        // Behaviors are typically registered as Singleton; Arc clones keep them alive.
+        let behaviors: Vec<Arc<dyn IPipelineBehavior>> = scope.get_all::<dyn IPipelineBehavior>();
+
+        // Terminal closure: captures the owned handler + call bridge.
+        // The handler owns its dependencies (Arc<T> clones), so the scope is no longer needed.
+        let entry_call = entry.call;
+        let terminal: BoxedNextFn = Box::new(
+            move |req: Box<dyn std::any::Any + Send>| -> BoxedPipelineFuture {
+                Box::pin(async move { (entry_call)(handler, req).await })
+            },
+        );
+
+        // Build the behavior chain (empty behaviors returns terminal as-is).
+        let chain = build_chain(behaviors, terminal);
+        let result_box = chain(Box::new(req)).await?;
         let result = *result_box
             .downcast::<R>()
             .expect("Response type mismatch in Mediator::send call bridge");

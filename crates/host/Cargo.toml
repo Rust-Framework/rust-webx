@@ -35,9 +35,10 @@ flate2 = "1.1.9"
 ctrlc.workspace = true
 
 [dev-dependencies]
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "gzip"] }
 criterion = { version = "0.5", features = ["html_reports"] }
 rust-webapp-macros.workspace = true
+rust-webapp.workspace = true
 
 [[bench]]
 name = "router_bench"

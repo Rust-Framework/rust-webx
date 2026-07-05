@@ -1,4 +1,4 @@
-﻿mod test_utils;
+mod test_utils;
 
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation};
 use rust_webapp_core::auth::IAuthenticationHandler;
@@ -101,7 +101,7 @@ async fn auth_empty_token_returns_none() {
 }
 
 #[tokio::test]
-async fn auth_invalid_token_returns_error() {
+async fn auth_invalid_token_returns_none() {
     let secret = b"test-secret-key";
     let auth = JwtAuth::new(DecodingKey::from_secret(secret), Validation::default());
 
@@ -109,11 +109,14 @@ async fn auth_invalid_token_returns_error() {
         .with_header("authorization", "Bearer invalid-token-data");
 
     let result = auth.authenticate(&mut ctx).await;
-    assert!(result.is_err(), "Invalid token should return an error");
+    assert!(
+        result.unwrap().is_none(),
+        "Invalid token should return None"
+    );
 }
 
 #[tokio::test]
-async fn auth_wrong_secret_key_fails() {
+async fn auth_wrong_secret_key_returns_none() {
     let secret = b"real-secret";
     let wrong_secret = b"wrong-secret";
     let token = create_test_token(secret, "user-1", &[], &[]);
@@ -127,13 +130,13 @@ async fn auth_wrong_secret_key_fails() {
 
     let result = auth.authenticate(&mut ctx).await;
     assert!(
-        result.is_err(),
-        "Token signed with different key should fail"
+        result.unwrap().is_none(),
+        "Token signed with different key should return None"
     );
 }
 
 #[tokio::test]
-async fn auth_expired_token_fails() {
+async fn auth_expired_token_returns_none() {
     let secret = b"test-secret-key-expiry";
     let token = create_expired_token(secret);
     let auth = JwtAuth::new(DecodingKey::from_secret(secret), Validation::default());
@@ -142,7 +145,10 @@ async fn auth_expired_token_fails() {
         .with_header("authorization", &format!("Bearer {}", token));
 
     let result = auth.authenticate(&mut ctx).await;
-    assert!(result.is_err(), "Expired token should be rejected");
+    assert!(
+        result.unwrap().is_none(),
+        "Expired token should return None"
+    );
 }
 
 #[tokio::test]

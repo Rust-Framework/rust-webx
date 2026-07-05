@@ -291,3 +291,287 @@ async fn mediator_publish_empty_handler_list() {
         .await;
     assert!(result.is_ok());
 }
+
+// --- Mediator::send scope provider test ---
+//
+// Verifies P0-5 fix: `Mediator::send` creates a per-call scope so that Scoped
+// services resolve to a single shared instance within one send invocation
+// (matching the HTTP dispatch path). Before the fix, send used the root
+// provider, which made Scoped services degrade to transient (fresh instance
+// per resolution, no within-call caching).
+
+use std::sync::atomic::{AtomicU32, Ordering};
+
+static SCOPED_COUNTER: AtomicU32 = AtomicU32::new(0);
+
+/// Scoped service that records the order in which it was constructed.
+struct ScopedService {
+    instance_id: u32,
+}
+
+struct ScopeProbeRequest;
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct ScopeProbeResponse {
+    /// "same" if two resolutions within one send returned the same instance,
+    /// "different" otherwise.
+    within_call: String,
+    /// The instance id observed on the first resolution.
+    first_id: u32,
+}
+
+impl IRequest<ScopeProbeResponse> for ScopeProbeRequest {}
+
+/// Factory that resolves `ScopedService` twice from the same resolver and
+/// records whether the two resolutions returned the same instance.
+fn __factory_scope_probe_handler(
+    resolver: &dyn rust_dicore::IServiceResolver,
+) -> Box<dyn std::any::Any + Send> {
+    // Use get_any (the only non-Sized-bound resolver method) + downcast.
+    let key = std::any::type_name::<ScopedService>();
+    let a: Arc<ScopedService> = resolver
+        .get_any(key)
+        .and_then(|a| a.downcast::<Arc<ScopedService>>().ok())
+        .map(|d| Arc::clone(&*d))
+        .expect("ScopedService not registered");
+    let b: Arc<ScopedService> = resolver
+        .get_any(key)
+        .and_then(|a| a.downcast::<Arc<ScopedService>>().ok())
+        .map(|d| Arc::clone(&*d))
+        .expect("ScopedService not registered");
+    let within_call = if std::ptr::eq(Arc::as_ptr(&a), Arc::as_ptr(&b)) {
+        "same"
+    } else {
+        "different"
+    };
+    let first_id = a.instance_id;
+    Box::new(ScopeProbeResult {
+        within_call: within_call.to_string(),
+        first_id,
+    }) as Box<dyn std::any::Any + Send>
+}
+
+struct ScopeProbeResult {
+    within_call: String,
+    first_id: u32,
+}
+
+fn __call_scope_probe_handler(
+    handler: Box<dyn std::any::Any + Send>,
+    _request: Box<dyn std::any::Any + Send>,
+) -> std::pin::Pin<
+    Box<
+        dyn std::future::Future<Output = LrwfResult<Box<dyn std::any::Any + Send>>>
+            + Send,
+    >,
+> {
+    Box::pin(async move {
+        let h = *handler
+            .downcast::<ScopeProbeResult>()
+            .expect("ScopeProbeResult downcast failed");
+        let rsp = ScopeProbeResponse {
+            within_call: h.within_call,
+            first_id: h.first_id,
+        };
+        Ok(Box::new(rsp) as Box<dyn std::any::Any + Send>)
+    })
+}
+
+inventory::submit! {
+    HandlerRegistration {
+        req_type_name: "ScopeProbeRequest",
+        factory: __factory_scope_probe_handler,
+        call: __call_scope_probe_handler,
+    }
+}
+
+#[tokio::test]
+async fn mediator_send_uses_per_call_scope_for_scoped_services() {
+    SCOPED_COUNTER.store(0, Ordering::SeqCst);
+
+    let provider = Arc::new(
+        ServiceCollection::new()
+            .scoped::<ScopedService>(|_| {
+                let id = SCOPED_COUNTER.fetch_add(1, Ordering::SeqCst) + 1;
+                Arc::new(ScopedService { instance_id: id })
+            })
+            .build()
+            .unwrap(),
+    );
+    let mediator = Mediator::new(provider);
+
+    let r1 = mediator.send(ScopeProbeRequest).await.expect("send #1 failed");
+    let r2 = mediator.send(ScopeProbeRequest).await.expect("send #2 failed");
+
+    // Within a single send, both resolutions must return the same instance
+    // (Scoped caching within the per-call scope).
+    assert_eq!(r1.within_call, "same", "first send: scope not caching scoped service");
+    assert_eq!(r2.within_call, "same", "second send: scope not caching scoped service");
+
+    // Across sends, a new scope means a fresh scoped instance.
+    assert_eq!(r1.first_id, 1, "first send should observe instance #1");
+    assert_eq!(r2.first_id, 2, "second send should observe instance #2");
+}
+
+// --- Pipeline behavior chain tests ---
+//
+// Verifies P0-3: IPipelineBehavior chain construction and execution.
+// Behaviors wrap the handler in a MediatR-style chain: each behavior can
+// inspect/modify the request, short-circuit, or pass through to the next.
+
+use rust_webapp_core::pipeline::{BoxedNextFn, IPipelineBehavior};
+
+struct BehaviorProbeRequest;
+
+#[derive(Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+struct BehaviorProbeResponse {
+    message: String,
+    source: String,
+}
+
+impl IRequest<BehaviorProbeResponse> for BehaviorProbeRequest {}
+
+#[derive(Default)]
+struct BehaviorProbeHandler;
+
+#[async_trait::async_trait]
+impl IRequestHandler<BehaviorProbeRequest, BehaviorProbeResponse> for BehaviorProbeHandler {
+    async fn handle(&mut self, _req: BehaviorProbeRequest) -> LrwfResult<BehaviorProbeResponse> {
+        Ok(BehaviorProbeResponse {
+            message: "from-handler".into(),
+            source: "handler".into(),
+        })
+    }
+}
+
+fn __factory_behavior_probe_handler(
+    _resolver: &dyn rust_dicore::IServiceResolver,
+) -> Box<dyn std::any::Any + Send> {
+    Box::new(BehaviorProbeHandler::default()) as Box<dyn std::any::Any + Send>
+}
+
+fn __call_behavior_probe_handler(
+    handler: Box<dyn std::any::Any + Send>,
+    request: Box<dyn std::any::Any + Send>,
+) -> std::pin::Pin<
+    Box<
+        dyn std::future::Future<Output = LrwfResult<Box<dyn std::any::Any + Send>>>
+            + Send,
+    >,
+> {
+    Box::pin(async move {
+        let mut h = *handler
+            .downcast::<BehaviorProbeHandler>()
+            .expect("Handler downcast failed");
+        let req = *request
+            .downcast::<BehaviorProbeRequest>()
+            .expect("Request downcast failed");
+        let result: BehaviorProbeResponse = h.handle(req).await?;
+        Ok(Box::new(result) as Box<dyn std::any::Any + Send>)
+    })
+}
+
+inventory::submit! {
+    HandlerRegistration {
+        req_type_name: "BehaviorProbeRequest",
+        factory: __factory_behavior_probe_handler,
+        call: __call_behavior_probe_handler,
+    }
+}
+
+/// Behavior that records the order it was called relative to the handler.
+struct TrackingBehavior {
+    called: Arc<AtomicU32>,
+}
+
+#[async_trait::async_trait]
+impl IPipelineBehavior for TrackingBehavior {
+    async fn handle(
+        &self,
+        req: Box<dyn std::any::Any + Send>,
+        next: BoxedNextFn,
+    ) -> LrwfResult<Box<dyn std::any::Any + Send>> {
+        self.called.fetch_add(1, Ordering::SeqCst);
+        next(req).await
+    }
+}
+
+/// Behavior that short-circuits the chain without calling next.
+struct ShortCircuitBehavior;
+
+#[async_trait::async_trait]
+impl IPipelineBehavior for ShortCircuitBehavior {
+    async fn handle(
+        &self,
+        _req: Box<dyn std::any::Any + Send>,
+        _next: BoxedNextFn,
+    ) -> LrwfResult<Box<dyn std::any::Any + Send>> {
+        Ok(Box::new(BehaviorProbeResponse {
+            message: "short-circuited".into(),
+            source: "behavior".into(),
+        }))
+    }
+}
+
+#[tokio::test]
+async fn mediator_send_pipeline_behavior_executes_before_handler() {
+    let behavior_called = Arc::new(AtomicU32::new(0));
+    let behavior = Arc::new(TrackingBehavior {
+        called: Arc::clone(&behavior_called),
+    });
+
+    let provider = Arc::new(
+        ServiceCollection::new()
+            .singleton::<dyn IPipelineBehavior>(move |_| {
+                Arc::clone(&behavior) as Arc<dyn IPipelineBehavior>
+            })
+            .build()
+            .unwrap(),
+    );
+    let mediator = Mediator::new(provider);
+
+    let rsp = mediator
+        .send(BehaviorProbeRequest)
+        .await
+        .expect("send failed");
+
+    assert_eq!(behavior_called.load(Ordering::SeqCst), 1, "behavior should be called once");
+    assert_eq!(rsp.source, "handler", "response should come from handler");
+    assert_eq!(rsp.message, "from-handler");
+}
+
+#[tokio::test]
+async fn mediator_send_pipeline_behavior_can_short_circuit() {
+    let provider = Arc::new(
+        ServiceCollection::new()
+            .singleton::<dyn IPipelineBehavior>(|_| {
+                Arc::new(ShortCircuitBehavior) as Arc<dyn IPipelineBehavior>
+            })
+            .build()
+            .unwrap(),
+    );
+    let mediator = Mediator::new(provider);
+
+    let rsp = mediator
+        .send(BehaviorProbeRequest)
+        .await
+        .expect("send failed");
+
+    assert_eq!(rsp.source, "behavior", "response should come from behavior (short-circuit)");
+    assert_eq!(rsp.message, "short-circuited");
+}
+
+#[tokio::test]
+async fn mediator_send_pipeline_empty_chain_works() {
+    // No behaviors registered — chain is just the terminal handler.
+    let provider = build_provider();
+    let mediator = Mediator::new(provider);
+
+    let rsp = mediator
+        .send(BehaviorProbeRequest)
+        .await
+        .expect("send failed");
+
+    assert_eq!(rsp.source, "handler");
+    assert_eq!(rsp.message, "from-handler");
+}

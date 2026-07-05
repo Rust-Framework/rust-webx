@@ -3,6 +3,7 @@
 use rust_webapp_core::error::Result;
 use rust_webapp_core::http::IHttpContext;
 use rust_webapp_core::middleware::IMiddleware;
+use std::ops::ControlFlow;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static REQUEST_COUNT: AtomicU64 = AtomicU64::new(0);
@@ -27,8 +28,8 @@ impl Default for TimingMiddleware {
 
 #[async_trait::async_trait]
 impl IMiddleware for TimingMiddleware {
-    async fn invoke(&self, _ctx: &mut dyn IHttpContext) -> Result<()> {
-        Ok(())
+    async fn invoke(&self, _ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
+        Ok(ControlFlow::Continue(()))
     }
 
     async fn after(&self, ctx: &mut dyn IHttpContext) -> Result<()> {

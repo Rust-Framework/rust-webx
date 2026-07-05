@@ -6,6 +6,7 @@
 use rust_webapp_core::error::Result;
 use rust_webapp_core::http::{HttpStatus, IHttpContext};
 use rust_webapp_core::middleware::IMiddleware;
+use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 
 /// SPA static file middleware.
@@ -44,10 +45,10 @@ impl SpaMiddleware {
 
 #[async_trait::async_trait]
 impl IMiddleware for SpaMiddleware {
-    async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<()> {
+    async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
         let method = ctx.request().method().to_uppercase();
         if method != "GET" {
-            return Ok(());
+            return Ok(ControlFlow::Continue(()));
         }
 
         let request_path = ctx.request().path();
@@ -56,12 +57,12 @@ impl IMiddleware for SpaMiddleware {
             let relative = alias_static_path(request_path.trim_start_matches('/'));
             if relative.is_empty() {
                 ctx.response_mut().set_status(HttpStatus::NOT_FOUND);
-                return Ok(());
+                return Ok(ControlFlow::Continue(()));
             }
             let candidate = self.root.join(&relative);
             if relative.contains("..") || !candidate.is_file() {
                 ctx.response_mut().set_status(HttpStatus::NOT_FOUND);
-                return Ok(());
+                return Ok(ControlFlow::Continue(()));
             }
             match tokio::fs::read(&candidate).await {
                 Ok(data) => {
@@ -74,7 +75,7 @@ impl IMiddleware for SpaMiddleware {
                     ctx.response_mut().set_status(HttpStatus::NOT_FOUND);
                 }
             }
-            return Ok(());
+            return Ok(ControlFlow::Continue(()));
         }
 
         let file_path = self.resolve_file(request_path);
@@ -102,7 +103,7 @@ impl IMiddleware for SpaMiddleware {
             }
         }
 
-        Ok(())
+        Ok(ControlFlow::Continue(()))
     }
 }
 

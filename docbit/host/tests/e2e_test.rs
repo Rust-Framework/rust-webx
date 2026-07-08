@@ -265,7 +265,7 @@ async fn e2e_admin_blog_crud() {
             "summary": "Summary",
             "content": "Body content",
             "tags": ["e2e", "test"],
-            "category_id": 1,
+            "category_id": "00000000-0000-4000-8000-000000000003",
             "published_at": now
         }))
         .send()
@@ -349,6 +349,135 @@ async fn e2e_admin_rbac_list_roles() {
     let names: Vec<&str> = body.iter().filter_map(|r| r["name"].as_str()).collect();
     assert!(names.contains(&"admin"));
     assert!(names.contains(&"user"));
+
+    fx.teardown().await;
+}
+
+async fn register_user_token(client: &reqwest::Client, base: &str) -> (String, String) {
+    let email = format!("user-{}@e2e.test", unique_suffix());
+    let reg = client
+        .post(format!("{}/api/auth/register", base))
+        .json(&serde_json::json!({
+            "name": "Regular User",
+            "email": email,
+            "password": "password123"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reg.status().as_u16(), 200);
+    let token = reg
+        .json::<serde_json::Value>()
+        .await
+        .unwrap()["token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+    (email, token)
+}
+
+#[tokio::test]
+#[serial]
+async fn e2e_non_admin_forbidden_on_admin_routes() {
+    let fx = spawn_docbit().await;
+    let client = reqwest::Client::new();
+    let base = fx.base();
+    let (_email, token) = register_user_token(&client, &base).await;
+
+    let roles = client
+        .get(format!("{}/api/roles", base))
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(roles.status().as_u16(), 403);
+    let ct = roles
+        .headers()
+        .get("content-type")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(ct.contains("application/problem+json"));
+
+    let categories = client
+        .post(format!("{}/api/categories", base))
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({
+            "name": "Forbidden",
+            "slug": "forbidden",
+            "sort_order": 0
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(categories.status().as_u16(), 403);
+
+    fx.teardown().await;
+}
+
+#[tokio::test]
+#[serial]
+async fn e2e_admin_category_crud() {
+    let fx = spawn_docbit().await;
+    let client = reqwest::Client::new();
+    let base = fx.base();
+    let token = admin_token(&client, &base).await;
+    let slug = format!("e2e-cat-{}", unique_suffix());
+
+    let create = client
+        .post(format!("{}/api/categories", base))
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({
+            "name": "E2E Category",
+            "slug": slug,
+            "sort_order": 99
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(create.status().as_u16(), 200);
+    let created: serde_json::Value = create.json().await.unwrap();
+    let id = created["id"].as_str().expect("category id");
+    assert_eq!(created["slug"], slug);
+
+    let update = client
+        .put(format!("{}/api/categories/{}", base, id))
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({ "name": "E2E Category Updated" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(update.status().as_u16(), 200);
+    assert_eq!(
+        update.json::<serde_json::Value>().await.unwrap()["name"],
+        "E2E Category Updated"
+    );
+
+    let list = client
+        .get(format!("{}/api/categories", base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(list.status().as_u16(), 200);
+    let tree: Vec<serde_json::Value> = list.json().await.unwrap();
+
+    fn tree_has_slug(nodes: &[serde_json::Value], slug: &str) -> bool {
+        nodes.iter().any(|n| {
+            n["slug"] == slug
+                || n.get("children")
+                    .and_then(|c| c.as_array())
+                    .is_some_and(|ch| tree_has_slug(ch, slug))
+        })
+    }
+    assert!(tree_has_slug(&tree, &slug));
+
+    let delete = client
+        .delete(format!("{}/api/categories/{}", base, id))
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(delete.status().as_u16(), 200);
 
     fx.teardown().await;
 }

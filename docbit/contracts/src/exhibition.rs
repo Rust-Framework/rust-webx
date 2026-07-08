@@ -5,12 +5,12 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExhibitionModel {
-    pub id: i32,
+    pub id: String,
     pub slug: String,
     pub title: String,
     pub subtitle: String,
     pub description: String,
-    pub category_id: i32,
+    pub category_id: String,
     pub category_name: String,
     pub category: String,
     pub tags: Vec<String>,
@@ -49,7 +49,7 @@ pub struct UpsertExhibitionRequest {
     pub title: String,
     pub subtitle: String,
     pub description: String,
-    pub category_id: i32,
+    pub category_id: String,
     pub tags: Vec<String>,
     pub repo_url: Option<String>,
     pub demo_url: Option<String>,

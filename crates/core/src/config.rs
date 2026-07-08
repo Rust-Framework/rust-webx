@@ -162,16 +162,10 @@ fn default_rate_limit_max_ips() -> usize {
 }
 
 /// HTTP request metrics (`GET /metrics` Prometheus text when enabled).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct MetricsSection {
     #[serde(default, rename = "Enabled")]
     pub enabled: bool,
-}
-
-impl Default for MetricsSection {
-    fn default() -> Self {
-        Self { enabled: false }
-    }
 }
 
 /// TLS (Transport Layer Security) section.
@@ -242,34 +236,6 @@ pub fn load_appsettings(mode: AppMode) -> Option<serde_json::Value> {
     apply_env_overrides(&mut base);
 
     Some(base)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn config_env_jwt_and_app_override_precedence() {
-        std::env::set_var("JWT_SECRET", "env-jwt-secret-that-is-long-enough-32");
-        let mut config = serde_json::json!({ "Jwt": { "Secret": "from-file" } });
-        apply_well_known_env_overrides(&mut config);
-        assert_eq!(
-            config["Jwt"]["Secret"],
-            "env-jwt-secret-that-is-long-enough-32"
-        );
-
-        std::env::set_var(
-            "APP__Jwt__Secret",
-            "from-app-override-secret-32chars-minimum",
-        );
-        apply_env_overrides(&mut config);
-        std::env::remove_var("JWT_SECRET");
-        std::env::remove_var("APP__Jwt__Secret");
-        assert_eq!(
-            config["Jwt"]["Secret"],
-            "from-app-override-secret-32chars-minimum"
-        );
-    }
 }
 
 /// Apply conventional environment variables that map to config sections.
@@ -380,5 +346,33 @@ fn merge_json(base: &mut serde_json::Value, overlay: serde_json::Value) {
             }
         }
         (a, b) => *a = b,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_env_jwt_and_app_override_precedence() {
+        std::env::set_var("JWT_SECRET", "env-jwt-secret-that-is-long-enough-32");
+        let mut config = serde_json::json!({ "Jwt": { "Secret": "from-file" } });
+        apply_well_known_env_overrides(&mut config);
+        assert_eq!(
+            config["Jwt"]["Secret"],
+            "env-jwt-secret-that-is-long-enough-32"
+        );
+
+        std::env::set_var(
+            "APP__Jwt__Secret",
+            "from-app-override-secret-32chars-minimum",
+        );
+        apply_env_overrides(&mut config);
+        std::env::remove_var("JWT_SECRET");
+        std::env::remove_var("APP__Jwt__Secret");
+        assert_eq!(
+            config["Jwt"]["Secret"],
+            "from-app-override-secret-32chars-minimum"
+        );
     }
 }

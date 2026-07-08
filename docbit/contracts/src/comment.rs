@@ -5,13 +5,13 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommentModel {
-    pub id: i32,
-    pub blog_id: i32,
-    pub user_id: i32,
+    pub id: String,
+    pub blog_id: String,
+    pub user_id: String,
     pub user_name: String,
     pub content: String,
-    pub parent_id: Option<i32>,
-    pub quoted_id: Option<i32>,
+    pub parent_id: Option<String>,
+    pub quoted_id: Option<String>,
     pub created_at: i64,
 }
 
@@ -26,10 +26,10 @@ impl IRequest<Vec<CommentModel>> for ListCommentsRequest {}
 #[claims]
 #[derive(Default, Deserialize)]
 pub struct CreateCommentRequest {
-    pub blog_id: i32,
+    pub blog_id: String,
     pub content: String,
-    pub parent_id: Option<i32>,
-    pub quoted_id: Option<i32>,
+    pub parent_id: Option<String>,
+    pub quoted_id: Option<String>,
 }
 
 #[post("/api/comments")]

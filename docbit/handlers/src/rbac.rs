@@ -10,7 +10,7 @@ use rust_webx::*;
 
 use docbit_contracts::rbac::*;
 use docbit_domain::entities::{Authorize, Resource, Role, RoleUser};
-use docbit_domain::{ApplyTo, ToEntity, ToModel};
+use docbit_domain::{new_id, ApplyTo, ToEntity, ToModel};
 
 use crate::util::{now_secs, operator_id, parse_id};
 
@@ -56,25 +56,17 @@ impl IRequestHandler<ListRolesRequest, Vec<RoleModel>> for ListRolesHandler {
 #[async_trait]
 impl IRequestHandler<CreateRoleRequest, RoleModel> for CreateRoleHandler {
     async fn handle(&mut self, req: CreateRoleRequest) -> Result<RoleModel> {
-        let op = operator_id(req.claims.as_deref()).unwrap_or(0);
+        let op = operator_id(req.claims.as_deref());
         let now = now_secs();
-        let name = req.name.clone();
-        let role = req.to_entity(op, now);
-        self.ctx.set::<Role>().add(role);
+        let id = new_id();
+        let entity = req.to_entity(id.clone(), op, now);
+        let set = self.ctx.set::<Role>();
+        set.add(entity.clone());
         self.ctx
             .save_changes()
             .await
             .map_err(|e| Error::Internal(format!("Failed to create role: {}", e)))?;
-        // FIXME(framework): rust-ef 1.3.0 save_changes 不回填自增 id，按 name 回查。
-        let created = {
-            let q = name.clone();
-            linq!(self.ctx.set::<Role>(), |r: Role| r.name == q && !r.is_deleted)
-                .first_or_default()
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?
-        }
-        .ok_or_else(|| Error::Internal("Role disappeared after insert".into()))?;
-        Ok(created.to_model())
+        Ok(entity.to_model())
     }
 }
 
@@ -87,26 +79,19 @@ impl IRequestHandler<UpdateRoleRequest, RoleModel> for UpdateRoleHandler {
             .ctx
             .set::<Role>()
             .query()
-            .find(id)
+            .find(id.clone())
             .await
             .map_err(|e| Error::Internal(e.to_string()))?
             .ok_or_else(|| Error::NotFound("Role not found".into()))?;
-        let op = operator_id(req.claims.as_deref()).unwrap_or(0);
+        let op = operator_id(req.claims.as_deref());
         req.apply_to(&mut role, op, now_secs());
-        self.ctx.set::<Role>().update(role);
+        let set = self.ctx.set::<Role>();
+        set.update(role.clone());
         self.ctx
             .save_changes()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?;
-        let updated = self
-            .ctx
-            .set::<Role>()
-            .query()
-            .find(id)
-            .await
-            .map_err(|e| Error::Internal(e.to_string()))?
-            .ok_or_else(|| Error::NotFound("Role not found after update".into()))?;
-        Ok(updated.to_model())
+        Ok(role.to_model())
     }
 }
 
@@ -119,14 +104,15 @@ impl IRequestHandler<DeleteRoleRequest, String> for DeleteRoleHandler {
             .ctx
             .set::<Role>()
             .query()
-            .find(id)
+            .find(id.clone())
             .await
             .map_err(|e| Error::Internal(e.to_string()))?
             .ok_or_else(|| Error::NotFound("Role not found".into()))?;
         role.is_deleted = true;
         role.updated_id = operator_id(req.claims.as_deref());
         role.updated_at = now_secs();
-        self.ctx.set::<Role>().update(role);
+        let set = self.ctx.set::<Role>();
+        set.update(role);
         self.ctx
             .save_changes()
             .await
@@ -154,7 +140,11 @@ pub struct RevokeRoleHandler {
 impl IRequestHandler<AssignRoleRequest, String> for AssignRoleHandler {
     async fn handle(&mut self, req: AssignRoleRequest) -> Result<String> {
         // 幂等：若已存在则跳过
-        let exists = linq!(self.ctx.set::<RoleUser>(), |r: RoleUser| r.user_id == req.user_id && r.role_id == req.role_id)
+        let user_id = req.user_id.clone();
+        let role_id = req.role_id.clone();
+        let exists_uid = user_id.clone();
+        let exists_rid = role_id.clone();
+        let exists = linq!(self.ctx.set::<RoleUser>(), |r: RoleUser| r.user_id == exists_uid && r.role_id == exists_rid)
             .first_or_default()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?;
@@ -162,17 +152,19 @@ impl IRequestHandler<AssignRoleRequest, String> for AssignRoleHandler {
             return Ok(format!("Role {} already assigned to user {}", req.role_id, req.user_id));
         }
         let now = now_secs();
-        self.ctx.set::<RoleUser>().add(RoleUser {
-            id: 0,
-            user_id: req.user_id,
-            role_id: req.role_id,
+        let entity = RoleUser {
+            id: new_id(),
+            user_id: user_id.clone(),
+            role_id: role_id.clone(),
             created_at: now,
-        });
+        };
+        let set = self.ctx.set::<RoleUser>();
+        set.add(entity);
         self.ctx
             .save_changes()
             .await
             .map_err(|e| Error::Internal(format!("Failed to assign role: {}", e)))?;
-        Ok(format!("Assigned role {} to user {}", req.role_id, req.user_id))
+        Ok(format!("Assigned role {} to user {}", role_id, user_id))
     }
 }
 
@@ -184,7 +176,9 @@ impl IRequestHandler<RevokeRoleRequest, String> for RevokeRoleHandler {
         let rid = parse_id(&req.role_id)?;
         // rust-ef 最佳实践：用 `linq!` 类型安全谓词 + `execute_delete` 直接 DB 删除，
         // 避免旧的 `load_all` + `tracked_entries` + `remove_at` + `save_changes` 三段式。
-        let affected = linq!(self.ctx.set::<RoleUser>(), |r: RoleUser| r.user_id == uid && r.role_id == rid)
+        let uid_q = uid.clone();
+        let rid_q = rid.clone();
+        let affected = linq!(self.ctx.set::<RoleUser>(), |r: RoleUser| r.user_id == uid_q && r.role_id == rid_q)
             .execute_delete()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?;
@@ -238,27 +232,17 @@ impl IRequestHandler<ListResourcesRequest, Vec<ResourceModel>> for ListResources
 #[async_trait]
 impl IRequestHandler<CreateResourceRequest, ResourceModel> for CreateResourceHandler {
     async fn handle(&mut self, req: CreateResourceRequest) -> Result<ResourceModel> {
-        let op = operator_id(req.claims.as_deref()).unwrap_or(0);
+        let op = operator_id(req.claims.as_deref());
         let now = now_secs();
-        let value = req.value.clone();
-        let res = req.to_entity(op, now);
-        // FIXME(framework): rust-ef 1.3.0 不回填自增 id，按 value 回查。
-        // `Resource.value` 无 `#[unique]`，并发下可能取到他人记录。
-        // 长期修复：框架暴露 last-insert-id + 为 `value` 加 `#[unique]`。
-        self.ctx.set::<Resource>().add(res);
+        let id = new_id();
+        let entity = req.to_entity(id.clone(), op, now);
+        let set = self.ctx.set::<Resource>();
+        set.add(entity.clone());
         self.ctx
             .save_changes()
             .await
             .map_err(|e| Error::Internal(format!("Failed to create resource: {}", e)))?;
-        let created = {
-            let q = value.clone();
-            linq!(self.ctx.set::<Resource>(), |r: Resource| r.value == q)
-                .first_or_default()
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?
-                .ok_or_else(|| Error::Internal("Resource disappeared after insert".into()))?
-        };
-        Ok(created.to_model())
+        Ok(entity.to_model())
     }
 }
 
@@ -271,26 +255,19 @@ impl IRequestHandler<UpdateResourceRequest, ResourceModel> for UpdateResourceHan
             .ctx
             .set::<Resource>()
             .query()
-            .find(id)
+            .find(id.clone())
             .await
             .map_err(|e| Error::Internal(e.to_string()))?
             .ok_or_else(|| Error::NotFound("Resource not found".into()))?;
-        let op = operator_id(req.claims.as_deref()).unwrap_or(0);
+        let op = operator_id(req.claims.as_deref());
         req.apply_to(&mut res, op, now_secs());
-        self.ctx.set::<Resource>().update(res);
+        let set = self.ctx.set::<Resource>();
+        set.update(res.clone());
         self.ctx
             .save_changes()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?;
-        let updated = self
-            .ctx
-            .set::<Resource>()
-            .query()
-            .find(id)
-            .await
-            .map_err(|e| Error::Internal(e.to_string()))?
-            .ok_or_else(|| Error::NotFound("Resource not found after update".into()))?;
-        Ok(updated.to_model())
+        Ok(res.to_model())
     }
 }
 
@@ -303,14 +280,15 @@ impl IRequestHandler<DeleteResourceRequest, String> for DeleteResourceHandler {
             .ctx
             .set::<Resource>()
             .query()
-            .find(id)
+            .find(id.clone())
             .await
             .map_err(|e| Error::Internal(e.to_string()))?
             .ok_or_else(|| Error::NotFound("Resource not found".into()))?;
         res.is_deleted = true;
         res.updated_id = operator_id(req.claims.as_deref());
         res.updated_at = now_secs();
-        self.ctx.set::<Resource>().update(res);
+        let set = self.ctx.set::<Resource>();
+        set.update(res);
         self.ctx
             .save_changes()
             .await
@@ -359,8 +337,11 @@ impl IRequestHandler<ListAuthorizesRequest, Vec<AuthorizeModel>> for ListAuthori
 impl IRequestHandler<CreateAuthorizeRequest, AuthorizeModel> for CreateAuthorizeHandler {
     async fn handle(&mut self, req: CreateAuthorizeRequest) -> Result<AuthorizeModel> {
         // 幂等：若已存在则返回现有
-        let (role_id, resource_id) = (req.role_id, req.resource_id);
-        let exists = linq!(self.ctx.set::<Authorize>(), |a: Authorize| a.role_id == role_id && a.resource_id == resource_id)
+        let role_id = req.role_id.clone();
+        let resource_id = req.resource_id.clone();
+        let exists_role = role_id.clone();
+        let exists_resource = resource_id.clone();
+        let exists = linq!(self.ctx.set::<Authorize>(), |a: Authorize| a.role_id == exists_role && a.resource_id == exists_resource)
             .first_or_default()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?;
@@ -368,18 +349,15 @@ impl IRequestHandler<CreateAuthorizeRequest, AuthorizeModel> for CreateAuthorize
             return Ok(e.to_model());
         }
         let now = now_secs();
-        let authorize = req.to_entity(0, now);
-        self.ctx.set::<Authorize>().add(authorize);
+        let id = new_id();
+        let entity = req.to_entity(id, None, now);
+        let set = self.ctx.set::<Authorize>();
+        set.add(entity.clone());
         self.ctx
             .save_changes()
             .await
             .map_err(|e| Error::Internal(format!("Failed to create authorize: {}", e)))?;
-        let created = linq!(self.ctx.set::<Authorize>(), |a: Authorize| a.role_id == role_id && a.resource_id == resource_id)
-            .first_or_default()
-            .await
-            .map_err(|e| Error::Internal(e.to_string()))?
-            .ok_or_else(|| Error::Internal("Authorize disappeared after insert".into()))?;
-        Ok(created.to_model())
+        Ok(entity.to_model())
     }
 }
 
@@ -390,7 +368,8 @@ impl IRequestHandler<DeleteAuthorizeRequest, String> for DeleteAuthorizeHandler 
         let id = parse_id(&req.id)?;
         // rust-ef 最佳实践：`linq!` 类型安全谓词 + `execute_delete` 直接 DB 删除，
         // 避免旧的 `load_all` + `tracked_entries` + `remove_at` + `save_changes` 三段式。
-        let affected = linq!(self.ctx.set::<Authorize>(), |a: Authorize| a.id == id)
+        let q = id.clone();
+        let affected = linq!(self.ctx.set::<Authorize>(), |a: Authorize| a.id == q)
             .execute_delete()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?;

@@ -7,6 +7,9 @@ description = "rust-webx procedural macros: route shortcuts (#[get], #[post], #[
 repository.workspace = true
 homepage.workspace = true
 documentation.workspace = true
+readme = "../../README.md"
+keywords = ["web", "http", "async", "framework", "proc-macro"]
+categories = ["web-programming"]
 
 [lib]
 proc-macro = true

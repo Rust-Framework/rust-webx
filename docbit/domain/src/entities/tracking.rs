@@ -6,8 +6,8 @@ use rust_ef::prelude::*;
 #[table("tracking")]
 pub struct Tracking {
     #[primary_key]
-    #[auto_increment]
-    pub id: i32,
+    #[max_length(36)]
+    pub id: String,
     #[required]
     #[max_length(500)]
     #[index]

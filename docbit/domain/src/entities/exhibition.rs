@@ -8,8 +8,8 @@ use super::category::Category;
 #[table("exhibitions")]
 pub struct Exhibition {
     #[primary_key]
-    #[auto_increment]
-    pub id: i32,
+    #[max_length(36)]
+    pub id: String,
     #[required]
     #[max_length(100)]
     #[unique]
@@ -24,9 +24,10 @@ pub struct Exhibition {
     #[required]
     #[foreign_key(Category)]
     #[index]
-    pub category_id: i32,
+    #[max_length(36)]
+    pub category_id: String,
     #[required]
-    pub tags: String, // JSON 数组字符串
+    pub tags: String,
     #[max_length(500)]
     pub repo_url: Option<String>,
     #[max_length(500)]
@@ -44,9 +45,11 @@ pub struct Exhibition {
     #[required]
     pub updated_at: i64,
     #[index]
-    pub created_id: Option<i32>, // 无 FK
+    #[max_length(36)]
+    pub created_id: Option<String>,
     #[index]
-    pub updated_id: Option<i32>, // 无 FK
+    #[max_length(36)]
+    pub updated_id: Option<String>,
     #[required]
     #[index]
     pub is_deleted: bool,

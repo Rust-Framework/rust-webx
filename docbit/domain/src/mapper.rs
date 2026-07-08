@@ -1,24 +1,4 @@
-//! Mapper extensions — `to_model()` / `to_entity()` / `apply_to()` 一行式转换。
-//!
-//! 大幅降低 handler 中的 Entity ↔ Model/Request 转换样板代码：
-//! - `ToModel<M>`：Entity → Model（复用 `conversions.rs` 中的 `From` impl）
-//! - `ToEntity<T>`：CreateRequest → Entity（自动初始化导航字段、审计字段、默认值）
-//! - `ApplyTo<T>`：UpdateRequest → &mut Entity（部分字段更新 + 审计字段）
-//!
-//! 调用约定：`op` = 操作人 ID（来自 claims），`now` = 当前 Unix 时间戳。
-//!
-//! ## 用法示例
-//!
-//! ```ignore
-//! // Entity → Model
-//! let model: BlogPostModel = blog.to_model();
-//!
-//! // Request → Entity (create)
-//! let blog = req.to_entity(uid, now);
-//!
-//! // Request → &mut Entity (update)
-//! req.apply_to(&mut blog, uid, now);
-//! ```
+//! Mapper extensions — `to_model()` / `to_entity()` / `apply_to()`.
 
 use rust_ef::prelude::*;
 
@@ -35,14 +15,8 @@ use docbit_contracts::{
 };
 
 use crate::entities::*;
+use crate::seed_ids;
 
-// ────────────────── ToModel: Entity → Model ──────────────────
-
-/// Extension trait: convert entity to model via existing `From` impl.
-///
-/// 复用 `conversions.rs` 中的 `From<Entity> for Model` 实现。
-/// 当同一 Entity 有多个目标 Model 时（如 `Blog` → `BlogPostModel` / `BlogPostSummary`），
-/// 需用 turbofish 或类型标注指定：`blog.to_model::<BlogPostSummary>()`。
 pub trait ToModel<M> {
     fn to_model(self) -> M;
 }
@@ -57,33 +31,29 @@ where
     }
 }
 
-// ────────────────── ToEntity: Request → Entity (create) ──────────────────
-
-/// Extension trait: convert create-request to entity with audit context.
-///
-/// 自动设置 `id: 0`、`is_deleted: false`、导航字段为空、审计字段为 `(op, now)`。
-///
-/// `op` = 操作人 ID（来自 claims），`now` = 当前 Unix 时间戳。
+/// Convert create-request to entity. `id` is assigned by the caller before insert.
 pub trait ToEntity<T> {
-    fn to_entity(self, op: i32, now: i64) -> T;
+    fn to_entity(self, id: String, op: Option<String>, now: i64) -> T;
 }
 
 impl ToEntity<Blog> for CreateBlogPostRequest {
-    fn to_entity(self, op: i32, now: i64) -> Blog {
+    fn to_entity(self, id: String, op: Option<String>, now: i64) -> Blog {
         Blog {
-            id: 0,
+            id,
             slug: self.slug,
             title: self.title,
             summary: self.summary,
             content: self.content,
             tags: serde_json::to_string(&self.tags).unwrap_or_default(),
-            category_id: self.category_id.unwrap_or(1),
-            author_id: op,
+            category_id: self
+                .category_id
+                .unwrap_or_else(|| seed_ids::CAT_UNCATEGORIZED.to_string()),
+            author_id: op.clone().unwrap_or_default(),
             published_at: self.published_at,
             created_at: now,
             updated_at: now,
-            created_id: Some(op),
-            updated_id: Some(op),
+            created_id: op.clone(),
+            updated_id: op,
             is_deleted: false,
             category: BelongsTo::new(),
             author: BelongsTo::new(),
@@ -93,16 +63,16 @@ impl ToEntity<Blog> for CreateBlogPostRequest {
 }
 
 impl ToEntity<Category> for CreateCategoryRequest {
-    fn to_entity(self, op: i32, now: i64) -> Category {
+    fn to_entity(self, id: String, op: Option<String>, now: i64) -> Category {
         Category {
-            id: 0,
+            id,
             name: self.name,
             slug: self.slug,
             parent_id: self.parent_id,
             sort_order: self.sort_order,
-            created_id: Some(op),
+            created_id: op.clone(),
             created_at: now,
-            updated_id: Some(op),
+            updated_id: op,
             updated_at: now,
             is_deleted: false,
             parent: BelongsTo::new(),
@@ -112,17 +82,17 @@ impl ToEntity<Category> for CreateCategoryRequest {
 }
 
 impl ToEntity<Comment> for CreateCommentRequest {
-    fn to_entity(self, op: i32, now: i64) -> Comment {
+    fn to_entity(self, id: String, op: Option<String>, now: i64) -> Comment {
         Comment {
-            id: 0,
+            id,
             blog_id: self.blog_id,
-            user_id: op,
-            user_name: String::new(), // 调用方设置（来自 claims 用户名）
+            user_id: op.clone().unwrap_or_default(),
+            user_name: String::new(),
             content: self.content,
             parent_id: self.parent_id,
             quoted_id: self.quoted_id,
             created_at: now,
-            updated_id: Some(op),
+            updated_id: op,
             updated_at: now,
             is_deleted: false,
             blog: BelongsTo::new(),
@@ -134,15 +104,15 @@ impl ToEntity<Comment> for CreateCommentRequest {
 }
 
 impl ToEntity<User> for CreateUserRequest {
-    fn to_entity(self, op: i32, now: i64) -> User {
+    fn to_entity(self, id: String, op: Option<String>, now: i64) -> User {
         User {
-            id: 0,
+            id,
             name: self.name,
             email: self.email,
             password_hash: String::new(),
-            created_id: Some(op),
+            created_id: op.clone(),
             created_at: now,
-            updated_id: Some(op),
+            updated_id: op,
             updated_at: now,
             is_deleted: false,
             roles: HasMany::new(),
@@ -151,9 +121,9 @@ impl ToEntity<User> for CreateUserRequest {
 }
 
 impl ToEntity<Exhibition> for UpsertExhibitionRequest {
-    fn to_entity(self, op: i32, now: i64) -> Exhibition {
+    fn to_entity(self, id: String, op: Option<String>, now: i64) -> Exhibition {
         Exhibition {
-            id: 0,
+            id,
             slug: self.slug,
             title: self.title,
             subtitle: self.subtitle,
@@ -168,8 +138,8 @@ impl ToEntity<Exhibition> for UpsertExhibitionRequest {
             logo_url: self.logo_url,
             created_at: now,
             updated_at: now,
-            created_id: Some(op),
-            updated_id: Some(op),
+            created_id: op.clone(),
+            updated_id: op,
             is_deleted: false,
             category: BelongsTo::new(),
         }
@@ -177,14 +147,14 @@ impl ToEntity<Exhibition> for UpsertExhibitionRequest {
 }
 
 impl ToEntity<Role> for CreateRoleRequest {
-    fn to_entity(self, op: i32, now: i64) -> Role {
+    fn to_entity(self, id: String, op: Option<String>, now: i64) -> Role {
         Role {
-            id: 0,
+            id,
             name: self.name,
             description: self.description,
-            created_id: Some(op),
+            created_id: op.clone(),
             created_at: now,
-            updated_id: Some(op),
+            updated_id: op,
             updated_at: now,
             is_deleted: false,
             users: HasMany::new(),
@@ -194,17 +164,17 @@ impl ToEntity<Role> for CreateRoleRequest {
 }
 
 impl ToEntity<Resource> for CreateResourceRequest {
-    fn to_entity(self, op: i32, now: i64) -> Resource {
+    fn to_entity(self, id: String, op: Option<String>, now: i64) -> Resource {
         Resource {
-            id: 0,
+            id,
             name: self.name,
             description: self.description,
             resource_type: self.r#type,
             value: self.value,
             properties: self.properties,
-            created_id: Some(op),
+            created_id: op.clone(),
             created_at: now,
-            updated_id: Some(op),
+            updated_id: op,
             updated_at: now,
             is_deleted: false,
             roles: HasMany::new(),
@@ -213,9 +183,9 @@ impl ToEntity<Resource> for CreateResourceRequest {
 }
 
 impl ToEntity<Authorize> for CreateAuthorizeRequest {
-    fn to_entity(self, _op: i32, now: i64) -> Authorize {
+    fn to_entity(self, id: String, _op: Option<String>, now: i64) -> Authorize {
         Authorize {
-            id: 0,
+            id,
             role_id: self.role_id,
             resource_id: self.resource_id,
             created_at: now,
@@ -223,19 +193,12 @@ impl ToEntity<Authorize> for CreateAuthorizeRequest {
     }
 }
 
-// ────────────────── ApplyTo: UpdateRequest → &mut Entity ──────────────────
-
-/// Extension trait: apply update-request fields to an existing entity.
-///
-/// 仅更新请求中提供的字段（`Option::Some`），并设置审计字段 `updated_id`/`updated_at`。
-///
-/// `op` = 操作人 ID，`now` = 当前 Unix 时间戳。
 pub trait ApplyTo<T> {
-    fn apply_to(self, entity: &mut T, op: i32, now: i64);
+    fn apply_to(self, entity: &mut T, op: Option<String>, now: i64);
 }
 
 impl ApplyTo<Blog> for UpdateBlogPostRequest {
-    fn apply_to(self, entity: &mut Blog, op: i32, now: i64) {
+    fn apply_to(self, entity: &mut Blog, op: Option<String>, now: i64) {
         if let Some(v) = self.title {
             entity.title = v;
         }
@@ -254,52 +217,52 @@ impl ApplyTo<Blog> for UpdateBlogPostRequest {
         if let Some(v) = self.published_at {
             entity.published_at = v;
         }
-        entity.updated_id = Some(op);
+        entity.updated_id = op;
         entity.updated_at = now;
     }
 }
 
 impl ApplyTo<Category> for UpdateCategoryRequest {
-    fn apply_to(self, entity: &mut Category, op: i32, now: i64) {
+    fn apply_to(self, entity: &mut Category, op: Option<String>, now: i64) {
         if let Some(v) = self.name {
             entity.name = v;
         }
         if let Some(v) = self.sort_order {
             entity.sort_order = v;
         }
-        entity.updated_id = Some(op);
+        entity.updated_id = op;
         entity.updated_at = now;
     }
 }
 
 impl ApplyTo<User> for UpdateUserRequest {
-    fn apply_to(self, entity: &mut User, op: i32, now: i64) {
+    fn apply_to(self, entity: &mut User, op: Option<String>, now: i64) {
         if let Some(v) = self.name {
             entity.name = v;
         }
         if let Some(v) = self.email {
             entity.email = v;
         }
-        entity.updated_id = Some(op);
+        entity.updated_id = op;
         entity.updated_at = now;
     }
 }
 
 impl ApplyTo<Role> for UpdateRoleRequest {
-    fn apply_to(self, entity: &mut Role, op: i32, now: i64) {
+    fn apply_to(self, entity: &mut Role, op: Option<String>, now: i64) {
         if let Some(v) = self.name {
             entity.name = v;
         }
         if let Some(v) = self.description {
             entity.description = v;
         }
-        entity.updated_id = Some(op);
+        entity.updated_id = op;
         entity.updated_at = now;
     }
 }
 
 impl ApplyTo<Resource> for UpdateResourceRequest {
-    fn apply_to(self, entity: &mut Resource, op: i32, now: i64) {
+    fn apply_to(self, entity: &mut Resource, op: Option<String>, now: i64) {
         if let Some(v) = self.name {
             entity.name = v;
         }
@@ -315,13 +278,13 @@ impl ApplyTo<Resource> for UpdateResourceRequest {
         if let Some(v) = self.properties {
             entity.properties = v;
         }
-        entity.updated_id = Some(op);
+        entity.updated_id = op;
         entity.updated_at = now;
     }
 }
 
 impl ApplyTo<Exhibition> for UpsertExhibitionRequest {
-    fn apply_to(self, entity: &mut Exhibition, op: i32, now: i64) {
+    fn apply_to(self, entity: &mut Exhibition, op: Option<String>, now: i64) {
         entity.title = self.title;
         entity.subtitle = self.subtitle;
         entity.description = self.description;
@@ -333,7 +296,7 @@ impl ApplyTo<Exhibition> for UpsertExhibitionRequest {
         entity.featured = self.featured;
         entity.sort_order = self.sort_order;
         entity.logo_url = self.logo_url;
-        entity.updated_id = Some(op);
+        entity.updated_id = op;
         entity.updated_at = now;
     }
 }

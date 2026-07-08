@@ -7,6 +7,9 @@ description = "rust-webx — A Rust WebApi framework inspired by ASP.NET Core"
 repository.workspace = true
 homepage.workspace = true
 documentation.workspace = true
+readme = "../../README.md"
+keywords = ["web", "http", "async", "framework", "aspnet-core"]
+categories = ["web-programming", "asynchronous"]
 
 [dependencies]
 rust-webx-core.workspace = true

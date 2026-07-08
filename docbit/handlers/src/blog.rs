@@ -15,15 +15,13 @@ use rust_webx::*;
 
 use docbit_contracts::blog::*;
 use docbit_domain::entities::{Blog, Category};
-use docbit_domain::{ApplyTo, ToEntity, ToModel};
+use docbit_domain::{new_id, ApplyTo, ToEntity, ToModel};
 
 use crate::util::now_secs;
 
-fn uid_from_claims(claims: Option<&dyn IClaims>) -> Result<i32> {
+fn uid_from_claims(claims: Option<&dyn IClaims>) -> Result<String> {
     let c = claims.ok_or_else(|| Error::Http("Not authenticated".into()))?;
-    c.subject()
-        .parse::<i32>()
-        .map_err(|_| Error::Http("Invalid user id in token".into()))
+    Ok(c.subject().to_string())
 }
 
 fn roles_from_claims(claims: Option<&dyn IClaims>) -> Vec<String> {
@@ -102,9 +100,9 @@ impl IRequestHandler<ListBlogCategoriesRequest, Vec<BlogCategoryCount>> for List
             .to_list()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?;
-        let mut counts: HashMap<i32, usize> = HashMap::new();
+        let mut counts: HashMap<String, usize> = HashMap::new();
         for b in &blogs {
-            *counts.entry(b.category_id).or_insert(0) += 1;
+            *counts.entry(b.category_id.clone()).or_insert(0) += 1;
         }
         let cats = linq!(self.ctx.set::<Category>(), |c: Category| !c.is_deleted)
             .to_list()
@@ -112,11 +110,14 @@ impl IRequestHandler<ListBlogCategoriesRequest, Vec<BlogCategoryCount>> for List
             .map_err(|e| Error::Internal(e.to_string()))?;
         let mut result: Vec<BlogCategoryCount> = cats
             .into_iter()
-            .map(|c| BlogCategoryCount {
-                id: c.id,
-                name: c.name,
-                slug: c.slug,
-                count: counts.get(&c.id).copied().unwrap_or(0),
+            .map(|c| {
+                let count = counts.get(&c.id).copied().unwrap_or(0);
+                BlogCategoryCount {
+                    id: c.id,
+                    name: c.name,
+                    slug: c.slug,
+                    count,
+                }
             })
             .collect();
         result.sort_by(|a, b| a.id.cmp(&b.id));
@@ -129,7 +130,8 @@ impl IRequestHandler<ListBlogCategoriesRequest, Vec<BlogCategoryCount>> for List
 impl IRequestHandler<ListMyBlogPostsRequest, Vec<BlogPostSummary>> for ListMyBlogPostsHandler {
     async fn handle(&mut self, req: ListMyBlogPostsRequest) -> Result<Vec<BlogPostSummary>> {
         let uid = uid_from_claims(req.claims.as_deref())?;
-        let blogs = linq!(self.ctx.set::<Blog>(), |b: Blog| b.author_id == uid && !b.is_deleted; include b.category; include b.author; order_by b.published_at desc)
+        let q = uid.clone();
+        let blogs = linq!(self.ctx.set::<Blog>(), |b: Blog| b.author_id == q && !b.is_deleted; include b.category; include b.author; order_by b.published_at desc)
             .to_list()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?;
@@ -168,15 +170,17 @@ impl IRequestHandler<CreateBlogPostRequest, BlogPostModel> for CreateBlogPostHan
         }
 
         let now = now_secs();
-        let blog = req.to_entity(uid, now);
-        self.ctx.set::<Blog>().add(blog);
+        let id = new_id();
+        let entity = req.to_entity(id.clone(), Some(uid.clone()), now);
+        let set = self.ctx.set::<Blog>();
+        set.add(entity);
         self.ctx
             .save_changes()
             .await
             .map_err(|e| Error::Internal(format!("Failed to create blog: {}", e)))?;
-        // 回查以装载导航字段
-        let q = slug.clone();
-        let saved = linq!(self.ctx.set::<Blog>(), |b: Blog| b.slug == q && !b.is_deleted; include b.category; include b.author)
+        // 按已知 id 回查以装载导航字段
+        let id_q = id.clone();
+        let saved = linq!(self.ctx.set::<Blog>(), |b: Blog| b.id == id_q && !b.is_deleted; include b.category; include b.author)
             .first_or_default()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?
@@ -204,14 +208,16 @@ impl IRequestHandler<UpdateBlogPostRequest, BlogPostModel> for UpdateBlogPostHan
             return Err(Error::Http("Forbidden: not the author".into()));
         }
 
-        req.apply_to(&mut blog, uid, now_secs());
-        self.ctx.set::<Blog>().update(blog);
+        let blog_id = blog.id.clone();
+        req.apply_to(&mut blog, Some(uid.clone()), now_secs());
+        let set = self.ctx.set::<Blog>();
+        set.update(blog);
         self.ctx
             .save_changes()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?;
-        let q = slug.clone();
-        let saved = linq!(self.ctx.set::<Blog>(), |b: Blog| b.slug == q && !b.is_deleted; include b.category; include b.author)
+        let id_q = blog_id.clone();
+        let saved = linq!(self.ctx.set::<Blog>(), |b: Blog| b.id == id_q && !b.is_deleted; include b.category; include b.author)
             .first_or_default()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?
@@ -241,7 +247,8 @@ impl IRequestHandler<DeleteBlogPostRequest, String> for DeleteBlogPostHandler {
         blog.is_deleted = true;
         blog.updated_id = Some(uid);
         blog.updated_at = now_secs();
-        self.ctx.set::<Blog>().update(blog);
+        let set = self.ctx.set::<Blog>();
+        set.update(blog);
         self.ctx
             .save_changes()
             .await

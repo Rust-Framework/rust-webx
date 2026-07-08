@@ -10,7 +10,7 @@ use docbit_contracts::exhibition::{
     UpsertExhibitionRequest,
 };
 use docbit_domain::entities::Exhibition;
-use docbit_domain::{ApplyTo, ToEntity, ToModel};
+use docbit_domain::{new_id, ApplyTo, ToEntity, ToModel};
 
 use crate::util::{now_secs, operator_id};
 
@@ -81,30 +81,33 @@ impl IRequestHandler<UpsertExhibitionRequest, ExhibitionModel> for UpsertExhibit
                 .map_err(|e| Error::Internal(e.to_string()))?
         };
 
-        if let Some(mut ex) = existing {
-            req.apply_to(&mut ex, op.unwrap_or(0), now);
-            self.ctx.set::<Exhibition>().update(ex);
+        let saved_id = if let Some(mut ex) = existing {
+            let id = ex.id.clone();
+            req.apply_to(&mut ex, op.clone(), now);
+            let set = self.ctx.set::<Exhibition>();
+            set.update(ex);
             self.ctx
                 .save_changes()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?;
+            id
         } else {
-            let ex = req.to_entity(op.unwrap_or(0), now);
-            self.ctx.set::<Exhibition>().add(ex);
+            let id = new_id();
+            let entity = req.to_entity(id.clone(), op.clone(), now);
+            let set = self.ctx.set::<Exhibition>();
+            set.add(entity);
             self.ctx
                 .save_changes()
                 .await
                 .map_err(|e| Error::Internal(format!("Failed to create exhibition: {}", e)))?;
-        }
+            id
+        };
 
-        let saved = {
-            let q = slug.clone();
-            linq!(self.ctx.set::<Exhibition>(), |e: Exhibition| e.slug == q && !e.is_deleted; include e.category)
-                .first_or_default()
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?
-        }
-        .ok_or_else(|| Error::Internal("Exhibition vanished after save".into()))?;
+        let saved = linq!(self.ctx.set::<Exhibition>(), |e: Exhibition| e.id == saved_id && !e.is_deleted; include e.category)
+            .first_or_default()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?
+            .ok_or_else(|| Error::Internal("Exhibition vanished after save".into()))?;
         tracing::info!("[Exhibition] Upserted: {} ({})", saved.slug, saved.id);
         Ok(saved.to_model())
     }
@@ -128,11 +131,12 @@ impl IRequestHandler<DeleteExhibitionRequest, String> for DeleteExhibitionHandle
             return Err(Error::NotFound(format!("Exhibition not found: {}", slug)));
         }
 
+        let set = self.ctx.set::<Exhibition>();
         for mut item in items {
             item.is_deleted = true;
-            item.updated_id = op;
+            item.updated_id = op.clone();
             item.updated_at = now;
-            self.ctx.set::<Exhibition>().update(item);
+            set.update(item);
         }
         self.ctx
             .save_changes()

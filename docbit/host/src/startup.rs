@@ -89,6 +89,8 @@ impl DbInitService {
             return Ok(());
         }
 
+        let user_id = docbit_domain::new_id();
+        let role_user_id = docbit_domain::new_id();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
@@ -97,40 +99,30 @@ impl DbInitService {
             hash(ADMIN_DEFAULT_PASSWORD, DEFAULT_COST).map_err(|e| Error::Internal(e.to_string()))?;
 
         let user = User {
-            id: 0,
+            id: user_id.clone(),
             name: "Administrator".into(),
             email: ADMIN_EMAIL.into(),
             password_hash,
-            created_id: None, // 首条 admin 无创建人
+            created_id: None,
             created_at: now,
             updated_id: None,
             updated_at: now,
             is_deleted: false,
             roles: HasMany::new(),
         };
-        ctx.set::<User>().add(user);
+        let role_user = docbit_domain::entities::RoleUser {
+            id: role_user_id,
+            user_id,
+            role_id: docbit_domain::seed_ids::ROLE_ADMIN.into(),
+            created_at: now,
+        };
+        let users = ctx.set::<User>();
+        users.add(user);
+        let role_users = ctx.set::<docbit_domain::entities::RoleUser>();
+        role_users.add(role_user);
         ctx.save_changes()
             .await
             .map_err(|e| Error::Internal(format!("Failed to create admin user: {}", e)))?;
-
-        // 关联 admin 角色（role_id=1）
-        // FIXME(framework): rust-ef 1.3.0 save_changes 不回填自增 id，按 email 回查。
-        let admin_user = linq!(ctx.set::<User>(), |u: User| u.email == ADMIN_EMAIL && !u.is_deleted)
-            .first_or_default()
-            .await
-            .map_err(|e| Error::Internal(e.to_string()))?
-            .ok_or_else(|| Error::Internal("Admin user disappeared after insert".into()))?;
-
-        let role_user = docbit_domain::entities::RoleUser {
-            id: 0,
-            user_id: admin_user.id,
-            role_id: 1, // admin
-            created_at: now,
-        };
-        ctx.set::<docbit_domain::entities::RoleUser>().add(role_user);
-        ctx.save_changes()
-            .await
-            .map_err(|e| Error::Internal(format!("Failed to assign admin role: {}", e)))?;
 
         tracing::info!(
             "[DbInitService] Created default admin user: {} / {}",

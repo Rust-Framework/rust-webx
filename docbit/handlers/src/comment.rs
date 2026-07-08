@@ -12,7 +12,7 @@ use docbit_contracts::comment::{
     CommentModel, CreateCommentRequest, DeleteCommentRequest, ListCommentsRequest,
 };
 use docbit_domain::entities::Comment;
-use docbit_domain::{ToEntity, ToModel};
+use docbit_domain::{new_id, ToEntity, ToModel};
 
 use crate::util::{now_secs, operator_id, parse_id};
 
@@ -39,7 +39,8 @@ pub struct DeleteCommentHandler {
 impl IRequestHandler<ListCommentsRequest, Vec<CommentModel>> for ListCommentsHandler {
     async fn handle(&mut self, req: ListCommentsRequest) -> Result<Vec<CommentModel>> {
         let blog_id = parse_id(&req.blog_id)?;
-        let mut rows = linq!(self.ctx.set::<Comment>(), |c: Comment| c.blog_id == blog_id && !c.is_deleted)
+        let q = blog_id.clone();
+        let mut rows = linq!(self.ctx.set::<Comment>(), |c: Comment| c.blog_id == q && !c.is_deleted)
             .to_list()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?;
@@ -61,10 +62,7 @@ impl IRequestHandler<CreateCommentRequest, CommentModel> for CreateCommentHandle
         if content_owned.len() > 4000 {
             return Err(Error::Http("Comment too long".into()));
         }
-        let user_id = claims
-            .subject()
-            .parse::<i32>()
-            .map_err(|_| Error::Http("Invalid user id in token".into()))?;
+        let user_id = claims.subject().to_string();
         let user_name = claims
             .get_username()
             .map(|s| s.to_string())
@@ -72,29 +70,18 @@ impl IRequestHandler<CreateCommentRequest, CommentModel> for CreateCommentHandle
             .unwrap_or_else(|| "User".to_string());
 
         let now = now_secs();
-        let blog_id = req.blog_id;
-        let mut comment = req.to_entity(user_id, now);
+        let comment_id = new_id();
+        let mut comment = req.to_entity(comment_id, Some(user_id.clone()), now);
         comment.user_name = user_name.clone();
         comment.content = content_owned;
-        // FIXME(framework): rust-ef 1.3.0 的 `save_changes` 不回填自增 id，
-        // 故无法用 `find(inserted_id)` 精确回查。当前以 `max_by_key(c.id)`
-        // 近似——per-request owned DbContext 消除了请求内竞态，
-        // 但跨请求 DB 层竞态仍存在（并发同 (blog_id, user_id) 插入可能取到他人记录）。
-        // 待框架暴露 last-insert-id 后改为 `find(id)`。
-        self.ctx.set::<Comment>().add(comment);
+        let set = self.ctx.set::<Comment>();
+        set.add(comment.clone());
         self.ctx
             .save_changes()
             .await
             .map_err(|e| Error::Internal(format!("Failed to create comment: {}", e)))?;
-        let last = linq!(self.ctx.set::<Comment>(), |c: Comment| c.blog_id == blog_id && c.user_id == user_id)
-            .to_list()
-            .await
-            .map_err(|e| Error::Internal(e.to_string()))?
-            .into_iter()
-            .max_by_key(|c| c.id)
-            .ok_or_else(|| Error::Internal("Comment disappeared after insert".into()))?;
-        tracing::info!("[Comment] Created by {} on blog {}", user_name, blog_id);
-        Ok(last.to_model())
+        tracing::info!("[Comment] Created by {} on blog {}", user_name, comment.blog_id);
+        Ok(comment.to_model())
     }
 }
 
@@ -107,7 +94,7 @@ impl IRequestHandler<DeleteCommentRequest, String> for DeleteCommentHandler {
             .ctx
             .set::<Comment>()
             .query()
-            .find(id)
+            .find(id.clone())
             .await
             .map_err(|e| Error::Internal(e.to_string()))?
             .ok_or_else(|| Error::NotFound("Comment not found".into()))?;
@@ -117,10 +104,7 @@ impl IRequestHandler<DeleteCommentRequest, String> for DeleteCommentHandler {
             .claims
             .as_deref()
             .ok_or_else(|| Error::Http("Not authenticated".into()))?;
-        let uid = claims
-            .subject()
-            .parse::<i32>()
-            .map_err(|_| Error::Http("Invalid user id in token".into()))?;
+        let uid = claims.subject().to_string();
         if !claims.has_role("admin") && comment.user_id != uid {
             return Err(Error::Http("Forbidden: can only delete your own comments".into()));
         }
@@ -128,7 +112,8 @@ impl IRequestHandler<DeleteCommentRequest, String> for DeleteCommentHandler {
         comment.is_deleted = true;
         comment.updated_id = operator_id(Some(claims));
         comment.updated_at = now_secs();
-        self.ctx.set::<Comment>().update(comment);
+        let set = self.ctx.set::<Comment>();
+        set.update(comment);
         self.ctx
             .save_changes()
             .await

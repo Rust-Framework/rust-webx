@@ -7,6 +7,9 @@ description = "rust-webx HTTP layer: Host builder, middleware pipeline, Trie-bas
 repository.workspace = true
 homepage.workspace = true
 documentation.workspace = true
+readme = "../../README.md"
+keywords = ["web", "http", "server", "hyper", "middleware"]
+categories = ["web-programming", "asynchronous"]
 
 [dependencies]
 rust-webx-core.workspace = true

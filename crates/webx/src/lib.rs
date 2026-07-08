@@ -39,7 +39,7 @@ pub use rust_webx_core::routing::{HttpMethod, IEndpoint, IRouter, RouteMeta};
 pub use rust_webx_core::route::ext::{is_mediator_active, should_scan_endpoints, IServiceCollectionExt};
 pub use rust_webx_core::route::scan::{
     global_provider, set_global_provider, HandlerCache, HandlerEntry, HandlerRegistration,
-    ParamMeta, ResponseData, RouteDispatch, RouteEntry,
+    HandlerRegistry, ParamMeta, ResponseData, RouteDispatch, RouteEntry,
 };
 
 // --- HTTP layer ---

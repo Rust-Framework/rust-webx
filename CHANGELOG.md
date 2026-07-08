@@ -2,6 +2,20 @@
 
 All notable changes to **rust-webx** are documented in this file.
 
+## [0.2.1] — 2026-07-08
+
+### Changed
+
+- **Unified dispatch**: HTTP endpoints and `Mediator::send` share `dispatch::dispatch` (HandlerCache → scope → pipeline → handler).
+- **Handler lookup**: `HandlerRegistration` adds `req_type_id: TypeId` for reliable in-process dispatch.
+- **`add_mediator()`**: registers `Mediator` as transient (DI-injectable after host build).
+- **`HandlerRegistry`**: type alias for `HandlerCache`.
+
+### Fixed
+
+- docbit `DocService` resolves monorepo docs at `<workspace>/docs` when `<app_base>/docs` is absent.
+- docbit startup recreates SQLite schema on datatype mismatch; skips doc index when docs dir missing.
+
 ## [0.2.0] — 2026-07-08
 
 ### Changed

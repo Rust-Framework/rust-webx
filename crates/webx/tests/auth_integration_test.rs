@@ -1,7 +1,6 @@
 //! End-to-end integration tests for JWT authentication + #[authorize] macro.
 //!
-//! Verifies the full HTTP path: JwtAuth middleware → StubEndpoint 401/403 checks.
-//! Token construction mirrors auth_test.rs (copied to avoid cross-test mod complexity).
+//! Verifies the full HTTP path: JwtAuth middleware → RouteDispatch 401/403 checks.
 
 use std::net::TcpListener;
 
@@ -9,9 +8,7 @@ use jsonwebtoken::{EncodingKey, Header};
 use rust_webx::*;
 use serde::{Deserialize, Serialize};
 
-// ---------------------------------------------------------------------------
-// Token construction helpers (mirrors auth_test.rs)
-// ---------------------------------------------------------------------------
+const TEST_SECRET: &[u8] = b"test-secret-key-for-integration";
 
 fn now_plus_seconds(secs: u64) -> usize {
     std::time::SystemTime::now()
@@ -56,7 +53,7 @@ fn create_expired_token(secret: &[u8]) -> String {
     let claims = TestClaims {
         sub: "expired-user".to_string(),
         roles: vec![],
-        permissions: vec![],
+        permissions: Vec::new(),
         exp: now_minus_seconds(3600),
     };
     jsonwebtoken::encode(
@@ -66,12 +63,6 @@ fn create_expired_token(secret: &[u8]) -> String {
     )
     .unwrap()
 }
-
-// ---------------------------------------------------------------------------
-// Protected endpoints (test-only, registered via inventory in this binary)
-// ---------------------------------------------------------------------------
-
-const TEST_SECRET: &[u8] = b"test-secret-key-for-integration";
 
 #[derive(Default, Serialize, Deserialize)]
 struct ProtectedRequest;
@@ -109,10 +100,6 @@ impl IRequestHandler<MeRequest, String> for MeHandler {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Test harness
-// ---------------------------------------------------------------------------
-
 fn find_free_port() -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.local_addr().unwrap().port()
@@ -120,8 +107,8 @@ fn find_free_port() -> u16 {
 
 async fn spawn_auth_host(port: u16) {
     let addr = format!("127.0.0.1:{}", port);
-    let builder = rust_webx_host::server::Host::builder()
-        .mode(rust_webx_core::mode::AppMode::Development)
+    let builder = Host::builder()
+        .mode(AppMode::Development)
         .no_spa()
         .add_authentication()
         .configure(|b| {
@@ -133,10 +120,6 @@ async fn spawn_auth_host(port: u16) {
     tokio::spawn(async move { host.run_at(&addr).await.unwrap() });
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn auth_no_token_returns_401() {

@@ -26,11 +26,20 @@ use rust_webx::{app_base, inject, Inject};
 pub struct DocService;
 
 impl DocService {
-    /// 文档数据目录：docbit 业务约定为 `<app_base>/docs`。
-    ///
-    /// 与 ASP.NET Core 中 `wwwroot` 的硬编码约定一致，不通过 DI 注入路径。
+    /// 文档数据目录：优先 `<app_base>/docs`（部署布局）；
+    /// monorepo 开发时回退到 `<workspace>/docs`（`app_base` 为 `docbit/` 等 member crate）。
     fn root() -> PathBuf {
-        app_base().join("docs")
+        let app_docs = app_base().join("docs");
+        if app_docs.is_dir() {
+            return app_docs;
+        }
+        if let Some(parent) = app_base().parent() {
+            let workspace_docs = parent.join("docs");
+            if workspace_docs.is_dir() {
+                return workspace_docs;
+            }
+        }
+        app_docs
     }
 
     fn work_dir(work: &str) -> PathBuf {
@@ -202,13 +211,15 @@ impl IDocumentService for DocService {
     }
 
     fn ensure_all_indexes(&self) -> Result<(), String> {
-        if !Self::root().is_dir() {
-            return Err(format!(
-                "Docs directory not found: {}",
-                Self::root().display()
-            ));
+        let root = Self::root();
+        if !root.is_dir() {
+            tracing::warn!(
+                "[DocService] Docs directory not found ({}); skipping index generation",
+                root.display()
+            );
+            return Ok(());
         }
-        for entry in fs::read_dir(Self::root()).map_err(|e| e.to_string())? {
+        for entry in fs::read_dir(&root).map_err(|e| e.to_string())? {
             let entry = entry.map_err(|e| e.to_string())?;
             if !entry.file_type().map_err(|e| e.to_string())?.is_dir() {
                 continue;

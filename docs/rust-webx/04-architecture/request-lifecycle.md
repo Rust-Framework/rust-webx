@@ -59,12 +59,12 @@ sequenceDiagram
 
 ### 4. 端点处理
 
-`IEndpoint::handle(ctx)` 负责：
+`#[get]` / `#[post]` 等宏生成的 `RouteDispatch` 负责：
 
-1. 从 `route_params`、body 构建 Request struct
-2. 通过 DI 解析对应 `IRequestHandler`
-3. 调用 `handle()` 获取 `Result<Response>`
-4. 序列化响应写入 `HttpResponse`
+1. 从 `route_params`、query、body 构建 Request struct
+2. 注入 claims，进入 `RequestContext`
+3. 调用 `Mediator::send(request)`（与进程内调用同一路径）
+4. 将响应序列化为 JSON 写入 `HttpResponse`
 
 ### 5. 错误处理
 
@@ -80,13 +80,13 @@ sequenceDiagram
 
 ## 与 Mediator 的关系
 
-对于 `RequestEndpoint`（标准请求端点），内部调用链为：
+对于 `#[endpoint]` / `#[get]` 等宏注册的路由，HTTP 适配层在构造 request 后调用：
 
 ```
-Endpoint → IMediator::send(request) → IRequestHandler::handle(request)
+RouteDispatch → Mediator::send(request) → dispatch → HandlerCache → IRequestHandler::handle
 ```
 
-`IPipelineBehavior` 可在 `send()` 内部包装 Handler 调用，实现验证、缓存等横切逻辑。
+`IPipelineBehavior` 在 `dispatch` 内部包装 Handler 调用，实现验证、缓存等横切逻辑。
 
 ## 启动与关闭生命周期
 

@@ -15,6 +15,7 @@ pub mod pagination;
 pub mod paths;
 pub mod pipeline;
 pub mod problem;
+pub mod request_context;
 pub mod routing;
 
 pub use app::*;
@@ -34,4 +35,5 @@ pub use pagination::*;
 pub use paths::*;
 pub use pipeline::*;
 pub use problem::*;
+pub use request_context::*;
 pub use routing::*;

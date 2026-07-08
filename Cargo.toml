@@ -8,6 +8,7 @@ members = [
     "crates/webx",
     "crates/spa",
     "crates/openapi",
+    "crates/ef",
     "docbit/contracts",
     "docbit/domain",
     "docbit/handlers",
@@ -32,6 +33,7 @@ rust-webx-macros = { version = "0.2.0", path = "crates/macros" }
 rust-webx = { version = "0.2.0", path = "crates/webx" }
 rust-webx-spa = { version = "0.2.0", path = "crates/spa" }
 rust-webx-openapi = { version = "0.2.0", path = "crates/openapi" }
+rust-webx-ef = { version = "0.2.0", path = "crates/ef" }
 
 # Docbit sub-crates (4-crate workspace)
 docbit-contracts = { version = "0.1.0", path = "docbit/contracts" }

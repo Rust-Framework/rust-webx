@@ -6,60 +6,22 @@ alwaysApply: false
 
 # Docbit Handler 规范
 
-适用于 `docbit/handlers` 中所有 `IRequestHandler` 实现。
-
-## 结构
-
-每个 `handle` 方法按逻辑分段，段与段之间空一行：
-
-1. **校验 / 鉴权** — 参数、claims、业务规则
-2. **加载** — `linq!` 或 `set.query().find`
-3. **变更** — 构建 entity、`apply_to`、软删除字段
-4. **持久化** — 仅写操作：`set` → `add`/`update` → **一次** `save_changes`
-5. **响应** — `Ok(...)`、必要时 `tracing::info!`
-
-## DbContext 写操作
-
-分步编写，禁止链式 `self.ctx.set::<T>().add(...)`：
-
-```rust
-let set = self.ctx.set::<User>();
-let entity = User { id: new_id(), /* ... */ };
-set.add(entity);
-
-self.ctx
-    .save_changes()
-    .await
-    .map_err(|e| Error::Internal(format!("Failed to create user: {}", e)))?;
-```
-
-- 主键在应用层用 `new_id()` 预分配，禁止 save 后再查 id
-- 同一业务操作内多表写入：多个 `set`/`add`，**一次** `save_changes`
-- `ToModel::to_model(self)` 会消耗 entity；写操作需 `set.add(entity.clone())` 或 `set.update(entity.clone())`，保存后再 `entity.to_model()` 返回
-
-## DbContext 读操作
-
-- 复杂条件：`linq!`；闭包捕获前先 `let q = ...` 绑定
-- 按 id 单条：`self.ctx.set::<T>().query().find(id).await?`
-- 错误统一：`.map_err(|e| Error::Internal(e.to_string()))?`
-
 ## 软删除
 
-```rust
-entity.is_deleted = true;
-entity.updated_id = operator_id(req.claims.as_deref());
-entity.updated_at = now_secs();
+全局查询过滤器在 `docbit_domain::prepare_context` 注册，**禁止**在 handler 的 `linq!` 中重复 `!is_deleted`。
 
-let set = self.ctx.set::<T>();
-set.update(entity);
-self.ctx.save_changes().await?;
+## 持久化
+
+```rust
+use crate::db::{save_changes, EfResultExt};
+
+save_changes(&mut self.ctx).await?;
+let rows = linq!(self.ctx.set::<User>(), |u: User| u.email == q)
+    .to_list()
+    .await
+    .map_ef()?;
 ```
 
-## 联结表删除
+## 写操作步骤
 
-`RoleUser` / `Authorize` 用 `linq!(...).execute_delete().await?`，无需 `save_changes`。
-
-## Handler 类型
-
-- 数据访问 handler：`#[inject(owned)] ctx: DbContext`
-- 只读配置/服务：`#[inject] Arc<...>`
+`set` → `add`/`update` → 一次 `save_changes`；禁止链式 `self.ctx.set::<T>().add(...)`。

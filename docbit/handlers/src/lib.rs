@@ -15,22 +15,18 @@
 //!
 //! ```ignore
 //! let set = self.ctx.set::<User>();
-//! let entity = User { id: new_id(), /* ... */ };
 //! set.add(entity);
 //!
-//! self.ctx
-//!     .save_changes()
-//!     .await
-//!     .map_err(|e| Error::Internal(format!("Failed to create user: {}", e)))?;
+//! crate::db::save_changes(&mut self.ctx).await?;
 //! ```
 //!
 //! - 禁止链式 `self.ctx.set::<T>().add(...)`
 //! - 主键用 `new_id()` 预分配；同一业务操作只调用一次 `save_changes`
 //!
-//! ### 读操作
+//! ### 软删除与持久化
 //!
-//! - `linq!` 闭包捕获前先 `let q = ...`
-//! - 按 id：`self.ctx.set::<T>().query().find(id).await?`
+//! - 软删除由 `docbit_domain::prepare_context` 全局过滤器处理，handler 禁止重复 `!is_deleted`
+//! - 使用 `crate::db::{save_changes, EfResultExt}` 统一 ORM 错误映射
 
 pub mod auth;
 pub mod authorizer;
@@ -38,6 +34,7 @@ pub mod blog;
 pub mod cache;
 pub mod category;
 pub mod comment;
+pub mod db;
 pub mod doc_service;
 pub mod docs;
 pub mod exhibition;

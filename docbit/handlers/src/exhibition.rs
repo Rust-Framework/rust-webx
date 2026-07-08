@@ -12,6 +12,7 @@ use docbit_contracts::exhibition::{
 use docbit_domain::entities::Exhibition;
 use docbit_domain::{new_id, ApplyTo, ToEntity, ToModel};
 
+use crate::db::{save_changes, EfResultExt};
 use crate::util::{now_secs, operator_id};
 
 #[derive(Inject)]
@@ -42,10 +43,10 @@ pub struct DeleteExhibitionHandler {
 #[async_trait]
 impl IRequestHandler<ListExhibitionsRequest, Vec<ExhibitionModel>> for ListExhibitionsHandler {
     async fn handle(&mut self, _: ListExhibitionsRequest) -> Result<Vec<ExhibitionModel>> {
-        let items = linq!(self.ctx.set::<Exhibition>(), |e: Exhibition| !e.is_deleted; include e.category; order_by e.sort_order asc)
+        let items = linq!(self.ctx.set::<Exhibition>(); include e.category; order_by e.sort_order asc)
             .to_list()
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
+            .map_ef()?;
 
         Ok(items.into_iter().map(ExhibitionModel::from).collect())
     }
@@ -58,10 +59,10 @@ impl IRequestHandler<GetExhibitionRequest, ExhibitionModel> for GetExhibitionHan
         let slug = req.slug.clone();
         let q = slug.clone();
 
-        let item = linq!(self.ctx.set::<Exhibition>(), |e: Exhibition| e.slug == q && !e.is_deleted; include e.category)
+        let item = linq!(self.ctx.set::<Exhibition>(), |e: Exhibition| e.slug == q; include e.category)
             .first_or_default()
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?
+            .map_ef()?
             .ok_or_else(|| Error::NotFound(format!("Exhibition not found: {}", slug)))?;
 
         Ok(ExhibitionModel::from(item))
@@ -77,10 +78,10 @@ impl IRequestHandler<UpsertExhibitionRequest, ExhibitionModel> for UpsertExhibit
         let slug = req.slug.clone();
         let q = slug.clone();
 
-        let existing = linq!(self.ctx.set::<Exhibition>(), |e: Exhibition| e.slug == q && !e.is_deleted)
+        let existing = linq!(self.ctx.set::<Exhibition>(), |e: Exhibition| e.slug == q)
             .first_or_default()
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
+            .map_ef()?;
 
         let saved_id = if let Some(mut ex) = existing {
             let id = ex.id.clone();
@@ -89,10 +90,7 @@ impl IRequestHandler<UpsertExhibitionRequest, ExhibitionModel> for UpsertExhibit
             let set = self.ctx.set::<Exhibition>();
             set.update(ex);
 
-            self.ctx
-                .save_changes()
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?;
+            save_changes(&mut self.ctx).await?;
 
             id
         } else {
@@ -102,19 +100,16 @@ impl IRequestHandler<UpsertExhibitionRequest, ExhibitionModel> for UpsertExhibit
             let set = self.ctx.set::<Exhibition>();
             set.add(entity);
 
-            self.ctx
-                .save_changes()
-                .await
-                .map_err(|e| Error::Internal(format!("Failed to create exhibition: {}", e)))?;
+            save_changes(&mut self.ctx).await?;
 
             id
         };
 
         let id_q = saved_id.clone();
-        let saved = linq!(self.ctx.set::<Exhibition>(), |e: Exhibition| e.id == id_q && !e.is_deleted; include e.category)
+        let saved = linq!(self.ctx.set::<Exhibition>(), |e: Exhibition| e.id == id_q; include e.category)
             .first_or_default()
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?
+            .map_ef()?
             .ok_or_else(|| Error::Internal("Exhibition vanished after save".into()))?;
 
         tracing::info!("[Exhibition] Upserted: {} ({})", saved.slug, saved.id);
@@ -131,10 +126,10 @@ impl IRequestHandler<DeleteExhibitionRequest, String> for DeleteExhibitionHandle
         let slug = req.slug.clone();
         let q = slug.clone();
 
-        let items = linq!(self.ctx.set::<Exhibition>(), |e: Exhibition| e.slug == q && !e.is_deleted)
+        let items = linq!(self.ctx.set::<Exhibition>(), |e: Exhibition| e.slug == q)
             .to_list()
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
+            .map_ef()?;
 
         if items.is_empty() {
             return Err(Error::NotFound(format!("Exhibition not found: {}", slug)));
@@ -148,10 +143,7 @@ impl IRequestHandler<DeleteExhibitionRequest, String> for DeleteExhibitionHandle
             set.update(item);
         }
 
-        self.ctx
-            .save_changes()
-            .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
+        save_changes(&mut self.ctx).await?;
 
         tracing::info!("[Exhibition] Soft-deleted: {}", slug);
         Ok(format!("Deleted: {}", slug))

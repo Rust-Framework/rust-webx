@@ -14,6 +14,7 @@ use docbit_contracts::comment::{
 use docbit_domain::entities::Comment;
 use docbit_domain::{new_id, ToEntity, ToModel};
 
+use crate::db::{save_changes, EfResultExt};
 use crate::util::{now_secs, operator_id, parse_id};
 
 #[derive(Inject)]
@@ -41,10 +42,10 @@ impl IRequestHandler<ListCommentsRequest, Vec<CommentModel>> for ListCommentsHan
         let blog_id = parse_id(&req.blog_id)?;
         let q = blog_id.clone();
 
-        let mut rows = linq!(self.ctx.set::<Comment>(), |c: Comment| c.blog_id == q && !c.is_deleted)
+        let mut rows = linq!(self.ctx.set::<Comment>(), |c: Comment| c.blog_id == q)
             .to_list()
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
+            .map_ef()?;
 
         rows.sort_by(|a, b| a.created_at.cmp(&b.created_at));
         Ok(rows.into_iter().map(CommentModel::from).collect())
@@ -85,10 +86,7 @@ impl IRequestHandler<CreateCommentRequest, CommentModel> for CreateCommentHandle
         let set = self.ctx.set::<Comment>();
         set.add(comment.clone());
 
-        self.ctx
-            .save_changes()
-            .await
-            .map_err(|e| Error::Internal(format!("Failed to create comment: {}", e)))?;
+        save_changes(&mut self.ctx).await?;
 
         tracing::info!("[Comment] Created by {} on blog {}", user_name, comment.blog_id);
         Ok(comment.to_model())
@@ -107,7 +105,7 @@ impl IRequestHandler<DeleteCommentRequest, String> for DeleteCommentHandler {
             .query()
             .find(id.clone())
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?
+            .map_ef()?
             .ok_or_else(|| Error::NotFound("Comment not found".into()))?;
 
         let claims = req
@@ -127,10 +125,7 @@ impl IRequestHandler<DeleteCommentRequest, String> for DeleteCommentHandler {
         let set = self.ctx.set::<Comment>();
         set.update(comment);
 
-        self.ctx
-            .save_changes()
-            .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
+        save_changes(&mut self.ctx).await?;
 
         tracing::info!("[Comment] Soft-deleted: {}", id);
         Ok(format!("Deleted comment {}", id))

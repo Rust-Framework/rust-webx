@@ -9,6 +9,7 @@ use docbit_contracts::user::*;
 use docbit_domain::entities::{RoleUser, User};
 use docbit_domain::{new_id, seed_ids, ApplyTo, ToEntity, ToModel};
 
+use crate::db::{save_changes, EfResultExt};
 use crate::util::{now_secs, operator_id, parse_id};
 
 #[derive(Inject)]
@@ -51,10 +52,10 @@ pub struct InfoHandler {
 #[async_trait]
 impl IRequestHandler<ListUsersRequest, Vec<UserModel>> for ListUsersHandler {
     async fn handle(&mut self, _: ListUsersRequest) -> Result<Vec<UserModel>> {
-        let users = linq!(self.ctx.set::<User>(), |u: User| !u.is_deleted; include u.roles; order_by u.created_at desc)
+        let users = linq!(self.ctx.set::<User>(); include u.roles; order_by u.created_at desc)
             .to_list()
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
+            .map_ef()?;
 
         Ok(users.into_iter().map(UserModel::from).collect())
     }
@@ -67,10 +68,10 @@ impl IRequestHandler<GetUserRequest, UserModel> for GetUserHandler {
         let id = parse_id(&req.id)?;
         let q = id.clone();
 
-        let user = linq!(self.ctx.set::<User>(), |u: User| u.id == q && !u.is_deleted; include u.roles)
+        let user = linq!(self.ctx.set::<User>(), |u: User| u.id == q; include u.roles)
             .first_or_default()
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?
+            .map_ef()?
             .ok_or_else(|| Error::NotFound("User not found".into()))?;
 
         Ok(UserModel::from(user))
@@ -100,10 +101,7 @@ impl IRequestHandler<CreateUserRequest, UserModel> for CreateUserHandler {
         let role_users = self.ctx.set::<RoleUser>();
         role_users.add(role_user);
 
-        self.ctx
-            .save_changes()
-            .await
-            .map_err(|e| Error::Internal(format!("Failed to create user: {}", e)))?;
+        save_changes(&mut self.ctx).await?;
 
         tracing::info!("[User] Created: {} ({}) by {:?}", name, user_id, op);
         Ok(UserModel {
@@ -128,7 +126,7 @@ impl IRequestHandler<UpdateUserRequest, UserModel> for UpdateUserHandler {
             .query()
             .find(id.clone())
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?
+            .map_ef()?
             .ok_or_else(|| Error::NotFound("User not found".into()))?;
 
         let op = operator_id(req.claims.as_deref());
@@ -137,16 +135,13 @@ impl IRequestHandler<UpdateUserRequest, UserModel> for UpdateUserHandler {
         let set = self.ctx.set::<User>();
         set.update(user);
 
-        self.ctx
-            .save_changes()
-            .await
-            .map_err(|e| Error::Internal(format!("Failed to update user: {}", e)))?;
+        save_changes(&mut self.ctx).await?;
 
         let q = id.clone();
-        let updated = linq!(self.ctx.set::<User>(), |u: User| u.id == q && !u.is_deleted; include u.roles)
+        let updated = linq!(self.ctx.set::<User>(), |u: User| u.id == q; include u.roles)
             .first_or_default()
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?
+            .map_ef()?
             .ok_or_else(|| Error::NotFound("User not found after update".into()))?;
 
         Ok(updated.to_model())
@@ -165,7 +160,7 @@ impl IRequestHandler<DeleteUserRequest, String> for DeleteUserHandler {
             .query()
             .find(id.clone())
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?
+            .map_ef()?
             .ok_or_else(|| Error::NotFound("User not found".into()))?;
 
         user.is_deleted = true;
@@ -175,10 +170,7 @@ impl IRequestHandler<DeleteUserRequest, String> for DeleteUserHandler {
         let set = self.ctx.set::<User>();
         set.update(user);
 
-        self.ctx
-            .save_changes()
-            .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
+        save_changes(&mut self.ctx).await?;
 
         tracing::info!("[User] Soft-deleted: {}", id);
         Ok(format!("Deleted user {}", id))
@@ -189,9 +181,9 @@ impl IRequestHandler<DeleteUserRequest, String> for DeleteUserHandler {
 #[async_trait]
 impl IRequestHandler<InfoRequest, String> for InfoHandler {
     async fn handle(&mut self, _: InfoRequest) -> Result<String> {
-        let count = linq!(self.ctx.set::<User>(), |u: User| !u.is_deleted; count)
+        let count = linq!(self.ctx.set::<User>(); count)
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
+            .map_ef()?;
 
         Ok(format!("Total users: {}", count))
     }

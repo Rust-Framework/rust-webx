@@ -1,0 +1,19 @@
+[package]
+name = "rust-webx-ef"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "rust-webx + rust-ef integration — error mapping and SaveChanges hooks"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme = "../../README.md"
+keywords = ["web", "orm", "ef", "aspnet-core"]
+categories = ["web-programming", "database"]
+
+[dependencies]
+rust-webx-core.workspace = true
+rust-ef.workspace = true
+rust-dix.workspace = true
+async-trait.workspace = true
+tracing.workspace = true

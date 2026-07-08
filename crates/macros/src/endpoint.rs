@@ -210,6 +210,8 @@ fn generate_dispatch_fn(
             Box::pin(async move {
                 let mut request: #ty = #build_request;
 
+                let operator_id = claims.as_ref().map(|c| c.subject().to_string());
+
                 // Inject claims into the request *before* dispatch (no-op if the
                 // request type has no inherent `set_claims`).
                 {
@@ -217,6 +219,7 @@ fn generate_dispatch_fn(
                     request.set_claims(claims);
                 }
 
+                ::rust_webx::RequestContext::run(operator_id, async move {
                 // Look up the HandlerRegistration by request type name.
                 // `#[handler]` on `impl IRequestHandler<Req, Rsp> for Handler` submits
                 // an entry to inventory at compile time; the entry's factory constructs
@@ -246,6 +249,7 @@ fn generate_dispatch_fn(
                     content_type: "application/json".to_string(),
                     body: json_bytes,
                 })
+                }).await
             })
         }
     }

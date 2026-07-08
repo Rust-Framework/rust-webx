@@ -14,6 +14,7 @@ use docbit_contracts::category::{
 use docbit_domain::entities::Category;
 use docbit_domain::{new_id, ApplyTo, ToEntity, ToModel};
 
+use crate::db::{save_changes, EfResultExt};
 use crate::util::{now_secs, operator_id, parse_id};
 
 #[derive(Inject)]
@@ -98,10 +99,10 @@ fn attach_children(
 #[async_trait]
 impl IRequestHandler<ListCategoriesRequest, Vec<CategoryTreeNode>> for ListCategoriesHandler {
     async fn handle(&mut self, _: ListCategoriesRequest) -> Result<Vec<CategoryTreeNode>> {
-        let cats = linq!(self.ctx.set::<Category>(), |c: Category| !c.is_deleted)
+        let cats = linq!(self.ctx.set::<Category>();)
             .to_list()
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
+            .map_ef()?;
 
         let models: Vec<CategoryModel> = cats.into_iter().map(CategoryModel::from).collect();
         Ok(build_tree(models))
@@ -121,10 +122,7 @@ impl IRequestHandler<CreateCategoryRequest, CategoryModel> for CreateCategoryHan
         let set = self.ctx.set::<Category>();
         set.add(entity.clone());
 
-        self.ctx
-            .save_changes()
-            .await
-            .map_err(|e| Error::Internal(format!("Failed to create category: {}", e)))?;
+        save_changes(&mut self.ctx).await?;
 
         tracing::info!("[Category] Created: {} ({})", entity.name, entity.id);
         Ok(entity.to_model())
@@ -143,7 +141,7 @@ impl IRequestHandler<UpdateCategoryRequest, CategoryModel> for UpdateCategoryHan
             .query()
             .find(id.clone())
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?
+            .map_ef()?
             .ok_or_else(|| Error::NotFound("Category not found".into()))?;
 
         let op = operator_id(req.claims.as_deref());
@@ -152,10 +150,7 @@ impl IRequestHandler<UpdateCategoryRequest, CategoryModel> for UpdateCategoryHan
         let set = self.ctx.set::<Category>();
         set.update(cat.clone());
 
-        self.ctx
-            .save_changes()
-            .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
+        save_changes(&mut self.ctx).await?;
 
         Ok(cat.to_model())
     }
@@ -173,7 +168,7 @@ impl IRequestHandler<DeleteCategoryRequest, String> for DeleteCategoryHandler {
             .query()
             .find(id.clone())
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?
+            .map_ef()?
             .ok_or_else(|| Error::NotFound("Category not found".into()))?;
 
         cat.is_deleted = true;
@@ -183,10 +178,7 @@ impl IRequestHandler<DeleteCategoryRequest, String> for DeleteCategoryHandler {
         let set = self.ctx.set::<Category>();
         set.update(cat);
 
-        self.ctx
-            .save_changes()
-            .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
+        save_changes(&mut self.ctx).await?;
 
         tracing::info!("[Category] Soft-deleted: {}", id);
         Ok(format!("Deleted category {}", id))

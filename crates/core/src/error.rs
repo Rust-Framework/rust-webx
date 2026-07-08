@@ -30,6 +30,10 @@ pub enum Error {
     /// Resource not found.
     #[error("{0}")]
     NotFound(String),
+
+    /// Optimistic concurrency or state conflict.
+    #[error("{0}")]
+    Conflict(String),
 }
 
 impl Error {
@@ -47,6 +51,7 @@ impl Error {
             Error::Message(_) => 500,
             Error::Validation(_) => 400,
             Error::NotFound(_) => 404,
+            Error::Conflict(_) => 409,
         }
     }
 }

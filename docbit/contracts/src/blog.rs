@@ -99,6 +99,7 @@ impl IRequest<BlogPostModel> for CreateBlogPostRequest {}
 #[claims]
 #[derive(Default, Deserialize)]
 pub struct UpdateBlogPostRequest {
+    #[serde(default)]
     pub slug: String,
     pub title: Option<String>,
     pub summary: Option<String>,

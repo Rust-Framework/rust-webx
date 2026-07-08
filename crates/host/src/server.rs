@@ -25,8 +25,10 @@ use crate::context::HttpContext;
 use crate::cors::{CorsConfig, CorsMiddleware};
 use crate::endpoint::{StaticHtmlEndpoint, StaticJsonEndpoint, StubEndpoint};
 use crate::health::{HealthCheckEndpoint, HealthCheckRegistry, HealthStatus};
-use crate::problem_response::{build_problem, write_problem_response};
 use crate::memory_cache::MemoryCache;
+use crate::metrics::{HttpMetrics, MetricsEndpoint, MetricsMiddleware};
+use crate::problem_response::{build_problem, write_problem_response};
+use crate::rate_limit::RateLimitMiddleware;
 use crate::pipeline::{HandlerFn, MiddlewarePipeline};
 use crate::router::Router;
 use jsonwebtoken::{DecodingKey, Validation};
@@ -336,25 +338,44 @@ impl HostBuilder {
         // dependencies via the global provider set above.
         rust_webx_core::route::scan::HandlerCache::init_global();
 
-        let mut pipeline = MiddlewarePipeline::new();
-
-        // Default security & observability middleware (zero-config safe defaults).
-        // Order: SecurityHeaders → RequestId → user middleware → CORS → SPA → Auth
-        // - SecurityHeaders first so every response (including short-circuited) gets headers
-        // - RequestId first so every response carries a trace ID
-        pipeline.add_middleware(Arc::new(crate::security_headers::SecurityHeadersMiddleware::new()));
-        pipeline.add_middleware(Arc::new(crate::request_id::RequestIdMiddleware::new()));
-
-        let middlewares: Vec<Arc<dyn IMiddleware>> = provider.get_all::<dyn IMiddleware>();
-        for mw in middlewares {
-            pipeline.add_middleware(mw);
-        }
-
         let appsettings =
             config::load_appsettings(self.mode).unwrap_or_else(|| serde_json::json!({}));
         let mut options: AppOptions = config::bind_root(&appsettings);
         for modifier in self.options_modifiers {
             modifier(&mut options);
+        }
+
+        let http_metrics = HttpMetrics::new();
+
+        let mut pipeline = MiddlewarePipeline::new();
+
+        // Default security & observability middleware (zero-config safe defaults).
+        // Order: SecurityHeaders → RequestId → RateLimit → Metrics → user → CORS → SPA → Auth
+        pipeline.add_middleware(Arc::new(crate::security_headers::SecurityHeadersMiddleware::new()));
+        pipeline.add_middleware(Arc::new(crate::request_id::RequestIdMiddleware::new()));
+
+        if options.rate_limit.enabled {
+            tracing::info!(
+                "[Host] RateLimit enabled: {} req/s, burst {}, max_ips {}",
+                options.rate_limit.requests_per_second,
+                options.rate_limit.burst_size,
+                options.rate_limit.max_tracked_ips
+            );
+            pipeline.add_middleware(Arc::new(RateLimitMiddleware::from_config(
+                &options.rate_limit,
+            )));
+        }
+
+        if options.metrics.enabled {
+            tracing::info!("[Host] Metrics enabled at GET /metrics");
+            pipeline.add_middleware(Arc::new(MetricsMiddleware::new(Arc::clone(
+                &http_metrics,
+            ))));
+        }
+
+        let middlewares: Vec<Arc<dyn IMiddleware>> = provider.get_all::<dyn IMiddleware>();
+        for mw in middlewares {
+            pipeline.add_middleware(mw);
         }
 
         let cors = self.cors_config.unwrap_or_else(|| {
@@ -506,6 +527,14 @@ impl HostBuilder {
             "/health/ready",
             Arc::new(HealthCheckEndpoint::new(health_registry)),
         );
+
+        if options.metrics.enabled {
+            router.register(
+                HttpMethod::Get,
+                "/metrics",
+                Arc::new(MetricsEndpoint::new(http_metrics)),
+            );
+        }
 
         if self.mode == AppMode::Development {
             let version = env!("CARGO_PKG_VERSION");

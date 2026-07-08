@@ -3,7 +3,7 @@
 ## inject_attr 模式（推荐）
 
 ```rust
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<LoginRequest, AuthResponse>)]
+#[inject]
 pub struct LoginHandler {
     auth: Arc<dyn IAuthService>,
 }
@@ -31,7 +31,7 @@ pub trait IDocumentService: Send + Sync {
 }
 
 // handlers/docs.rs — 实现 + 自动注册
-#[rust_dicore::inject_attr(singleton, as = dyn IDocumentService)]
+#[inject]
 pub struct DocService {
     paths: Arc<AppPaths>,
 }
@@ -39,7 +39,7 @@ pub struct DocService {
 impl IDocumentService for DocService { ... }
 
 // handlers/docs.rs — Handler 消费接口
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<GetDocIndexRequest, DocIndex>)]
+#[inject]
 pub struct GetDocIndexHandler {
     docs: Arc<dyn IDocumentService>,
 }

@@ -3,6 +3,9 @@
 //! Provides HealthCheckRegistry and typed HealthStatus.
 //! Endpoints follow RFC 8407 (`application/health+json` content type).
 
+use rust_webx_core::error::Result;
+use rust_webx_core::http::IHttpContext;
+use rust_webx_core::routing::IEndpoint;
 use std::sync::{Arc, Mutex};
 
 pub type HealthCheckFn = Arc<dyn Fn() -> HealthStatus + Send + Sync>;
@@ -103,5 +106,56 @@ impl HealthCheckRegistry {
                 }
             })
             .unwrap_or("fail")
+    }
+}
+
+/// Build an RFC 8407 `application/health+json` body from the registry.
+///
+/// When the registry has no checks, returns `{"status":"pass"}`.
+/// Otherwise returns `{"status":<overall>,"checks":[...]}`.
+pub fn build_health_response(registry: &HealthCheckRegistry) -> Vec<u8> {
+    let entries = registry.snapshot();
+    let overall = registry.overall_status();
+    let body = if entries.is_empty() {
+        serde_json::json!({ "status": overall })
+    } else {
+        serde_json::json!({
+            "status": overall,
+            "checks": entries
+        })
+    };
+    serde_json::to_vec(&body).unwrap_or_default()
+}
+
+/// HTTP status for a health overall status: `fail` → 503, otherwise 200.
+pub fn health_http_status(overall: &str) -> u16 {
+    if overall == "fail" {
+        503
+    } else {
+        200
+    }
+}
+
+/// Dynamic health endpoint — evaluates registered probes on each request.
+pub struct HealthCheckEndpoint {
+    registry: Arc<HealthCheckRegistry>,
+}
+
+impl HealthCheckEndpoint {
+    pub fn new(registry: Arc<HealthCheckRegistry>) -> Self {
+        Self { registry }
+    }
+}
+
+#[async_trait::async_trait]
+impl IEndpoint for HealthCheckEndpoint {
+    async fn handle(&self, ctx: &mut dyn IHttpContext) -> Result<()> {
+        let overall = self.registry.overall_status();
+        let body = build_health_response(&self.registry);
+        ctx.response_mut()
+            .set_status(health_http_status(overall));
+        ctx.response_mut()
+            .set_header("content-type", "application/health+json");
+        ctx.response_mut().write_bytes(body).await
     }
 }

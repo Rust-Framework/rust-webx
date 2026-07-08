@@ -34,6 +34,21 @@ All notable changes to **rust-webx** are documented in this file.
 - `docbit/Dockerfile`, `docbit/docker-compose.yml`, `docbit/.env.example`, `docbit/publish.sh`, `docbit/PRODUCTION.md`.
 - CI job: Docker build for docbit.
 
+### Framework production fixes (0.2.0)
+
+- **Dynamic health checks**: `/health` and `/health/ready` evaluate probes per request; `fail` returns HTTP 503.
+- **SIGTERM**: Unix graceful shutdown via tokio signal listener (alongside Ctrl+C).
+- **`IHost::stop()`** and **`run_at()`** now trigger shutdown and run hosted service lifecycle.
+- **Production fail-fast** for CORS wildcard `*`.
+- **OpenAPI UI** registered only in Development mode.
+- Tests: runtime health probe, production guard panics, `APP__Jwt__Secret` precedence.
+
+### Framework production fixes (0.2.0) — continued
+
+- **Unified error format**: 401/403/429/413 统一为 RFC 7807 `application/problem+json`（`problem_response` 模块）。
+- **SIGTERM / shutdown tests** + **TLS HTTPS 集成测试**（rcgen 自签证书）。
+- **docs/rust-webx** 批量更新：`rust_dix`、`add_memory_cache`、TLS/health API。
+
 ### Changed
 
 - `appsettings.Production.json`: JWT secret removed from file; must be supplied via env.

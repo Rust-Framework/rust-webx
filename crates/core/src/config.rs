@@ -185,6 +185,41 @@ pub fn load_appsettings(mode: AppMode) -> Option<serde_json::Value> {
     Some(base)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn jwt_secret_env_overrides_json_value() {
+        std::env::set_var("JWT_SECRET", "env-jwt-secret-that-is-long-enough-32");
+        let mut config = serde_json::json!({ "Jwt": { "Secret": "from-file" } });
+        apply_well_known_env_overrides(&mut config);
+        std::env::remove_var("JWT_SECRET");
+        assert_eq!(
+            config["Jwt"]["Secret"],
+            "env-jwt-secret-that-is-long-enough-32"
+        );
+    }
+
+    #[test]
+    fn app_env_override_wins_over_jwt_secret() {
+        std::env::set_var("JWT_SECRET", "from-jwt-secret-env-var-32chars-min");
+        std::env::set_var(
+            "APP__Jwt__Secret",
+            "from-app-override-secret-32chars-minimum",
+        );
+        let mut config = serde_json::json!({ "Jwt": { "Secret": "from-file" } });
+        apply_well_known_env_overrides(&mut config);
+        apply_env_overrides(&mut config);
+        std::env::remove_var("JWT_SECRET");
+        std::env::remove_var("APP__Jwt__Secret");
+        assert_eq!(
+            config["Jwt"]["Secret"],
+            "from-app-override-secret-32chars-minimum"
+        );
+    }
+}
+
 /// Apply conventional environment variables that map to config sections.
 ///
 /// `JWT_SECRET` → `Jwt.Secret` (overridden by `APP__Jwt__Secret` if set).

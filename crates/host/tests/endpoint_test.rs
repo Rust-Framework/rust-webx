@@ -183,10 +183,8 @@ async fn endpoint_auth_required_without_claims_returns_401() {
     let (status, _, body) = ctx.into_response_parts();
     assert_eq!(status, 401);
     let body_json: serde_json::Value = serde_json::from_slice(body.as_ref().unwrap()).unwrap();
-    assert!(body_json["error"]
-        .as_str()
-        .unwrap()
-        .contains("Authentication"));
+    assert_eq!(body_json["detail"], "Authentication required");
+    assert_eq!(body_json["title"], "Unauthorized");
 }
 
 #[tokio::test]

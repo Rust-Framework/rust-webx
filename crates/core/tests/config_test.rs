@@ -145,11 +145,32 @@ fn config_bind_empty_json_returns_default() {
 
 #[test]
 fn config_jwt_secret_env_override() {
-    std::env::set_var("JWT_SECRET", "env-jwt-secret-that-is-long-enough-32");
-    let result = config::load_appsettings(AppMode::Development);
-    std::env::remove_var("JWT_SECRET");
-    if let Some(json) = result {
+    // Integration test: only assert when no appsettings.json is discovered on disk.
+    if config::load_appsettings(AppMode::Development).is_none() {
+        std::env::set_var("JWT_SECRET", "env-jwt-secret-that-is-long-enough-32");
+        let result = config::load_appsettings(AppMode::Development);
+        std::env::remove_var("JWT_SECRET");
+        let json = result.expect("expected config when JWT_SECRET set");
         let opts: rust_webx_core::config::AppOptions = config::bind_root(&json);
         assert_eq!(opts.jwt.secret, "env-jwt-secret-that-is-long-enough-32");
+    }
+}
+
+#[test]
+fn config_app_jwt_secret_overrides_jwt_secret_env() {
+    std::env::set_var("JWT_SECRET", "from-jwt-secret-env-var-32chars-min");
+    std::env::set_var(
+        "APP__Jwt__Secret",
+        "from-app-override-secret-32chars-minimum",
+    );
+    let result = config::load_appsettings(AppMode::Development);
+    std::env::remove_var("JWT_SECRET");
+    std::env::remove_var("APP__Jwt__Secret");
+    if let Some(json) = result {
+        let opts: rust_webx_core::config::AppOptions = config::bind_root(&json);
+        assert_eq!(
+            opts.jwt.secret,
+            "from-app-override-secret-32chars-minimum"
+        );
     }
 }

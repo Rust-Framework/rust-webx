@@ -150,7 +150,8 @@ async fn auth_no_token_returns_401() {
     assert_eq!(resp.status().as_u16(), 401);
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["status"], 401);
-    assert_eq!(body["error"], "Authentication required");
+    assert_eq!(body["detail"], "Authentication required");
+    assert_eq!(body["title"], "Unauthorized");
 }
 
 #[tokio::test]
@@ -206,7 +207,8 @@ async fn auth_expired_token_returns_401() {
     assert_eq!(resp.status().as_u16(), 401);
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["status"], 401);
-    assert_eq!(body["error"], "Authentication required");
+    assert_eq!(body["detail"], "Authentication required");
+    assert_eq!(body["title"], "Unauthorized");
 }
 
 #[tokio::test]

@@ -57,7 +57,7 @@ svc.add_hosted_service::<DbInitService>()
 
 - `#[handler]` 收集的所有 Handler
 - `IMediator` → `Mediator`
-- `use_memory_cache()` 时的 `IDistributedCache`
+- `add_memory_cache()` 时的 `IDistributedCache`
 - `add_authentication()` 时的 JWT 中间件
 
 ## 小结

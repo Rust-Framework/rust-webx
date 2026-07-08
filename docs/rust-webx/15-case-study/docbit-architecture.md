@@ -25,7 +25,7 @@ let host = Host::builder()
     .register(common::bootstrap::configure)
     .use_spa(wwwroot)
     .add_authentication()
-    .use_memory_cache()
+    .add_memory_cache()
     .build();
 
 host.run().await?;

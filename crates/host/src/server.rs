@@ -24,7 +24,8 @@ use crate::authz::collect_authorizers;
 use crate::context::HttpContext;
 use crate::cors::{CorsConfig, CorsMiddleware};
 use crate::endpoint::{StaticHtmlEndpoint, StaticJsonEndpoint, StubEndpoint};
-use crate::health::{HealthCheckRegistry, HealthStatus};
+use crate::health::{HealthCheckEndpoint, HealthCheckRegistry, HealthStatus};
+use crate::problem_response::{build_problem, write_problem_response};
 use crate::memory_cache::MemoryCache;
 use crate::pipeline::{HandlerFn, MiddlewarePipeline};
 use crate::router::Router;
@@ -400,7 +401,7 @@ impl HostBuilder {
                 init_jwt_secret(&secret);
             } else {
                 tracing::warn!(
-                    "add_authentication() enabled but no JWT secret configured. Set jwt.secret in appsettings.json or JWT_SECRET env var."
+                    "add_authentication() enabled but no JWT secret configured. Set Jwt.Secret in appsettings.json, JWT_SECRET, or APP__Jwt__Secret env var."
                 );
             }
         }
@@ -419,10 +420,10 @@ impl HostBuilder {
             );
         }
 
-        // Security: Warn if CORS allows all origins in production
+        // Security: fail fast in production when CORS allows all origins
         if self.mode == AppMode::Production && options.cors.origins.iter().any(|o| o == "*") {
-            tracing::warn!(
-                "INSECURE: CORS allows all origins (*) in production. Restrict to specific origins."
+            panic!(
+                "Production forbids CORS origin '*'. Set explicit origins via Cors.Origins or APP__Cors__Origins."
             );
         }
 
@@ -464,26 +465,26 @@ impl HostBuilder {
             router.register(entry.method, entry.path, stub);
         }
 
-        let openapi_spec = generate_openapi_spec("LRWF API", "1.0.0");
-        let openapi_bytes = serde_json::to_vec(&openapi_spec).unwrap_or_default();
-        router.register(
-            HttpMethod::Get,
-            "/api/openapi.json",
-            Arc::new(StaticJsonEndpoint::new(openapi_bytes)),
-        );
-        router.register(
-            HttpMethod::Get,
-            "/api/openapi.html",
-            Arc::new(StaticHtmlEndpoint { body: APIUI_HTML }),
-        );
+        let openapi_spec = generate_openapi_spec("Rust WebX API", env!("CARGO_PKG_VERSION"));
+        if self.mode == AppMode::Development {
+            let openapi_bytes = serde_json::to_vec(&openapi_spec).unwrap_or_default();
+            router.register(
+                HttpMethod::Get,
+                "/api/openapi.json",
+                Arc::new(StaticJsonEndpoint::new(openapi_bytes)),
+            );
+            router.register(
+                HttpMethod::Get,
+                "/api/openapi.html",
+                Arc::new(StaticHtmlEndpoint { body: APIUI_HTML }),
+            );
+        }
 
         // Health check endpoints (RFC 8407 application/health+json)
-        // /health and /healthz: aggregate status from registered probes
-        let health_body = build_health_response(&self.health_registry);
-        let health_endpoint: Arc<dyn IEndpoint> = Arc::new(StaticJsonEndpoint {
-            body: health_body,
-            content_type: "application/health+json",
-        });
+        // Probes are evaluated on each request (not baked at build time).
+        let health_registry = Arc::clone(&self.health_registry);
+        let health_endpoint: Arc<dyn IEndpoint> =
+            Arc::new(HealthCheckEndpoint::new(Arc::clone(&health_registry)));
         router.register(HttpMethod::Get, "/health", Arc::clone(&health_endpoint));
         router.register(HttpMethod::Get, "/healthz", health_endpoint);
 
@@ -499,15 +500,11 @@ impl HostBuilder {
             }),
         );
 
-        // /health/ready: readiness (queries Registry, same as /health)
-        let ready_body = build_health_response(&self.health_registry);
+        // /health/ready: readiness (queries registry, same as /health)
         router.register(
             HttpMethod::Get,
             "/health/ready",
-            Arc::new(StaticJsonEndpoint {
-                body: ready_body,
-                content_type: "application/health+json",
-            }),
+            Arc::new(HealthCheckEndpoint::new(health_registry)),
         );
 
         if self.mode == AppMode::Development {
@@ -640,17 +637,7 @@ impl Host {
     /// { "App": { "Urls": ["http://localhost:5000", "https://localhost:5030"] } }
     /// ```
     pub async fn run(&self) -> Result<()> {
-        // â”€â”€ Start all hosted services before accepting connections â”€â”€
-        if !self.hosted_services.is_empty() {
-            tracing::info!(
-                "Starting {} hosted service(s)...",
-                self.hosted_services.len()
-            );
-            for svc in &self.hosted_services {
-                svc.start().await?;
-            }
-            tracing::info!("All hosted services started.");
-        }
+        start_hosted_services(&self.hosted_services).await?;
 
         let urls = if self.options.app.urls.is_empty() {
             vec!["http://0.0.0.0:5000".to_string()]
@@ -700,6 +687,7 @@ impl Host {
 
         let notify = Arc::clone(&self.shutdown);
         install_shutdown_handler(Arc::clone(&notify));
+        spawn_async_shutdown_listener(Arc::clone(&notify));
 
         let mut handles = Vec::new();
         let pipeline = Arc::clone(&self.pipeline);
@@ -746,27 +734,18 @@ impl Host {
             let _ = h.await;
         }
 
-        // â”€â”€ Stop all hosted services during graceful shutdown â”€â”€
-        if !self.hosted_services.is_empty() {
-            tracing::info!(
-                "Stopping {} hosted service(s)...",
-                self.hosted_services.len()
-            );
-            for svc in &self.hosted_services {
-                if let Err(e) = svc.stop().await {
-                    tracing::warn!("Hosted service stop error: {}", e);
-                }
-            }
-            tracing::info!("All hosted services stopped.");
-        }
+        stop_hosted_services(&self.hosted_services).await;
 
         Ok(())
     }
 
     /// Start the server at a single explicit address (convenience wrapper).
     pub async fn run_at(&self, addr: &str) -> Result<()> {
+        start_hosted_services(&self.hosted_services).await?;
+
         let notify = Arc::clone(&self.shutdown);
         install_shutdown_handler(Arc::clone(&notify));
+        spawn_async_shutdown_listener(Arc::clone(&notify));
         serve_http(
             addr.to_string(),
             notify,
@@ -776,6 +755,8 @@ impl Host {
             self.options.app.max_body_size,
         )
         .await;
+
+        stop_hosted_services(&self.hosted_services).await;
         Ok(())
     }
 
@@ -811,6 +792,7 @@ impl IHost for Host {
     }
     async fn stop(&self) -> Result<()> {
         tracing::info!("Stop requested.");
+        self.shutdown.notify_waiters();
         Ok(())
     }
 }
@@ -860,37 +842,7 @@ async fn handle_request(
 }
 
 async fn write_error_response(ctx: &mut dyn IHttpContext, status: u16, message: &str) {
-    ctx.response_mut().set_status(status);
-    ctx.response_mut()
-        .set_header("content-type", "application/problem+json");
-    // RFC 7807 Problem Details format
-    let title = match status {
-        400 => "Bad Request",
-        401 => "Unauthorized",
-        403 => "Forbidden",
-        404 => "Not Found",
-        405 => "Method Not Allowed",
-        409 => "Conflict",
-        413 => "Payload Too Large",
-        415 => "Unsupported Media Type",
-        422 => "Unprocessable Entity",
-        429 => "Too Many Requests",
-        500 => "Internal Server Error",
-        502 => "Bad Gateway",
-        503 => "Service Unavailable",
-        504 => "Gateway Timeout",
-        _ => "Error",
-    };
-    let body = serde_json::json!({
-        "type": format!("https://httpstatuses.com/{}", status),
-        "title": title,
-        "status": status,
-        "detail": message,
-    });
-    let _ = ctx
-        .response_mut()
-        .write_bytes(serde_json::to_vec(&body).unwrap_or_default())
-        .await;
+    write_problem_response(ctx, build_problem(status, message)).await;
 }
 
 // ---------------------------------------------------------------------------
@@ -919,6 +871,62 @@ fn install_shutdown_handler(shutdown: Arc<tokio::sync::Notify>) {
     }) {
         tracing::warn!("Could not install Ctrl+C handler: {}", e);
     }
+}
+
+/// Tokio-based listener for Ctrl+C (all platforms) and SIGTERM (Unix).
+fn spawn_async_shutdown_listener(shutdown: Arc<tokio::sync::Notify>) {
+    tokio::spawn(async move {
+        wait_for_shutdown_signal().await;
+        tracing::info!("Async shutdown signal received, draining connections...");
+        shutdown.notify_waiters();
+    });
+}
+
+async fn wait_for_shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        let mut sigterm = signal(SignalKind::terminate()).expect("install SIGTERM handler");
+        tokio::select! {
+            res = tokio::signal::ctrl_c() => {
+                if let Err(e) = res {
+                    tracing::warn!("Ctrl+C listener error: {}", e);
+                }
+            }
+            _ = sigterm.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        if let Err(e) = tokio::signal::ctrl_c().await {
+            tracing::warn!("Ctrl+C listener error: {}", e);
+        }
+    }
+}
+
+async fn start_hosted_services(services: &[Arc<dyn IHostedService>]) -> Result<()> {
+    if services.is_empty() {
+        return Ok(());
+    }
+    tracing::info!("Starting {} hosted service(s)...", services.len());
+    for svc in services {
+        svc.start().await?;
+    }
+    tracing::info!("All hosted services started.");
+    Ok(())
+}
+
+async fn stop_hosted_services(services: &[Arc<dyn IHostedService>]) {
+    if services.is_empty() {
+        return;
+    }
+    tracing::info!("Stopping {} hosted service(s)...", services.len());
+    for svc in services {
+        if let Err(e) = svc.stop().await {
+            tracing::warn!("Hosted service stop error: {}", e);
+        }
+    }
+    tracing::info!("All hosted services stopped.");
 }
 
 async fn drain_connections(
@@ -1192,26 +1200,4 @@ fn build_tls_acceptor(cert_path: &str, key_path: &str) -> Result<TlsAcceptor> {
         .map_err(|e| rust_webx_core::error::Error::Http(format!("TLS config error: {}", e)))?;
 
     Ok(TlsAcceptor::from(std::sync::Arc::new(config)))
-}
-
-// ---------------------------------------------------------------------------
-// Health response helper (RFC 8407)
-// ---------------------------------------------------------------------------
-
-/// Build an RFC 8407 health+json response body from the registry.
-///
-/// When the registry has no checks, returns `{"status":"pass"}`.
-/// Otherwise returns `{"status":<overall>,"checks":[...]}`.
-fn build_health_response(registry: &HealthCheckRegistry) -> Vec<u8> {
-    let entries = registry.snapshot();
-    let overall = registry.overall_status();
-    let body = if entries.is_empty() {
-        serde_json::json!({ "status": overall })
-    } else {
-        serde_json::json!({
-            "status": overall,
-            "checks": entries
-        })
-    };
-    serde_json::to_vec(&body).unwrap_or_default()
 }

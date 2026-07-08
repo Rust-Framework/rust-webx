@@ -3,7 +3,7 @@
 ## 内存缓存
 
 ```rust
-Host::builder().use_memory_cache()
+Host::builder().add_memory_cache()
 ```
 
 注册 `MemoryCache` 为 `IDistributedCache` 实现。
@@ -36,6 +36,6 @@ svc.add_middleware::<RateLimitMiddleware>()
 
 ## 小结
 
-`use_memory_cache()` 一行启用缓存；速率限制保护 API 免受滥用。
+`add_memory_cache()` 一行启用缓存；速率限制保护 API 免受滥用。
 
 下一节：[OpenAPI 与 SPA 托管](openapi-spa.md)

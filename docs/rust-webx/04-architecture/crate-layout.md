@@ -82,7 +82,7 @@ rust-webx = "0.2"
 use rust_webx::*;
 ```
 
-同时 re-export `rust_dicore`、`async_trait`、`serde` 等常用依赖，减少 `Cargo.toml` 条目。
+同时 re-export `rust_dix`、`async_trait`、`serde` 等常用依赖，减少 `Cargo.toml` 条目。
 
 ## 小结
 

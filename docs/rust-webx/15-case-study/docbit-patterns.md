@@ -3,7 +3,7 @@
 ## 模式 1：inject_attr + #[handler(inject)]
 
 ```rust
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<LoginRequest, AuthResponse>)]
+#[inject]
 pub struct LoginHandler {
     auth: Arc<dyn IAuthService>,
 }
@@ -28,14 +28,14 @@ pub struct ListBlogPostsRequest;
 impl IRequest<Vec<BlogPostSummary>> for ListBlogPostsRequest {}
 
 // handlers/blog.rs — 实现
-#[rust_dicore::inject_attr(singleton, as = dyn IBlogService)]
+#[inject]
 pub struct BlogService {
     paths: Arc<AppPaths>,
 }
 
 impl IBlogService for BlogService { ... }
 
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<ListBlogPostsRequest, Vec<BlogPostSummary>>)]
+#[inject]
 pub struct ListBlogPostsHandler {
     blog: Arc<dyn IBlogService>,
 }
@@ -46,7 +46,7 @@ pub struct ListBlogPostsHandler {
 ## 模式 3：IHostedService 初始化
 
 ```rust
-#[rust_dicore::inject_attr(singleton, as = dyn IHostedService)]
+#[inject]
 pub struct DbInitService {
     ctx: Arc<Mutex<DbContext>>,
     docs: Arc<dyn IDocumentService>,

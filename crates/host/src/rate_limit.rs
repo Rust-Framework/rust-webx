@@ -12,6 +12,7 @@
 //! The middleware reads the client IP from `X-Forwarded-For` or
 //! `X-Real-IP` headers.  Exceeded clients receive a 429 response.
 
+use crate::problem_response::write_problem;
 use rust_webx_core::error::Result;
 use rust_webx_core::http::IHttpContext;
 use rust_webx_core::middleware::IMiddleware;
@@ -125,17 +126,7 @@ impl IMiddleware for RateLimitMiddleware {
         let ip = extract_client_ip(ctx);
 
         if !self.limiter.allow(ip).await {
-            ctx.response_mut().set_status(429);
-            ctx.response_mut()
-                .set_header("content-type", "application/json");
-            let body = serde_json::json!({
-                "error": "Too Many Requests",
-                "status": 429
-            });
-            let _ = ctx
-                .response_mut()
-                .write_bytes(serde_json::to_vec(&body).unwrap_or_default())
-                .await;
+            write_problem(ctx, 429, "Too Many Requests").await;
             return Ok(ControlFlow::Break(()));
         }
 

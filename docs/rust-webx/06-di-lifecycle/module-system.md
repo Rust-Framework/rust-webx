@@ -5,7 +5,7 @@
 大型项目可用 `#[module]` 宏组织 DI 注册：
 
 ```rust
-use rust_dicore_macros::module;
+use rust_dix_macros::module;
 
 #[module]
 pub mod UserModule {
@@ -19,7 +19,7 @@ pub mod UserModule {
 ## inject 宏
 
 ```rust
-use rust_dicore::inject;
+use rust_dix::inject;
 
 #[inject(singleton)]
 pub struct EmailService {

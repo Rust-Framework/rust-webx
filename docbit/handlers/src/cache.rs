@@ -30,6 +30,7 @@ impl IRequestHandler<CacheStatsRequest, String> for CacheStatsHandler {
             .map_err(|e| Error::Internal(e.to_string()))?;
 
         let entries = self.cache.count().await;
+
         Ok(serde_json::json!({
             "status": val,
             "entries": entries,

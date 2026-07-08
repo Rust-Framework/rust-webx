@@ -10,11 +10,9 @@
 
 use rust_webx::*;
 
-// `#[derive(Inject)]` 生成 `__rdi_construct_RoleAuthorizer` 构造器。
 #[derive(Inject)]
 pub struct RoleAuthorizer;
 
-// `#[inject]` 在 trait impl 上：注册为 `dyn IDynamicAuthorizer`（默认 singleton）。
 #[inject]
 #[async_trait]
 impl IDynamicAuthorizer for RoleAuthorizer {
@@ -27,12 +25,15 @@ impl IDynamicAuthorizer for RoleAuthorizer {
         if route_pattern.starts_with("/api/auth/") {
             return Ok(());
         }
+
         if route_pattern.contains("/comments") {
             return Ok(());
         }
+
         if claims.has_role("admin") {
             return Ok(());
         }
+
         Err(Error::Http(format!(
             "Forbidden: admin role required for '{}'",
             route_pattern

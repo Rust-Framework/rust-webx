@@ -1,7 +1,6 @@
 //! User handlers — admin CRUD with audit fields and soft delete.
 //!
-//! 每个 handler 持有 owned `DbContext`（bare T 字段由 `#[derive(Inject)]`
-//! 通过 `get_owned` 解析），`handle(&mut self, ...)` 直接操作 `self.ctx`。
+//! 每个 handler 持有 owned `DbContext`，`handle(&mut self, ...)` 直接操作 `self.ctx`。
 
 use rust_ef::{db_context::DbContext, prelude::*};
 use rust_webx::*;
@@ -56,6 +55,7 @@ impl IRequestHandler<ListUsersRequest, Vec<UserModel>> for ListUsersHandler {
             .to_list()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?;
+
         Ok(users.into_iter().map(UserModel::from).collect())
     }
 }
@@ -66,11 +66,13 @@ impl IRequestHandler<GetUserRequest, UserModel> for GetUserHandler {
     async fn handle(&mut self, req: GetUserRequest) -> Result<UserModel> {
         let id = parse_id(&req.id)?;
         let q = id.clone();
+
         let user = linq!(self.ctx.set::<User>(), |u: User| u.id == q && !u.is_deleted; include u.roles)
             .first_or_default()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?
             .ok_or_else(|| Error::NotFound("User not found".into()))?;
+
         Ok(UserModel::from(user))
     }
 }
@@ -84,6 +86,7 @@ impl IRequestHandler<CreateUserRequest, UserModel> for CreateUserHandler {
         let user_id = new_id();
         let name = req.name.clone();
         let email = req.email.clone();
+
         let user = req.to_entity(user_id.clone(), op.clone(), now);
         let users = self.ctx.set::<User>();
         users.add(user);
@@ -118,6 +121,7 @@ impl IRequestHandler<CreateUserRequest, UserModel> for CreateUserHandler {
 impl IRequestHandler<UpdateUserRequest, UserModel> for UpdateUserHandler {
     async fn handle(&mut self, req: UpdateUserRequest) -> Result<UserModel> {
         let id = parse_id(&req.id)?;
+
         let mut user = self
             .ctx
             .set::<User>()
@@ -132,18 +136,19 @@ impl IRequestHandler<UpdateUserRequest, UserModel> for UpdateUserHandler {
 
         let set = self.ctx.set::<User>();
         set.update(user);
+
         self.ctx
             .save_changes()
             .await
             .map_err(|e| Error::Internal(format!("Failed to update user: {}", e)))?;
 
-        // 回查含角色
         let q = id.clone();
         let updated = linq!(self.ctx.set::<User>(), |u: User| u.id == q && !u.is_deleted; include u.roles)
             .first_or_default()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?
             .ok_or_else(|| Error::NotFound("User not found after update".into()))?;
+
         Ok(updated.to_model())
     }
 }
@@ -153,6 +158,7 @@ impl IRequestHandler<UpdateUserRequest, UserModel> for UpdateUserHandler {
 impl IRequestHandler<DeleteUserRequest, String> for DeleteUserHandler {
     async fn handle(&mut self, req: DeleteUserRequest) -> Result<String> {
         let id = parse_id(&req.id)?;
+
         let mut user = self
             .ctx
             .set::<User>()
@@ -165,12 +171,15 @@ impl IRequestHandler<DeleteUserRequest, String> for DeleteUserHandler {
         user.is_deleted = true;
         user.updated_id = operator_id(req.claims.as_deref());
         user.updated_at = now_secs();
+
         let set = self.ctx.set::<User>();
         set.update(user);
+
         self.ctx
             .save_changes()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?;
+
         tracing::info!("[User] Soft-deleted: {}", id);
         Ok(format!("Deleted user {}", id))
     }
@@ -183,6 +192,7 @@ impl IRequestHandler<InfoRequest, String> for InfoHandler {
         let count = linq!(self.ctx.set::<User>(), |u: User| !u.is_deleted; count)
             .await
             .map_err(|e| Error::Internal(e.to_string()))?;
+
         Ok(format!("Total users: {}", count))
     }
 }

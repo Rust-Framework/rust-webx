@@ -50,9 +50,11 @@ impl IRequestHandler<GetDocIndexRequest, DocIndex> for GetDocIndexHandler {
 #[async_trait]
 impl IRequestHandler<GetDocContentRequest, DocContent> for GetDocContentHandler {
     async fn handle(&mut self, req: GetDocContentRequest) -> Result<DocContent> {
-        // 路径编码约定：`/` 在 URL 路径段中以 `:` 替代，这里还原。
         let path = percent_decode(&req.path).replace(':', "/");
-        self.docs.content(&req.work, &path).map_err(Error::NotFound)
+
+        self.docs
+            .content(&req.work, &path)
+            .map_err(Error::NotFound)
     }
 }
 
@@ -60,6 +62,7 @@ impl IRequestHandler<GetDocContentRequest, DocContent> for GetDocContentHandler 
 fn percent_decode(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     let mut chars = s.chars();
+
     while let Some(c) = chars.next() {
         if c == '%' {
             let hex: String = chars.by_ref().take(2).collect();

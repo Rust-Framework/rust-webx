@@ -1,6 +1,7 @@
 //! IServiceCollectionExt — Extension trait for rust_dix ServiceCollection.
 
 use crate::handler::IHostedService;
+use crate::mediator::Mediator;
 use crate::middleware::IMiddleware;
 use crate::pipeline::IPipelineBehavior;
 use rust_dix::{ServiceCollection, ServiceLifetime};
@@ -58,11 +59,15 @@ pub trait IServiceCollectionExt: Sized {
 
 impl IServiceCollectionExt for ServiceCollection {
     fn add_mediator(self) -> Self {
-        // The Mediator is constructed later by Host.
-        // Here we just signal that mediation is active.
-        // Handler registrations happen via #[rust_dix::module].
+        // Transient (not singleton) so build-time validation does not require a
+        // fully wired ServiceProvider. Each resolution shares the root provider Arc.
         MEDIATOR_ACTIVE.store(true, std::sync::atomic::Ordering::SeqCst);
-        self
+        self.transient::<Mediator>(|resolver| {
+            let provider = resolver
+                .provider_arc()
+                .expect("ServiceProvider not available from DI resolver");
+            Arc::new(Mediator::new(provider))
+        })
     }
 
     fn add_request_endpoints(self) -> Self {

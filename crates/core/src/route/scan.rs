@@ -85,7 +85,9 @@ inventory::collect!(RouteEntry);
 /// The result is an owned, type-erased handler — no `Arc<dyn Trait>` caching,
 /// so `handle(&mut self)` works without interior mutability.
 pub struct HandlerRegistration {
-    /// Request type name (e.g., "hello_request::HelloRequest") — used to match RouteDispatch.
+    /// Compile-time type id of the request type — primary dispatch key.
+    pub req_type_id: std::any::TypeId,
+    /// Request type name (e.g., "HelloRequest") — used for diagnostics and route matching.
     pub req_type_name: &'static str,
     /// Constructs a fresh owned handler, boxed as `Box<dyn Any + Send>`.
     /// Called per-request with the per-request scope as resolver.
@@ -173,6 +175,7 @@ impl RouteEntry {
 /// Scoped dependencies (DbContext) are freshly owned each time.
 pub struct HandlerCache {
     pub entries: HashMap<&'static str, HandlerEntry>,
+    pub entries_by_id: HashMap<std::any::TypeId, HandlerEntry>,
 }
 
 static HANDLER_CACHE: OnceLock<HandlerCache> = OnceLock::new();
@@ -181,16 +184,19 @@ impl HandlerCache {
     /// Build the cache from all `HandlerRegistration` inventory items.
     pub fn build() -> Self {
         let mut entries = HashMap::new();
+        let mut entries_by_id = HashMap::new();
         for reg in inventory::iter::<HandlerRegistration> {
-            entries.insert(
-                reg.req_type_name,
-                HandlerEntry {
-                    factory: reg.factory,
-                    call: reg.call,
-                },
-            );
+            let entry = HandlerEntry {
+                factory: reg.factory,
+                call: reg.call,
+            };
+            entries.insert(reg.req_type_name, entry.clone());
+            entries_by_id.insert(reg.req_type_id, entry);
         }
-        Self { entries }
+        Self {
+            entries,
+            entries_by_id,
+        }
     }
 
     /// Initialize the global cache. Called once at host build time.
@@ -205,9 +211,14 @@ impl HandlerCache {
         HANDLER_CACHE.get_or_init(Self::build)
     }
 
-    /// Look up a handler entry by request type name.
+    /// Look up a handler entry by request type name (route / OpenAPI diagnostics).
     pub fn get(&self, req_type_name: &str) -> Option<&HandlerEntry> {
         self.entries.get(req_type_name)
+    }
+
+    /// Look up a handler entry by request type id (Mediator / in-process dispatch).
+    pub fn get_by_type_id(&self, type_id: std::any::TypeId) -> Option<&HandlerEntry> {
+        self.entries_by_id.get(&type_id)
     }
 }
 
@@ -215,6 +226,7 @@ impl HandlerCache {
 ///
 /// Stores only the factory and call bridge — no cached instance.
 /// The factory is called per request to produce a fresh owned handler.
+#[derive(Clone)]
 pub struct HandlerEntry {
     /// Per-request factory: receives the scoped resolver, returns an owned handler.
     pub factory: fn(&dyn rust_dix::IServiceResolver) -> Box<dyn Any + Send>,

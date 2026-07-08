@@ -1,3 +1,5 @@
+#![allow(non_snake_case)] // rust-dix #[derive(Inject)] generates __rdi_construct_* symbols
+
 //! Docbit host — composition root (library + binary).
 //!
 //! Exports `build_host()` for integration tests and the `docbit-host` binary.
@@ -24,6 +26,7 @@ pub fn build_host() -> Host {
     let mode = AppMode::from_env();
     let mut builder = Host::builder()
         .register(|svc| register_db_context(svc))
+        .register(|svc| svc.add_mediator())
         .add_options::<SiteConfig>("Site")
         .add_authentication()
         .add_memory_cache();

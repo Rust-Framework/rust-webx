@@ -1,3 +1,5 @@
+#![allow(non_snake_case)] // rust-dix #[derive(Inject)] generates __rdi_construct_* symbols
+
 //! Docbit handlers crate — service implementations and HTTP handlers.
 //!
 //! Each module contains `IRequestHandler` implementations registered via

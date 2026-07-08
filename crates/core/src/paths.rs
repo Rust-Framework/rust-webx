@@ -5,6 +5,7 @@
 //! 而非源码目录读取资源。
 //!
 //! 优先级：
+//! 0. **环境变量 `RUST_WEBX_APP_BASE`**：显式指定基准目录（测试 / 容器挂载场景）。
 //! 1. **exe 同级目录**：若 exe 所在目录存在 `appsettings.json`，视为部署目录
 //!    （`cargo build --release` 后由发布脚本产出的布局，从任意 cwd 启动均生效）。
 //! 2. **cwd 同级目录**：若当前工作目录存在 `appsettings.json`，视为基准目录
@@ -25,6 +26,14 @@ pub fn looks_like_app_base(dir: &Path) -> bool {
 
 /// 解析应用基准目录。优先级见模块文档。
 pub fn app_base() -> PathBuf {
+    // 0. 显式环境变量（测试 / 自定义部署路径）
+    if let Ok(base) = std::env::var("RUST_WEBX_APP_BASE") {
+        let path = PathBuf::from(&base);
+        if path.is_dir() {
+            return path;
+        }
+    }
+
     // 1. exe 同级目录（部署场景）
     if let Ok(exe) = std::env::current_exe() {
         if let Some(exe_dir) = exe.parent() {

@@ -228,6 +228,31 @@ fn mime_type(path: &Path) -> &'static str {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::{alias_static_path, mime_type, normalize_path};
+    use std::path::Path;
+
+    #[test]
+    fn alias_static_path_strips_vditor_dist_segment() {
+        let out = alias_static_path("assets/vendor/vditor-dist/dist/js/foo.js");
+        assert_eq!(out, "assets/vendor/vditor-dist/js/foo.js");
+    }
+
+    #[test]
+    fn mime_type_maps_common_extensions() {
+        assert_eq!(mime_type(Path::new("a.js")), "application/javascript");
+        assert_eq!(mime_type(Path::new("a.css")), "text/css");
+        assert_eq!(mime_type(Path::new("a.wasm")), "application/wasm");
+    }
+
+    #[test]
+    fn normalize_path_removes_dot_dot() {
+        let p = normalize_path(Path::new("a/../b/./c"));
+        assert_eq!(p, Path::new("b/c"));
+    }
+}
+
 /// Resolve a SPA root path by first checking the application base directory
 /// (as resolved by `rust_webx_core::paths::app_base`), then as-is.
 ///

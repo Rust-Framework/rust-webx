@@ -121,6 +121,59 @@ fn default_max_age() -> u32 {
     86400
 }
 
+/// Per-IP rate limiting (token bucket).
+#[derive(Debug, Clone, Deserialize)]
+pub struct RateLimitSection {
+    /// Enable rate-limit middleware. Default: false (enable in Production appsettings).
+    #[serde(default, rename = "Enabled")]
+    pub enabled: bool,
+    /// Sustained requests per second per client IP.
+    #[serde(default = "default_rate_limit_rps", rename = "RequestsPerSecond")]
+    pub requests_per_second: f64,
+    /// Burst capacity before throttling.
+    #[serde(default = "default_rate_limit_burst", rename = "BurstSize")]
+    pub burst_size: u32,
+    /// Maximum distinct client IPs tracked (LRU eviction when exceeded).
+    #[serde(default = "default_rate_limit_max_ips", rename = "MaxTrackedIps")]
+    pub max_tracked_ips: usize,
+}
+
+impl Default for RateLimitSection {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            requests_per_second: default_rate_limit_rps(),
+            burst_size: default_rate_limit_burst(),
+            max_tracked_ips: default_rate_limit_max_ips(),
+        }
+    }
+}
+
+fn default_rate_limit_rps() -> f64 {
+    100.0
+}
+
+fn default_rate_limit_burst() -> u32 {
+    200
+}
+
+fn default_rate_limit_max_ips() -> usize {
+    10_000
+}
+
+/// HTTP request metrics (`GET /metrics` Prometheus text when enabled).
+#[derive(Debug, Clone, Deserialize)]
+pub struct MetricsSection {
+    #[serde(default, rename = "Enabled")]
+    pub enabled: bool,
+}
+
+impl Default for MetricsSection {
+    fn default() -> Self {
+        Self { enabled: false }
+    }
+}
+
 /// TLS (Transport Layer Security) section.
 ///
 /// TLS is activated automatically when the `App.Urls` array
@@ -154,6 +207,12 @@ pub struct AppOptions {
     /// TLS settings.
     #[serde(default, rename = "Tls")]
     pub tls: TlsSection,
+    /// Rate limiting settings.
+    #[serde(default, rename = "RateLimit")]
+    pub rate_limit: RateLimitSection,
+    /// Prometheus-style metrics endpoint settings.
+    #[serde(default, rename = "Metrics")]
+    pub metrics: MetricsSection,
 }
 
 // ---------------------------------------------------------------------------
@@ -190,26 +249,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn jwt_secret_env_overrides_json_value() {
+    fn config_env_jwt_and_app_override_precedence() {
         std::env::set_var("JWT_SECRET", "env-jwt-secret-that-is-long-enough-32");
         let mut config = serde_json::json!({ "Jwt": { "Secret": "from-file" } });
         apply_well_known_env_overrides(&mut config);
-        std::env::remove_var("JWT_SECRET");
         assert_eq!(
             config["Jwt"]["Secret"],
             "env-jwt-secret-that-is-long-enough-32"
         );
-    }
 
-    #[test]
-    fn app_env_override_wins_over_jwt_secret() {
-        std::env::set_var("JWT_SECRET", "from-jwt-secret-env-var-32chars-min");
         std::env::set_var(
             "APP__Jwt__Secret",
             "from-app-override-secret-32chars-minimum",
         );
-        let mut config = serde_json::json!({ "Jwt": { "Secret": "from-file" } });
-        apply_well_known_env_overrides(&mut config);
         apply_env_overrides(&mut config);
         std::env::remove_var("JWT_SECRET");
         std::env::remove_var("APP__Jwt__Secret");

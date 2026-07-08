@@ -123,7 +123,10 @@ fn config_app_options_defaults() {
     assert_eq!(defaults.app.urls, vec!["http://0.0.0.0:5000"]);
     assert_eq!(defaults.app.max_body_size, 10 * 1024 * 1024);
     assert!(defaults.jwt.secret.is_empty());
-    assert!(defaults.cors.origins.contains(&"*".to_string()));
+    assert_eq!(defaults.cors.origins.contains(&"*".to_string()), true);
+    assert!(!defaults.rate_limit.enabled);
+    assert_eq!(defaults.rate_limit.requests_per_second, 100.0);
+    assert!(!defaults.metrics.enabled);
 }
 
 #[test]

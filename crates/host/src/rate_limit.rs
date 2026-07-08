@@ -1,18 +1,15 @@
 //! Per-IP token-bucket rate-limiting middleware.
 //!
-//! Limits the number of requests per client IP using a classic
-//! token-bucket algorithm.  Configure via:
+//! Configure via `appsettings.json` `RateLimit` section or manually:
 //!
 //! ```ignore
-//! .register(|svc| svc.singleton(|_| {
-//!     Arc::new(RateLimitMiddleware::new(10.0, 20))
-//! }))
+//! .use_middleware_with(|| {
+//!     Arc::new(RateLimitMiddleware::from_config(&options.rate_limit))
+//! })
 //! ```
-//!
-//! The middleware reads the client IP from `X-Forwarded-For` or
-//! `X-Real-IP` headers.  Exceeded clients receive a 429 response.
 
 use crate::problem_response::write_problem;
+use rust_webx_core::config::RateLimitSection;
 use rust_webx_core::error::Result;
 use rust_webx_core::http::IHttpContext;
 use rust_webx_core::middleware::IMiddleware;
@@ -23,14 +20,8 @@ use std::str::FromStr;
 use std::time::Instant;
 use tokio::sync::Mutex;
 
-// ---------------------------------------------------------------------------
-// TokenBucket —per-IP state
-// ---------------------------------------------------------------------------
-
 struct TokenBucket {
-    /// Current number of available tokens.
     tokens: f64,
-    /// When this bucket was last refilled.
     last_refill: Instant,
 }
 
@@ -42,8 +33,6 @@ impl TokenBucket {
         }
     }
 
-    /// Refill the bucket based on the elapsed time and try to consume
-    /// one token.  Returns `true` when the request is allowed.
     fn try_consume(&mut self, rate: f64, burst: f64) -> bool {
         let now = Instant::now();
         let elapsed = now.duration_since(self.last_refill).as_secs_f64();
@@ -59,64 +48,75 @@ impl TokenBucket {
     }
 }
 
-// ---------------------------------------------------------------------------
-// RateLimiter —inner state shared across middleware instances
-// ---------------------------------------------------------------------------
-
 /// Inner rate-limiting state shared behind a [`Mutex`].
 pub struct RateLimiter {
     buckets: Mutex<HashMap<IpAddr, TokenBucket>>,
-    rate: f64,  // tokens per second
-    burst: f64, // max tokens
+    rate: f64,
+    burst: f64,
+    max_ips: usize,
 }
 
 impl RateLimiter {
-    /// Create a new limiter.
-    ///
-    /// * `requests_per_second` —sustained request rate (e.g. `10.0`).
-    /// * `burst_size` —maximum burst before throttling kicks in.
-    pub fn new(requests_per_second: f64, burst_size: u32) -> Self {
+    pub fn new(requests_per_second: f64, burst_size: u32, max_tracked_ips: usize) -> Self {
         Self {
             buckets: Mutex::new(HashMap::new()),
             rate: requests_per_second,
             burst: burst_size as f64,
+            max_ips: max_tracked_ips.max(1),
         }
     }
 
-    /// Check whether `ip` is allowed.  Returns `true` when the request
-    /// should proceed.
     async fn allow(&self, ip: IpAddr) -> bool {
         let mut buckets = self.buckets.lock().await;
+        if !buckets.contains_key(&ip) && buckets.len() >= self.max_ips {
+            evict_oldest(&mut buckets);
+        }
         let bucket = buckets
             .entry(ip)
             .or_insert_with(|| TokenBucket::new(self.burst));
         bucket.try_consume(self.rate, self.burst)
     }
+
+    /// Current number of tracked client IPs (for tests).
+    pub async fn tracked_ip_count(&self) -> usize {
+        self.buckets.lock().await.len()
+    }
 }
 
-// ---------------------------------------------------------------------------
-// RateLimitMiddleware
-// ---------------------------------------------------------------------------
+fn evict_oldest(buckets: &mut HashMap<IpAddr, TokenBucket>) {
+    if buckets.is_empty() {
+        return;
+    }
+    let oldest = buckets
+        .iter()
+        .min_by_key(|(_, b)| b.last_refill)
+        .map(|(ip, _)| *ip);
+    if let Some(ip) = oldest {
+        buckets.remove(&ip);
+    }
+}
 
-/// Built-in per-IP rate-limiting middleware.
-///
-/// Reads the client IP from the `X-Forwarded-For` or `X-Real-IP` header
-/// and applies a token-bucket algorithm.  Exceeded clients receive a
-/// `429 Too Many Requests` JSON response.
 pub struct RateLimitMiddleware {
     limiter: RateLimiter,
 }
 
 impl RateLimitMiddleware {
-    /// Create middleware with the given rate and burst parameters.
-    ///
-    /// ```ignore
-    /// Arc::new(RateLimitMiddleware::new(10.0, 20))
-    /// ```
     pub fn new(requests_per_second: f64, burst_size: u32) -> Self {
+        Self::new_with_max_ips(requests_per_second, burst_size, 10_000)
+    }
+
+    pub fn new_with_max_ips(requests_per_second: f64, burst_size: u32, max_tracked_ips: usize) -> Self {
         Self {
-            limiter: RateLimiter::new(requests_per_second, burst_size),
+            limiter: RateLimiter::new(requests_per_second, burst_size, max_tracked_ips),
         }
+    }
+
+    pub fn from_config(cfg: &RateLimitSection) -> Self {
+        Self::new_with_max_ips(
+            cfg.requests_per_second,
+            cfg.burst_size,
+            cfg.max_tracked_ips,
+        )
     }
 }
 
@@ -134,9 +134,7 @@ impl IMiddleware for RateLimitMiddleware {
     }
 }
 
-/// Best-effort extraction of the client IP address.
 fn extract_client_ip(ctx: &dyn IHttpContext) -> IpAddr {
-    // Prefer X-Forwarded-For (take the first entry when chained)
     if let Some(fwd) = ctx.request().header("x-forwarded-for") {
         let first = fwd.split(',').next().unwrap_or("").trim();
         if let Ok(ip) = IpAddr::from_str(first) {
@@ -144,13 +142,28 @@ fn extract_client_ip(ctx: &dyn IHttpContext) -> IpAddr {
         }
     }
 
-    // Fallback: X-Real-IP
     if let Some(real) = ctx.request().header("x-real-ip") {
         if let Ok(ip) = IpAddr::from_str(real.trim()) {
             return ip;
         }
     }
 
-    // Last resort —this should never happen behind a proper reverse proxy.
     IpAddr::from_str("127.0.0.1").unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::Ipv4Addr;
+
+    #[tokio::test]
+    async fn rate_limiter_evicts_oldest_when_max_ips_reached() {
+        let limiter = RateLimiter::new(100.0, 10, 2);
+        assert!(limiter.allow(IpAddr::V4(Ipv4Addr::new(1, 0, 0, 1))).await);
+        assert!(limiter.allow(IpAddr::V4(Ipv4Addr::new(2, 0, 0, 1))).await);
+        assert_eq!(limiter.tracked_ip_count().await, 2);
+
+        assert!(limiter.allow(IpAddr::V4(Ipv4Addr::new(3, 0, 0, 1))).await);
+        assert_eq!(limiter.tracked_ip_count().await, 2);
+    }
 }

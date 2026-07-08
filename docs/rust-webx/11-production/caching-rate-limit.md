@@ -6,36 +6,57 @@
 Host::builder().add_memory_cache()
 ```
 
-注册 `MemoryCache` 为 `IDistributedCache` 实现。
-
-### 在 Handler 中使用
-
-```rust
-use rust_webx::{IDistributedCache, DistributedCacheExtensions};
-
-let cached = self.cache.get_or_create("user:123", async {
-    self.repo.find("123").await
-}).await?;
-```
+Handler 通过 `Arc<MemoryCache>` 或 `IDistributedCache` trait 注入使用。
 
 ## 速率限制
 
-```rust
-svc.add_middleware::<RateLimitMiddleware>()
+### appsettings（推荐）
+
+```json
+{
+  "RateLimit": {
+    "Enabled": true,
+    "RequestsPerSecond": 20,
+    "BurstSize": 40,
+    "MaxTrackedIps": 10000
+  }
+}
 ```
 
-基于令牌桶算法限制请求频率，防止 API 滥用。
+框架在 `Host::build()` 时读取 `RateLimit` 节，启用后自动注册 `RateLimitMiddleware`（无需手写 `use_middleware`）。
 
-## 缓存策略
+| 字段 | 说明 | 默认 |
+|------|------|------|
+| `Enabled` | 是否启用 | `false` |
+| `RequestsPerSecond` | 每 IP  sustained 速率 | `100` |
+| `BurstSize` | 突发容量 | `200` |
+| `MaxTrackedIps` | 最大跟踪 IP 数（LRU 淘汰） | `10000` |
 
-| 场景 | 策略 |
-|------|------|
-| 读多写少的配置 | 长 TTL 缓存 |
-| 用户 Session | 中等 TTL + 主动失效 |
-| 实时数据 | 不缓存 |
+环境变量示例：`APP__RateLimit__Enabled=true`
+
+### 代码注册（可选）
+
+```rust
+Host::builder()
+    .use_middleware_with(|| {
+        Arc::new(RateLimitMiddleware::new(10.0, 20)) as Arc<dyn IMiddleware>
+    })
+```
+
+超限返回 RFC 7807 `429` + `application/problem+json`。
+
+## 指标
+
+```json
+{
+  "Metrics": {
+    "Enabled": true
+  }
+}
+```
+
+启用后暴露 `GET /metrics`（Prometheus text 格式），并自动记录 2xx/4xx/5xx 计数。
 
 ## 小结
 
-`add_memory_cache()` 一行启用缓存；速率限制保护 API 免受滥用。
-
-下一节：[OpenAPI 与 SPA 托管](openapi-spa.md)
+`add_memory_cache()` 一行启用缓存；`RateLimit` / `Metrics` 配置节用于生产防护与可观测性。

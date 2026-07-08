@@ -409,6 +409,31 @@ async fn integration_rate_limit_returns_429_when_exceeded() {
 }
 
 #[tokio::test]
+async fn integration_metrics_endpoint_when_enabled() {
+    let port = find_free_port();
+    spawn_test_host_with(port, |b| {
+        b.configure(|app| {
+            app.useOptions(|o| o.metrics.enabled = true);
+        })
+    })
+    .await;
+
+    let resp = reqwest::get(format!("http://127.0.0.1:{}/metrics", port))
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 200);
+    let ct = resp
+        .headers()
+        .get("content-type")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(ct.contains("text/plain"));
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("http_requests_total"));
+}
+
+#[tokio::test]
 async fn integration_use_middleware_with_runs_in_pipeline() {
     use rust_webx_core::http::IHttpContext;
     use rust_webx_core::middleware::IMiddleware;

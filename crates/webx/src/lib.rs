@@ -13,7 +13,7 @@ pub use rust_webx_core::cache::{
 };
 pub use rust_webx_core::config::{
     bind_config, bind_root, load_appsettings, AppOptions, AppSection, CorsSection, IAppOptions,
-    JwtSection, TlsSection,
+    JwtSection, MetricsSection, RateLimitSection, TlsSection,
 };
 pub use rust_webx_core::error::{Error, Result};
 pub use rust_webx_core::handler::{IClaimsCarrier, IEventHandler, IHostedService, IRequestHandler};

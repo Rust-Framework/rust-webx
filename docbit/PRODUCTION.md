@@ -9,6 +9,8 @@
 | `JWT_SECRET` | 是 | ≥32 字符强密钥；也可使用 `APP__Jwt__Secret` |
 | `APP__App__Urls` | 否 | 监听地址 JSON 数组，默认 `http://0.0.0.0:8100` |
 | `APP__Cors__Origins` | 建议 | 生产 CORS 白名单，勿使用 `*` |
+| `APP__RateLimit__Enabled` | 建议 | 生产启用速率限制（docbit 默认 true） |
+| `APP__Metrics__Enabled` | 建议 | 启用 `GET /metrics` Prometheus 指标 |
 
 开发模式（默认）使用 SQLite（`<app_base>/app.db`），无需 `DATABASE_URL`。
 
@@ -38,9 +40,12 @@ chmod +x docbit/publish.sh
 
 ## 生产中间件
 
-`APP_ENV=Production` 时 docbit 自动启用：
+`APP_ENV=Production` 时 docbit 自动启用（appsettings）：
 
-- 速率限制（20 req/s，burst 40）
+- 速率限制（20 req/s，burst 40，见 `RateLimit` 节）
+- `GET /metrics` Prometheus 指标
+
+并额外启用以下中间件（代码注册）：
 - Gzip 压缩
 - 请求耗时（`TimingMiddleware`）
 - 结构化请求追踪（`RequestTracing`）

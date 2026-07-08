@@ -49,6 +49,14 @@ All notable changes to **rust-webx** are documented in this file.
 - **SIGTERM / shutdown tests** + **TLS HTTPS 集成测试**（rcgen 自签证书）。
 - **docs/rust-webx** 批量更新：`rust_dix`、`add_memory_cache`、TLS/health API。
 
+### Framework P2 (0.2.0)
+
+- **RateLimit appsettings**：`RateLimit.Enabled/RequestsPerSecond/BurstSize/MaxTrackedIps`，build 时自动注册中间件。
+- **Rate limit LRU**：超过 `MaxTrackedIps` 时淘汰最久未刷新的 IP bucket。
+- **`GET /metrics`**：Prometheus text 格式（`Metrics.Enabled`）。
+- docbit Production 改用 appsettings 配置 RateLimit/Metrics。
+- 测试：openapi spec、spa 工具函数、metrics 集成、rate limit LRU。
+
 ### Changed
 
 - `appsettings.Production.json`: JWT secret removed from file; must be supplied via env.

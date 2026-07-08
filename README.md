@@ -146,7 +146,7 @@ JSON 响应: RFC 7807 application/problem+json（404/5xx）
 | 速率限制 / 压缩 | 应用层 opt-in（`use_middleware`） |
 | TLS | ✅ 配置 `App.Urls` + `Tls.CertPath/KeyPath` |
 
-环境变量：`JWT_SECRET`、`APP__Jwt__Secret`、`APP__*` 覆盖 appsettings。详见 `docs/rust-webx/`。
+环境变量：`RUST_WEBX_APP_BASE`（应用目录）、`JWT_SECRET`、`APP__Jwt__Secret`、`APP__*` 覆盖 appsettings。详见 `docs/rust-webx/`。
 
 ## 异常映射
 

@@ -4,6 +4,14 @@ version = "0.1.0"
 edition.workspace = true
 publish = false
 
+[lib]
+name = "docbit_host"
+path = "src/lib.rs"
+
+[[bin]]
+name = "docbit-host"
+path = "src/main.rs"
+
 [dependencies]
 docbit-contracts.workspace = true
 docbit-domain.workspace = true
@@ -20,3 +28,11 @@ serde_json.workspace = true
 tracing.workspace = true
 bcrypt = "0.16"
 inventory.workspace = true
+
+[dev-dependencies]
+reqwest = { version = "0.12", features = ["json"] }
+tempfile = "3"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tracing-subscriber = { version = "0.3", features = ["fmt"] }
+serde_json.workspace = true
+serial_test = "3"

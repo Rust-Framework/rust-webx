@@ -550,6 +550,7 @@ impl HostBuilder {
             if route_count > 0 {
                 tracing::info!("    Routes:   {} registered", route_count);
             }
+            crate::diagnostics::log_startup_diagnostics();
             let banner_urls = if options.app.urls.is_empty() {
                 vec!["http://localhost:5000".to_string()]
             } else {

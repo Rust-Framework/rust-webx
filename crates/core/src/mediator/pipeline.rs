@@ -9,7 +9,7 @@ use crate::pipeline::{BoxedNextFn, IPipelineBehavior};
 /// Behaviors are applied in Vec order: the first element is the outermost
 /// (runs first on request, last on response). Reverse-fold constructs the
 /// nested closure chain.
-pub(crate) fn build_chain(
+pub fn build_chain(
     behaviors: Vec<Arc<dyn IPipelineBehavior>>,
     terminal: BoxedNextFn,
 ) -> BoxedNextFn {

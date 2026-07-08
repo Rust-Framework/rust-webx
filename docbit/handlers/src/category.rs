@@ -113,11 +113,10 @@ impl IRequestHandler<ListCategoriesRequest, Vec<CategoryTreeNode>> for ListCateg
 #[async_trait]
 impl IRequestHandler<CreateCategoryRequest, CategoryModel> for CreateCategoryHandler {
     async fn handle(&mut self, req: CreateCategoryRequest) -> Result<CategoryModel> {
-        let op = operator_id(req.claims.as_deref());
         let now = now_secs();
         let id = new_id();
 
-        let entity = req.to_entity(id, op, now);
+        let entity = req.to_entity(id, now);
 
         let set = self.ctx.set::<Category>();
         set.add(entity.clone());
@@ -144,8 +143,7 @@ impl IRequestHandler<UpdateCategoryRequest, CategoryModel> for UpdateCategoryHan
             .map_ef()?
             .ok_or_else(|| Error::NotFound("Category not found".into()))?;
 
-        let op = operator_id(req.claims.as_deref());
-        req.apply_to(&mut cat, op, now_secs());
+        req.apply_to(&mut cat, now_secs());
 
         let set = self.ctx.set::<Category>();
         set.update(cat.clone());
@@ -172,7 +170,7 @@ impl IRequestHandler<DeleteCategoryRequest, String> for DeleteCategoryHandler {
             .ok_or_else(|| Error::NotFound("Category not found".into()))?;
 
         cat.is_deleted = true;
-        cat.updated_id = operator_id(req.claims.as_deref());
+        cat.updated_id = operator_id();
         cat.updated_at = now_secs();
 
         let set = self.ctx.set::<Category>();

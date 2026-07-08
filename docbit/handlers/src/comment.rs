@@ -79,7 +79,8 @@ impl IRequestHandler<CreateCommentRequest, CommentModel> for CreateCommentHandle
         let now = now_secs();
         let comment_id = new_id();
 
-        let mut comment = req.to_entity(comment_id, Some(user_id), now);
+        let mut comment = req.to_entity(comment_id, now);
+        comment.user_id = user_id;
         comment.user_name = user_name.clone();
         comment.content = content;
 
@@ -119,7 +120,7 @@ impl IRequestHandler<DeleteCommentRequest, String> for DeleteCommentHandler {
         }
 
         comment.is_deleted = true;
-        comment.updated_id = operator_id(Some(claims));
+        comment.updated_id = operator_id();
         comment.updated_at = now_secs();
 
         let set = self.ctx.set::<Comment>();

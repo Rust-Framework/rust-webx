@@ -237,8 +237,18 @@ fn generate_dispatch_fn(
                 let resolver: &dyn ::rust_webx::rust_dix::IServiceResolver = &scope;
                 let handler = (entry.factory)(resolver);
 
-                // Invoke `handle(&mut self, req)` via the call bridge.
-                let result_box = (entry.call)(handler, ::std::boxed::Box::new(request)).await?;
+                let behaviors: ::std::vec::Vec<::std::sync::Arc<dyn ::rust_webx::IPipelineBehavior>> =
+                    scope.get_all::<dyn ::rust_webx::IPipelineBehavior>();
+
+                let entry_call = entry.call;
+                let terminal: ::rust_webx::BoxedNextFn = ::std::boxed::Box::new(
+                    move |req: ::std::boxed::Box<dyn ::std::any::Any + Send>| -> ::rust_webx::BoxedPipelineFuture {
+                        ::std::boxed::Box::pin(async move { (entry_call)(handler, req).await })
+                    },
+                );
+
+                let chain = ::rust_webx::build_pipeline_chain(behaviors, terminal);
+                let result_box = chain(::std::boxed::Box::new(request)).await?;
                 let result = *result_box
                     .downcast::<#rsp_type>()
                     .expect("Response type mismatch in handler call bridge");

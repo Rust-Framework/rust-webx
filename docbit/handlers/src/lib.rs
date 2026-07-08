@@ -21,11 +21,12 @@
 //! ```
 //!
 //! - 禁止链式 `self.ctx.set::<T>().add(...)`
-//! - 主键用 `new_id()` 预分配；同一业务操作只调用一次 `save_changes`
+//! Post-save reload: `ef_require_by_id!`（crate 根宏）
 //!
 //! ### 软删除与持久化
 //!
 //! - 软删除由 `docbit_domain::prepare_context` 全局过滤器处理，handler 禁止重复 `!is_deleted`
+//! - 审计字段（`created_id`/`updated_id`）由 `docbit_domain` mapper 从 `RequestContext` 读取，handler 无需传 `op`
 //! - 使用 `crate::db::{save_changes, EfResultExt}` 统一 ORM 错误映射
 
 pub mod auth;

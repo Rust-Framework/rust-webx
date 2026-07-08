@@ -1,8 +1,8 @@
-//! 共享工具：时间戳生成、ID 解析、审计字段填充辅助。
+//! 共享工具：时间戳生成、ID 解析、操作人 ID（来自 RequestContext）。
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rust_webx::{Error, IClaims, Result};
+use rust_webx::{Error, Result, RequestContext};
 
 /// 当前 Unix 秒（i64）。
 pub fn now_secs() -> i64 {
@@ -20,7 +20,7 @@ pub fn parse_id(s: &str) -> Result<String> {
     Ok(s.to_string())
 }
 
-/// 从 claims 提取操作人 ID（UUID 字符串），用于审计字段。
-pub fn operator_id(claims: Option<&dyn IClaims>) -> Option<String> {
-    claims.map(|c| c.subject().to_string())
+/// 当前请求操作人 ID（JWT `sub`），由 HTTP dispatch 写入 RequestContext。
+pub fn operator_id() -> Option<String> {
+    RequestContext::operator_id()
 }

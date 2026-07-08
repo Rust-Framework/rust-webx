@@ -58,11 +58,10 @@ impl IRequestHandler<ListRolesRequest, Vec<RoleModel>> for ListRolesHandler {
 #[async_trait]
 impl IRequestHandler<CreateRoleRequest, RoleModel> for CreateRoleHandler {
     async fn handle(&mut self, req: CreateRoleRequest) -> Result<RoleModel> {
-        let op = operator_id(req.claims.as_deref());
         let now = now_secs();
         let id = new_id();
 
-        let entity = req.to_entity(id, op, now);
+        let entity = req.to_entity(id, now);
 
         let set = self.ctx.set::<Role>();
         set.add(entity.clone());
@@ -88,8 +87,7 @@ impl IRequestHandler<UpdateRoleRequest, RoleModel> for UpdateRoleHandler {
             .map_ef()?
             .ok_or_else(|| Error::NotFound("Role not found".into()))?;
 
-        let op = operator_id(req.claims.as_deref());
-        req.apply_to(&mut role, op, now_secs());
+        req.apply_to(&mut role, now_secs());
 
         let set = self.ctx.set::<Role>();
         set.update(role.clone());
@@ -116,7 +114,7 @@ impl IRequestHandler<DeleteRoleRequest, String> for DeleteRoleHandler {
             .ok_or_else(|| Error::NotFound("Role not found".into()))?;
 
         role.is_deleted = true;
-        role.updated_id = operator_id(req.claims.as_deref());
+        role.updated_id = operator_id();
         role.updated_at = now_secs();
 
         let set = self.ctx.set::<Role>();
@@ -245,11 +243,10 @@ impl IRequestHandler<ListResourcesRequest, Vec<ResourceModel>> for ListResources
 #[async_trait]
 impl IRequestHandler<CreateResourceRequest, ResourceModel> for CreateResourceHandler {
     async fn handle(&mut self, req: CreateResourceRequest) -> Result<ResourceModel> {
-        let op = operator_id(req.claims.as_deref());
         let now = now_secs();
         let id = new_id();
 
-        let entity = req.to_entity(id, op, now);
+        let entity = req.to_entity(id, now);
 
         let set = self.ctx.set::<Resource>();
         set.add(entity.clone());
@@ -275,8 +272,7 @@ impl IRequestHandler<UpdateResourceRequest, ResourceModel> for UpdateResourceHan
             .map_ef()?
             .ok_or_else(|| Error::NotFound("Resource not found".into()))?;
 
-        let op = operator_id(req.claims.as_deref());
-        req.apply_to(&mut res, op, now_secs());
+        req.apply_to(&mut res, now_secs());
 
         let set = self.ctx.set::<Resource>();
         set.update(res.clone());
@@ -303,7 +299,7 @@ impl IRequestHandler<DeleteResourceRequest, String> for DeleteResourceHandler {
             .ok_or_else(|| Error::NotFound("Resource not found".into()))?;
 
         res.is_deleted = true;
-        res.updated_id = operator_id(req.claims.as_deref());
+        res.updated_id = operator_id();
         res.updated_at = now_secs();
 
         let set = self.ctx.set::<Resource>();
@@ -372,7 +368,7 @@ impl IRequestHandler<CreateAuthorizeRequest, AuthorizeModel> for CreateAuthorize
         let now = now_secs();
         let id = new_id();
 
-        let entity = req.to_entity(id, None, now);
+        let entity = req.to_entity(id, now);
 
         let set = self.ctx.set::<Authorize>();
         set.add(entity.clone());

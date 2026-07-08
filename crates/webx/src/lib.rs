@@ -26,8 +26,12 @@ pub use rust_webx_core::middleware::IMiddleware;
 pub use rust_webx_core::mode::AppMode;
 pub use rust_webx_core::pagination::{PagedRequest, PagedResponse};
 pub use rust_webx_core::paths::{app_base, looks_like_app_base};
-pub use rust_webx_core::pipeline::IPipelineBehavior;
+pub use rust_webx_core::mediator::build_pipeline_chain;
+pub use rust_webx_core::pipeline::{BoxedNextFn, BoxedPipelineFuture, IPipelineBehavior};
 pub use rust_webx_core::problem::{FieldError, ProblemDetails};
+pub use rust_webx_core::route::diagnostics::{
+    format_route_diagnostics, orphan_handlers, orphan_routes, route_snapshots,
+};
 pub use rust_webx_core::request_context::RequestContext;
 pub use rust_webx_core::routing::{HttpMethod, IEndpoint, IRouter, RouteMeta};
 
@@ -57,8 +61,11 @@ pub use rust_webx_host::request_id::RequestIdMiddleware;
 pub use rust_webx_host::request_tracing::RequestTracing;
 pub use rust_webx_host::router::Router;
 pub use rust_webx_host::security_headers::SecurityHeadersMiddleware;
+pub use rust_webx_host::diagnostics::log_startup_diagnostics;
 pub use rust_webx_host::server::{Host, HostAppBuilder, HostBuilder, Server, ServerHandle};
 pub use rust_webx_host::timing::TimingMiddleware;
+#[cfg(feature = "testing")]
+pub use rust_webx_host::testing::{free_port, spawn, spawn_with_health, wait_until_ready, TestServer};
 
 // --- Mediator ---
 pub use rust_webx_core::mediator::Mediator;

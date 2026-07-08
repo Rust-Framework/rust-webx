@@ -14,6 +14,7 @@ use docbit_contracts::{
     user::{CreateUserRequest, UpdateUserRequest},
 };
 
+use crate::audit::operator_id;
 use crate::entities::*;
 use crate::seed_ids;
 
@@ -33,11 +34,12 @@ where
 
 /// Convert create-request to entity. `id` is assigned by the caller before insert.
 pub trait ToEntity<T> {
-    fn to_entity(self, id: String, op: Option<String>, now: i64) -> T;
+    fn to_entity(self, id: String, now: i64) -> T;
 }
 
 impl ToEntity<Blog> for CreateBlogPostRequest {
-    fn to_entity(self, id: String, op: Option<String>, now: i64) -> Blog {
+    fn to_entity(self, id: String, now: i64) -> Blog {
+        let op = operator_id();
         Blog {
             id,
             slug: self.slug,
@@ -63,7 +65,8 @@ impl ToEntity<Blog> for CreateBlogPostRequest {
 }
 
 impl ToEntity<Category> for CreateCategoryRequest {
-    fn to_entity(self, id: String, op: Option<String>, now: i64) -> Category {
+    fn to_entity(self, id: String, now: i64) -> Category {
+        let op = operator_id();
         Category {
             id,
             name: self.name,
@@ -82,7 +85,8 @@ impl ToEntity<Category> for CreateCategoryRequest {
 }
 
 impl ToEntity<Comment> for CreateCommentRequest {
-    fn to_entity(self, id: String, op: Option<String>, now: i64) -> Comment {
+    fn to_entity(self, id: String, now: i64) -> Comment {
+        let op = operator_id();
         Comment {
             id,
             blog_id: self.blog_id,
@@ -104,7 +108,8 @@ impl ToEntity<Comment> for CreateCommentRequest {
 }
 
 impl ToEntity<User> for CreateUserRequest {
-    fn to_entity(self, id: String, op: Option<String>, now: i64) -> User {
+    fn to_entity(self, id: String, now: i64) -> User {
+        let op = operator_id();
         User {
             id,
             name: self.name,
@@ -121,7 +126,8 @@ impl ToEntity<User> for CreateUserRequest {
 }
 
 impl ToEntity<Exhibition> for UpsertExhibitionRequest {
-    fn to_entity(self, id: String, op: Option<String>, now: i64) -> Exhibition {
+    fn to_entity(self, id: String, now: i64) -> Exhibition {
+        let op = operator_id();
         Exhibition {
             id,
             slug: self.slug,
@@ -147,7 +153,8 @@ impl ToEntity<Exhibition> for UpsertExhibitionRequest {
 }
 
 impl ToEntity<Role> for CreateRoleRequest {
-    fn to_entity(self, id: String, op: Option<String>, now: i64) -> Role {
+    fn to_entity(self, id: String, now: i64) -> Role {
+        let op = operator_id();
         Role {
             id,
             name: self.name,
@@ -164,7 +171,8 @@ impl ToEntity<Role> for CreateRoleRequest {
 }
 
 impl ToEntity<Resource> for CreateResourceRequest {
-    fn to_entity(self, id: String, op: Option<String>, now: i64) -> Resource {
+    fn to_entity(self, id: String, now: i64) -> Resource {
+        let op = operator_id();
         Resource {
             id,
             name: self.name,
@@ -183,7 +191,7 @@ impl ToEntity<Resource> for CreateResourceRequest {
 }
 
 impl ToEntity<Authorize> for CreateAuthorizeRequest {
-    fn to_entity(self, id: String, _op: Option<String>, now: i64) -> Authorize {
+    fn to_entity(self, id: String, now: i64) -> Authorize {
         Authorize {
             id,
             role_id: self.role_id,
@@ -194,11 +202,11 @@ impl ToEntity<Authorize> for CreateAuthorizeRequest {
 }
 
 pub trait ApplyTo<T> {
-    fn apply_to(self, entity: &mut T, op: Option<String>, now: i64);
+    fn apply_to(self, entity: &mut T, now: i64);
 }
 
 impl ApplyTo<Blog> for UpdateBlogPostRequest {
-    fn apply_to(self, entity: &mut Blog, op: Option<String>, now: i64) {
+    fn apply_to(self, entity: &mut Blog, now: i64) {
         if let Some(v) = self.title {
             entity.title = v;
         }
@@ -217,52 +225,52 @@ impl ApplyTo<Blog> for UpdateBlogPostRequest {
         if let Some(v) = self.published_at {
             entity.published_at = v;
         }
-        entity.updated_id = op;
+        entity.updated_id = operator_id();
         entity.updated_at = now;
     }
 }
 
 impl ApplyTo<Category> for UpdateCategoryRequest {
-    fn apply_to(self, entity: &mut Category, op: Option<String>, now: i64) {
+    fn apply_to(self, entity: &mut Category, now: i64) {
         if let Some(v) = self.name {
             entity.name = v;
         }
         if let Some(v) = self.sort_order {
             entity.sort_order = v;
         }
-        entity.updated_id = op;
+        entity.updated_id = operator_id();
         entity.updated_at = now;
     }
 }
 
 impl ApplyTo<User> for UpdateUserRequest {
-    fn apply_to(self, entity: &mut User, op: Option<String>, now: i64) {
+    fn apply_to(self, entity: &mut User, now: i64) {
         if let Some(v) = self.name {
             entity.name = v;
         }
         if let Some(v) = self.email {
             entity.email = v;
         }
-        entity.updated_id = op;
+        entity.updated_id = operator_id();
         entity.updated_at = now;
     }
 }
 
 impl ApplyTo<Role> for UpdateRoleRequest {
-    fn apply_to(self, entity: &mut Role, op: Option<String>, now: i64) {
+    fn apply_to(self, entity: &mut Role, now: i64) {
         if let Some(v) = self.name {
             entity.name = v;
         }
         if let Some(v) = self.description {
             entity.description = v;
         }
-        entity.updated_id = op;
+        entity.updated_id = operator_id();
         entity.updated_at = now;
     }
 }
 
 impl ApplyTo<Resource> for UpdateResourceRequest {
-    fn apply_to(self, entity: &mut Resource, op: Option<String>, now: i64) {
+    fn apply_to(self, entity: &mut Resource, now: i64) {
         if let Some(v) = self.name {
             entity.name = v;
         }
@@ -278,13 +286,13 @@ impl ApplyTo<Resource> for UpdateResourceRequest {
         if let Some(v) = self.properties {
             entity.properties = v;
         }
-        entity.updated_id = op;
+        entity.updated_id = operator_id();
         entity.updated_at = now;
     }
 }
 
 impl ApplyTo<Exhibition> for UpsertExhibitionRequest {
-    fn apply_to(self, entity: &mut Exhibition, op: Option<String>, now: i64) {
+    fn apply_to(self, entity: &mut Exhibition, now: i64) {
         entity.title = self.title;
         entity.subtitle = self.subtitle;
         entity.description = self.description;
@@ -296,7 +304,7 @@ impl ApplyTo<Exhibition> for UpsertExhibitionRequest {
         entity.featured = self.featured;
         entity.sort_order = self.sort_order;
         entity.logo_url = self.logo_url;
-        entity.updated_id = op;
+        entity.updated_id = operator_id();
         entity.updated_at = now;
     }
 }

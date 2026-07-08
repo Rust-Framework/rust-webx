@@ -19,8 +19,7 @@ docbit-handlers.workspace = true
 rust-ef.workspace = true
 rust-ef-sqlite.workspace = true
 rust-ef-mysql.workspace = true
-rust-webx.workspace = true
-rust-webx-ef.workspace = true
+rust-webx = { workspace = true, features = ["testing"] }
 rust-dix.workspace = true
 async-trait.workspace = true
 tokio.workspace = true

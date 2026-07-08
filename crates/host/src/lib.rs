@@ -5,6 +5,7 @@ pub mod authz;
 pub mod compression;
 pub mod context;
 pub mod cors;
+pub mod diagnostics;
 pub mod endpoint;
 pub mod health;
 pub mod memory_cache;
@@ -19,11 +20,15 @@ pub mod security_headers;
 pub mod server;
 pub mod timing;
 
+#[cfg(feature = "testing")]
+pub mod testing;
+
 pub use auth_jwt::*;
 pub use authz::*;
 pub use compression::*;
 pub use context::*;
 pub use cors::*;
+pub use diagnostics::*;
 pub use endpoint::*;
 pub use health::*;
 pub use memory_cache::*;

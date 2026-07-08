@@ -77,6 +77,7 @@ fn __call_hello_handler(
 
 inventory::submit! {
     HandlerRegistration {
+        req_type_id: std::any::TypeId::of::<HelloRequest>(),
         req_type_name: "HelloRequest",
         factory: __factory_hello_handler,
         call: __call_hello_handler,
@@ -122,6 +123,7 @@ fn __call_failing_handler(
 
 inventory::submit! {
     HandlerRegistration {
+        req_type_id: std::any::TypeId::of::<HelloRequest>(),
         req_type_name: "HelloRequest",
         factory: __factory_failing_handler,
         call: __call_failing_handler,
@@ -373,6 +375,7 @@ fn __call_scope_probe_handler(
 
 inventory::submit! {
     HandlerRegistration {
+        req_type_id: std::any::TypeId::of::<ScopeProbeRequest>(),
         req_type_name: "ScopeProbeRequest",
         factory: __factory_scope_probe_handler,
         call: __call_scope_probe_handler,
@@ -465,6 +468,7 @@ fn __call_behavior_probe_handler(
 
 inventory::submit! {
     HandlerRegistration {
+        req_type_id: std::any::TypeId::of::<BehaviorProbeRequest>(),
         req_type_name: "BehaviorProbeRequest",
         factory: __factory_behavior_probe_handler,
         call: __call_behavior_probe_handler,

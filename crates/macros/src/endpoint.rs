@@ -220,38 +220,9 @@ fn generate_dispatch_fn(
                 }
 
                 ::rust_webx::RequestContext::run(operator_id, async move {
-                // Look up the HandlerRegistration by request type name.
-                // `#[handler]` on `impl IRequestHandler<Req, Rsp> for Handler` submits
-                // an entry to inventory at compile time; the entry's factory constructs
-                // a fresh owned Handler per request, resolving Scoped dependencies
-                // (DbContext) via `resolver.get_owned` — EFCore-style per-request UoW.
-                let cache = ::rust_webx::HandlerCache::get_or_init();
-                let entry = cache.get(#type_name).ok_or_else(|| ::rust_webx::Error::Di(
-                    format!("No #[handler] registered for request type '{}'", #type_name)
-                ))?;
-
-                // Create a per-request DI scope and construct the owned handler.
-                let provider = ::rust_webx::global_provider();
-                use ::rust_webx::rust_dix::ScopeFactory as _;
-                let scope = provider.create_scope();
-                let resolver: &dyn ::rust_webx::rust_dix::IServiceResolver = &scope;
-                let handler = (entry.factory)(resolver);
-
-                let behaviors: ::std::vec::Vec<::std::sync::Arc<dyn ::rust_webx::IPipelineBehavior>> =
-                    scope.get_all::<dyn ::rust_webx::IPipelineBehavior>();
-
-                let entry_call = entry.call;
-                let terminal: ::rust_webx::BoxedNextFn = ::std::boxed::Box::new(
-                    move |req: ::std::boxed::Box<dyn ::std::any::Any + Send>| -> ::rust_webx::BoxedPipelineFuture {
-                        ::std::boxed::Box::pin(async move { (entry_call)(handler, req).await })
-                    },
-                );
-
-                let chain = ::rust_webx::build_pipeline_chain(behaviors, terminal);
-                let result_box = chain(::std::boxed::Box::new(request)).await?;
-                let result = *result_box
-                    .downcast::<#rsp_type>()
-                    .expect("Response type mismatch in handler call bridge");
+                // HTTP adapter: construct request, then dispatch via IMediator (same path as in-process calls).
+                let mediator = ::rust_webx::Mediator::new(::std::sync::Arc::clone(::rust_webx::global_provider()));
+                let result: #rsp_type = mediator.send(request).await?;
 
                 let json_bytes = ::serde_json::to_vec(&result).unwrap_or_default();
                 Ok(::rust_webx::ResponseData {

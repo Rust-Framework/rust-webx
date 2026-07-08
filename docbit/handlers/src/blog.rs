@@ -120,8 +120,8 @@ impl IRequestHandler<ListBlogCategoriesRequest, Vec<BlogCategoryCount>> for List
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ListMyBlogPostsRequest, Vec<BlogPostSummary>> for ListMyBlogPostsHandler {
-    async fn handle(&mut self, req: ListMyBlogPostsRequest) -> Result<Vec<BlogPostSummary>> {
-        let uid = operator_id(req.claims.as_deref())
+    async fn handle(&mut self, _req: ListMyBlogPostsRequest) -> Result<Vec<BlogPostSummary>> {
+        let uid = operator_id()
             .ok_or_else(|| Error::Http("Not authenticated".into()))?;
         let q = uid.clone();
 
@@ -155,7 +155,7 @@ impl IRequestHandler<GetBlogPostRequest, BlogPostModel> for GetBlogPostHandler {
 #[async_trait]
 impl IRequestHandler<CreateBlogPostRequest, BlogPostModel> for CreateBlogPostHandler {
     async fn handle(&mut self, req: CreateBlogPostRequest) -> Result<BlogPostModel> {
-        let uid = operator_id(req.claims.as_deref())
+        let uid = operator_id()
             .ok_or_else(|| Error::Http("Not authenticated".into()))?;
 
         let slug = req.slug.clone();
@@ -172,18 +172,20 @@ impl IRequestHandler<CreateBlogPostRequest, BlogPostModel> for CreateBlogPostHan
         let now = now_secs();
         let id = new_id();
 
-        let entity = req.to_entity(id.clone(), Some(uid.clone()), now);
+        let entity = req.to_entity(id.clone(), now);
         let set = self.ctx.set::<Blog>();
         set.add(entity);
 
         save_changes(&mut self.ctx).await?;
 
-        let id_q = id.clone();
-        let saved = linq!(self.ctx.set::<Blog>(), |b: Blog| b.id == id_q; include b.category; include b.author)
-            .first_or_default()
-            .await
-            .map_ef()?
-            .ok_or_else(|| Error::Internal("Blog vanished after insert".into()))?;
+        let saved = crate::ef_require_by_id!(
+            self.ctx,
+            Blog,
+            id,
+            Error::NotFound("Blog not found after save".into());
+            include row.category;
+            include row.author
+        );
 
         tracing::info!("[Blog] Created: {} by {}", saved.slug, uid);
         Ok(saved.to_model())
@@ -194,7 +196,7 @@ impl IRequestHandler<CreateBlogPostRequest, BlogPostModel> for CreateBlogPostHan
 #[async_trait]
 impl IRequestHandler<UpdateBlogPostRequest, BlogPostModel> for UpdateBlogPostHandler {
     async fn handle(&mut self, req: UpdateBlogPostRequest) -> Result<BlogPostModel> {
-        let uid = operator_id(req.claims.as_deref())
+        let uid = operator_id()
             .ok_or_else(|| Error::Http("Not authenticated".into()))?;
         let roles = roles_from_claims(req.claims.as_deref());
 
@@ -211,19 +213,21 @@ impl IRequestHandler<UpdateBlogPostRequest, BlogPostModel> for UpdateBlogPostHan
         }
 
         let blog_id = blog.id.clone();
-        req.apply_to(&mut blog, Some(uid.clone()), now_secs());
+        req.apply_to(&mut blog, now_secs());
 
         let set = self.ctx.set::<Blog>();
         set.update(blog);
 
         save_changes(&mut self.ctx).await?;
 
-        let id_q = blog_id.clone();
-        let saved = linq!(self.ctx.set::<Blog>(), |b: Blog| b.id == id_q; include b.category; include b.author)
-            .first_or_default()
-            .await
-            .map_ef()?
-            .ok_or_else(|| Error::NotFound("Blog not found after update".into()))?;
+        let saved = crate::ef_require_by_id!(
+            self.ctx,
+            Blog,
+            blog_id,
+            Error::NotFound("Blog not found after update".into());
+            include row.category;
+            include row.author
+        );
 
         Ok(saved.to_model())
     }
@@ -233,7 +237,7 @@ impl IRequestHandler<UpdateBlogPostRequest, BlogPostModel> for UpdateBlogPostHan
 #[async_trait]
 impl IRequestHandler<DeleteBlogPostRequest, String> for DeleteBlogPostHandler {
     async fn handle(&mut self, req: DeleteBlogPostRequest) -> Result<String> {
-        let uid = operator_id(req.claims.as_deref())
+        let uid = operator_id()
             .ok_or_else(|| Error::Http("Not authenticated".into()))?;
         let roles = roles_from_claims(req.claims.as_deref());
 
@@ -250,7 +254,7 @@ impl IRequestHandler<DeleteBlogPostRequest, String> for DeleteBlogPostHandler {
         }
 
         blog.is_deleted = true;
-        blog.updated_id = Some(uid);
+        blog.updated_id = operator_id();
         blog.updated_at = now_secs();
 
         let set = self.ctx.set::<Blog>();

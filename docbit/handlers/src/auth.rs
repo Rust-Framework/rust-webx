@@ -52,6 +52,16 @@ fn create_token(user: &UserView) -> Result<String> {
     .map_err(|e| Error::Http(format!("Token creation failed: {}", e)))
 }
 
+fn user_to_view(user: User) -> UserView {
+    UserView {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        roles: user.roles.items().iter().map(|r| r.name.clone()).collect(),
+        created_at: user.created_at,
+    }
+}
+
 /// 加载用户（含角色导航），按 email 查询；全局过滤器排除已删除用户。
 async fn load_user_by_email(ctx: &mut DbContext, email: &str) -> Result<Option<User>> {
     let q = email.to_string();
@@ -143,13 +153,14 @@ impl IRequestHandler<RegisterRequest, AuthResponse> for RegisterHandler {
 
         save_changes(&mut self.ctx).await?;
 
-        let model = UserView {
-            id: user_id,
-            name: req.name,
-            email: req.email,
-            roles: vec!["user".into()],
-            created_at: now,
-        };
+        let saved = crate::ef_require_by_id!(
+            self.ctx,
+            User,
+            user_id,
+            Error::NotFound("User not found after register".into());
+            include row.roles
+        );
+        let model = user_to_view(saved);
         let token = create_token(&model)?;
 
         tracing::info!("[Auth] User registered: {} ({})", model.name, model.id);
@@ -172,13 +183,7 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
             return Err(Error::Http("Invalid email or password".into()));
         }
 
-        let model = UserView {
-            id: user.id,
-            name: user.name.clone(),
-            email: user.email.clone(),
-            roles: user.roles.items().iter().map(|r| r.name.clone()).collect(),
-            created_at: user.created_at,
-        };
+        let model = user_to_view(user);
         let token = create_token(&model)?;
 
         tracing::info!("[Auth] User logged in: {} ({})", model.name, model.id);
@@ -189,21 +194,15 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<AuthMeRequest, UserView> for AuthMeHandler {
-    async fn handle(&mut self, req: AuthMeRequest) -> Result<UserView> {
-        let uid = operator_id(req.claims.as_deref())
+    async fn handle(&mut self, _req: AuthMeRequest) -> Result<UserView> {
+        let uid = operator_id()
             .ok_or_else(|| Error::Http("Not authenticated".into()))?;
 
         let user = load_user_by_id(&mut self.ctx, &uid)
             .await?
             .ok_or_else(|| Error::Http("User not found".into()))?;
 
-        Ok(UserView {
-            id: user.id,
-            name: user.name,
-            email: user.email,
-            roles: user.roles.items().iter().map(|r| r.name.clone()).collect(),
-            created_at: user.created_at,
-        })
+        Ok(user_to_view(user))
     }
 }
 

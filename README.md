@@ -9,7 +9,7 @@ ASP.NET Core 风格的 Rust WebApi 服务框架，基于 [rust-dix](https://crat
 - **编译时自动扫描** — 通过 `inventory` 编译时收集路由元数据，`Host::build()` 时自动注册
 - **零配置 Handler 注册** — `#[handler]` 属性宏自动向 DI 容器注册 Handler
 - **身份认证和授权** — JWT Bearer + 基于资源的路由授权
-- **rust-ef 集成** — `add_dbcontext` + per-request owned `DbContext`（EFCore 风格 UoW）
+- **ORM 无关** — 框架不依赖 rust-ef；Docbit 在 `handlers/src/db.rs` 与 `host` 内联最少胶水
 
 ## 快速开始
 

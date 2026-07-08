@@ -73,7 +73,6 @@ impl IRequestHandler<GetExhibitionRequest, ExhibitionModel> for GetExhibitionHan
 #[async_trait]
 impl IRequestHandler<UpsertExhibitionRequest, ExhibitionModel> for UpsertExhibitionHandler {
     async fn handle(&mut self, req: UpsertExhibitionRequest) -> Result<ExhibitionModel> {
-        let op = operator_id(req.claims.as_deref());
         let now = now_secs();
         let slug = req.slug.clone();
         let q = slug.clone();
@@ -85,7 +84,7 @@ impl IRequestHandler<UpsertExhibitionRequest, ExhibitionModel> for UpsertExhibit
 
         let saved_id = if let Some(mut ex) = existing {
             let id = ex.id.clone();
-            req.apply_to(&mut ex, op.clone(), now);
+            req.apply_to(&mut ex, now);
 
             let set = self.ctx.set::<Exhibition>();
             set.update(ex);
@@ -95,7 +94,7 @@ impl IRequestHandler<UpsertExhibitionRequest, ExhibitionModel> for UpsertExhibit
             id
         } else {
             let id = new_id();
-            let entity = req.to_entity(id.clone(), op.clone(), now);
+            let entity = req.to_entity(id.clone(), now);
 
             let set = self.ctx.set::<Exhibition>();
             set.add(entity);
@@ -105,12 +104,13 @@ impl IRequestHandler<UpsertExhibitionRequest, ExhibitionModel> for UpsertExhibit
             id
         };
 
-        let id_q = saved_id.clone();
-        let saved = linq!(self.ctx.set::<Exhibition>(), |e: Exhibition| e.id == id_q; include e.category)
-            .first_or_default()
-            .await
-            .map_ef()?
-            .ok_or_else(|| Error::Internal("Exhibition vanished after save".into()))?;
+        let saved = crate::ef_require_by_id!(
+            self.ctx,
+            Exhibition,
+            saved_id,
+            Error::NotFound("Exhibition not found after save".into());
+            include row.category
+        );
 
         tracing::info!("[Exhibition] Upserted: {} ({})", saved.slug, saved.id);
         Ok(saved.to_model())
@@ -121,7 +121,6 @@ impl IRequestHandler<UpsertExhibitionRequest, ExhibitionModel> for UpsertExhibit
 #[async_trait]
 impl IRequestHandler<DeleteExhibitionRequest, String> for DeleteExhibitionHandler {
     async fn handle(&mut self, req: DeleteExhibitionRequest) -> Result<String> {
-        let op = operator_id(req.claims.as_deref());
         let now = now_secs();
         let slug = req.slug.clone();
         let q = slug.clone();
@@ -138,7 +137,7 @@ impl IRequestHandler<DeleteExhibitionRequest, String> for DeleteExhibitionHandle
         let set = self.ctx.set::<Exhibition>();
         for mut item in items {
             item.is_deleted = true;
-            item.updated_id = op.clone();
+            item.updated_id = operator_id();
             item.updated_at = now;
             set.update(item);
         }

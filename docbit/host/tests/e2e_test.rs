@@ -2,19 +2,10 @@
 
 use serial_test::serial;
 
-use std::net::TcpListener;
 use std::sync::Once;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 static INIT: Once = Once::new();
-
-fn find_free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
 
 fn unique_suffix() -> u128 {
     SystemTime::now()
@@ -59,54 +50,26 @@ fn setup_app_dir() -> tempfile::TempDir {
 }
 
 struct DocbitFixture {
-    port: u16,
     _dir: tempfile::TempDir,
-    handle: rust_webx::ServerHandle,
-    server: tokio::task::JoinHandle<()>,
+    server: rust_webx::TestServer,
 }
 
 impl DocbitFixture {
     fn base(&self) -> String {
-        format!("http://127.0.0.1:{}", self.port)
+        self.server.base_url.clone()
     }
 
     async fn teardown(self) {
-        self.handle.shutdown();
-        let _ = tokio::time::timeout(Duration::from_secs(5), self.server).await;
-        // Allow SQLite connection pool to release file handles before the next test.
+        self.server.teardown().await;
         tokio::time::sleep(Duration::from_millis(300)).await;
     }
 }
 
-async fn wait_ready(port: u16) {
-    let url = format!("http://127.0.0.1:{}/health/live", port);
-    for _ in 0..60 {
-        if let Ok(resp) = reqwest::get(&url).await {
-            if resp.status().is_success() {
-                return;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
-    panic!("docbit failed to become ready on port {port}");
-}
-
 async fn spawn_docbit() -> DocbitFixture {
-    let _dir = setup_app_dir();
-    let port = find_free_port();
-    let addr = format!("127.0.0.1:{}", port);
-    let host = docbit_host::build_host();
-    let handle = host.server_handle();
-    let server = tokio::spawn(async move {
-        let _ = host.run_at(&addr).await;
-    });
-    wait_ready(port).await;
-    DocbitFixture {
-        port,
-        _dir,
-        handle,
-        server,
-    }
+    let dir = setup_app_dir();
+    let port = rust_webx::free_port();
+    let server = rust_webx::spawn(docbit_host::build_host(), port).await;
+    DocbitFixture { _dir: dir, server }
 }
 
 async fn admin_token(client: &reqwest::Client, base: &str) -> String {

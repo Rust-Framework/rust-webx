@@ -4,13 +4,15 @@
 
 mod startup;
 
+use std::sync::Arc;
+
 use docbit_contracts::site::SiteConfig;
 use docbit_domain::prepare_context;
+use rust_ef::db_context::{DbContext, DbContextOptionsBuilder};
 use rust_ef_mysql::DbContextOptionsBuilderExt as _;
 use rust_ef_sqlite::DbContextOptionsBuilderExt as _;
 use rust_webx::rust_dix::ServiceCollection;
 use rust_webx::*;
-use rust_webx_ef::{EfServiceCollectionExt, SaveChangesLogInterceptor};
 
 extern crate docbit_domain;
 extern crate docbit_handlers;
@@ -37,25 +39,31 @@ pub fn build_host() -> Host {
     builder.build()
 }
 
-/// Register DbContext (SQLite in Development, MySQL in Production).
+/// Register scoped `DbContext` (SQLite in Development, MySQL in Production).
 pub fn register_db_context(svc: ServiceCollection) -> ServiceCollection {
-    svc.add_ef_dbcontext(
-        |opts| {
-            opts.add_interceptor(SaveChangesLogInterceptor);
-            match AppMode::from_env() {
-                AppMode::Production => {
-                    let cs = std::env::var("DATABASE_URL")
-                        .expect("DATABASE_URL environment variable required in Production");
-                    opts.use_mysql(&cs);
-                    tracing::info!("[docbit] DbContext provider: MySQL");
-                }
-                AppMode::Development => {
-                    let path = app_base().join("app.db");
-                    opts.use_sqlite(&path.to_string_lossy());
-                    tracing::info!("[docbit] SQLite path: {}", path.display());
-                }
-            }
-        },
-        |ctx| prepare_context(ctx),
-    )
+    let mut builder = DbContextOptionsBuilder::new();
+    match AppMode::from_env() {
+        AppMode::Production => {
+            let cs = std::env::var("DATABASE_URL")
+                .expect("DATABASE_URL environment variable required in Production");
+            builder.use_mysql(&cs);
+            tracing::info!("[docbit] DbContext provider: MySQL");
+        }
+        AppMode::Development => {
+            let path = app_base().join("app.db");
+            builder.use_sqlite(&path.to_string_lossy());
+            tracing::info!("[docbit] SQLite path: {}", path.display());
+        }
+    }
+
+    let options = Arc::new(builder.build());
+    options
+        .create_provider()
+        .expect("DbContext provider initialization failed at startup");
+
+    svc.scoped(move |_| {
+        let mut ctx = DbContext::from_options(&options).expect("Failed to create DbContext");
+        prepare_context(&mut ctx);
+        Arc::new(ctx)
+    })
 }

@@ -3,7 +3,7 @@
 use bcrypt::{hash, DEFAULT_COST};
 use rust_ef::{db_context::DbContext, prelude::*};
 use rust_webx::*;
-use rust_webx_ef::EfResultExt;
+use docbit_handlers::db::{save_changes, EfResultExt};
 
 use docbit_domain::entities::User;
 use docbit_domain::{new_id, seed_ids};
@@ -56,7 +56,7 @@ pub async fn ensure_admin_user(ctx: &mut DbContext) -> Result<()> {
     let role_users = ctx.set::<docbit_domain::entities::RoleUser>();
     role_users.add(role_user);
 
-    rust_webx_ef::save_changes(ctx).await?;
+    save_changes(ctx).await?;
 
     tracing::info!(
         "[DbInit] Created default admin user: {} / {}",

@@ -26,3 +26,6 @@ serde.workspace = true
 serde_json.workspace = true
 inventory.workspace = true
 jsonwebtoken.workspace = true
+
+[features]
+testing = ["rust-webx-host/testing"]

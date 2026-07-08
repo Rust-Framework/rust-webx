@@ -82,13 +82,10 @@ impl IRequestHandler<GetUserRequest, UserModel> for GetUserHandler {
 #[async_trait]
 impl IRequestHandler<CreateUserRequest, UserModel> for CreateUserHandler {
     async fn handle(&mut self, req: CreateUserRequest) -> Result<UserModel> {
-        let op = operator_id(req.claims.as_deref());
         let now = now_secs();
         let user_id = new_id();
-        let name = req.name.clone();
-        let email = req.email.clone();
 
-        let user = req.to_entity(user_id.clone(), op.clone(), now);
+        let user = req.to_entity(user_id.clone(), now);
         let users = self.ctx.set::<User>();
         users.add(user);
 
@@ -103,14 +100,21 @@ impl IRequestHandler<CreateUserRequest, UserModel> for CreateUserHandler {
 
         save_changes(&mut self.ctx).await?;
 
-        tracing::info!("[User] Created: {} ({}) by {:?}", name, user_id, op);
-        Ok(UserModel {
-            id: user_id,
-            name,
-            email,
-            roles: vec!["user".into()],
-            created_at: now,
-        })
+        let saved = crate::ef_require_by_id!(
+            self.ctx,
+            User,
+            user_id,
+            Error::NotFound("User not found after create".into());
+            include row.roles
+        );
+
+        tracing::info!(
+            "[User] Created: {} ({}) by {:?}",
+            saved.name,
+            saved.id,
+            operator_id()
+        );
+        Ok(saved.to_model())
     }
 }
 
@@ -129,20 +133,20 @@ impl IRequestHandler<UpdateUserRequest, UserModel> for UpdateUserHandler {
             .map_ef()?
             .ok_or_else(|| Error::NotFound("User not found".into()))?;
 
-        let op = operator_id(req.claims.as_deref());
-        req.apply_to(&mut user, op, now_secs());
+        req.apply_to(&mut user, now_secs());
 
         let set = self.ctx.set::<User>();
         set.update(user);
 
         save_changes(&mut self.ctx).await?;
 
-        let q = id.clone();
-        let updated = linq!(self.ctx.set::<User>(), |u: User| u.id == q; include u.roles)
-            .first_or_default()
-            .await
-            .map_ef()?
-            .ok_or_else(|| Error::NotFound("User not found after update".into()))?;
+        let updated = crate::ef_require_by_id!(
+            self.ctx,
+            User,
+            id,
+            Error::NotFound("User not found after update".into());
+            include row.roles
+        );
 
         Ok(updated.to_model())
     }
@@ -164,7 +168,7 @@ impl IRequestHandler<DeleteUserRequest, String> for DeleteUserHandler {
             .ok_or_else(|| Error::NotFound("User not found".into()))?;
 
         user.is_deleted = true;
-        user.updated_id = operator_id(req.claims.as_deref());
+        user.updated_id = operator_id();
         user.updated_at = now_secs();
 
         let set = self.ctx.set::<User>();

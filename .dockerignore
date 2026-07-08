@@ -1,0 +1,9 @@
+target/
+.git/
+.github/
+.trae/
+*.db
+*.db-*
+docbit/.env
+coverage/
+**/*.rs.bk

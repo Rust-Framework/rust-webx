@@ -71,7 +71,7 @@ pub struct GetUserProfileHandler {
 
 ```toml
 [dependencies]
-rust-webx-core = "0.1"
+rust-webx-core = "0.2"
 ```
 
 ## 小结

@@ -41,6 +41,16 @@ use std::time::Instant;
 use tokio::task::JoinSet;
 use tokio_rustls::TlsAcceptor;
 
+/// Returns true when the JWT secret is missing, too short, or a known placeholder.
+fn is_weak_jwt_secret(secret: &str) -> bool {
+    secret.is_empty()
+        || secret.len() < 32
+        || secret.contains("change-in-production")
+        || secret.contains("please-change")
+        || secret.contains("demo-secret")
+        || secret.contains("dev-secret")
+}
+
 pub struct Host {
     #[allow(dead_code)]
     provider: Arc<ServiceProvider>,
@@ -401,14 +411,11 @@ impl HostBuilder {
 
         let pipeline = Arc::new(pipeline);
 
-        // Security: Warn if JWT secret is the default value in production
-        if self.mode == AppMode::Production
-            && (options.jwt.secret.is_empty()
-                || options.jwt.secret.contains("change-in-production")
-                || options.jwt.secret.contains("demo-secret"))
+        // Security: fail fast in production when auth is enabled but JWT secret is missing or weak
+        if self.mode == AppMode::Production && self.auth_enabled && is_weak_jwt_secret(&options.jwt.secret)
         {
-            tracing::warn!(
-                "INSECURE: JWT secret is default or empty. Set a strong secret via appsettings.json or JWT_SECRET env var."
+            panic!(
+                "Production requires a strong JWT secret. Set APP__Jwt__Secret or JWT_SECRET env var (min 32 chars, not a placeholder)."
             );
         }
 

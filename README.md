@@ -1,23 +1,20 @@
-# LRWF — Rust WebApi Framework
+# rust-webx — Rust WebApi Framework
 
-ASP.NET Core 风格的 Rust WebApi 服务框架，基于 [lrdi](https://crates.io/crates/lrdi) DI + 中介者模式构建。
+ASP.NET Core 风格的 Rust WebApi 服务框架，基于 [rust-dix](https://crates.io/crates/rust-dix) DI + 中介者模式构建。
 
 ## 特性
 
 - **DI + 中介者 双核心** — 以 `IRequest<T>` + `IRequestHandler<T, R>` 为载体，框架自动完成路由映射和 DI 解析
-- **编译时路由快捷键** — `#[get("/path")]` `#[post("/path")]` `#[put("/path")]` `#[delete("/path")]` 一行标注定义完整端点
-- **编译时自动扫描** — 通过 `inventory` 编译时收集路由元数据，`Host::build()` 时自动读取并注册
-- **零配置 Handler 注册** — `#[handler]` 属性宏自动向 DI 容器注册 Handler，无需任何手动代码
-- **内置异常中间件** — `Error` 变体自动映射 HTTP 状态码（404/400/401/403/500），响应格式统一为 `{"error": "msg", "status": code}`
-- **事件发布/订阅** — `IEventRequest` + `IEventHandler<T>` + `IMediator::publish()` 实现模块间松耦合通信
-- **身份认证和授权** — JWT Bearer Token 认证 + 基于资源（原始路由字符串）的角色/权限授权
-- **高内聚低耦合** — `lrwf-core` 只定义 trait，零实现依赖；上层 crate 只依赖 trait 抽象
-- **AI 驱动开发友好** — 请求即端点，每个 `IRequest` 自带路由元数据，AI 生成的模块可直接插入系统
+- **编译时路由快捷键** — `#[get("/path")]` `#[post("/path")]` 等一行标注定义完整端点
+- **编译时自动扫描** — 通过 `inventory` 编译时收集路由元数据，`Host::build()` 时自动注册
+- **零配置 Handler 注册** — `#[handler]` 属性宏自动向 DI 容器注册 Handler
+- **身份认证和授权** — JWT Bearer + 基于资源的路由授权
+- **rust-ef 集成** — `add_dbcontext` + per-request owned `DbContext`（EFCore 风格 UoW）
 
 ## 快速开始
 
 ```rust
-use lrwf::*;
+use rust_webx::*;
 
 struct HelloRequest;
 

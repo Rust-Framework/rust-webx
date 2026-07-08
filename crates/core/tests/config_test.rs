@@ -142,3 +142,14 @@ fn config_bind_empty_json_returns_default() {
     let config: TestConfig = config::bind_root(&json);
     assert_eq!(config, TestConfig::default());
 }
+
+#[test]
+fn config_jwt_secret_env_override() {
+    std::env::set_var("JWT_SECRET", "env-jwt-secret-that-is-long-enough-32");
+    let result = config::load_appsettings(AppMode::Development);
+    std::env::remove_var("JWT_SECRET");
+    if let Some(json) = result {
+        let opts: rust_webx_core::config::AppOptions = config::bind_root(&json);
+        assert_eq!(opts.jwt.secret, "env-jwt-secret-that-is-long-enough-32");
+    }
+}

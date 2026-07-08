@@ -26,14 +26,30 @@ extern crate docbit_handlers;
 
 #[tokio::main]
 async fn main() {
-    let host = Host::builder()
+    let host = build_host();
+    host.run().await.expect("Server failed");
+}
+
+fn build_host() -> Host {
+    let mode = AppMode::from_env();
+    let mut builder = Host::builder()
         .register(|svc| register_db_context(svc))
         .add_options::<SiteConfig>("Site")
         .add_authentication()
-        .add_memory_cache()
-        .build();
+        .add_memory_cache();
 
-    host.run().await.expect("Server failed");
+    if mode == AppMode::Production {
+        tracing::info!("[docbit] Production middleware: rate-limit, compression, timing, request-tracing");
+        builder = builder
+            .use_middleware_with(|| {
+                std::sync::Arc::new(RateLimitMiddleware::new(20.0, 40)) as std::sync::Arc<dyn IMiddleware>
+            })
+            .use_middleware::<CompressionMiddleware>()
+            .use_middleware::<TimingMiddleware>()
+            .use_middleware::<RequestTracing>();
+    }
+
+    builder.build()
 }
 
 /// 注册 DbContext。

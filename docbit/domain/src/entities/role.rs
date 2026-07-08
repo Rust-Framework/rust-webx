@@ -9,8 +9,8 @@ use super::user::User;
 #[table("roles")]
 pub struct Role {
     #[primary_key]
-    #[auto_increment]
-    pub id: i32,
+    #[max_length(36)]
+    pub id: String,
     #[required]
     #[max_length(50)]
     #[unique]
@@ -18,11 +18,13 @@ pub struct Role {
     #[max_length(200)]
     pub description: String,
     #[index]
-    pub created_id: Option<i32>, // 无 FK
+    #[max_length(36)]
+    pub created_id: Option<String>,
     #[required]
     pub created_at: i64,
     #[index]
-    pub updated_id: Option<i32>, // 无 FK
+    #[max_length(36)]
+    pub updated_id: Option<String>,
     #[required]
     pub updated_at: i64,
     #[required]
@@ -38,16 +40,18 @@ pub struct Role {
 #[table("role_users")]
 pub struct RoleUser {
     #[primary_key]
-    #[auto_increment]
-    pub id: i32,
+    #[max_length(36)]
+    pub id: String,
     #[required]
     #[foreign_key(User)]
     #[index]
-    pub user_id: i32,
+    #[max_length(36)]
+    pub user_id: String,
     #[required]
     #[foreign_key(Role)]
     #[index]
-    pub role_id: i32,
+    #[max_length(36)]
+    pub role_id: String,
     #[required]
-    pub created_at: i64, // 联结表仅留 created_at
+    pub created_at: i64,
 }

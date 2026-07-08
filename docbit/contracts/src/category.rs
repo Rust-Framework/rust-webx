@@ -5,10 +5,10 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CategoryModel {
-    pub id: i32,
+    pub id: String,
     pub name: String,
     pub slug: String,
-    pub parent_id: Option<i32>,
+    pub parent_id: Option<String>,
     pub sort_order: i32,
     pub created_at: i64,
 }
@@ -32,7 +32,7 @@ impl IRequest<Vec<CategoryTreeNode>> for ListCategoriesRequest {}
 pub struct CreateCategoryRequest {
     pub name: String,
     pub slug: String,
-    pub parent_id: Option<i32>,
+    pub parent_id: Option<String>,
     pub sort_order: i32,
 }
 
@@ -43,6 +43,7 @@ impl IRequest<CategoryModel> for CreateCategoryRequest {}
 #[claims]
 #[derive(Default, Deserialize)]
 pub struct UpdateCategoryRequest {
+    #[serde(default)]
     pub id: String,
     pub name: Option<String>,
     pub sort_order: Option<i32>,

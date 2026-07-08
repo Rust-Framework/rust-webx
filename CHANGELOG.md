@@ -61,6 +61,11 @@ All notable changes to **rust-webx** are documented in this file.
 
 - `appsettings.Production.json`: JWT secret removed from file; must be supplied via env.
 
+### Known limitations (0.2.0)
+
+- **OpenTelemetry export**: not built-in; use structured JSON logs (Production), `RequestTracing` middleware, and optional `GET /metrics` (Prometheus). OTLP planned for a future minor release.
+- **rust-ef insert ID**: `save_changes` does not backfill auto-increment IDs (1.5.1); docbit handlers re-query by natural keys (documented as `FIXME(upstream)`).
+
 ## [0.1.0] — 2026-06
 
 Initial release as `rust-webapp` (superseded by 0.2.0 rebrand).

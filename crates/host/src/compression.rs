@@ -59,16 +59,9 @@ impl CompressionConfig {
 ///     .use_middleware::<CompressionMiddleware>()
 ///     .build()
 /// ```
+#[derive(Default)]
 pub struct CompressionMiddleware {
     config: CompressionConfig,
-}
-
-impl Default for CompressionMiddleware {
-    fn default() -> Self {
-        Self {
-            config: CompressionConfig::default(),
-        }
-    }
 }
 
 impl CompressionMiddleware {

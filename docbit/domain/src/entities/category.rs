@@ -6,8 +6,8 @@ use rust_ef::prelude::*;
 #[table("categories")]
 pub struct Category {
     #[primary_key]
-    #[auto_increment]
-    pub id: i32,
+    #[max_length(36)]
+    pub id: String,
     #[required]
     #[max_length(100)]
     pub name: String,
@@ -16,15 +16,18 @@ pub struct Category {
     #[unique]
     pub slug: String,
     #[foreign_key(Category)]
-    pub parent_id: Option<i32>, // 自外键
+    #[max_length(36)]
+    pub parent_id: Option<String>,
     #[required]
     pub sort_order: i32,
     #[index]
-    pub created_id: Option<i32>, // 无 FK
+    #[max_length(36)]
+    pub created_id: Option<String>,
     #[required]
     pub created_at: i64,
     #[index]
-    pub updated_id: Option<i32>, // 无 FK
+    #[max_length(36)]
+    pub updated_id: Option<String>,
     #[required]
     pub updated_at: i64,
     #[required]

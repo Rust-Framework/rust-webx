@@ -7,6 +7,9 @@ description = "rust-webx core traits: IRequest, IRequestHandler, IMiddleware, IH
 repository.workspace = true
 homepage.workspace = true
 documentation.workspace = true
+readme = "../../README.md"
+keywords = ["web", "http", "async", "framework", "aspnet-core"]
+categories = ["web-programming", "asynchronous"]
 
 [dependencies]
 async-trait.workspace = true

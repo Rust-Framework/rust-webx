@@ -7,6 +7,9 @@ description = "rust-webx SPA: static file serving middleware"
 repository.workspace = true
 homepage.workspace = true
 documentation.workspace = true
+readme = "../../README.md"
+keywords = ["web", "spa", "static-files", "middleware"]
+categories = ["web-programming"]
 
 [dependencies]
 rust-webx-core.workspace = true

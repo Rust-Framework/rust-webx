@@ -228,6 +228,28 @@ fn mime_type(path: &Path) -> &'static str {
     }
 }
 
+/// Resolve a SPA root path by first checking the application base directory
+/// (as resolved by `rust_webx_core::paths::app_base`), then as-is.
+///
+/// This mirrors the strategy used by `config::load_appsettings` so that
+/// `use_spa("wwwroot")` works whether the user runs from `demo/`, from
+/// the workspace root (`rust-webx/`), or from a deployment directory
+/// (exe alongside `wwwroot/`).
+fn resolve_spa_root(root: PathBuf) -> PathBuf {
+    // If the path is already absolute or exists, use it directly.
+    if root.is_absolute() || root.exists() {
+        return root;
+    }
+
+    // 应用基准目录（exe 同级 / cwd / 上溯统一由 app_base 处理）。
+    let candidate = rust_webx_core::paths::app_base().join(&root);
+    if candidate.exists() {
+        return candidate;
+    }
+
+    root
+}
+
 #[cfg(test)]
 mod tests {
     use super::{alias_static_path, mime_type, normalize_path};
@@ -251,26 +273,4 @@ mod tests {
         let p = normalize_path(Path::new("a/../b/./c"));
         assert_eq!(p, Path::new("b/c"));
     }
-}
-
-/// Resolve a SPA root path by first checking the application base directory
-/// (as resolved by `rust_webx_core::paths::app_base`), then as-is.
-///
-/// This mirrors the strategy used by `config::load_appsettings` so that
-/// `use_spa("wwwroot")` works whether the user runs from `demo/`, from
-/// the workspace root (`rust-webx/`), or from a deployment directory
-/// (exe alongside `wwwroot/`).
-fn resolve_spa_root(root: PathBuf) -> PathBuf {
-    // If the path is already absolute or exists, use it directly.
-    if root.is_absolute() || root.exists() {
-        return root;
-    }
-
-    // 应用基准目录（exe 同级 / cwd / 上溯统一由 app_base 处理）。
-    let candidate = rust_webx_core::paths::app_base().join(&root);
-    if candidate.exists() {
-        return candidate;
-    }
-
-    root
 }

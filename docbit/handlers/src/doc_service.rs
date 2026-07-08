@@ -101,12 +101,12 @@ impl DocService {
         let legacy: DocIndex =
             serde_json::from_str(&raw).map_err(|e| format!("Invalid INDEX.json: {}", e))?;
         Ok(ExhibitionModel {
-            id: 0,
+            id: String::new(),
             slug: dir_slug.to_string(),
             title: legacy.title,
             subtitle: String::new(),
             description: String::new(),
-            category_id: 0,
+            category_id: String::new(),
             category_name: "product".into(),
             category: "product".into(),
             tags: vec![],
@@ -462,12 +462,12 @@ fn meta_to_exhibition_model(dir_slug: &str, meta: &IndexMeta, has_docs: bool) ->
     };
 
     ExhibitionModel {
-        id: 0,
+        id: String::new(),
         slug: slug.clone(),
         title: meta.title.clone(),
         subtitle,
         description,
-        category_id: 0,
+        category_id: String::new(),
         category_name: meta.category.clone(),
         category: meta.category.clone(),
         tags: meta.tags.clone(),

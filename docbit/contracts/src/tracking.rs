@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrackingModel {
-    pub id: i32,
+    pub id: String,
     pub path: String,
     pub method: String,
     pub ip: String,

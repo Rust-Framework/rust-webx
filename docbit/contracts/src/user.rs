@@ -1,7 +1,7 @@
 //! User contracts — admin CRUD endpoints.
 //!
 //! Migrated from docbit/src/contracts/user.rs with UserModel changes:
-//! - `id` changed from String to i32
+//! - `id` uses String (UUID)
 //! - `password_hash` field removed (never exposed to clients)
 //! - `role: String` removed (replaced by multi-role RBAC)
 //! - `roles: Vec<String>` added
@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserModel {
-    pub id: i32,
+    pub id: String,
     pub name: String,
     pub email: String,
     pub roles: Vec<String>,
@@ -59,6 +59,7 @@ impl IRequest<UserModel> for CreateUserRequest {}
 #[claims]
 #[derive(Default, Deserialize)]
 pub struct UpdateUserRequest {
+    #[serde(default)]
     pub id: String,
     pub name: Option<String>,
     pub email: Option<String>,

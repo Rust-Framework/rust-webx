@@ -1,7 +1,7 @@
 //! Auth contracts — register / login / me / forgot-password / reset-password.
 //!
 //! Migrated from docbit/src/contracts/auth.rs with UserView changes:
-//! - `id` changed from String to i32
+//! - `id` uses String (UUID)
 //! - `role: String` removed
 //! - `roles: Vec<String>` added (multi-role RBAC)
 //! - `created_at` changed from String to i64
@@ -27,7 +27,7 @@ pub struct AuthResponse {
 
 #[derive(Serialize)]
 pub struct UserView {
-    pub id: i32,
+    pub id: String,
     pub name: String,
     pub email: String,
     pub roles: Vec<String>,

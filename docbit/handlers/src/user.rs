@@ -8,7 +8,7 @@ use rust_webx::*;
 
 use docbit_contracts::user::*;
 use docbit_domain::entities::{RoleUser, User};
-use docbit_domain::{ApplyTo, ToEntity, ToModel};
+use docbit_domain::{new_id, seed_ids, ApplyTo, ToEntity, ToModel};
 
 use crate::util::{now_secs, operator_id, parse_id};
 
@@ -65,7 +65,8 @@ impl IRequestHandler<ListUsersRequest, Vec<UserModel>> for ListUsersHandler {
 impl IRequestHandler<GetUserRequest, UserModel> for GetUserHandler {
     async fn handle(&mut self, req: GetUserRequest) -> Result<UserModel> {
         let id = parse_id(&req.id)?;
-        let user = linq!(self.ctx.set::<User>(), |u: User| u.id == id && !u.is_deleted; include u.roles)
+        let q = id.clone();
+        let user = linq!(self.ctx.set::<User>(), |u: User| u.id == q && !u.is_deleted; include u.roles)
             .first_or_default()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?
@@ -80,44 +81,34 @@ impl IRequestHandler<CreateUserRequest, UserModel> for CreateUserHandler {
     async fn handle(&mut self, req: CreateUserRequest) -> Result<UserModel> {
         let op = operator_id(req.claims.as_deref());
         let now = now_secs();
-        let email = req.email.clone();
+        let user_id = new_id();
         let name = req.name.clone();
-        let user = req.to_entity(op.unwrap_or(0), now);
-        self.ctx.set::<User>().add(user);
+        let email = req.email.clone();
+        let user = req.to_entity(user_id.clone(), op.clone(), now);
+        let users = self.ctx.set::<User>();
+        users.add(user);
+
+        let role_user = RoleUser {
+            id: new_id(),
+            user_id: user_id.clone(),
+            role_id: seed_ids::ROLE_USER.to_string(),
+            created_at: now,
+        };
+        let role_users = self.ctx.set::<RoleUser>();
+        role_users.add(role_user);
+
         self.ctx
             .save_changes()
             .await
             .map_err(|e| Error::Internal(format!("Failed to create user: {}", e)))?;
 
-        // 回查拿到自增 id，并分配默认 user 角色
-        // FIXME(framework): rust-ef 1.3.0 save_changes 不回填自增 id，按 email 回查。
-        let created = {
-            let q = email.clone();
-            linq!(self.ctx.set::<User>(), |u: User| u.email == q)
-                .first_or_default()
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?
-        }
-        .ok_or_else(|| Error::Internal("User disappeared after insert".into()))?;
-
-        self.ctx.set::<RoleUser>().add(RoleUser {
-            id: 0,
-            user_id: created.id,
-            role_id: 2,
-            created_at: now,
-        });
-        self.ctx
-            .save_changes()
-            .await
-            .map_err(|e| Error::Internal(format!("Failed to assign role: {}", e)))?;
-
-        tracing::info!("[User] Created: {} ({}) by {:?}", name, created.id, op);
+        tracing::info!("[User] Created: {} ({}) by {:?}", name, user_id, op);
         Ok(UserModel {
-            id: created.id,
-            name: created.name,
-            email: created.email,
+            id: user_id,
+            name,
+            email,
             roles: vec!["user".into()],
-            created_at: created.created_at,
+            created_at: now,
         })
     }
 }
@@ -131,22 +122,24 @@ impl IRequestHandler<UpdateUserRequest, UserModel> for UpdateUserHandler {
             .ctx
             .set::<User>()
             .query()
-            .find(id)
+            .find(id.clone())
             .await
             .map_err(|e| Error::Internal(e.to_string()))?
             .ok_or_else(|| Error::NotFound("User not found".into()))?;
 
-        let op = operator_id(req.claims.as_deref()).unwrap_or(0);
+        let op = operator_id(req.claims.as_deref());
         req.apply_to(&mut user, op, now_secs());
 
-        self.ctx.set::<User>().update(user);
+        let set = self.ctx.set::<User>();
+        set.update(user);
         self.ctx
             .save_changes()
             .await
             .map_err(|e| Error::Internal(format!("Failed to update user: {}", e)))?;
 
         // 回查含角色
-        let updated = linq!(self.ctx.set::<User>(), |u: User| u.id == id && !u.is_deleted; include u.roles)
+        let q = id.clone();
+        let updated = linq!(self.ctx.set::<User>(), |u: User| u.id == q && !u.is_deleted; include u.roles)
             .first_or_default()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?
@@ -164,7 +157,7 @@ impl IRequestHandler<DeleteUserRequest, String> for DeleteUserHandler {
             .ctx
             .set::<User>()
             .query()
-            .find(id)
+            .find(id.clone())
             .await
             .map_err(|e| Error::Internal(e.to_string()))?
             .ok_or_else(|| Error::NotFound("User not found".into()))?;
@@ -172,7 +165,8 @@ impl IRequestHandler<DeleteUserRequest, String> for DeleteUserHandler {
         user.is_deleted = true;
         user.updated_id = operator_id(req.claims.as_deref());
         user.updated_at = now_secs();
-        self.ctx.set::<User>().update(user);
+        let set = self.ctx.set::<User>();
+        set.update(user);
         self.ctx
             .save_changes()
             .await

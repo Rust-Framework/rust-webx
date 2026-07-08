@@ -7,6 +7,9 @@ description = "rust-webx OpenAPI: specification generation and API docs UI"
 repository.workspace = true
 homepage.workspace = true
 documentation.workspace = true
+readme = "../../README.md"
+keywords = ["web", "openapi", "swagger", "api-docs"]
+categories = ["web-programming"]
 
 [dependencies]
 rust-webx-core.workspace = true

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoleModel {
-    pub id: i32,
+    pub id: String,
     pub name: String,
     pub description: String,
     pub created_at: i64,
@@ -18,7 +18,7 @@ pub struct RoleModel {
 /// - `properties`：配置属性 JSON，如 `{"method":"GET"}`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourceModel {
-    pub id: i32,
+    pub id: String,
     pub name: String,
     pub description: String,
     pub r#type: String,
@@ -30,9 +30,9 @@ pub struct ResourceModel {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthorizeModel {
-    pub id: i32,
-    pub role_id: i32,
-    pub resource_id: i32,
+    pub id: String,
+    pub role_id: String,
+    pub resource_id: String,
 }
 
 // ── Role CRUD ──
@@ -58,6 +58,7 @@ impl IRequest<RoleModel> for CreateRoleRequest {}
 #[claims]
 #[derive(Default, Deserialize)]
 pub struct UpdateRoleRequest {
+    #[serde(default)]
     pub id: String,
     pub name: Option<String>,
     pub description: Option<String>,
@@ -81,8 +82,8 @@ impl IRequest<String> for DeleteRoleRequest {}
 
 #[derive(Default, Deserialize)]
 pub struct AssignRoleRequest {
-    pub user_id: i32,
-    pub role_id: i32,
+    pub user_id: String,
+    pub role_id: String,
 }
 
 #[post("/api/role-users")]
@@ -125,6 +126,7 @@ impl IRequest<ResourceModel> for CreateResourceRequest {}
 #[claims]
 #[derive(Default, Deserialize)]
 pub struct UpdateResourceRequest {
+    #[serde(default)]
     pub id: String,
     pub name: Option<String>,
     pub description: Option<String>,
@@ -159,8 +161,8 @@ impl IRequest<Vec<AuthorizeModel>> for ListAuthorizesRequest {}
 #[claims]
 #[derive(Default, Deserialize)]
 pub struct CreateAuthorizeRequest {
-    pub role_id: i32,
-    pub resource_id: i32,
+    pub role_id: String,
+    pub resource_id: String,
 }
 
 #[post("/api/authorizes")]

@@ -222,6 +222,9 @@ impl HandlerCache {
     }
 }
 
+/// Preferred name for [`HandlerCache`] — emphasizes registry semantics over caching.
+pub type HandlerRegistry = HandlerCache;
+
 /// A single compiled handler entry in the registry.
 ///
 /// Stores only the factory and call bridge — no cached instance.

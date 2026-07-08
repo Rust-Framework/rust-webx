@@ -2,7 +2,7 @@
 
 ## 应用内部分层
 
-rust-webapp 推荐的业务应用分层：
+rust-webx 推荐的业务应用分层：
 
 ```
 ┌─────────────────────────────────────────┐
@@ -39,7 +39,7 @@ impl IRequest<AuthResponse> for LoginRequest {}
 ```
 
 - 不含业务实现
-- **仅依赖框架**（`rust_webapp`），**禁止依赖 domain**
+- **仅依赖框架**（`rust_webx`），**禁止依赖 domain**
 - 是对外 API 与业务抽象的「说明书」
 
 ### handlers — 应用层
@@ -94,7 +94,7 @@ pub struct UserEntity {
 ## 依赖方向
 
 ```
-framework (rust_webapp)
+framework (rust_webx)
     ↑
 contracts  ←── domain（可复用 contracts 类型）
     ↑

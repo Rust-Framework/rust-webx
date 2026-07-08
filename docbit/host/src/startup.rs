@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use bcrypt::{hash, DEFAULT_COST};
 use rust_ef::{db_context::DbContext, prelude::*};
-use rust_webapp::*;
+use rust_webx::*;
 
 use docbit_contracts::docs::IDocumentService;
 use docbit_domain::entities::User;
@@ -47,7 +47,9 @@ impl IHostedService for DbInitService {
         tracing::info!("[DbInitService] Starting initialization...");
 
         // 从 root provider 解析 owned DbContext（transient：全新实例）。
-        let mut ctx: DbContext = global_provider().get_owned();
+        let mut ctx: DbContext = global_provider()
+            .get_owned()
+            .map_err(|e| Error::Internal(format!("DbContext resolution failed: {}", e)))?;
         seed(&mut ctx); // 注册种子数据到 model builder
         ctx.ensure_created()
             .await
@@ -62,7 +64,7 @@ impl IHostedService for DbInitService {
             .ensure_all_indexes()
             .map_err(|e| Error::Internal(format!("Doc index generation failed: {}", e)))?;
 
-        let wwwroot = rust_webapp::app_base().join("wwwroot");
+        let wwwroot = rust_webx::app_base().join("wwwroot");
         self.docs
             .sync_portfolio_assets(&wwwroot)
             .map_err(|e| Error::Internal(format!("Portfolio asset sync failed: {}", e)))?;

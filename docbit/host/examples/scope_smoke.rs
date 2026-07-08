@@ -20,7 +20,7 @@
 
 use std::sync::Arc;
 
-use rust_dicore::{ServiceCollection, ServiceProvider};
+use rust_dix::{ServiceCollection, ServiceProvider, ScopeFactory};
 use rust_ef::db_context::DbContext;
 use rust_ef::di::DbContextServiceCollectionExt as _;
 use rust_ef_sqlite::DbContextOptionsBuilderExt as _;
@@ -31,7 +31,9 @@ fn build_provider() -> Arc<ServiceProvider> {
     let collection = ServiceCollection::new().add_dbcontext(|opts| {
         opts.use_sqlite_in_memory();
     });
-    Arc::new(collection.build().expect("Failed to build ServiceProvider"))
+    collection
+        .build()
+        .expect("Failed to build ServiceProvider")
 }
 
 fn assert_true(label: &str, cond: bool) {
@@ -55,8 +57,8 @@ async fn main() {
     let scope1 = provider.create_scope();
 
     // 同 scope 内两次 get：应返回同一 Arc 实例（Scoped 语义）
-    let ctx1_a: Arc<DbContext> = scope1.get();
-    let ctx1_b: Arc<DbContext> = scope1.get();
+    let ctx1_a: Arc<DbContext> = scope1.get().expect("DbContext not registered");
+    let ctx1_b: Arc<DbContext> = scope1.get().expect("DbContext not registered");
     assert_true(
         "scope1: ctx1_a == ctx1_b (same instance, Scoped cache)",
         Arc::ptr_eq(&ctx1_a, &ctx1_b),
@@ -66,7 +68,7 @@ async fn main() {
     // ── Request 2 ──────────────────────────────────────────────
     println!("── Request 2: create_scope() ──");
     let scope2 = provider.create_scope();
-    let ctx2: Arc<DbContext> = scope2.get();
+    let ctx2: Arc<DbContext> = scope2.get().expect("DbContext not registered");
 
     // 不同 scope：应返回不同实例（per-request 隔离）
     assert_true(
@@ -77,7 +79,7 @@ async fn main() {
 
     // ── Root provider resolution ───────────────────────────────
     println!("── Root provider: provider.get() ──");
-    let root_ctx: Arc<DbContext> = provider.get();
+    let root_ctx: Arc<DbContext> = provider.get().expect("DbContext not registered");
 
     // 根 provider 有自己的 root_scoped_cache，与子 scope 隔离
     assert_true(
@@ -94,8 +96,8 @@ async fn main() {
     println!("── get_owned::<DbContext>() — owned resolution ──");
     // get_owned 绕过 scope 缓存，每次调用工厂产生全新 owned 实例。
     // 这是 handler `#[inject(owned)] ctx: DbContext` 的解析路径。
-    let _owned1: DbContext = scope1.get_owned();
-    let _owned2: DbContext = scope1.get_owned();
+    let _owned1: DbContext = scope1.get_owned().expect("owned DbContext resolution failed");
+    let _owned2: DbContext = scope1.get_owned().expect("owned DbContext resolution failed");
     assert_true(
         "get_owned returns owned DbContext (no panic, no Arc<Mutex>)",
         true,
@@ -116,7 +118,7 @@ async fn main() {
     // ── Request 3 (after scopes dropped) ───────────────────────
     println!("── Request 3: create_scope() (after previous scopes dropped) ──");
     let scope3 = provider.create_scope();
-    let ctx3: Arc<DbContext> = scope3.get();
+    let ctx3: Arc<DbContext> = scope3.get().expect("DbContext not registered");
 
     // 新 scope 获得全新实例（之前的实例已随 scope drop 释放）
     assert_true(

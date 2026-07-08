@@ -67,11 +67,11 @@ pub struct GetUserProfileHandler {
 
 ## 发布为独立 Crate
 
-通用组件可发布为独立 crate，只依赖 `rust-webapp-core`：
+通用组件可发布为独立 crate，只依赖 `rust-webx-core`：
 
 ```toml
 [dependencies]
-rust-webapp-core = "0.1"
+rust-webx-core = "0.1"
 ```
 
 ## 小结

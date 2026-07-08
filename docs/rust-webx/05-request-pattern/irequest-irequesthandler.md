@@ -2,7 +2,7 @@
 
 ## 核心契约
 
-rust-webapp 用两个 trait 定义一个完整端点：
+rust-webx 用两个 trait 定义一个完整端点：
 
 ```rust
 // 声明：这是一个请求，响应类型为 T

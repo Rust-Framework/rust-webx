@@ -200,7 +200,7 @@
                   <span>关于本站</span>
                 </h2>
                 <div class="resume-about-text">
-                  <p>本站由 <strong>rust-webapp</strong> 框架驱动，采用 Rust 编写后端 WebApi，前端为原生 SPA 架构，集成 Layui 组件库与 Vditor 编辑器。</p>
+                  <p>本站由 <strong>rust-webx</strong> 框架驱动，采用 Rust 编写后端 WebApi，前端为原生 SPA 架构，集成 Layui 组件库与 Vditor 编辑器。</p>
                   <p>内容涵盖技术博客、开源文档与作品集，全部数据存储于 SQLite，支持博客评论、邮箱重置密码等完整功能。</p>
                   <div class="resume-about-actions">
                     <a class="layui-btn layui-btn-normal" href="/" data-nav>

@@ -1,11 +1,11 @@
-﻿//! Benchmark: Trie-based router matching.
+//! Benchmark: Trie-based router matching.
 //!
 //! Measures static route, dynamic parameter, and 404 path performance.
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use rust_webapp_core::http::IHttpContext;
-use rust_webapp_core::routing::{HttpMethod, IEndpoint, IRouter};
-use rust_webapp_host::router::Router;
+use rust_webx_core::http::IHttpContext;
+use rust_webx_core::routing::{HttpMethod, IEndpoint, IRouter};
+use rust_webx_host::router::Router;
 use std::sync::Arc;
 
 /// Minimal endpoint for benchmarks.
@@ -13,7 +13,7 @@ struct BenchEndpoint;
 
 #[async_trait::async_trait]
 impl IEndpoint for BenchEndpoint {
-    async fn handle(&self, _ctx: &mut dyn IHttpContext) -> rust_webapp_core::error::Result<()> {
+    async fn handle(&self, _ctx: &mut dyn IHttpContext) -> rust_webx_core::error::Result<()> {
         Ok(())
     }
 }
@@ -155,7 +155,7 @@ struct TestHttpRequest {
 }
 
 #[async_trait::async_trait]
-impl rust_webapp_core::http::IHttpRequest for TestHttpRequest {
+impl rust_webx_core::http::IHttpRequest for TestHttpRequest {
     fn method(&self) -> &str {
         &self.method
     }
@@ -180,12 +180,12 @@ impl rust_webapp_core::http::IHttpRequest for TestHttpRequest {
     fn route_pattern_mut(&mut self) -> &mut Option<String> {
         &mut self.route_pattern
     }
-    async fn body_bytes(&self) -> rust_webapp_core::error::Result<Vec<u8>> {
+    async fn body_bytes(&self) -> rust_webx_core::error::Result<Vec<u8>> {
         Ok(self.body_bytes.clone())
     }
-    async fn body_text(&self) -> rust_webapp_core::error::Result<String> {
+    async fn body_text(&self) -> rust_webx_core::error::Result<String> {
         String::from_utf8(self.body_bytes.clone())
-            .map_err(|e| rust_webapp_core::error::Error::Http(e.to_string()))
+            .map_err(|e| rust_webx_core::error::Error::Http(e.to_string()))
     }
 }
 
@@ -196,7 +196,7 @@ struct TestHttpResponse {
 }
 
 #[async_trait::async_trait]
-impl rust_webapp_core::http::IHttpResponse for TestHttpResponse {
+impl rust_webx_core::http::IHttpResponse for TestHttpResponse {
     fn status(&self) -> u16 {
         self.status
     }
@@ -209,11 +209,11 @@ impl rust_webapp_core::http::IHttpResponse for TestHttpResponse {
     fn set_header(&mut self, key: &str, value: &str) {
         self.headers.push((key.to_string(), value.to_string()));
     }
-    async fn write_bytes(&mut self, data: Vec<u8>) -> rust_webapp_core::error::Result<()> {
+    async fn write_bytes(&mut self, data: Vec<u8>) -> rust_webx_core::error::Result<()> {
         self.body = Some(data);
         Ok(())
     }
-    async fn write_text(&mut self, text: &str) -> rust_webapp_core::error::Result<()> {
+    async fn write_text(&mut self, text: &str) -> rust_webx_core::error::Result<()> {
         self.body = Some(text.as_bytes().to_vec());
         Ok(())
     }
@@ -222,7 +222,7 @@ impl rust_webapp_core::http::IHttpResponse for TestHttpResponse {
 struct TestHttpContext {
     req: TestHttpRequest,
     resp: TestHttpResponse,
-    claims: std::cell::RefCell<Option<Box<dyn rust_webapp_core::auth::IClaims>>>,
+    claims: std::cell::RefCell<Option<Box<dyn rust_webx_core::auth::IClaims>>>,
 }
 
 impl TestHttpContext {
@@ -247,29 +247,29 @@ impl TestHttpContext {
     }
 }
 
-impl rust_webapp_core::http::IClaimsExt for TestHttpContext {
-    fn set_claims(&mut self, claims: Box<dyn rust_webapp_core::auth::IClaims>) {
+impl rust_webx_core::http::IClaimsExt for TestHttpContext {
+    fn set_claims(&mut self, claims: Box<dyn rust_webx_core::auth::IClaims>) {
         *self.claims.borrow_mut() = Some(claims);
     }
-    fn claims(&self) -> Option<&dyn rust_webapp_core::auth::IClaims> {
+    fn claims(&self) -> Option<&dyn rust_webx_core::auth::IClaims> {
         let borrowed = self.claims.borrow();
         borrowed
             .as_ref()
-            .map(|b| unsafe { &*(&**b as *const dyn rust_webapp_core::auth::IClaims) })
+            .map(|b| unsafe { &*(&**b as *const dyn rust_webx_core::auth::IClaims) })
     }
 }
 
 impl IHttpContext for TestHttpContext {
-    fn request(&self) -> &dyn rust_webapp_core::http::IHttpRequest {
+    fn request(&self) -> &dyn rust_webx_core::http::IHttpRequest {
         &self.req
     }
-    fn request_mut(&mut self) -> &mut dyn rust_webapp_core::http::IHttpRequest {
+    fn request_mut(&mut self) -> &mut dyn rust_webx_core::http::IHttpRequest {
         &mut self.req
     }
-    fn response(&self) -> &dyn rust_webapp_core::http::IHttpResponse {
+    fn response(&self) -> &dyn rust_webx_core::http::IHttpResponse {
         &self.resp
     }
-    fn response_mut(&mut self) -> &mut dyn rust_webapp_core::http::IHttpResponse {
+    fn response_mut(&mut self) -> &mut dyn rust_webx_core::http::IHttpResponse {
         &mut self.resp
     }
 }

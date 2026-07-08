@@ -1,9 +1,9 @@
 mod test_utils;
 
-use rust_webapp_core::error::Result as LrwfResult;
-use rust_webapp_core::http::IHttpContext;
-use rust_webapp_core::middleware::IMiddleware;
-use rust_webapp_host::pipeline::{HandlerFn, MiddlewarePipeline};
+use rust_webx_core::error::Result as LrwfResult;
+use rust_webx_core::http::IHttpContext;
+use rust_webx_core::middleware::IMiddleware;
+use rust_webx_host::pipeline::{HandlerFn, MiddlewarePipeline};
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
@@ -207,7 +207,7 @@ async fn pipeline_short_circuit_on_invoke_error() {
     #[async_trait::async_trait]
     impl IMiddleware for FailingMiddleware {
         async fn invoke(&self, _ctx: &mut dyn IHttpContext) -> LrwfResult<ControlFlow<()>> {
-            Err(rust_webapp_core::error::Error::Http("blocked".into()))
+            Err(rust_webx_core::error::Error::Http("blocked".into()))
         }
     }
 
@@ -265,7 +265,7 @@ async fn pipeline_after_hooks_skipped_on_final_handler_error() {
 
     let final_handler: HandlerFn = Arc::new(move |_ctx: &mut dyn IHttpContext| {
         Box::pin(async move {
-            Err(rust_webapp_core::error::Error::Internal(
+            Err(rust_webx_core::error::Error::Internal(
                 "final handler error".into(),
             ))
         })

@@ -3,7 +3,7 @@
 //! Tests the HealthCheckRegistry API: snapshot, overall_status, and
 //! the build_health_response helper for RFC 8407 compliance.
 
-use rust_webapp_host::health::{HealthCheckRegistry, HealthStatus};
+use rust_webx_host::health::{HealthCheckRegistry, HealthStatus};
 use std::sync::Arc;
 
 #[test]

@@ -1,11 +1,11 @@
-﻿//! Matchit-based router with zero-alloc route matching.
+//! Matchit-based router with zero-alloc route matching.
 //!
 //! Uses `matchit::Router` (the same library as Axum) for efficient
 //! radix-tree based route matching with zero heap allocations per request.
 
-use rust_webapp_core::error::Result;
-use rust_webapp_core::http::IHttpContext;
-use rust_webapp_core::routing::{HttpMethod, IEndpoint, IRouter};
+use rust_webx_core::error::Result;
+use rust_webx_core::http::IHttpContext;
+use rust_webx_core::routing::{HttpMethod, IEndpoint, IRouter};
 use std::collections::HashMap;
 use std::sync::Arc;
 

@@ -10,7 +10,7 @@ GET /swagger         → Swagger UI 页面
 ```
 
 ```rust
-use rust_webapp::{generate_openapi_spec, APIUI_HTML};
+use rust_webx::{generate_openapi_spec, APIUI_HTML};
 ```
 
 ## SPA 静态托管

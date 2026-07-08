@@ -5,7 +5,7 @@
 `src/main.rs`：
 
 ```rust
-use rust_webapp::*;
+use rust_webx::*;
 
 // ── 第一步：定义 Request ──
 struct HelloRequest;
@@ -22,7 +22,7 @@ struct HelloHandler;
 #[async_trait]
 impl IRequestHandler<HelloRequest, String> for HelloHandler {
     async fn handle(&self, _req: HelloRequest) -> Result<String> {
-        Ok("Hello, World! Welcome to rust-webapp.".to_string())
+        Ok("Hello, World! Welcome to rust-webx.".to_string())
     }
 }
 
@@ -157,6 +157,6 @@ impl IRequest<GreetingDto> for HelloRequest {}
 
 ## 小结
 
-Hello World 看似简单，实则展示了 rust-webapp 的**核心契约**：Request 声明路由与响应类型，Handler 实现业务逻辑，框架负责一切管线工作。
+Hello World 看似简单，实则展示了 rust-webx 的**核心契约**：Request 声明路由与响应类型，Handler 实现业务逻辑，框架负责一切管线工作。
 
 下一节：[第一个 CRUD API](first-crud.md)

@@ -1,13 +1,13 @@
 # AI 友好开发模式
 
-## 为什么 rust-webapp 适合 AI 辅助开发
+## 为什么 rust-webx 适合 AI 辅助开发
 
 ### 1. 请求即边界
 
 每个 API 端点由独立的 Request + Handler 组成，AI 可以一次生成一个完整模块：
 
 ```
-请为 rust-webapp 创建「获取博客文章列表」端点：
+请为 rust-webx 创建「获取博客文章列表」端点：
 - 路由：GET /api/blog/posts
 - 支持分页
 - 返回 PagedResponse<BlogPostDto>
@@ -55,7 +55,7 @@ handlers/blog/
 ## 提示词模板
 
 ```
-使用 rust-webapp 框架，遵循以下约定：
+使用 rust-webx 框架，遵循以下约定：
 - contracts/：Request、Response DTO、enum、I…Service trait（仅依赖框架，禁止引用 domain）
 - handlers/：IRequestHandler 实现 + I…Service 实现（inject_attr 自动注册）
 - domain/：实体与迁移（可引用 contracts 枚举）

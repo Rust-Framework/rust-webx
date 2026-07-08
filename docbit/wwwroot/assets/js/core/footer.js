@@ -34,7 +34,7 @@
         </div>
         <div class="footer-beian footer-beian--center">${beianHtml(f)}</div>
         <div class="footer-meta">
-          <p class="footer-built">Built with <strong>rust-webapp</strong> · Rust</p>
+          <p class="footer-built">Built with <strong>rust-webx</strong> · Rust</p>
           <p class="footer-copy-row">
             <span>${escapeHtml(f.copyright || "© 2024 Start. All rights reserved.")}</span>
             <img src="${LOGOS.brand}" alt="" class="footer-logo" width="22" height="22" />

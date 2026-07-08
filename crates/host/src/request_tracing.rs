@@ -1,8 +1,8 @@
 //! Structured request tracing middleware with trace_id injection.
 
-use rust_webapp_core::error::Result;
-use rust_webapp_core::http::IHttpContext;
-use rust_webapp_core::middleware::IMiddleware;
+use rust_webx_core::error::Result;
+use rust_webx_core::http::IHttpContext;
+use rust_webx_core::middleware::IMiddleware;
 use std::ops::ControlFlow;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};

@@ -4,7 +4,7 @@
 //! 通过 `get_owned` 解析），`handle(&mut self, ...)` 直接操作 `self.ctx`。
 
 use rust_ef::{db_context::DbContext, prelude::*};
-use rust_webapp::*;
+use rust_webx::*;
 
 use docbit_contracts::user::*;
 use docbit_domain::entities::{RoleUser, User};

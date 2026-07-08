@@ -12,9 +12,9 @@
 //! The middleware reads the client IP from `X-Forwarded-For` or
 //! `X-Real-IP` headers.  Exceeded clients receive a 429 response.
 
-use rust_webapp_core::error::Result;
-use rust_webapp_core::http::IHttpContext;
-use rust_webapp_core::middleware::IMiddleware;
+use rust_webx_core::error::Result;
+use rust_webx_core::http::IHttpContext;
+use rust_webx_core::middleware::IMiddleware;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::ops::ControlFlow;

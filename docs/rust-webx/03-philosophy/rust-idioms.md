@@ -2,7 +2,7 @@
 
 ## 编译期契约
 
-rust-webapp 将尽可能多的错误前移到编译期：
+rust-webx 将尽可能多的错误前移到编译期：
 
 ### 响应类型绑定
 
@@ -121,6 +121,6 @@ Handler 通过 `#[handler]` 或 DI 注册暴露，无需 `pub`。
 
 ## 小结
 
-rust-webapp 充分利用 Rust 类型系统在编译期捕获错误，用 `Arc` + `async-trait` 处理并发与异步，用显式 `Result` 替代异常。
+rust-webx 充分利用 Rust 类型系统在编译期捕获错误，用 `Arc` + `async-trait` 处理并发与异步，用显式 `Result` 替代异常。
 
 下一节：[渐进式披露与框架边界](progressive-disclosure.md)

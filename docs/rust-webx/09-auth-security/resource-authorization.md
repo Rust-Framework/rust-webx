@@ -14,7 +14,7 @@
 ## ResourceAuthorization
 
 ```rust
-use rust_webapp::authz::ResourceAuthorization;
+use rust_webx::authz::ResourceAuthorization;
 
 let policy = ResourceAuthorization::new()
     .allow_role("/api/admin/**", "admin")

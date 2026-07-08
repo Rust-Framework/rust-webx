@@ -2,7 +2,7 @@
 
 ## 为什么是 ASP.NET Core
 
-ASP.NET Core 在 .NET 生态中解决了与 rust-webapp 相同的问题：**如何在大型团队中统一 Web 后端架构**。其成功模式包括：
+ASP.NET Core 在 .NET 生态中解决了与 rust-webx 相同的问题：**如何在大型团队中统一 Web 后端架构**。其成功模式包括：
 
 - 内置 DI 容器
 - 中间件管道
@@ -10,11 +10,11 @@ ASP.NET Core 在 .NET 生态中解决了与 rust-webapp 相同的问题：**如�
 - 后台服务（`IHostedService`）
 - MediatR 社区实践的 Request/Handler 模式
 
-rust-webapp 不是简单移植，而是**提取设计精髓并用 Rust 类型系统重新实现**。
+rust-webx 不是简单移植，而是**提取设计精髓并用 Rust 类型系统重新实现**。
 
 ## 概念映射
 
-| ASP.NET Core | rust-webapp | 差异说明 |
+| ASP.NET Core | rust-webx | 差异说明 |
 |-------------|-------------|---------|
 | `Startup.cs` / `Program.cs` | `Host::builder()` | 构建器模式，链式配置 |
 | `IServiceCollection` | `ServiceCollection` (rust-dicore) | 同名概念 |
@@ -31,7 +31,7 @@ rust-webapp 不是简单移植，而是**提取设计精髓并用 Rust 类型系
 
 ### 1. 宿主（Host）抽象
 
-ASP.NET Core 的 Generic Host 统一管理配置、DI、生命周期。rust-webapp 的 `Host` 同样：
+ASP.NET Core 的 Generic Host 统一管理配置、DI、生命周期。rust-webx 的 `Host` 同样：
 
 ```rust
 Host::builder()
@@ -47,7 +47,7 @@ Host::builder()
 
 ### 2. 中介者解耦
 
-MediatR 让 Controller 变薄，业务逻辑进入 Handler。rust-webapp 更进一步——**连 Controller 都没有**，Request 直接就是端点。
+MediatR 让 Controller 变薄，业务逻辑进入 Handler。rust-webx 更进一步——**连 Controller 都没有**，Request 直接就是端点。
 
 ### 3. 配置分层
 
@@ -62,7 +62,7 @@ appsettings.Development.json  # 开发覆盖（自动合并）
 
 ### 编译时 > 运行时
 
-| ASP.NET Core（运行时反射） | rust-webapp（编译时） |
+| ASP.NET Core（运行时反射） | rust-webx（编译时） |
 |--------------------------|---------------------|
 | 控制器发现 | `inventory` 路由收集 |
 | Handler 注册 | `#[handler]` 宏 |
@@ -81,7 +81,7 @@ impl IRequestHandler<GetUserRequest, UserDto> for GetUserHandler { ... }
 //                                    ^^^^^^^ 必须与 IRequest 泛型一致
 ```
 
-ASP.NET Core 中类型不匹配是运行时错误；rust-webapp 中是编译错误。
+ASP.NET Core 中类型不匹配是运行时错误；rust-webx 中是编译错误。
 
 ### 所有权与 Arc
 
@@ -93,7 +93,7 @@ Rust 没有 GC，DI 容器使用 `Arc<T>` 共享所有权。ASP.NET Core 的 Sco
 
 | ASP.NET Core | 原因 |
 |-------------|------|
-| Razor / MVC View | rust-webapp 专注 WebApi |
+| Razor / MVC View | rust-webx 专注 WebApi |
 | EF Core 内置 | ORM 由用户自选 |
 | SignalR | WebSocket 非当前重点 |
 | 过滤器（Filters） | 由 `IPipelineBehavior` + 中间件替代 |
@@ -111,6 +111,6 @@ Rust 没有 GC，DI 容器使用 `Arc<T>` 共享所有权。ASP.NET Core 的 Sco
 
 ## 小结
 
-rust-webapp 是 ASP.NET Core 设计哲学的 Rust 表达：相同的架构舒适度，更强的编译期保证。
+rust-webx 是 ASP.NET Core 设计哲学的 Rust 表达：相同的架构舒适度，更强的编译期保证。
 
 下一节：[Rust 惯用法与类型安全](rust-idioms.md)

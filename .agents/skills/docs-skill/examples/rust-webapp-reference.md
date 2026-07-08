@@ -1,4 +1,4 @@
-# rust-webapp 参考实现
+# rust-webx 参考实现
 
 当需要**完整、已验证**的书籍样例时加载本文件。其他框架项目仅复用**结构模式**，不复用下列路径/API 字面量。
 
@@ -6,15 +6,15 @@
 
 | 项 | 值 |
 |----|-----|
-| slug | `rust-webapp` |
-| 文档根 | `docs/rust-webapp/` |
+| slug | `rust-webx` |
+| 文档根 | `docs/rust-webx/` |
 | 维护说明 | `docs/README.md` |
-| 预览 | `cargo run -p docbit` → 作品集 → rust-webapp |
-| API | `GET /api/docs/rust-webapp/index`、`/content/{path}` |
+| 预览 | `cargo run -p docbit` → 作品集 → rust-webx |
+| API | `GET /api/docs/rust-webx/index`、`/content/{path}` |
 
 ## 约定（摘自 FOREWORD）
 
-- 导入：`use rust_webapp::*;`
+- 导入：`use rust_webx::*;`
 - 符号：`✅` / `❌`；路径参数 `{id}`
 - 示例项目：`docbit`，`cargo run -p docbit`
 
@@ -33,14 +33,14 @@
 
 | 用途 | 路径 |
 |------|------|
-| 前言与阅读路径 | `docs/rust-webapp/FOREWORD.md` |
-| 全书目录 | `docs/rust-webapp/INDEX.md` |
-| 站点元数据 | `docs/rust-webapp/INDEX.json` |
-| 概念章 INDEX | `docs/rust-webapp/01-introduction/INDEX.md` |
-| 动手章 INDEX | `docs/rust-webapp/02-quickstart/INDEX.md` |
-| 教程小节 | `docs/rust-webapp/02-quickstart/hello-world.md` |
-| 渐进式披露原文 | `docs/rust-webapp/03-philosophy/progressive-disclosure.md` |
-| 设计原则 | `docs/rust-webapp/03-philosophy/design-principles.md` |
+| 前言与阅读路径 | `docs/rust-webx/FOREWORD.md` |
+| 全书目录 | `docs/rust-webx/INDEX.md` |
+| 站点元数据 | `docs/rust-webx/INDEX.json` |
+| 概念章 INDEX | `docs/rust-webx/01-introduction/INDEX.md` |
+| 动手章 INDEX | `docs/rust-webx/02-quickstart/INDEX.md` |
+| 教程小节 | `docs/rust-webx/02-quickstart/hello-world.md` |
+| 渐进式披露原文 | `docs/rust-webx/03-philosophy/progressive-disclosure.md` |
+| 设计原则 | `docs/rust-webx/03-philosophy/design-principles.md` |
 
 ## L0–L4 在本项目的映射
 
@@ -52,9 +52,9 @@ L3: 05–08 各核心模式章
 L4: 12–14 工程化；15–16 案例与迁移
 ```
 
-## 编写 rust-webapp 文档时
+## 编写 rust-webx 文档时
 
 1. 仍先完成 [project-bootstrap](../reference/project-bootstrap.md) Profile（可快速填表）
 2. 对照上表路径 mimic 结构与语气
-3. 代码示例与 `rust_webapp` crate 源码一致
+3. 代码示例与 `rust_webx` crate 源码一致
 4. 框架编码技能见同仓库 `lrwf-skill`（API 细节），本书保持指南形态

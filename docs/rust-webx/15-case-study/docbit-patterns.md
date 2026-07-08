@@ -104,6 +104,6 @@ contracts 不引用 domain；domain 可通过 `use crate::contracts::…` 复用
 
 ## 小结
 
-面向接口 + 自动注册让业务开发**自动化、聚焦契约、组合根简洁**——这是 rust-webapp 业务应用模板的核心价值。
+面向接口 + 自动注册让业务开发**自动化、聚焦契约、组合根简洁**——这是 rust-webx 业务应用模板的核心价值。
 
 下一章：[迁移指南](../16-migration/INDEX.md)

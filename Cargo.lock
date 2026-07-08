@@ -669,7 +669,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "inventory",
- "rust-webapp",
+ "rust-webx",
  "serde",
  "serde_json",
 ]
@@ -694,10 +694,10 @@ dependencies = [
  "docbit-domain",
  "inventory",
  "jsonwebtoken",
- "rust-dicore",
+ "rust-dix",
  "rust-ef",
  "rust-ef-sqlite",
- "rust-webapp",
+ "rust-webx",
  "serde",
  "serde_json",
  "tokio",
@@ -714,11 +714,11 @@ dependencies = [
  "docbit-domain",
  "docbit-handlers",
  "inventory",
- "rust-dicore",
+ "rust-dix",
  "rust-ef",
  "rust-ef-mysql",
  "rust-ef-sqlite",
- "rust-webapp",
+ "rust-webx",
  "serde",
  "serde_json",
  "tokio",
@@ -887,6 +887,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c"
 
 [[package]]
+name = "futures"
+version = "0.3.32"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b147ee9d1f6d097cef9ce628cd2ee62288d963e16fb287bd9286455b241382d"
+dependencies = [
+ "futures-channel",
+ "futures-core",
+ "futures-executor",
+ "futures-io",
+ "futures-sink",
+ "futures-task",
+ "futures-util",
+]
+
+[[package]]
 name = "futures-channel"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -931,6 +946,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cecba35d7ad927e23624b22ad55235f2239cfa44fd10428eecbeba6d6a717718"
 
 [[package]]
+name = "futures-macro"
+version = "0.3.32"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e835b70203e41293343137df5c0664546da5745f82ec9b84d40be8336958447b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "futures-sink"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -948,8 +974,10 @@ version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "389ca41296e6190b48053de0321d02a77f32f8a5d2461dd38762c0593805c6d6"
 dependencies = [
+ "futures-channel",
  "futures-core",
  "futures-io",
+ "futures-macro",
  "futures-sink",
  "futures-task",
  "memchr",
@@ -2249,21 +2277,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "rust-dicore"
-version = "0.5.1"
+name = "rust-dix"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91ad0976a8f6cf384e18489a6fb67363d47529ceea4c5bafcc4728dc2c663c7f"
+checksum = "4d99f2307f54ceedc3c8f9c44a74dfbaee96735397ae096a9c5899141575661d"
 dependencies = [
+ "futures",
  "inventory",
- "rust-dicore-macros",
+ "rust-dix-macros",
  "thiserror 1.0.69",
 ]
 
 [[package]]
-name = "rust-dicore-macros"
-version = "0.5.1"
+name = "rust-dix-macros"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42ab0ea76fc819e916f4e7c1323473cd88f90e0d96463d6bc6991c2827ddd71b"
+checksum = "fe4b4860178b798f832ee5cd1b7f16e8c647e144b6d36c57f59fced763812a26"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2273,13 +2302,11 @@ dependencies = [
 [[package]]
 name = "rust-ef"
 version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0cb1f2f4597e21f2c9af4fca1f90e6140ce701cbe0aafde7fc3cd28ee3d36f87"
 dependencies = [
  "async-trait",
  "chrono",
  "inventory",
- "rust-dicore",
+ "rust-dix",
  "rust-ef-macros",
  "rust_decimal",
  "thiserror 2.0.18",
@@ -2290,8 +2317,6 @@ dependencies = [
 [[package]]
 name = "rust-ef-macros"
 version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e49dc12987b3e1e34d49015e632c1f1b1cc8f98469acfc28d3f41c14a1ecec6d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2301,8 +2326,6 @@ dependencies = [
 [[package]]
 name = "rust-ef-mysql"
 version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6e49201e0ce672e80bf62af89e577561a9061bc7efdb1497dcec866362d9d54"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2316,8 +2339,6 @@ dependencies = [
 [[package]]
 name = "rust-ef-sqlite"
 version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7090b8b82e378bec0bdc292ef1e0a44c6bf0d261aef97a6fb656f21eb8ce46fd"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2329,32 +2350,32 @@ dependencies = [
 ]
 
 [[package]]
-name = "rust-webapp"
+name = "rust-webx"
 version = "0.1.0"
 dependencies = [
  "async-trait",
  "hyper",
  "inventory",
  "jsonwebtoken",
- "rust-dicore",
- "rust-dicore-macros",
- "rust-webapp-core",
- "rust-webapp-host",
- "rust-webapp-macros",
- "rust-webapp-openapi",
- "rust-webapp-spa",
+ "rust-dix",
+ "rust-dix-macros",
+ "rust-webx-core",
+ "rust-webx-host",
+ "rust-webx-macros",
+ "rust-webx-openapi",
+ "rust-webx-spa",
  "serde",
  "serde_json",
  "tokio",
 ]
 
 [[package]]
-name = "rust-webapp-core"
+name = "rust-webx-core"
 version = "0.1.0"
 dependencies = [
  "async-trait",
  "inventory",
- "rust-dicore",
+ "rust-dix",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -2362,7 +2383,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rust-webapp-host"
+name = "rust-webx-host"
 version = "0.1.0"
 dependencies = [
  "async-trait",
@@ -2377,12 +2398,12 @@ dependencies = [
  "jsonwebtoken",
  "matchit",
  "reqwest",
- "rust-dicore",
- "rust-webapp",
- "rust-webapp-core",
- "rust-webapp-macros",
- "rust-webapp-openapi",
- "rust-webapp-spa",
+ "rust-dix",
+ "rust-webx",
+ "rust-webx-core",
+ "rust-webx-macros",
+ "rust-webx-openapi",
+ "rust-webx-spa",
  "rustls",
  "rustls-pemfile",
  "serde",
@@ -2396,7 +2417,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rust-webapp-macros"
+name = "rust-webx-macros"
 version = "0.1.0"
 dependencies = [
  "proc-macro2",
@@ -2405,20 +2426,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "rust-webapp-openapi"
+name = "rust-webx-openapi"
 version = "0.1.0"
 dependencies = [
  "inventory",
- "rust-webapp-core",
+ "rust-webx-core",
  "serde_json",
 ]
 
 [[package]]
-name = "rust-webapp-spa"
+name = "rust-webx-spa"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "rust-webapp-core",
+ "rust-webx-core",
  "tokio",
 ]
 

@@ -2,7 +2,7 @@
 
 ## 思维模型转变
 
-| Axum/Actix 思维 | rust-webapp 思维 |
+| Axum/Actix 思维 | rust-webx 思维 |
 |----------------|-----------------|
 | 路由是中心 | Request 是中心 |
 | 手动组装一切 | 框架提供应用骨架 |
@@ -19,7 +19,7 @@ Router::new()
     .route("/api/users", post(create_user))
 ```
 
-### rust-webapp
+### rust-webx
 
 ```rust
 // 无需中央路由表，每个端点自声明
@@ -40,7 +40,7 @@ let app = Router::new()
     .layer(CorsLayer::permissive());
 ```
 
-### rust-webapp
+### rust-webx
 
 ```rust
 Host::builder()
@@ -62,7 +62,7 @@ struct AppState {
 }
 ```
 
-### rust-webapp
+### rust-webx
 
 ```rust
 // 通过 DI 容器管理，无需 AppState
@@ -82,7 +82,7 @@ async fn get_user(id: String) -> Result<Json<User>, AppError> {
 }
 ```
 
-### rust-webapp
+### rust-webx
 
 ```rust
 async fn handle(&self, req: GetUserRequest) -> Result<UserDto> {
@@ -98,10 +98,10 @@ async fn handle(&self, req: GetUserRequest) -> Result<UserDto> {
 
 ## 渐进式迁移策略
 
-1. 新端点用 rust-webapp 编写
+1. 新端点用 rust-webx 编写
 2. 旧 Axum 路由通过反向代理共存
 3. 逐步将旧端点改写为 Request + Handler
-4. 最终统一为 rust-webapp Host
+4. 最终统一为 rust-webx Host
 
 ## 小结
 

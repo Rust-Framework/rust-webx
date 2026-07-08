@@ -148,4 +148,4 @@ sequenceDiagram
 4. 调整相邻小节「下一节」链接
 5. **披露检查**：该主题 Level 是否与本章定位一致？过高则后移或合并为「变体」
 
-完整 16 章落地参考 → [rust-webapp-reference.md](rust-webapp-reference.md)
+完整 16 章落地参考 → [rust-webx-reference.md](rust-webx-reference.md)

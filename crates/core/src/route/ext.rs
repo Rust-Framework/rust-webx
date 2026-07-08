@@ -1,18 +1,18 @@
-//! IServiceCollectionExt — Extension trait for rust_dicore ServiceCollection.
+//! IServiceCollectionExt — Extension trait for rust_dix ServiceCollection.
 
 use crate::handler::IHostedService;
 use crate::middleware::IMiddleware;
 use crate::pipeline::IPipelineBehavior;
-use rust_dicore::{ServiceCollection, ServiceLifetime};
+use rust_dix::{ServiceCollection, ServiceLifetime};
 use std::sync::Arc;
 
-/// Extension methods for `rust_dicore::ServiceCollection` to enable
+/// Extension methods for `rust_dix::ServiceCollection` to enable
 /// framework-level service registration patterns.
 pub trait IServiceCollectionExt: Sized {
     /// Register the mediator in the DI container.
     ///
     /// The actual `IRequestHandler` and `IEventHandler` implementations
-    /// are registered via `#[rust_dicore::module]` blocks (re-exported as `lrwf::module`).
+    /// are registered via `#[rust_dix::module]` blocks (re-exported as `lrwf::module`).
     fn add_mediator(self) -> Self;
 
     /// Signal that endpoints should be auto-discovered from `#[get]` / `#[endpoint]`
@@ -60,7 +60,7 @@ impl IServiceCollectionExt for ServiceCollection {
     fn add_mediator(self) -> Self {
         // The Mediator is constructed later by Host.
         // Here we just signal that mediation is active.
-        // Handler registrations happen via #[rust_dicore::module].
+        // Handler registrations happen via #[rust_dix::module].
         MEDIATOR_ACTIVE.store(true, std::sync::atomic::Ordering::SeqCst);
         self
     }

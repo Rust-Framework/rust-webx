@@ -1,6 +1,6 @@
 //! Site configuration contracts — direct migration from docbit/src/contracts/site.rs.
 
-use rust_webapp::*;
+use rust_webx::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

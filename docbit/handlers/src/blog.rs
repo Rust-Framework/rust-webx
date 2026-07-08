@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 
 use rust_ef::{db_context::DbContext, prelude::*};
-use rust_webapp::*;
+use rust_webx::*;
 
 use docbit_contracts::blog::*;
 use docbit_domain::entities::{Blog, Category};

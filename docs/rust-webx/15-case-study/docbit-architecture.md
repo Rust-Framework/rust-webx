@@ -64,6 +64,6 @@ Handler 不感知 `DocService` 具体类型，测试时可替换 mock 实现。
 
 ## 小结
 
-Docbit 演示 rust-webapp 推荐的完整分层：**契约（含接口）→ Handler 履约 → 领域/基础设施**。面向接口，组合根最小化。
+Docbit 演示 rust-webx 推荐的完整分层：**契约（含接口）→ Handler 履约 → 领域/基础设施**。面向接口，组合根最小化。
 
 下一节：[可复用的模式提炼](docbit-patterns.md)

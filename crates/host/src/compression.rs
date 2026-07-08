@@ -6,9 +6,9 @@
 
 use flate2::write::GzEncoder;
 use flate2::Compression;
-use rust_webapp_core::error::Result;
-use rust_webapp_core::http::IHttpContext;
-use rust_webapp_core::middleware::IMiddleware;
+use rust_webx_core::error::Result;
+use rust_webx_core::http::IHttpContext;
+use rust_webx_core::middleware::IMiddleware;
 use std::io::Write;
 use std::ops::ControlFlow;
 

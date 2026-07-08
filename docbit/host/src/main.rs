@@ -16,8 +16,8 @@ use docbit_contracts::site::SiteConfig;
 use rust_ef::di::DbContextServiceCollectionExt as _;
 use rust_ef_mysql::DbContextOptionsBuilderExt as _;
 use rust_ef_sqlite::DbContextOptionsBuilderExt as _;
-use rust_webapp::*;
-use rust_webapp::rust_dicore::ServiceCollection;
+use rust_webx::*;
+use rust_webx::rust_dix::ServiceCollection;
 
 // 显式引用 handlers 与 domain crate，确保它们的 `#[inject]`
 // 与 `inventory::submit!` 注册被链接进最终二进制（否则链接器可能丢弃未使用 crate）。

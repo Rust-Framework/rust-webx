@@ -21,7 +21,7 @@ async fn test_create_user_success() {
 框架在 `crates/host/tests/` 提供完整集成测试范例：
 
 ```bash
-cargo test -p rust-webapp-host
+cargo test -p rust-webx-host
 ```
 
 测试覆盖：路由匹配、中间件管道、认证授权、缓存、CORS 等。
@@ -30,7 +30,7 @@ cargo test -p rust-webapp-host
 
 ```rust
 // tests/api_test.rs
-use rust_webapp::*;
+use rust_webx::*;
 
 #[tokio::test]
 async fn test_hello_endpoint() {

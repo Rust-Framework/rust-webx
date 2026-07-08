@@ -56,15 +56,15 @@
 **命令**：
 
 ```powershell
-cargo build -p rust-webapp-host
-cargo test -p rust-webapp-host --test integration_test
+cargo build -p rust-webx-host
+cargo test -p rust-webx-host --test integration_test
 ```
 
 **预期**：11 个集成测试全部通过。若失败，定位并修复（不扩大改动范围）。
 
 ### 改动 2：创建 builder\_test.rs
 
-**文件**：新增 [crates/host/tests/builder\_test.rs](file:///e:/GitCode/RF/rust-webapp/crates/host/tests/builder_test.rs)
+**文件**：新增 [crates/host/tests/builder\_test.rs](file:///e:/GitCode/RF/rust-webx/crates/host/tests/builder_test.rs)
 
 **为什么**：上轮 plan 改动 6 未完成，HostBuilder API（`use_middleware`、`no_spa`）无专门测试覆盖。
 
@@ -77,9 +77,9 @@ use std::net::TcpListener;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
-use rust_webapp_core::http::IHttpContext;
-use rust_webapp_core::middleware::IMiddleware;
-use rust_webapp_host::server::Host;
+use rust_webx_core::http::IHttpContext;
+use rust_webx_core::middleware::IMiddleware;
+use rust_webx_host::server::Host;
 
 fn find_free_port() -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -96,7 +96,7 @@ impl Default for MarkerMiddleware {
 
 #[async_trait::async_trait]
 impl IMiddleware for MarkerMiddleware {
-    async fn invoke(&self, ctx: &mut dyn IHttpContext) -> rust_webapp_core::error::Result<ControlFlow<()>> {
+    async fn invoke(&self, ctx: &mut dyn IHttpContext) -> rust_webx_core::error::Result<ControlFlow<()>> {
         ctx.response_mut().set_header("x-marker", "yes");
         Ok(ControlFlow::Continue(()))
     }
@@ -107,7 +107,7 @@ async fn use_middleware_registers_into_pipeline() {
     let port = find_free_port();
     let addr = format!("127.0.0.1:{}", port);
     let host = Host::builder()
-        .mode(rust_webapp_core::mode::AppMode::Development)
+        .mode(rust_webx_core::mode::AppMode::Development)
         .no_spa()
         .use_middleware::<MarkerMiddleware>()
         .build();
@@ -122,11 +122,11 @@ async fn use_middleware_registers_into_pipeline() {
 }
 ```
 
-**验证**：`cargo test -p rust-webapp-host --test builder_test` 通过。
+**验证**：`cargo test -p rust-webx-host --test builder_test` 通过。
 
 ### 改动 3：默认启用 SecurityHeaders + RequestId
 
-**文件**：[crates/host/src/server.rs](file:///e:/GitCode/RF/rust-webapp/crates/host/src/server.rs) L307 附近
+**文件**：[crates/host/src/server.rs](file:///e:/GitCode/RF/rust-webx/crates/host/src/server.rs) L307 附近
 
 **为什么**：符合 ASP.NET Core "zero-config safe defaults" 理念。每个生产级 Web 应用都需要安全头（防 MIME 嗅探、点击劫持）和请求 ID（可观测性）。默认启用避免每个新应用重复样板代码，符合用户偏好"框架自动化 + 微软极致易用"。RequestTracing 不默认启用（日志策略应用差异大）。
 
@@ -160,7 +160,7 @@ for mw in middlewares {
 
 ### 改动 4：新增 use\_middleware\_with API
 
-**文件**：[crates/host/src/server.rs](file:///e:/GitCode/RF/rust-webapp/crates/host/src/server.rs) L238-243 附近（紧邻 `use_middleware`）
+**文件**：[crates/host/src/server.rs](file:///e:/GitCode/RF/rust-webx/crates/host/src/server.rs) L238-243 附近（紧邻 `use_middleware`）
 
 **为什么**：当前 `use_middleware::<T: Default>` 无法注册 `RateLimitMiddleware::new(10.0, 20)` 等有参构造中间件。新增 `use_middleware_with(factory)` 接受闭包构造，API 对称清晰，符合用户选择。
 
@@ -201,7 +201,7 @@ where
 
 ### 改动 5：扩展集成测试 — 默认安全中间件验证
 
-**文件**：[crates/host/tests/integration\_test.rs](file:///e:/GitCode/RF/rust-webapp/crates/host/tests/integration_test.rs) 末尾追加
+**文件**：[crates/host/tests/integration\_test.rs](file:///e:/GitCode/RF/rust-webx/crates/host/tests/integration_test.rs) 末尾追加
 
 **为什么**：改动 3 默认启用了 SecurityHeaders + RequestId，必须有回归测试验证默认行为不被破坏。
 
@@ -251,7 +251,7 @@ async fn integration_default_request_id_present() {
 
 ### 改动 6：扩展集成测试 — RateLimit + use\_middleware\_with
 
-**文件**：[crates/host/tests/integration\_test.rs](file:///e:/GitCode/RF/rust-webapp/crates/host/tests/integration_test.rs) 末尾追加
+**文件**：[crates/host/tests/integration\_test.rs](file:///e:/GitCode/RF/rust-webx/crates/host/tests/integration_test.rs) 末尾追加
 
 **为什么**：验证 `use_middleware_with` API 可注册有参构造的 RateLimitMiddleware，并验证 RateLimit 短路语义（429）。
 
@@ -267,8 +267,8 @@ async fn integration_rate_limit_returns_429_when_exceeded() {
     let port = find_free_port();
     spawn_test_host_with(port, |b| {
         b.use_middleware_with(|| {
-            Arc::new(rust_webapp_host::rate_limit::RateLimitMiddleware::new(1.0, 2))
-                as Arc<dyn rust_webapp_core::middleware::IMiddleware>
+            Arc::new(rust_webx_host::rate_limit::RateLimitMiddleware::new(1.0, 2))
+                as Arc<dyn rust_webx_core::middleware::IMiddleware>
         })
     })
     .await;
@@ -299,14 +299,14 @@ async fn integration_rate_limit_returns_429_when_exceeded() {
 
 #[tokio::test]
 async fn integration_use_middleware_with_runs_in_pipeline() {
-    use rust_webapp_core::http::IHttpContext;
-    use rust_webapp_core::middleware::IMiddleware;
+    use rust_webx_core::http::IHttpContext;
+    use rust_webx_core::middleware::IMiddleware;
     use std::ops::ControlFlow;
 
     struct HeaderTagMiddleware;
     #[async_trait::async_trait]
     impl IMiddleware for HeaderTagMiddleware {
-        async fn invoke(&self, ctx: &mut dyn IHttpContext) -> rust_webapp_core::error::Result<ControlFlow<()>> {
+        async fn invoke(&self, ctx: &mut dyn IHttpContext) -> rust_webx_core::error::Result<ControlFlow<()>> {
             ctx.response_mut().set_header("x-tagged", "true");
             Ok(ControlFlow::Continue(()))
         }
@@ -328,7 +328,7 @@ async fn integration_use_middleware_with_runs_in_pipeline() {
 
 ### 改动 7：扩展 builder\_test.rs — use\_middleware\_with API
 
-**文件**：[crates/host/tests/builder\_test.rs](file:///e:/GitCode/RF/rust-webapp/crates/host/tests/builder_test.rs) 追加
+**文件**：[crates/host/tests/builder\_test.rs](file:///e:/GitCode/RF/rust-webx/crates/host/tests/builder_test.rs) 追加
 
 **为什么**：builder\_test.rs 应覆盖 `use_middleware_with` API 的注册路径（与 integration\_test 端到端验证互补）。
 
@@ -337,14 +337,14 @@ async fn integration_use_middleware_with_runs_in_pipeline() {
 ```rust
 #[tokio::test]
 async fn use_middleware_with_registers_into_pipeline() {
-    use rust_webapp_core::http::IHttpContext;
-    use rust_webapp_core::middleware::IMiddleware;
+    use rust_webx_core::http::IHttpContext;
+    use rust_webx_core::middleware::IMiddleware;
     use std::ops::ControlFlow;
 
     struct TagMiddleware;
     #[async_trait::async_trait]
     impl IMiddleware for TagMiddleware {
-        async fn invoke(&self, ctx: &mut dyn IHttpContext) -> rust_webapp_core::error::Result<ControlFlow<()>> {
+        async fn invoke(&self, ctx: &mut dyn IHttpContext) -> rust_webx_core::error::Result<ControlFlow<()>> {
             ctx.response_mut().set_header("x-via-with", "1");
             Ok(ControlFlow::Continue(()))
         }
@@ -353,7 +353,7 @@ async fn use_middleware_with_registers_into_pipeline() {
     let port = find_free_port();
     let addr = format!("127.0.0.1:{}", port);
     let host = Host::builder()
-        .mode(rust_webapp_core::mode::AppMode::Development)
+        .mode(rust_webx_core::mode::AppMode::Development)
         .no_spa()
         .use_middleware_with(|| Arc::new(TagMiddleware) as Arc<dyn IMiddleware>)
         .build();
@@ -382,13 +382,13 @@ async fn use_middleware_with_registers_into_pipeline() {
 
 ```powershell
 # 1. 编译验证（改动 1）
-cargo build -p rust-webapp-host
+cargo build -p rust-webx-host
 
 # 2. 集成测试（改动 5、6）
-cargo test -p rust-webapp-host --test integration_test
+cargo test -p rust-webx-host --test integration_test
 
 # 3. builder_test（改动 2、7）
-cargo test -p rust-webapp-host --test builder_test
+cargo test -p rust-webx-host --test builder_test
 
 # 4. 全量测试
 cargo test --workspace

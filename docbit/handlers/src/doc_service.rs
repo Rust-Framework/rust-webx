@@ -8,7 +8,7 @@
 //! 填占位值，运行时实际展示用 exhibition handlers 从 DB 取。
 //!
 //! 架构分层：服务实现归属 `handlers` 层（contracts 定义 `IDocumentService`，
-//! 此处提供 `DocService` 实现，通过 `#[rust_dicore::inject]` 自动注册为
+//! 此处提供 `DocService` 实现，通过 `#[rust_dix::inject]` 自动注册为
 //! `dyn IDocumentService` 单例，供 `docs.rs` handlers 与 `startup.rs`
 //! `DbInitService` 注入使用）。
 
@@ -19,7 +19,7 @@ use serde::Deserialize;
 
 use docbit_contracts::docs::{DocContent, DocIndex, DocIndexItem, IDocumentService};
 use docbit_contracts::exhibition::ExhibitionModel;
-use rust_webapp::{app_base, inject, Inject};
+use rust_webx::{app_base, inject, Inject};
 
 // `#[derive(Inject)]` 生成 `__rdi_construct_DocService` 构造器。
 #[derive(Inject)]

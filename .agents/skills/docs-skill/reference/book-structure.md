@@ -1,6 +1,6 @@
 # 书籍目录与文件结构规范
 
-跨项目通用的 **Docbit v2 + Markdown 书籍** 布局。完整落地样例见 [examples/rust-webapp-reference.md](../examples/rust-webapp-reference.md)。
+跨项目通用的 **Docbit v2 + Markdown 书籍** 布局。完整落地样例见 [examples/rust-webx-reference.md](../examples/rust-webx-reference.md)。
 
 ## 顶层布局
 

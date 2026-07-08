@@ -4,7 +4,7 @@
 
 **渐进式披露**（Progressive Disclosure）原则：先展示解决 80% 场景的最简路径，高级能力按需揭示，避免一次性压倒用户。
 
-rust-webapp 的学习曲线设计：
+rust-webx 的学习曲线设计：
 
 ```
 Level 0: Hello World（4 行核心代码）
@@ -122,6 +122,6 @@ graph TD
 
 ## 小结
 
-rust-webapp 通过渐进式披露降低学习门槛，通过明确边界防止过度设计。简单场景简单做，复杂场景有路可走。
+rust-webx 通过渐进式披露降低学习门槛，通过明确边界防止过度设计。简单场景简单做，复杂场景有路可走。
 
 下一章：[架构全景](../04-architecture/INDEX.md)

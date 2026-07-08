@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use rust_ef::{db_context::DbContext, prelude::*};
-use rust_webapp::*;
+use rust_webx::*;
 
 use docbit_contracts::category::{
     CategoryModel, CategoryTreeNode, CreateCategoryRequest, DeleteCategoryRequest,

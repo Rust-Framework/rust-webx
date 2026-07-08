@@ -1,4 +1,4 @@
-// rust-webapp-macros — Procedural macros for the Rust WebApi framework.
+// rust-webx-macros — Procedural macros for the Rust WebApi framework.
 // - #[endpoint(HttpMethod, "/path")] — full form
 // - #[get("/path")], #[post("/path")], #[put("/path")], #[delete("/path")] — shortcuts
 // - #[handler] — auto-registration via inventory

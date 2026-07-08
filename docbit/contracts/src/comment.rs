@@ -1,6 +1,6 @@
 //! Comment contracts — supports reply (`parent_id`) and quote (`quoted_id`).
 
-use rust_webapp::*;
+use rust_webx::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

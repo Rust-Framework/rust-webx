@@ -6,7 +6,7 @@
 //! - `roles: Vec<String>` added (multi-role RBAC)
 //! - `created_at` changed from String to i64
 
-use rust_webapp::*;
+use rust_webx::*;
 use serde::{Deserialize, Serialize};
 
 // ── Register ──

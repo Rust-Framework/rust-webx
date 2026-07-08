@@ -5,7 +5,7 @@
 //! 每个 handler 持有 owned `DbContext`，`handle(&mut self, ...)` 直接操作 `self.ctx`。
 
 use rust_ef::{db_context::DbContext, prelude::*};
-use rust_webapp::*;
+use rust_webx::*;
 
 use docbit_contracts::tracking::{GetTrackingSummaryRequest, ListTrackingRequest, TrackingSummary};
 use docbit_domain::entities::Tracking;

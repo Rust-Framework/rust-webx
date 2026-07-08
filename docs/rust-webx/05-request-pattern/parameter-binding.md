@@ -58,7 +58,7 @@ pub struct UserDto {
 ### 返回原始 JSON 值
 
 ```rust
-use rust_webapp::Json;
+use rust_webx::Json;
 
 async fn handle(&self, req: MyRequest) -> Result<Json<serde_json::Value>> {
     Ok(Json(serde_json::json!({ "custom": true })))
@@ -88,7 +88,7 @@ pub struct SearchRequest {
 框架提供内置分页类型：
 
 ```rust
-use rust_webapp::{PagedRequest, PagedResponse};
+use rust_webx::{PagedRequest, PagedResponse};
 
 #[derive(Deserialize)]
 pub struct ListUsersRequest {

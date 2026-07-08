@@ -1,12 +1,12 @@
 /* Docs page — theme overrides */
 /* Layout: pages/shell/shell.css */
 
-.content-shell[data-docs="rust-webapp"] .shell-brand-icon {
+.content-shell[data-docs="rust-webx"] .shell-brand-icon {
     background: var(--brand-rust-soft);
 }
 
-.content-shell[data-docs="rust-webapp"] .shell-nav a.active,
-.content-shell[data-docs="rust-webapp"] .shell-nav a:hover {
+.content-shell[data-docs="rust-webx"] .shell-nav a.active,
+.content-shell[data-docs="rust-webx"] .shell-nav a:hover {
     color: var(--brand-rust);
     background: var(--brand-rust-soft);
 }

@@ -32,7 +32,7 @@ public class UsersController : ControllerBase
 }
 ```
 
-### rust-webapp
+### rust-webx
 
 ```rust
 // contracts/user.rs
@@ -67,7 +67,7 @@ app.MapControllers();
 app.Run();
 ```
 
-### rust-webapp
+### rust-webx
 
 ```rust
 Host::builder()
@@ -82,7 +82,7 @@ Host::builder()
 
 ## 步骤 3：MediatR → IMediator
 
-| MediatR | rust-webapp |
+| MediatR | rust-webx |
 |---------|-------------|
 | `IRequest<T>` | `IRequest<T>` |
 | `IRequestHandler<T,R>` | `IRequestHandler<T,R>` |
@@ -127,6 +127,6 @@ impl IHostedService for DbInitService {
 
 ## 小结
 
-ASP.NET Core 开发者迁移到 rust-webapp 的核心是「概念映射」而非「重新学习」。
+ASP.NET Core 开发者迁移到 rust-webx 的核心是「概念映射」而非「重新学习」。
 
 下一节：[从 Axum / Actix 迁移](from-axum-actix.md)

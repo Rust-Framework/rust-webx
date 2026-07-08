@@ -33,7 +33,7 @@ my-app/
 
 ```rust
 // contracts/blog.rs
-use lrwf::*;  // 或 rust_webapp::*
+use lrwf::*;  // 或 rust_webx::*
 
 #[derive(Serialize, Deserialize)]
 pub struct BlogPostSummary {
@@ -55,7 +55,7 @@ impl IRequest<Vec<BlogPostSummary>> for ListBlogPostsRequest {}
 
 | 允许 | 禁止 |
 |------|------|
-| `use lrwf::*` / `use rust_webapp::*` | `use crate::domain::*` |
+| `use lrwf::*` / `use rust_webx::*` | `use crate::domain::*` |
 | `serde`、`std` | `use crate::handlers::*` |
 | 纯数据类型 + trait 定义 | `async fn` 业务实现、数据库访问 |
 
@@ -128,7 +128,7 @@ pub struct BlogPostEntity {
 
 - **可以**引用 `contracts` 复用枚举或共享 model
 - **禁止**引用 `handlers`
-- **禁止**依赖 `lrwf` / `rust_webapp` 框架类型（`serde` 除外）
+- **禁止**依赖 `lrwf` / `rust_webx` 框架类型（`serde` 除外）
 
 ### main.rs — 组合根
 
@@ -154,7 +154,7 @@ async fn main() -> Result<()> {
 
 ```
                     ┌─────────────┐
-                    │  framework  │  lrwf / rust_webapp
+                    │  framework  │  lrwf / rust_webx
                     └──────┬──────┘
                            │
                     ┌──────▼──────┐
@@ -206,7 +206,7 @@ HTTP Request
 | Handler 注入 `Arc<BlogService>` | `Arc<dyn IBlogService>` |
 | `main.rs` 逐个 `singleton::<BlogService>` | `inject_attr(as = dyn IBlogService)` |
 | contracts 中写 `impl IBlogService` | 实现放 handlers |
-| domain 中 `use rust_webapp::*` | domain 保持框架无关 |
+| domain 中 `use rust_webx::*` | domain 保持框架无关 |
 
 ## 与 Docbit 参考实现
 

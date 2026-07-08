@@ -2,7 +2,7 @@
 
 ## 为什么需要编译时扫描
 
-传统 Rust Web 框架在运行时构建路由表。rust-webapp 选择在**编译期**收集元数据，带来：
+传统 Rust Web 框架在运行时构建路由表。rust-webx 选择在**编译期**收集元数据，带来：
 
 - 启动时零反射开销
 - 遗漏注册在编译期暴露
@@ -99,6 +99,6 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler { ... }
 
 ## 小结
 
-编译时扫描是 rust-webapp「零配置」体验的技术基石。你写 `#[get]` + `#[handler]`，框架在 `build()` 时自动完成路由表、DI 注册与文档生成。
+编译时扫描是 rust-webx「零配置」体验的技术基石。你写 `#[get]` + `#[handler]`，框架在 `build()` 时自动完成路由表、DI 注册与文档生成。
 
 下一章：[请求即端点](../05-request-pattern/INDEX.md)

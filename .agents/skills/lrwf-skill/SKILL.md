@@ -266,7 +266,7 @@ impl IRequestHandler<CreateUserRequest, UserModel> for CreateUserHandler {
 
 | 层 | 拥有 | 依赖 |
 |----|------|------|
-| `contracts/` | Request、Response DTO、enum、`I…Service` trait、路由宏 | **仅**框架（`lrwf` / `rust_webapp`） |
+| `contracts/` | Request、Response DTO、enum、`I…Service` trait、路由宏 | **仅**框架（`lrwf` / `rust_webx`） |
 | `handlers/` | `IRequestHandler` 实现、`I…Service` 实现 | contracts、domain、基础设施 |
 | `domain/` | 实体、迁移、EF 配置 | contracts（复用枚举/model）、**禁止** handlers / 框架 |
 | `main.rs` | Host 配置、`bootstrap` 基础设施注册 | 不做业务 Service 手动注册 |

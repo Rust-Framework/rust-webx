@@ -1,8 +1,8 @@
 #!/bin/sh
 # ─────────────────────────────────────────────────────────────────
-# rust-webapp crate publish script
+# rust-webx crate publish script
 #
-# Publishes all rust-webapp crates to crates.io in dependency order.
+# Publishes all rust-webx crates to crates.io in dependency order.
 #
 # Usage:
 #   ./publish.sh              # Dry-run: verify all crates are publishable
@@ -11,12 +11,12 @@
 #   ./publish.sh --check      # Check only (cargo publish --dry-run)
 #
 # Order (must respect dependency graph):
-#   1. rust-webapp-core     (no internal deps)
-#   2. rust-webapp-macros   (no internal deps)
-#   3. rust-webapp-spa      (depends on rust-webapp-core)
-#   4. rust-webapp-openapi  (depends on rust-webapp-core)
-#   5. rust-webapp-host     (depends on rust-webapp-core, rust-webapp-spa, rust-webapp-openapi)
-#   6. rust-webapp          (depends on all above, umbrella crate)
+#   1. rust-webx-core     (no internal deps)
+#   2. rust-webx-macros   (no internal deps)
+#   3. rust-webx-spa      (depends on rust-webx-core)
+#   4. rust-webx-openapi  (depends on rust-webx-core)
+#   5. rust-webx-host     (depends on rust-webx-core, rust-webx-spa, rust-webx-openapi)
+#   6. rust-webx          (depends on all above, umbrella crate)
 # ─────────────────────────────────────────────────────────────────
 
 set -e
@@ -78,7 +78,7 @@ publish_crate() {
 # ── Main ──
 echo ""
 echo "┌─────────────────────────────────────────────────┐"
-echo "│      rust-webapp — Crate Publish Script         │"
+echo "│      rust-webx — Crate Publish Script         │"
 if [ "$DO_PUBLISH" = true ]; then
     echo "│          MODE: PUBLISH (live)                   │"
 else
@@ -95,17 +95,17 @@ echo "▸ Verifying workspace..."
 cargo check --workspace 2>&1 | tail -1
 
 echo "▸ Running tests..."
-cargo test -p rust-webapp-core -p rust-webapp-host --quiet 2>&1 | tail -1
+cargo test -p rust-webx-core -p rust-webx-host --quiet 2>&1 | tail -1
 
 bump_version
 
 # Publish in dependency order
-publish_crate "rust-webapp-core"
-publish_crate "rust-webapp-macros"
-publish_crate "rust-webapp-spa"
-publish_crate "rust-webapp-openapi"
-publish_crate "rust-webapp-host"
-publish_crate "rust-webapp"
+publish_crate "rust-webx-core"
+publish_crate "rust-webx-macros"
+publish_crate "rust-webx-spa"
+publish_crate "rust-webx-openapi"
+publish_crate "rust-webx-host"
+publish_crate "rust-webx"
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

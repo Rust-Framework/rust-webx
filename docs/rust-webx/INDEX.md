@@ -1,6 +1,6 @@
-# rust-webapp 开发者手册 · 目录
+# rust-webx 开发者手册 · 目录
 
-> 面向使用 rust-webapp 框架的开发者 · 渐进式披露 · 深入浅出
+> 面向使用 rust-webx 框架的开发者 · 渐进式披露 · 深入浅出
 
 ---
 
@@ -14,9 +14,9 @@
 
 ## 第一部分 · 入门与认知
 
-### [第一章 认识 rust-webapp](01-introduction/INDEX.md)
+### [第一章 认识 rust-webx](01-introduction/INDEX.md)
 
-- [什么是 rust-webapp](01-introduction/what-is-rust-webapp.md)
+- [什么是 rust-webx](01-introduction/what-is-rust-webx.md)
 - [适用场景与边界](01-introduction/who-should-use.md)
 - [生态与 Crate 全景](01-introduction/ecosystem-overview.md)
 

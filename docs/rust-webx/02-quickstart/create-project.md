@@ -16,7 +16,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-rust-webapp = "0.1"
+rust-webx = "0.1"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 async-trait = "0.1"
@@ -25,7 +25,7 @@ async-trait = "0.1"
 若在本仓库内开发，使用 path 依赖：
 
 ```toml
-rust-webapp = { path = "../crates/webapp" }
+rust-webx = { path = "../crates/webx" }
 ```
 
 ## 可选：appsettings.json
@@ -86,6 +86,6 @@ Docbit 展示了完整的中型项目结构，详见 [第十五章案例研究](
 
 ## 小结
 
-依赖只需 `rust-webapp` 一个伞 Crate 即可获得全部框架能力。下一节编写第一个端点。
+依赖只需 `rust-webx` 一个伞 Crate 即可获得全部框架能力。下一节编写第一个端点。
 
 下一节：[Hello World 详解](hello-world.md)

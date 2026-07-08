@@ -36,7 +36,7 @@ impl IMiddleware for AuthMiddleware {
 
 ## 与 ASP.NET Core 的差异
 
-ASP.NET Core 中间件支持 `next()` 闭包实现洋葱模型（请求进入和响应返回各经过一次）。rust-webapp 当前为顺序调用，响应阶段不回溯中间件。
+ASP.NET Core 中间件支持 `next()` 闭包实现洋葱模型（请求进入和响应返回各经过一次）。rust-webx 当前为顺序调用，响应阶段不回溯中间件。
 
 > 后续版本计划在 async closure 稳定后升级为洋葱模型。
 

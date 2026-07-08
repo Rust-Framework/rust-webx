@@ -2,7 +2,7 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rust_webapp::{Error, IClaims, Result};
+use rust_webx::{Error, IClaims, Result};
 
 /// 当前 Unix 秒（i64）。
 pub fn now_secs() -> i64 {

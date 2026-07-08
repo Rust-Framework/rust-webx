@@ -7,7 +7,7 @@
 //! ## Usage
 //!
 //! ```ignore
-//! use rust_webapp::*;
+//! use rust_webx::*;
 //! use serde::Deserialize;
 //!
 //! #[claims]
@@ -107,11 +107,11 @@ pub fn claims_impl(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let injected_field: syn::Field = if derives_deserialize {
         syn::parse_quote! {
             #[serde(skip)]
-            pub claims: ::std::option::Option<::std::boxed::Box<dyn ::rust_webapp::IClaims>>
+            pub claims: ::std::option::Option<::std::boxed::Box<dyn ::rust_webx::IClaims>>
         }
     } else {
         syn::parse_quote! {
-            pub claims: ::std::option::Option<::std::boxed::Box<dyn ::rust_webapp::IClaims>>
+            pub claims: ::std::option::Option<::std::boxed::Box<dyn ::rust_webx::IClaims>>
         }
     };
     fields_named.named.push(injected_field);
@@ -123,7 +123,7 @@ pub fn claims_impl(_attr: TokenStream, item: TokenStream) -> TokenStream {
             /// Injects authentication claims into the request. Called by the
             /// LRWF dispatcher before `IRequestHandler::handle`. Shadows the
             /// blanket no-op `IClaimsCarrier::set_claims` for this type.
-            pub fn set_claims(&mut self, claims: ::std::option::Option<::std::boxed::Box<dyn ::rust_webapp::IClaims>>) {
+            pub fn set_claims(&mut self, claims: ::std::option::Option<::std::boxed::Box<dyn ::rust_webx::IClaims>>) {
                 self.claims = claims;
             }
         }

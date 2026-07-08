@@ -2,8 +2,8 @@
 
 > 审查日期：2026-06-29
 > 审查依据：lref-skill（Rust Entity Framework / EFCore 风格 ORM 领域技能指导）
-> 审查范围：`d:\GitCode\RF\rust-webapp\docbit` 子工作区（contracts/domain/handlers/host 4-crate）+ 本地 `rust-webapp` 框架相关改动
-> 框架版本：rust-ef 1.2.0、rust-dicore 0.4.1、rust-webapp 0.1.0（本地）
+> 审查范围：`d:\GitCode\RF\rust-webx\docbit` 子工作区（contracts/domain/handlers/host 4-crate）+ 本地 `rust-webx` 框架相关改动
+> 框架版本：rust-ef 1.2.0、rust-dicore 0.4.1、rust-webx 0.1.0（本地）
 
 ---
 
@@ -34,9 +34,9 @@
 **修复方案**（执行 Risk #1 fallback）：
 1. **框架层**（`crates/macros/src/endpoint.rs:225-236`）：dispatch 函数改为每请求创建 DI Scope：
    ```rust
-   let provider = ::rust_webapp::global_provider();
+   let provider = ::rust_webx::global_provider();
    let scope = provider.create_scope();
-   let handler: ::std::sync::Arc<dyn ::rust_webapp::IRequestHandler<#ty, #rsp_type>> =
+   let handler: ::std::sync::Arc<dyn ::rust_webx::IRequestHandler<#ty, #rsp_type>> =
        scope.get_optional().ok_or_else(|| ...)?;
    ```
 2. **注册层**（`docbit/host/src/main.rs:60-68`）：`svc.singleton::<Mutex<DbContext>>` → `svc.scoped::<Mutex<DbContext>>`
@@ -169,7 +169,7 @@ ctx.save_changes().await?;
 
 ## 三、框架改动记录
 
-### `crates/macros/src/endpoint.rs`（rust-webapp 框架）
+### `crates/macros/src/endpoint.rs`（rust-webx 框架）
 
 **改动**：`generate_dispatch_fn` 第 225-236 行，handler 解析从根 provider 改为 per-request scope。
 
@@ -189,7 +189,7 @@ rust-ef-mysql = "1.2"
 
 ---
 
-## 四、框架缺口汇总（待 rust-ef / rust-webapp 补齐）
+## 四、框架缺口汇总（待 rust-ef / rust-webx 补齐）
 
 | 缺口 | 影响 | 阻塞的红旗 |
 |------|------|-----------|
@@ -198,7 +198,7 @@ rust-ef-mysql = "1.2"
 | `IAsyncConnection` 无 `last_insert_rowid()` | 同上 | R4a/R4b |
 | `find()` 返回 detached 实体 | `detect_changes` 模式不成立 | R6 |
 | `EntityTypeBuilder` 无 `has_query_filter` | 无全局软删除过滤器 | R3a |
-| rust-webapp 0.1.0 HTTP 管道无 per-request scope | **已修复**（本次） | R1 |
+| rust-webx 0.1.0 HTTP 管道无 per-request scope | **已修复**（本次） | R1 |
 
 ---
 

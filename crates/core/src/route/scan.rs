@@ -1,8 +1,8 @@
 //! Type scanning and automatic service registration logic.
 //!
-//! In the rust-webapp framework, "scanning" is achieved at compile time via:
+//! In the rust-webx framework, "scanning" is achieved at compile time via:
 //!
-//! 1. `#[rust_dicore::module]` + `rust_dicore::inject!` — declare handlers in a module group
+//! 1. `#[rust_dix::module]` + `rust_dix::inject!` — declare handlers in a module group
 //! 2. `#[endpoint]` (or shortcuts `#[get]`, `#[post]`, `#[put]`, `#[delete]`) — register route metadata via `inventory::submit!`
 //!
 //! This module provides the `RouteEntry` type that connects compile-time
@@ -15,16 +15,16 @@ use std::sync::{Arc, OnceLock};
 
 // --- Global Service Provider (for DI-based handler construction) ---
 
-static GLOBAL_PROVIDER: OnceLock<Arc<rust_dicore::ServiceProvider>> = OnceLock::new();
+static GLOBAL_PROVIDER: OnceLock<Arc<rust_dix::ServiceProvider>> = OnceLock::new();
 
 /// Set the global service provider. Called once at `Host::build()` time.
-pub fn set_global_provider(provider: Arc<rust_dicore::ServiceProvider>) {
+pub fn set_global_provider(provider: Arc<rust_dix::ServiceProvider>) {
     GLOBAL_PROVIDER.set(provider).ok();
 }
 
 /// Get the global service provider. Used by `#[handler]` factories
 /// when the handler struct has `#[inject_attr]` for DI-based construction.
-pub fn global_provider() -> &'static Arc<rust_dicore::ServiceProvider> {
+pub fn global_provider() -> &'static Arc<rust_dix::ServiceProvider> {
     GLOBAL_PROVIDER
         .get()
         .expect("Global provider not initialized")
@@ -89,7 +89,7 @@ pub struct HandlerRegistration {
     pub req_type_name: &'static str,
     /// Constructs a fresh owned handler, boxed as `Box<dyn Any + Send>`.
     /// Called per-request with the per-request scope as resolver.
-    pub factory: fn(&dyn rust_dicore::IServiceResolver) -> Box<dyn std::any::Any + Send>,
+    pub factory: fn(&dyn rust_dix::IServiceResolver) -> Box<dyn std::any::Any + Send>,
     /// Type-erased call bridge: receives the owned handler and the boxed request,
     /// invokes `handle(&mut self, req)`, and returns the boxed response.
     #[allow(clippy::type_complexity)]
@@ -217,7 +217,7 @@ impl HandlerCache {
 /// The factory is called per request to produce a fresh owned handler.
 pub struct HandlerEntry {
     /// Per-request factory: receives the scoped resolver, returns an owned handler.
-    pub factory: fn(&dyn rust_dicore::IServiceResolver) -> Box<dyn Any + Send>,
+    pub factory: fn(&dyn rust_dix::IServiceResolver) -> Box<dyn Any + Send>,
     /// Type-erased call bridge: invokes `handle(&mut self, req)` on the owned handler.
     #[allow(clippy::type_complexity)]
     pub call: fn(

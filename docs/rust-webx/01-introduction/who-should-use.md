@@ -10,13 +10,13 @@
 - 多模块业务（用户、订单、内容管理等）
 - 需要认证授权、缓存、限流等横切能力
 
-rust-webapp 的分层约定（contracts / handlers / domain / services）天然适合这类项目。
+rust-webx 的分层约定（contracts / handlers / domain / services）天然适合这类项目。
 
 ### 2. ASP.NET Core 团队迁移到 Rust
 
 若你的团队熟悉以下概念，学习曲线将非常平缓：
 
-| ASP.NET Core | rust-webapp |
+| ASP.NET Core | rust-webx |
 |-------------|-------------|
 | `IRequest<T>` (MediatR) | `IRequest<T>` + `IRequestHandler<T,R>` |
 | `IHostedService` | `IHostedService` |
@@ -67,9 +67,9 @@ Host::builder()
 
 ## 决策清单
 
-在选用 rust-webapp 前，回答以下问题：
+在选用 rust-webx 前，回答以下问题：
 
-| 问题 | 倾向选用 rust-webapp |
+| 问题 | 倾向选用 rust-webx |
 |------|---------------------|
 | 端点数量 > 10？ | ✅ |
 | 需要 DI 注入数据库/缓存/外部服务？ | ✅ |
@@ -91,6 +91,6 @@ Docbit 作品集站点属于**中型全栈单体**的典型范例（参见 [第�
 
 ## 小结
 
-rust-webapp 面向**需要工程化、模块化 WebApi 开发**的场景。它不是万能钥匙，但在其适用范围内，能显著降低架构决策成本，让团队把精力集中在业务逻辑上。
+rust-webx 面向**需要工程化、模块化 WebApi 开发**的场景。它不是万能钥匙，但在其适用范围内，能显著降低架构决策成本，让团队把精力集中在业务逻辑上。
 
 下一节：[生态与 Crate 全景](ecosystem-overview.md)

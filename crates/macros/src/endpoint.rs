@@ -80,7 +80,7 @@ fn emit_endpoint(attr: TokenStream, item: TokenStream) -> TokenStream {
         .into_iter()
         .map(|name| {
             quote! {
-                ::rust_webapp::ParamMeta {
+                ::rust_webx::ParamMeta {
                     name: #name,
                     source: "path",
                     type_hint: "string",
@@ -92,7 +92,7 @@ fn emit_endpoint(attr: TokenStream, item: TokenStream) -> TokenStream {
     let is_body_method = method_str == "Post" || method_str == "Put" || method_str == "Patch";
     if is_body_method {
         params_tokens.push(quote! {
-            ::rust_webapp::ParamMeta {
+            ::rust_webx::ParamMeta {
                 name: "body",
                 source: "body",
                 type_hint: "object",
@@ -120,15 +120,15 @@ fn emit_endpoint(attr: TokenStream, item: TokenStream) -> TokenStream {
         #dispatch_fn
 
         ::inventory::submit! {
-            ::rust_webapp::RouteDispatch {
+            ::rust_webx::RouteDispatch {
                 handler_type: #req_type_name,
                 dispatch: #dispatch_fn_name,
             }
         }
 
         ::inventory::submit! {
-            ::rust_webapp::RouteEntry::new(
-                ::rust_webapp::HttpMethod::#method_ident,
+            ::rust_webx::RouteEntry::new(
+                ::rust_webx::HttpMethod::#method_ident,
                 #path_str,
                 #req_type_name,
                 #rsp_type_str,
@@ -172,13 +172,13 @@ fn generate_dispatch_fn(
             .collect();
         quote! {{
             let mut req: #ty = ::serde_json::from_slice(&body_bytes)
-                .map_err(|e| ::rust_webapp::Error::Serialization(e))?;
+                .map_err(|e| ::rust_webx::Error::Serialization(e))?;
             req = #ty { #(#overrides)* ..req };
             req
         }}
     } else if is_body {
         quote! {
-            ::serde_json::from_slice(&body_bytes).map_err(|e| ::rust_webapp::Error::Serialization(e))?
+            ::serde_json::from_slice(&body_bytes).map_err(|e| ::rust_webx::Error::Serialization(e))?
         }
     } else if !path_params.is_empty() {
         let field_assignments: Vec<proc_macro2::TokenStream> = path_params
@@ -205,15 +205,15 @@ fn generate_dispatch_fn(
             body_bytes: Vec<u8>,
             route_params: ::std::collections::HashMap<String, String>,
             _query_params: ::std::collections::HashMap<String, String>,
-            claims: Option<Box<dyn ::rust_webapp::IClaims>>,
-        ) -> ::std::pin::Pin<Box<dyn ::std::future::Future<Output = ::rust_webapp::Result<::rust_webapp::ResponseData>> + Send>> {
+            claims: Option<Box<dyn ::rust_webx::IClaims>>,
+        ) -> ::std::pin::Pin<Box<dyn ::std::future::Future<Output = ::rust_webx::Result<::rust_webx::ResponseData>> + Send>> {
             Box::pin(async move {
                 let mut request: #ty = #build_request;
 
                 // Inject claims into the request *before* dispatch (no-op if the
                 // request type has no inherent `set_claims`).
                 {
-                    use ::rust_webapp::IClaimsCarrier;
+                    use ::rust_webx::IClaimsCarrier;
                     request.set_claims(claims);
                 }
 
@@ -222,15 +222,16 @@ fn generate_dispatch_fn(
                 // an entry to inventory at compile time; the entry's factory constructs
                 // a fresh owned Handler per request, resolving Scoped dependencies
                 // (DbContext) via `resolver.get_owned` — EFCore-style per-request UoW.
-                let cache = ::rust_webapp::HandlerCache::get_or_init();
-                let entry = cache.get(#type_name).ok_or_else(|| ::rust_webapp::Error::Di(
+                let cache = ::rust_webx::HandlerCache::get_or_init();
+                let entry = cache.get(#type_name).ok_or_else(|| ::rust_webx::Error::Di(
                     format!("No #[handler] registered for request type '{}'", #type_name)
                 ))?;
 
                 // Create a per-request DI scope and construct the owned handler.
-                let provider = ::rust_webapp::global_provider();
+                let provider = ::rust_webx::global_provider();
+                use ::rust_webx::rust_dix::ScopeFactory as _;
                 let scope = provider.create_scope();
-                let resolver: &dyn ::rust_webapp::rust_dicore::IServiceResolver = &scope;
+                let resolver: &dyn ::rust_webx::rust_dix::IServiceResolver = &scope;
                 let handler = (entry.factory)(resolver);
 
                 // Invoke `handle(&mut self, req)` via the call bridge.
@@ -240,7 +241,7 @@ fn generate_dispatch_fn(
                     .expect("Response type mismatch in handler call bridge");
 
                 let json_bytes = ::serde_json::to_vec(&result).unwrap_or_default();
-                Ok(::rust_webapp::ResponseData {
+                Ok(::rust_webx::ResponseData {
                     status: 200,
                     content_type: "application/json".to_string(),
                     body: json_bytes,

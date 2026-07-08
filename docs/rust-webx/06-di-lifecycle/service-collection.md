@@ -2,7 +2,7 @@
 
 ## DI 容器
 
-rust-webapp 使用 `rust-dicore` 作为 DI 容器：
+rust-webx 使用 `rust-dicore` 作为 DI 容器：
 
 ```rust
 Host::builder()

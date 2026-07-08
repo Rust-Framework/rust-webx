@@ -44,7 +44,7 @@ Workspace 已配置 LTO + strip，release 二进制体积和性能最优。
 框架提供 benchmark：
 
 ```bash
-cargo bench -p rust-webapp-host
+cargo bench -p rust-webx-host
 ```
 
 ## 小结

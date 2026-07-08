@@ -35,7 +35,7 @@ self.ctx
 
 - 主键在应用层用 `new_id()` 预分配，禁止 save 后再查 id
 - 同一业务操作内多表写入：多个 `set`/`add`，**一次** `save_changes`
-- 更新前先 `to_model()` 再 `set.update(entity)`，避免多余 `.clone()`
+- `ToModel::to_model(self)` 会消耗 entity；写操作需 `set.add(entity.clone())` 或 `set.update(entity.clone())`，保存后再 `entity.to_model()` 返回
 
 ## DbContext 读操作
 

@@ -3,10 +3,7 @@
 //! Tags 序列化为 JSON 字符串存库；列表查询 include `category`+`author`
 //! 以填充 `category_name`/`author_name`。
 //!
-//! 每个 handler 持有 owned `DbContext`（通过 `#[derive(Inject)]` 的 bare T 字段
-//! 自动以 `get_owned` 解析），实现 EFCore 风格的 per-request unit-of-work。
-//! `handle(&mut self, ...)` 直接调用 `self.ctx.set::<T>()` / `save_changes()`，
-//! 无需 `Arc<Mutex>` 内部可变性。
+//! 每个 handler 持有 owned `DbContext`，`handle(&mut self, ...)` 直接操作 `self.ctx`。
 
 use std::collections::HashMap;
 
@@ -17,12 +14,7 @@ use docbit_contracts::blog::*;
 use docbit_domain::entities::{Blog, Category};
 use docbit_domain::{new_id, ApplyTo, ToEntity, ToModel};
 
-use crate::util::now_secs;
-
-fn uid_from_claims(claims: Option<&dyn IClaims>) -> Result<String> {
-    let c = claims.ok_or_else(|| Error::Http("Not authenticated".into()))?;
-    Ok(c.subject().to_string())
-}
+use crate::util::{now_secs, operator_id};
 
 fn roles_from_claims(claims: Option<&dyn IClaims>) -> Vec<String> {
     claims.map(|c| c.roles().to_vec()).unwrap_or_default()
@@ -31,12 +23,6 @@ fn roles_from_claims(claims: Option<&dyn IClaims>) -> Vec<String> {
 fn is_admin(roles: &[String]) -> bool {
     roles.iter().any(|r| r == "admin")
 }
-
-// ── Handlers ──
-//
-// `ctx: DbContext`（bare T）由 `#[derive(Inject)]` 通过 `resolver.get_owned`
-// 解析为 owned 实例。`#[handler(inject)]` 生成 per-request factory + call bridge，
-// 使 dispatch 通过 `HandlerCache` 调用 `handle(&mut self, ...)`。
 
 #[derive(Inject)]
 pub struct ListBlogPostsHandler {
@@ -88,6 +74,7 @@ impl IRequestHandler<ListBlogPostsRequest, Vec<BlogPostSummary>> for ListBlogPos
             .to_list()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?;
+
         Ok(blogs.into_iter().map(BlogPostSummary::from).collect())
     }
 }
@@ -100,14 +87,17 @@ impl IRequestHandler<ListBlogCategoriesRequest, Vec<BlogCategoryCount>> for List
             .to_list()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?;
+
         let mut counts: HashMap<String, usize> = HashMap::new();
         for b in &blogs {
             *counts.entry(b.category_id.clone()).or_insert(0) += 1;
         }
+
         let cats = linq!(self.ctx.set::<Category>(), |c: Category| !c.is_deleted)
             .to_list()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?;
+
         let mut result: Vec<BlogCategoryCount> = cats
             .into_iter()
             .map(|c| {
@@ -121,6 +111,7 @@ impl IRequestHandler<ListBlogCategoriesRequest, Vec<BlogCategoryCount>> for List
             })
             .collect();
         result.sort_by(|a, b| a.id.cmp(&b.id));
+
         Ok(result)
     }
 }
@@ -129,12 +120,15 @@ impl IRequestHandler<ListBlogCategoriesRequest, Vec<BlogCategoryCount>> for List
 #[async_trait]
 impl IRequestHandler<ListMyBlogPostsRequest, Vec<BlogPostSummary>> for ListMyBlogPostsHandler {
     async fn handle(&mut self, req: ListMyBlogPostsRequest) -> Result<Vec<BlogPostSummary>> {
-        let uid = uid_from_claims(req.claims.as_deref())?;
+        let uid = operator_id(req.claims.as_deref())
+            .ok_or_else(|| Error::Http("Not authenticated".into()))?;
         let q = uid.clone();
+
         let blogs = linq!(self.ctx.set::<Blog>(), |b: Blog| b.author_id == q && !b.is_deleted; include b.category; include b.author; order_by b.published_at desc)
             .to_list()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?;
+
         Ok(blogs.into_iter().map(BlogPostSummary::from).collect())
     }
 }
@@ -144,11 +138,14 @@ impl IRequestHandler<ListMyBlogPostsRequest, Vec<BlogPostSummary>> for ListMyBlo
 impl IRequestHandler<GetBlogPostRequest, BlogPostModel> for GetBlogPostHandler {
     async fn handle(&mut self, req: GetBlogPostRequest) -> Result<BlogPostModel> {
         let slug = req.slug.clone();
-        let blog = linq!(self.ctx.set::<Blog>(), |b: Blog| b.slug == req.slug && !b.is_deleted; include b.category; include b.author)
+        let q = slug.clone();
+
+        let blog = linq!(self.ctx.set::<Blog>(), |b: Blog| b.slug == q && !b.is_deleted; include b.category; include b.author)
             .first_or_default()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?
             .ok_or_else(|| Error::NotFound(format!("Blog post not found: {}", slug)))?;
+
         Ok(blog.to_model())
     }
 }
@@ -157,34 +154,39 @@ impl IRequestHandler<GetBlogPostRequest, BlogPostModel> for GetBlogPostHandler {
 #[async_trait]
 impl IRequestHandler<CreateBlogPostRequest, BlogPostModel> for CreateBlogPostHandler {
     async fn handle(&mut self, req: CreateBlogPostRequest) -> Result<BlogPostModel> {
-        let uid = uid_from_claims(req.claims.as_deref())?;
-        // slug 唯一性校验
+        let uid = operator_id(req.claims.as_deref())
+            .ok_or_else(|| Error::Http("Not authenticated".into()))?;
+
         let slug = req.slug.clone();
         let q = slug.clone();
         let exists = linq!(self.ctx.set::<Blog>(), |b: Blog| b.slug == q && !b.is_deleted)
             .first_or_default()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?;
+
         if exists.is_some() {
             return Err(Error::Http(format!("Slug already exists: {}", slug)));
         }
 
         let now = now_secs();
         let id = new_id();
+
         let entity = req.to_entity(id.clone(), Some(uid.clone()), now);
         let set = self.ctx.set::<Blog>();
         set.add(entity);
+
         self.ctx
             .save_changes()
             .await
             .map_err(|e| Error::Internal(format!("Failed to create blog: {}", e)))?;
-        // 按已知 id 回查以装载导航字段
+
         let id_q = id.clone();
         let saved = linq!(self.ctx.set::<Blog>(), |b: Blog| b.id == id_q && !b.is_deleted; include b.category; include b.author)
             .first_or_default()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?
             .ok_or_else(|| Error::Internal("Blog vanished after insert".into()))?;
+
         tracing::info!("[Blog] Created: {} by {}", saved.slug, uid);
         Ok(saved.to_model())
     }
@@ -194,8 +196,10 @@ impl IRequestHandler<CreateBlogPostRequest, BlogPostModel> for CreateBlogPostHan
 #[async_trait]
 impl IRequestHandler<UpdateBlogPostRequest, BlogPostModel> for UpdateBlogPostHandler {
     async fn handle(&mut self, req: UpdateBlogPostRequest) -> Result<BlogPostModel> {
-        let uid = uid_from_claims(req.claims.as_deref())?;
+        let uid = operator_id(req.claims.as_deref())
+            .ok_or_else(|| Error::Http("Not authenticated".into()))?;
         let roles = roles_from_claims(req.claims.as_deref());
+
         let slug = req.slug.clone();
         let q = slug.clone();
         let mut blog = linq!(self.ctx.set::<Blog>(), |b: Blog| b.slug == q && !b.is_deleted; include b.category; include b.author)
@@ -210,18 +214,22 @@ impl IRequestHandler<UpdateBlogPostRequest, BlogPostModel> for UpdateBlogPostHan
 
         let blog_id = blog.id.clone();
         req.apply_to(&mut blog, Some(uid.clone()), now_secs());
+
         let set = self.ctx.set::<Blog>();
         set.update(blog);
+
         self.ctx
             .save_changes()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?;
+
         let id_q = blog_id.clone();
         let saved = linq!(self.ctx.set::<Blog>(), |b: Blog| b.id == id_q && !b.is_deleted; include b.category; include b.author)
             .first_or_default()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?
             .ok_or_else(|| Error::NotFound("Blog not found after update".into()))?;
+
         Ok(saved.to_model())
     }
 }
@@ -230,8 +238,10 @@ impl IRequestHandler<UpdateBlogPostRequest, BlogPostModel> for UpdateBlogPostHan
 #[async_trait]
 impl IRequestHandler<DeleteBlogPostRequest, String> for DeleteBlogPostHandler {
     async fn handle(&mut self, req: DeleteBlogPostRequest) -> Result<String> {
-        let uid = uid_from_claims(req.claims.as_deref())?;
+        let uid = operator_id(req.claims.as_deref())
+            .ok_or_else(|| Error::Http("Not authenticated".into()))?;
         let roles = roles_from_claims(req.claims.as_deref());
+
         let slug = req.slug.clone();
         let q = slug.clone();
         let mut blog = linq!(self.ctx.set::<Blog>(), |b: Blog| b.slug == q && !b.is_deleted)
@@ -247,12 +257,15 @@ impl IRequestHandler<DeleteBlogPostRequest, String> for DeleteBlogPostHandler {
         blog.is_deleted = true;
         blog.updated_id = Some(uid);
         blog.updated_at = now_secs();
+
         let set = self.ctx.set::<Blog>();
         set.update(blog);
+
         self.ctx
             .save_changes()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?;
+
         tracing::info!("[Blog] Soft-deleted: {}", slug);
         Ok(format!("Deleted blog post {}", slug))
     }

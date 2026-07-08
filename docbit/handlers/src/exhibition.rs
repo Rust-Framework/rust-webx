@@ -1,4 +1,4 @@
-//! Exhibition handlers — list / get / upsert portfolio works.
+//! Exhibition handlers — list / get / upsert / delete portfolio works.
 //!
 //! 每个 handler 持有 owned `DbContext`，`handle(&mut self, ...)` 直接操作 `self.ctx`。
 
@@ -46,6 +46,7 @@ impl IRequestHandler<ListExhibitionsRequest, Vec<ExhibitionModel>> for ListExhib
             .to_list()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?;
+
         Ok(items.into_iter().map(ExhibitionModel::from).collect())
     }
 }
@@ -55,11 +56,14 @@ impl IRequestHandler<ListExhibitionsRequest, Vec<ExhibitionModel>> for ListExhib
 impl IRequestHandler<GetExhibitionRequest, ExhibitionModel> for GetExhibitionHandler {
     async fn handle(&mut self, req: GetExhibitionRequest) -> Result<ExhibitionModel> {
         let slug = req.slug.clone();
-        let item = linq!(self.ctx.set::<Exhibition>(), |e: Exhibition| e.slug == req.slug && !e.is_deleted; include e.category)
+        let q = slug.clone();
+
+        let item = linq!(self.ctx.set::<Exhibition>(), |e: Exhibition| e.slug == q && !e.is_deleted; include e.category)
             .first_or_default()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?
             .ok_or_else(|| Error::NotFound(format!("Exhibition not found: {}", slug)))?;
+
         Ok(ExhibitionModel::from(item))
     }
 }
@@ -70,44 +74,49 @@ impl IRequestHandler<UpsertExhibitionRequest, ExhibitionModel> for UpsertExhibit
     async fn handle(&mut self, req: UpsertExhibitionRequest) -> Result<ExhibitionModel> {
         let op = operator_id(req.claims.as_deref());
         let now = now_secs();
-
-        // 按 slug 查找是否已存在（未软删除）
         let slug = req.slug.clone();
-        let existing = {
-            let q = slug.clone();
-            linq!(self.ctx.set::<Exhibition>(), |e: Exhibition| e.slug == q && !e.is_deleted)
-                .first_or_default()
-                .await
-                .map_err(|e| Error::Internal(e.to_string()))?
-        };
+        let q = slug.clone();
+
+        let existing = linq!(self.ctx.set::<Exhibition>(), |e: Exhibition| e.slug == q && !e.is_deleted)
+            .first_or_default()
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?;
 
         let saved_id = if let Some(mut ex) = existing {
             let id = ex.id.clone();
             req.apply_to(&mut ex, op.clone(), now);
+
             let set = self.ctx.set::<Exhibition>();
             set.update(ex);
+
             self.ctx
                 .save_changes()
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))?;
+
             id
         } else {
             let id = new_id();
             let entity = req.to_entity(id.clone(), op.clone(), now);
+
             let set = self.ctx.set::<Exhibition>();
             set.add(entity);
+
             self.ctx
                 .save_changes()
                 .await
                 .map_err(|e| Error::Internal(format!("Failed to create exhibition: {}", e)))?;
+
             id
         };
 
-        let saved = linq!(self.ctx.set::<Exhibition>(), |e: Exhibition| e.id == saved_id && !e.is_deleted; include e.category)
+        let id_q = saved_id.clone();
+        let saved = linq!(self.ctx.set::<Exhibition>(), |e: Exhibition| e.id == id_q && !e.is_deleted; include e.category)
             .first_or_default()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?
             .ok_or_else(|| Error::Internal("Exhibition vanished after save".into()))?;
+
         tracing::info!("[Exhibition] Upserted: {} ({})", saved.slug, saved.id);
         Ok(saved.to_model())
     }
@@ -119,9 +128,9 @@ impl IRequestHandler<DeleteExhibitionRequest, String> for DeleteExhibitionHandle
     async fn handle(&mut self, req: DeleteExhibitionRequest) -> Result<String> {
         let op = operator_id(req.claims.as_deref());
         let now = now_secs();
-
         let slug = req.slug.clone();
         let q = slug.clone();
+
         let items = linq!(self.ctx.set::<Exhibition>(), |e: Exhibition| e.slug == q && !e.is_deleted)
             .to_list()
             .await
@@ -138,6 +147,7 @@ impl IRequestHandler<DeleteExhibitionRequest, String> for DeleteExhibitionHandle
             item.updated_at = now;
             set.update(item);
         }
+
         self.ctx
             .save_changes()
             .await

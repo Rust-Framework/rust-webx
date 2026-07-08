@@ -43,6 +43,7 @@ pub struct DeleteCategoryHandler {
 /// 把扁平分类列表组装为森林，按 `sort_order` 升序、`id` 升序排序。
 fn build_tree(mut cats: Vec<CategoryModel>) -> Vec<CategoryTreeNode> {
     cats.sort_by(|a, b| a.sort_order.cmp(&b.sort_order).then(a.id.cmp(&b.id)));
+
     let mut nodes: HashMap<String, CategoryTreeNode> = cats
         .into_iter()
         .map(|c| {
@@ -78,11 +79,13 @@ fn attach_children(
     level: u32,
 ) -> CategoryTreeNode {
     node.level = level;
+
     let child_ids: Vec<String> = pool
         .values()
         .filter(|n| n.category.parent_id.as_deref() == Some(node.category.id.as_str()))
         .map(|n| n.category.id.clone())
         .collect();
+
     for cid in child_ids {
         if let Some(child) = pool.remove(&cid) {
             node.children.push(attach_children(child, pool, level + 1));
@@ -99,6 +102,7 @@ impl IRequestHandler<ListCategoriesRequest, Vec<CategoryTreeNode>> for ListCateg
             .to_list()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?;
+
         let models: Vec<CategoryModel> = cats.into_iter().map(CategoryModel::from).collect();
         Ok(build_tree(models))
     }
@@ -111,13 +115,17 @@ impl IRequestHandler<CreateCategoryRequest, CategoryModel> for CreateCategoryHan
         let op = operator_id(req.claims.as_deref());
         let now = now_secs();
         let id = new_id();
-        let entity = req.to_entity(id.clone(), op, now);
+
+        let entity = req.to_entity(id, op, now);
+
         let set = self.ctx.set::<Category>();
         set.add(entity.clone());
+
         self.ctx
             .save_changes()
             .await
             .map_err(|e| Error::Internal(format!("Failed to create category: {}", e)))?;
+
         tracing::info!("[Category] Created: {} ({})", entity.name, entity.id);
         Ok(entity.to_model())
     }
@@ -128,6 +136,7 @@ impl IRequestHandler<CreateCategoryRequest, CategoryModel> for CreateCategoryHan
 impl IRequestHandler<UpdateCategoryRequest, CategoryModel> for UpdateCategoryHandler {
     async fn handle(&mut self, req: UpdateCategoryRequest) -> Result<CategoryModel> {
         let id = parse_id(&req.id)?;
+
         let mut cat = self
             .ctx
             .set::<Category>()
@@ -139,12 +148,15 @@ impl IRequestHandler<UpdateCategoryRequest, CategoryModel> for UpdateCategoryHan
 
         let op = operator_id(req.claims.as_deref());
         req.apply_to(&mut cat, op, now_secs());
+
         let set = self.ctx.set::<Category>();
         set.update(cat.clone());
+
         self.ctx
             .save_changes()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?;
+
         Ok(cat.to_model())
     }
 }
@@ -154,6 +166,7 @@ impl IRequestHandler<UpdateCategoryRequest, CategoryModel> for UpdateCategoryHan
 impl IRequestHandler<DeleteCategoryRequest, String> for DeleteCategoryHandler {
     async fn handle(&mut self, req: DeleteCategoryRequest) -> Result<String> {
         let id = parse_id(&req.id)?;
+
         let mut cat = self
             .ctx
             .set::<Category>()
@@ -166,12 +179,15 @@ impl IRequestHandler<DeleteCategoryRequest, String> for DeleteCategoryHandler {
         cat.is_deleted = true;
         cat.updated_id = operator_id(req.claims.as_deref());
         cat.updated_at = now_secs();
+
         let set = self.ctx.set::<Category>();
         set.update(cat);
+
         self.ctx
             .save_changes()
             .await
             .map_err(|e| Error::Internal(e.to_string()))?;
+
         tracing::info!("[Category] Soft-deleted: {}", id);
         Ok(format!("Deleted category {}", id))
     }

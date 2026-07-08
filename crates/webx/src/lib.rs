@@ -28,6 +28,7 @@ pub use rust_webx_core::pagination::{PagedRequest, PagedResponse};
 pub use rust_webx_core::paths::{app_base, looks_like_app_base};
 pub use rust_webx_core::pipeline::IPipelineBehavior;
 pub use rust_webx_core::problem::{FieldError, ProblemDetails};
+pub use rust_webx_core::request_context::RequestContext;
 pub use rust_webx_core::routing::{HttpMethod, IEndpoint, IRouter, RouteMeta};
 
 // --- DI extensions ---

@@ -13,6 +13,8 @@ use rust_webx::*;
 use docbit_contracts::tracking::{GetTrackingSummaryRequest, ListTrackingRequest, TrackingSummary};
 use docbit_domain::entities::Tracking;
 
+use crate::db::EfResultExt;
+
 #[derive(Inject)]
 pub struct GetTrackingSummaryHandler {
     #[inject(owned)]
@@ -33,7 +35,7 @@ impl IRequestHandler<GetTrackingSummaryRequest, TrackingSummary>
     async fn handle(&mut self, _: GetTrackingSummaryRequest) -> Result<TrackingSummary> {
         let total: i64 = linq!(self.ctx.set::<Tracking>(); count)
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
+            .map_ef()?;
 
         let all = self
             .ctx
@@ -41,7 +43,7 @@ impl IRequestHandler<GetTrackingSummaryRequest, TrackingSummary>
             .query()
             .to_list()
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
+            .map_ef()?;
 
         let unique = all
             .iter()
@@ -52,7 +54,7 @@ impl IRequestHandler<GetTrackingSummaryRequest, TrackingSummary>
         let today_start = today_start_secs();
         let today: i64 = linq!(self.ctx.set::<Tracking>(), |t: Tracking| t.visited_at >= today_start; count)
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
+            .map_ef()?;
 
         Ok(TrackingSummary {
             total_visits: total,
@@ -74,7 +76,7 @@ impl IRequestHandler<ListTrackingRequest, Vec<docbit_contracts::tracking::Tracki
         let items = linq!(self.ctx.set::<Tracking>(); order_by t.visited_at desc)
             .to_list()
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
+            .map_ef()?;
 
         Ok(items.into_iter().map(Into::into).collect())
     }

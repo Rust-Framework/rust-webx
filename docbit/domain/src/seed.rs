@@ -13,8 +13,8 @@ pub const RES_TYPE_ACTION: &str = "操作";
 pub const RES_TYPE_DATA: &str = "数据";
 pub const RES_TYPE_OTHER: &str = "其他";
 
-/// Register seed data on the DbContext.
-pub fn seed(ctx: &mut DbContext) {
+/// Register seed data on the DbContext model builder.
+pub fn register(ctx: &mut DbContext) {
     let now = 0i64;
 
     ctx.model().entity::<Role>().has_data(&[

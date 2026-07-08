@@ -12,6 +12,7 @@ use docbit_contracts::rbac::*;
 use docbit_domain::entities::{Authorize, Resource, Role, RoleUser};
 use docbit_domain::{new_id, ApplyTo, ToEntity, ToModel};
 
+use crate::db::{save_changes, EfResultExt};
 use crate::util::{now_secs, operator_id, parse_id};
 
 // ── Role CRUD ──
@@ -44,10 +45,10 @@ pub struct DeleteRoleHandler {
 #[async_trait]
 impl IRequestHandler<ListRolesRequest, Vec<RoleModel>> for ListRolesHandler {
     async fn handle(&mut self, _: ListRolesRequest) -> Result<Vec<RoleModel>> {
-        let roles = linq!(self.ctx.set::<Role>(), |r: Role| !r.is_deleted)
+        let roles = linq!(self.ctx.set::<Role>();)
             .to_list()
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
+            .map_ef()?;
 
         Ok(roles.into_iter().map(RoleModel::from).collect())
     }
@@ -66,10 +67,7 @@ impl IRequestHandler<CreateRoleRequest, RoleModel> for CreateRoleHandler {
         let set = self.ctx.set::<Role>();
         set.add(entity.clone());
 
-        self.ctx
-            .save_changes()
-            .await
-            .map_err(|e| Error::Internal(format!("Failed to create role: {}", e)))?;
+        save_changes(&mut self.ctx).await?;
 
         Ok(entity.to_model())
     }
@@ -87,7 +85,7 @@ impl IRequestHandler<UpdateRoleRequest, RoleModel> for UpdateRoleHandler {
             .query()
             .find(id.clone())
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?
+            .map_ef()?
             .ok_or_else(|| Error::NotFound("Role not found".into()))?;
 
         let op = operator_id(req.claims.as_deref());
@@ -96,10 +94,7 @@ impl IRequestHandler<UpdateRoleRequest, RoleModel> for UpdateRoleHandler {
         let set = self.ctx.set::<Role>();
         set.update(role.clone());
 
-        self.ctx
-            .save_changes()
-            .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
+        save_changes(&mut self.ctx).await?;
 
         Ok(role.to_model())
     }
@@ -117,7 +112,7 @@ impl IRequestHandler<DeleteRoleRequest, String> for DeleteRoleHandler {
             .query()
             .find(id.clone())
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?
+            .map_ef()?
             .ok_or_else(|| Error::NotFound("Role not found".into()))?;
 
         role.is_deleted = true;
@@ -127,10 +122,7 @@ impl IRequestHandler<DeleteRoleRequest, String> for DeleteRoleHandler {
         let set = self.ctx.set::<Role>();
         set.update(role);
 
-        self.ctx
-            .save_changes()
-            .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
+        save_changes(&mut self.ctx).await?;
 
         Ok(format!("Deleted role {}", id))
     }
@@ -162,7 +154,7 @@ impl IRequestHandler<AssignRoleRequest, String> for AssignRoleHandler {
         let exists = linq!(self.ctx.set::<RoleUser>(), |r: RoleUser| r.user_id == exists_uid && r.role_id == exists_rid)
             .first_or_default()
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
+            .map_ef()?;
 
         if exists.is_some() {
             return Ok(format!(
@@ -182,10 +174,7 @@ impl IRequestHandler<AssignRoleRequest, String> for AssignRoleHandler {
         let set = self.ctx.set::<RoleUser>();
         set.add(entity);
 
-        self.ctx
-            .save_changes()
-            .await
-            .map_err(|e| Error::Internal(format!("Failed to assign role: {}", e)))?;
+        save_changes(&mut self.ctx).await?;
 
         Ok(format!("Assigned role {} to user {}", role_id, user_id))
     }
@@ -203,7 +192,7 @@ impl IRequestHandler<RevokeRoleRequest, String> for RevokeRoleHandler {
         let affected = linq!(self.ctx.set::<RoleUser>(), |r: RoleUser| r.user_id == uid_q && r.role_id == rid_q)
             .execute_delete()
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
+            .map_ef()?;
 
         if affected > 0 {
             Ok(format!("Revoked role {} from user {}", rid, uid))
@@ -243,10 +232,10 @@ pub struct DeleteResourceHandler {
 #[async_trait]
 impl IRequestHandler<ListResourcesRequest, Vec<ResourceModel>> for ListResourcesHandler {
     async fn handle(&mut self, _: ListResourcesRequest) -> Result<Vec<ResourceModel>> {
-        let items = linq!(self.ctx.set::<Resource>(), |r: Resource| !r.is_deleted)
+        let items = linq!(self.ctx.set::<Resource>();)
             .to_list()
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
+            .map_ef()?;
 
         Ok(items.into_iter().map(ResourceModel::from).collect())
     }
@@ -265,10 +254,7 @@ impl IRequestHandler<CreateResourceRequest, ResourceModel> for CreateResourceHan
         let set = self.ctx.set::<Resource>();
         set.add(entity.clone());
 
-        self.ctx
-            .save_changes()
-            .await
-            .map_err(|e| Error::Internal(format!("Failed to create resource: {}", e)))?;
+        save_changes(&mut self.ctx).await?;
 
         Ok(entity.to_model())
     }
@@ -286,7 +272,7 @@ impl IRequestHandler<UpdateResourceRequest, ResourceModel> for UpdateResourceHan
             .query()
             .find(id.clone())
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?
+            .map_ef()?
             .ok_or_else(|| Error::NotFound("Resource not found".into()))?;
 
         let op = operator_id(req.claims.as_deref());
@@ -295,10 +281,7 @@ impl IRequestHandler<UpdateResourceRequest, ResourceModel> for UpdateResourceHan
         let set = self.ctx.set::<Resource>();
         set.update(res.clone());
 
-        self.ctx
-            .save_changes()
-            .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
+        save_changes(&mut self.ctx).await?;
 
         Ok(res.to_model())
     }
@@ -316,7 +299,7 @@ impl IRequestHandler<DeleteResourceRequest, String> for DeleteResourceHandler {
             .query()
             .find(id.clone())
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?
+            .map_ef()?
             .ok_or_else(|| Error::NotFound("Resource not found".into()))?;
 
         res.is_deleted = true;
@@ -326,10 +309,7 @@ impl IRequestHandler<DeleteResourceRequest, String> for DeleteResourceHandler {
         let set = self.ctx.set::<Resource>();
         set.update(res);
 
-        self.ctx
-            .save_changes()
-            .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
+        save_changes(&mut self.ctx).await?;
 
         Ok(format!("Deleted resource {}", id))
     }
@@ -365,7 +345,7 @@ impl IRequestHandler<ListAuthorizesRequest, Vec<AuthorizeModel>> for ListAuthori
             .query()
             .to_list()
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
+            .map_ef()?;
 
         Ok(items.into_iter().map(AuthorizeModel::from).collect())
     }
@@ -383,7 +363,7 @@ impl IRequestHandler<CreateAuthorizeRequest, AuthorizeModel> for CreateAuthorize
         let exists = linq!(self.ctx.set::<Authorize>(), |a: Authorize| a.role_id == exists_role && a.resource_id == exists_resource)
             .first_or_default()
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
+            .map_ef()?;
 
         if let Some(existing) = exists {
             return Ok(existing.to_model());
@@ -397,10 +377,7 @@ impl IRequestHandler<CreateAuthorizeRequest, AuthorizeModel> for CreateAuthorize
         let set = self.ctx.set::<Authorize>();
         set.add(entity.clone());
 
-        self.ctx
-            .save_changes()
-            .await
-            .map_err(|e| Error::Internal(format!("Failed to create authorize: {}", e)))?;
+        save_changes(&mut self.ctx).await?;
 
         Ok(entity.to_model())
     }
@@ -416,7 +393,7 @@ impl IRequestHandler<DeleteAuthorizeRequest, String> for DeleteAuthorizeHandler 
         let affected = linq!(self.ctx.set::<Authorize>(), |a: Authorize| a.id == q)
             .execute_delete()
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
+            .map_ef()?;
 
         if affected > 0 {
             Ok(format!("Deleted authorize {}", id))

@@ -17,6 +17,7 @@ use docbit_contracts::auth::*;
 use docbit_domain::entities::{PasswordResetToken, RoleUser, User};
 use docbit_domain::{new_id, seed_ids};
 
+use crate::db::{save_changes, EfResultExt};
 use crate::util::{now_secs, operator_id};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -51,24 +52,24 @@ fn create_token(user: &UserView) -> Result<String> {
     .map_err(|e| Error::Http(format!("Token creation failed: {}", e)))
 }
 
-/// 加载用户（含角色导航），按 email 过滤未删除记录。
+/// 加载用户（含角色导航），按 email 查询；全局过滤器排除已删除用户。
 async fn load_user_by_email(ctx: &mut DbContext, email: &str) -> Result<Option<User>> {
     let q = email.to_string();
-    let users = linq!(ctx.set::<User>(), |u: User| u.email == q && !u.is_deleted; include u.roles)
+    let users = linq!(ctx.set::<User>(), |u: User| u.email == q; include u.roles)
         .to_list()
         .await
-        .map_err(|e| Error::Internal(e.to_string()))?;
+        .map_ef()?;
 
     Ok(users.into_iter().next())
 }
 
-/// 加载用户（含角色导航），按 id 过滤未删除记录。
+/// 加载用户（含角色导航），按 id 查询；全局过滤器排除已删除用户。
 async fn load_user_by_id(ctx: &mut DbContext, id: &str) -> Result<Option<User>> {
     let q = id.to_string();
-    let users = linq!(ctx.set::<User>(), |u: User| u.id == q && !u.is_deleted; include u.roles)
+    let users = linq!(ctx.set::<User>(), |u: User| u.id == q; include u.roles)
         .to_list()
         .await
-        .map_err(|e| Error::Internal(e.to_string()))?;
+        .map_ef()?;
 
     Ok(users.into_iter().next())
 }
@@ -140,10 +141,7 @@ impl IRequestHandler<RegisterRequest, AuthResponse> for RegisterHandler {
         let role_users = self.ctx.set::<RoleUser>();
         role_users.add(role_user);
 
-        self.ctx
-            .save_changes()
-            .await
-            .map_err(|e| Error::Internal(format!("Failed to create user: {}", e)))?;
+        save_changes(&mut self.ctx).await?;
 
         let model = UserView {
             id: user_id,
@@ -240,10 +238,7 @@ impl IRequestHandler<ForgotPasswordRequest, ForgotPasswordResponse> for ForgotPa
         let set = self.ctx.set::<PasswordResetToken>();
         set.add(token_record);
 
-        self.ctx
-            .save_changes()
-            .await
-            .map_err(|e| Error::Internal(format!("Failed to create reset token: {}", e)))?;
+        save_changes(&mut self.ctx).await?;
 
         tracing::info!("[Auth] Password reset requested for {}", req.email);
         Ok(ForgotPasswordResponse {
@@ -268,7 +263,7 @@ impl IRequestHandler<ResetPasswordRequest, ResetPasswordResponse> for ResetPassw
         let mut record = linq!(self.ctx.set::<PasswordResetToken>(), |t: PasswordResetToken| t.token == q)
             .first_or_default()
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?
+            .map_ef()?
             .ok_or_else(|| Error::Http("Invalid or expired reset token".into()))?;
 
         if record.used != 0 {
@@ -296,10 +291,7 @@ impl IRequestHandler<ResetPasswordRequest, ResetPasswordResponse> for ResetPassw
         let tokens = self.ctx.set::<PasswordResetToken>();
         tokens.update(record);
 
-        self.ctx
-            .save_changes()
-            .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
+        save_changes(&mut self.ctx).await?;
 
         tracing::info!("[Auth] Password reset completed for user {}", user_id);
         Ok(ResetPasswordResponse {

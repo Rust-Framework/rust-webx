@@ -49,7 +49,7 @@ Host::builder()
 Host::builder()
     .add_authentication()
     .use_cors(config)
-    .use_memory_cache()
+    .add_memory_cache()
     .configure(|app| app.useOptions(|o| { ... }))
 ```
 

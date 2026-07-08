@@ -15,7 +15,7 @@ pub struct ProblemDetails {
     pub detail: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instance: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", flatten)]
     pub extensions: Option<HashMap<String, serde_json::Value>>,
 }
 

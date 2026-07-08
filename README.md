@@ -28,7 +28,7 @@ struct HelloHandler;
 #[async_trait]
 impl IRequestHandler<HelloRequest, String> for HelloHandler {
     async fn handle(&self, _req: HelloRequest) -> Result<String> {
-        Ok("Hello, World! Welcome to LRWF.".to_string())
+        Ok("Hello, World! Welcome to Rust WebX.".to_string())
     }
 }
 
@@ -36,7 +36,7 @@ impl IRequestHandler<HelloRequest, String> for HelloHandler {
 async fn main() {
     Host::builder()
         .build()
-        .run("0.0.0.0:5000")
+        .run()
         .await
         .expect("Server failed");
 }
@@ -46,47 +46,41 @@ async fn main() {
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│                   lrwf (umbrella)                        │
-│  重新导出所有 crate + re-export lrdi/async-trait/serde   │
+│                   rust-webx (umbrella)                   │
+│  重新导出 core / host / macros / spa / openapi + rust_dix│
 ├──────────┬──────────┬──────────┬─────────────────────────┤
-│lrwf-http │lrwf-     │lrwf-di   │ lrwf-macros             │
-│Host +    │mediator  │IService- │ #[get] #[post] #[put]   │
-│Pipeline  │IMediator │Collection│ #[delete] #[endpoint]    │
-│+ Router  │send/     │Ext       │ #[handler]               │
-│+ Context │publish   │          │ #[from_body]             │
-│+ auth_jwt│          │          │                          │
-│+ authz   │          │          │                          │
+│rust-webx-│rust-webx-│rust-webx-│ rust-webx-macros        │
+│host      │core      │openapi   │ #[get] #[post] #[handler]│
+│Host +    │traits +  │OpenAPI   │ #[authorize]             │
+│Pipeline  │config    │生成      │                          │
+│+ Router  │mediator  │          │                          │
 ├──────────┴──────────┴──────────┴─────────────────────────┤
-│                    lrwf-core                             │
-│  IHost / IHttpContext / IHttpRequest                      │
-│  IHttpResponse / IMiddleware / IRouter / IEndpoint       │
-│  IMediator / IRequest / IEventRequest / IRequestHandler  │
-│  IEventHandler / IPipelineBehavior / Error / HttpMethod  │
+│                    rust-webx-core                        │
+│  IHost / IHttpContext / IMiddleware / IRequestHandler    │
+│  IMediator / AppOptions / Error / AppMode                │
 └──────────────────────┬───────────────────────────────────┘
                        │
           ┌────────────┼────────────┐
           ▼            ▼            ▼
    ┌──────────┐ ┌──────────┐ ┌──────────┐
-   │   lrdi   │ │  hyper   │ │inventory │
-   │(DI 容器)  │ │(HTTP底层) │ │(编译时   │
-   └──────────┘ └──────────┘ │ 路由收集) │
-                             └──────────┘
+   │ rust-dix │ │  hyper   │ │inventory │
+   │ (DI)     │ │(HTTP)    │ │(路由收集) │
+   └──────────┘ └──────────┘ └──────────┘
 ```
 
 ### Crate 结构
 
 ```
-lrwf/
-├── Cargo.toml              # workspace root
-├── examples/
-│   └── hello_request.rs    # #[handler] 零配置样例
+rust-webx/
+├── Cargo.toml              # workspace root (v0.2.0)
+├── docbit/                 # 参考应用（作品集 + 博客 + RBAC）
 └── crates/
-    ├── lrwf-core/          # 核心 trait 定义（零实现依赖）
-    ├── lrwf-di/            # DI 扩展 + 编译时扫描类型
-    ├── lrwf-http/          # Host 构建器 + 管道 + 路由器 + HTTP 上下文
-    ├── lrwf-mediator/      # IMediator 实现 + 管道行为骨架
-    ├── lrwf-macros/        # 过程宏（路由快捷键/参数绑定/处理器注册）
-    └── lrwf/               # 伞 crate，统一导出所有类型
+    ├── core/               # rust-webx-core — trait 与配置
+    ├── host/               # rust-webx-host — Host、管道、路由
+    ├── macros/             # rust-webx-macros — 过程宏
+    ├── spa/                # rust-webx-spa — 静态资源 / SPA
+    ├── openapi/            # rust-webx-openapi — OpenAPI 生成
+    └── webx/               # rust-webx — 伞 crate
 ```
 
 ## 核心概念
@@ -135,8 +129,24 @@ IEndpoint::handle(ctx)
 HttpResponse → hyper::Response
     │  若 Err → 内置异常中间件映射状态码
     ▼
-JSON 响应: {"error": "msg", "status": code}
+JSON 响应: RFC 7807 application/problem+json（404/5xx）
 ```
+
+## 生产就绪能力
+
+| 能力 | 状态 |
+|------|------|
+| 优雅关闭（Ctrl+C / SIGTERM） | ✅ |
+| 连接 drain（Production 30s） | ✅ |
+| 健康检查 `/health` `/health/ready`（运行时探针，fail→503） | ✅ |
+| 安全响应头 + Request ID | ✅ 默认启用 |
+| JWT Production fail-fast | ✅ |
+| CORS `*` Production fail-fast | ✅ |
+| OpenAPI UI | Development 模式 only |
+| 速率限制 / 压缩 | 应用层 opt-in（`use_middleware`） |
+| TLS | ✅ 配置 `App.Urls` + `Tls.CertPath/KeyPath` |
+
+环境变量：`JWT_SECRET`、`APP__Jwt__Secret`、`APP__*` 覆盖 appsettings。详见 `docs/rust-webx/`。
 
 ## 异常映射
 
@@ -151,40 +161,28 @@ JSON 响应: {"error": "msg", "status": code}
 | `Error::Message(msg)` | 500 | 通用错误消息 |
 | `Error::Routing(msg)` | 404 | 路由错误 |
 
-## 示例
+## 示例应用
 
-| 示例 | 路径 | 说明 |
-|------|------|------|
-| hello_request | `examples/hello_request.rs` | Hello World API，演示 `#[get]` + `#[handler]` 零配置自动注册 |
-| auth_example | `examples/auth_example.rs` | JWT 认证 + 资源授权，演示 jwt_middleware + resource_auth_middleware |
-
-### 运行示例
+参考应用 **docbit**（`docbit/host`）演示 rust-ef 集成、JWT、RBAC、SPA 托管：
 
 ```bash
-# Hello World
-cargo run --example hello_request
-# 访问: http://localhost:5000/hello
-
-# CRUD API
-cargo run --example crud_controller
-# GET    /api/users
-# GET    /api/users/{id}
-# POST   /api/users  (JSON body)
-# DELETE /api/users/{id}
+cargo run -p docbit-host
+# http://localhost:5000
 ```
+
+生产部署见 `docbit/PRODUCTION.md`。
 
 ## 依赖
 
 | Package | 版本 | 用途 |
 |---------|------|------|
-| `lrdi` | 0.1 | DI 容器 |
+| `rust-dix` | 0.6 | DI 容器 |
+| `rust-ef` | 1.5.1 | ORM（可选，docbit 使用） |
 | `hyper` | 1 | HTTP 服务器 |
 | `tokio` | 1 | 异步运行时 |
 | `serde` / `serde_json` | 1 | 序列化 |
-| `async-trait` | 0.1 | async trait 支持 |
 | `inventory` | 0.3 | 编译时路由收集 |
-| `jsonwebtoken` | 9 | JWT 认证支持 |
-| `thiserror` | 2 | 错误类型派生 |
+| `jsonwebtoken` | 9 | JWT 认证 |
 
 ## 许可证
 

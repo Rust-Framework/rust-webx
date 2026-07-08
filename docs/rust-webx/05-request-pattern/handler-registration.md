@@ -55,7 +55,7 @@ Host::builder()
 Docbit 推荐的生产模式：
 
 ```rust
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<LoginRequest, AuthResponse>)]
+#[inject]
 pub struct LoginHandler {
     ctx: Arc<Mutex<DbContext>>,
 }

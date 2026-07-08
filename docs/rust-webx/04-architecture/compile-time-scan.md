@@ -75,7 +75,7 @@ svc.singleton::<dyn IRequestHandler<HelloRequest, String>>(
 当 Handler 需要 DI 注入时：
 
 ```rust
-#[rust_dicore::inject_attr(singleton, as = dyn IRequestHandler<LoginRequest, AuthResponse>)]
+#[inject]
 pub struct LoginHandler {
     ctx: Arc<Mutex<DbContext>>,
 }

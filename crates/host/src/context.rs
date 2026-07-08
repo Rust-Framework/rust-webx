@@ -6,6 +6,8 @@ use hyper::Request;
 use rust_webx_core::auth::IClaims;
 use rust_webx_core::error::Result;
 use rust_webx_core::http::{IClaimsExt, IHttpContext, IHttpRequest, IHttpResponse};
+
+use crate::problem_response::{build_problem, problem_to_bytes};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -85,15 +87,15 @@ impl HttpContext {
 
         if payload_too_large {
             resp.set_status(413);
-            let error_body = serde_json::json!({
-                "error": "Request body exceeds maximum allowed size",
-                "status": 413
-            });
-            if let Ok(json) = serde_json::to_vec(&error_body) {
-                resp.body = Some(json);
-            }
-            resp.headers
-                .insert("content-type".to_string(), "application/json".to_string());
+            let problem = build_problem(
+                413,
+                "Request body exceeds maximum allowed size",
+            );
+            resp.body = Some(problem_to_bytes(&problem));
+            resp.headers.insert(
+                "content-type".to_string(),
+                "application/problem+json".to_string(),
+            );
         }
 
         Self {

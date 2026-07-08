@@ -224,7 +224,7 @@ async fn integration_health_with_failing_probe_returns_fail() {
         .await
         .unwrap();
 
-    assert_eq!(resp.status().as_u16(), 200);
+    assert_eq!(resp.status().as_u16(), 503);
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["status"], "fail");
     let checks = body["checks"].as_array().expect("checks array present");
@@ -232,6 +232,35 @@ async fn integration_health_with_failing_probe_returns_fail() {
     assert_eq!(checks[0]["name"], "db");
     assert_eq!(checks[0]["status"], "fail");
     assert_eq!(checks[0]["detail"], "db unreachable");
+}
+
+#[tokio::test]
+async fn integration_health_probe_evaluated_at_request_time() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let healthy = Arc::new(AtomicBool::new(true));
+    let flag = Arc::clone(&healthy);
+    let port = find_free_port();
+    spawn_test_host_with(port, move |b| {
+        b.add_health_check("db", move || {
+            if flag.load(Ordering::Relaxed) {
+                rust_webx_host::health::HealthStatus::pass()
+            } else {
+                rust_webx_host::health::HealthStatus::fail("db down")
+            }
+        })
+    })
+    .await;
+
+    let url = format!("http://127.0.0.1:{}/health", port);
+    let ok = reqwest::get(&url).await.unwrap();
+    assert_eq!(ok.status().as_u16(), 200);
+
+    healthy.store(false, Ordering::Relaxed);
+    let fail = reqwest::get(&url).await.unwrap();
+    assert_eq!(fail.status().as_u16(), 503);
+    let body: serde_json::Value = fail.json().await.unwrap();
+    assert_eq!(body["status"], "fail");
 }
 
 // ---------------------------------------------------------------------------
@@ -367,6 +396,16 @@ async fn integration_rate_limit_returns_429_when_exceeded() {
         .await
         .unwrap();
     assert_eq!(r3.status().as_u16(), 429);
+    let ct = r3
+        .headers()
+        .get("content-type")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(ct.contains("application/problem+json"));
+    let body: serde_json::Value = r3.json().await.unwrap();
+    assert_eq!(body["status"], 429);
+    assert_eq!(body["title"], "Too Many Requests");
 }
 
 #[tokio::test]

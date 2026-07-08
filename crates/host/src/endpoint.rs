@@ -7,6 +7,8 @@ use serde_json;
 use std::sync::Arc;
 
 use crate::authz::AuthorizerSet;
+use crate::problem_response::{write_forbidden, write_problem};
+use std::collections::HashMap;
 
 /// Endpoint that wraps a boxed async handler.
 #[allow(clippy::type_complexity)]
@@ -89,18 +91,7 @@ impl IEndpoint for StubEndpoint {
             if !self.auth_required_role.is_empty() {
                 match ctx.claims() {
                     None => {
-                        ctx.response_mut().set_status(401);
-                        ctx.response_mut()
-                            .set_header("content-type", "application/json");
-                        ctx.response_mut()
-                            .write_bytes(
-                                serde_json::to_vec(&serde_json::json!({
-                                    "error": "Authentication required",
-                                    "status": 401
-                                }))
-                                .unwrap_or_default(),
-                            )
-                            .await?;
+                        write_problem(ctx, 401, "Authentication required").await;
                         return Ok(());
                     }
                     Some(claims) => {
@@ -110,19 +101,17 @@ impl IEndpoint for StubEndpoint {
                                 .iter()
                                 .any(|r| r.as_str() == self.auth_required_role)
                         {
-                            ctx.response_mut().set_status(403);
-                            ctx.response_mut()
-                                .set_header("content-type", "application/json");
-                            ctx.response_mut()
-                                .write_bytes(
-                                    serde_json::to_vec(&serde_json::json!({
-                                        "error": "Forbidden: insufficient permissions",
-                                        "status": 403,
-                                        "required_role": self.auth_required_role,
-                                    }))
-                                    .unwrap_or_default(),
-                                )
-                                .await?;
+                            let mut ext = HashMap::new();
+                            ext.insert(
+                                "required_role".into(),
+                                serde_json::Value::String(self.auth_required_role.to_string()),
+                            );
+                            write_forbidden(
+                                ctx,
+                                "Forbidden: insufficient permissions",
+                                ext,
+                            )
+                            .await;
                             return Ok(());
                         }
                     }

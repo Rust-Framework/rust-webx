@@ -63,7 +63,7 @@ async fn main() {
         })
         .use_spa("wwwroot")      // 可选：SPA 静态托管
         .add_authentication()              // 可选：JWT 认证
-        .use_memory_cache()      // 可选：分布式缓存
+        .add_memory_cache()      // 可选：分布式缓存
         .build()
         .run()
         .await

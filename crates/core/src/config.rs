@@ -176,10 +176,24 @@ pub fn load_appsettings(mode: AppMode) -> Option<serde_json::Value> {
         merge_json(&mut base, overlay);
     }
 
+    // Well-known env vars (JWT_SECRET) — applied before APP__ so APP__Jwt__Secret wins.
+    apply_well_known_env_overrides(&mut base);
+
     // Apply environment variable overrides (APP__Section__Key pattern)
     apply_env_overrides(&mut base);
 
     Some(base)
+}
+
+/// Apply conventional environment variables that map to config sections.
+///
+/// `JWT_SECRET` → `Jwt.Secret` (overridden by `APP__Jwt__Secret` if set).
+fn apply_well_known_env_overrides(config: &mut serde_json::Value) {
+    if let Ok(secret) = std::env::var("JWT_SECRET") {
+        if !secret.is_empty() {
+            set_json_value(config, &["Jwt", "Secret"], &secret);
+        }
+    }
 }
 
 /// Apply environment variable overrides following the `APP__Section__Key` pattern.

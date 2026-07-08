@@ -1,0 +1,42 @@
+# Local production-like stack for docbit.
+# Usage (from repo root):
+#   cp docbit/.env.example docbit/.env   # edit JWT_SECRET + MYSQL_PASSWORD
+#   docker compose -f docbit/docker-compose.yml --env-file docbit/.env up --build
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-changeme}
+      MYSQL_DATABASE: docbit
+    volumes:
+      - docbit_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p${MYSQL_ROOT_PASSWORD:-changeme}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  docbit:
+    build:
+      context: ..
+      dockerfile: docbit/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${DOCBIT_PORT:-8100}:8100"
+    environment:
+      APP_ENV: Production
+      DATABASE_URL: mysql://root:${MYSQL_ROOT_PASSWORD:-changeme}@mysql:3306/docbit
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in docbit/.env (min 32 chars)}
+      APP__App__Urls: '["http://0.0.0.0:8100"]'
+    volumes:
+      - docbit_docs:/app/docs
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+volumes:
+  docbit_mysql_data:
+  docbit_docs:

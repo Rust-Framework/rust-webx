@@ -1,6 +1,6 @@
 //! Category contracts — hierarchical categories with tree response.
 
-use rust_webapp::*;
+use rust_webx::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

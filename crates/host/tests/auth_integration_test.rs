@@ -6,7 +6,7 @@
 use std::net::TcpListener;
 
 use jsonwebtoken::{EncodingKey, Header};
-use rust_webapp::*;
+use rust_webx::*;
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -120,8 +120,8 @@ fn find_free_port() -> u16 {
 
 async fn spawn_auth_host(port: u16) {
     let addr = format!("127.0.0.1:{}", port);
-    let builder = rust_webapp_host::server::Host::builder()
-        .mode(rust_webapp_core::mode::AppMode::Development)
+    let builder = rust_webx_host::server::Host::builder()
+        .mode(rust_webx_core::mode::AppMode::Development)
         .no_spa()
         .add_authentication()
         .configure(|b| {

@@ -4,7 +4,7 @@
 //! a rich OpenAPI JSON document with parameters, request bodies,
 //! response schemas, and summaries.
 
-use rust_webapp_core::route::scan::RouteEntry;
+use rust_webx_core::route::scan::RouteEntry;
 use serde_json::{json, Value as JsonValue};
 use std::collections::BTreeSet;
 

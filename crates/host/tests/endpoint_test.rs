@@ -1,16 +1,16 @@
-﻿//! Tests for StubEndpoint authorization checks and dispatch lifecycle.
+//! Tests for StubEndpoint authorization checks and dispatch lifecycle.
 //!
 //! Uses the mock `TestHttpContext` from `test_utils.rs`.
 
 mod test_utils;
 
-use rust_webapp_core::auth::{IClaims, IDynamicAuthorizer};
-use rust_webapp_core::route::scan::ResponseData;
-use rust_webapp_core::error::{Error, Result as LrwfResult};
-use rust_webapp_core::http::{IClaimsExt, IHttpContext};
-use rust_webapp_core::routing::IEndpoint;
-use rust_webapp_host::authz::AuthorizerSet;
-use rust_webapp_host::endpoint::StubEndpoint;
+use rust_webx_core::auth::{IClaims, IDynamicAuthorizer};
+use rust_webx_core::route::scan::ResponseData;
+use rust_webx_core::error::{Error, Result as LrwfResult};
+use rust_webx_core::http::{IClaimsExt, IHttpContext};
+use rust_webx_core::routing::IEndpoint;
+use rust_webx_host::authz::AuthorizerSet;
+use rust_webx_host::endpoint::StubEndpoint;
 use std::collections::HashMap;
 use std::sync::Arc;
 

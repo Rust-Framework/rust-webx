@@ -1,6 +1,6 @@
 //! Exhibition contracts — replaces work.rs; stores INDEX.json metadata for searchability.
 
-use rust_webapp::*;
+use rust_webx::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

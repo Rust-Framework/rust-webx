@@ -1,9 +1,9 @@
-﻿mod test_utils;
+mod test_utils;
 
-use rust_webapp_core::error::Result as LrwfResult;
-use rust_webapp_core::http::IHttpContext;
-use rust_webapp_core::routing::{HttpMethod, IEndpoint, IRouter};
-use rust_webapp_host::router::Router;
+use rust_webx_core::error::Result as LrwfResult;
+use rust_webx_core::http::IHttpContext;
+use rust_webx_core::routing::{HttpMethod, IEndpoint, IRouter};
+use rust_webx_host::router::Router;
 use std::sync::Arc;
 
 struct TestEndpoint {

@@ -1,9 +1,9 @@
-﻿//! Tests for MemoryCache implementing IDistributedCache.
+//! Tests for MemoryCache implementing IDistributedCache.
 
-use rust_webapp_core::cache::{
+use rust_webx_core::cache::{
     DistributedCacheEntryOptions, DistributedCacheExtensions, IDistributedCache,
 };
-use rust_webapp_host::memory_cache::MemoryCache;
+use rust_webx_host::memory_cache::MemoryCache;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 

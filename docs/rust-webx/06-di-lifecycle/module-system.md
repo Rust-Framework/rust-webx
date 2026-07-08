@@ -41,12 +41,12 @@ pub struct NotificationService {
 
 自动为 struct 生成 DI 注册代码。
 
-## 与 rust-webapp 集成
+## 与 rust-webx 集成
 
 伞 Crate 重新导出 DI 工具：
 
 ```rust
-use rust_webapp::{inject, inject_attr, module, Inject};
+use rust_webx::{inject, inject_attr, module, Inject};
 ```
 
 在 Handler 中：

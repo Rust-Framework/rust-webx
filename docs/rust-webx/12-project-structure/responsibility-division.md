@@ -46,7 +46,7 @@
 - 存在独立 `services/` 目录 → 接口应并入 contracts，实现并入 handlers
 - Handler 超过 80 行 → 逻辑下沉到 Service 实现
 - Handler 注入 `Arc<ConcreteService>` → 应改为 `Arc<dyn I…Service>`
-- domain 中 `use rust_webapp::*` → 领域被污染
+- domain 中 `use rust_webx::*` → 领域被污染
 
 ## 小结
 

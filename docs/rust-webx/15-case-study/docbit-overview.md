@@ -2,7 +2,7 @@
 
 ## 是什么
 
-Docbit 是基于 rust-webapp 构建的**开发者作品集全栈站点**，展示框架的生产级能力：
+Docbit 是基于 rust-webx 构建的**开发者作品集全栈站点**，展示框架的生产级能力：
 
 - 作品集展示（Works）
 - 技术博客（Blog）
@@ -25,7 +25,7 @@ Docbit 是基于 rust-webapp 构建的**开发者作品集全栈站点**，展�
 
 | 层 | 技术 |
 |----|------|
-| 框架 | rust-webapp |
+| 框架 | rust-webx |
 | 数据库 | rust-ef + SQLite |
 | 认证 | JWT + bcrypt |
 | 前端 | 原生 HTML/CSS/JS（wwwroot） |
@@ -44,7 +44,7 @@ Docbit 的 `DocService` 扫描仓库根目录 `docs/`：
 
 ```
 docs/
-└── rust-webapp/          ← 本书
+└── rust-webx/          ← 本书
     ├── FOREWORD.md
     ├── INDEX.md
     ├── INDEX.json
@@ -55,8 +55,8 @@ docs/
 
 API：
 - `GET /api/docs` — 列出所有文档作品
-- `GET /api/docs/rust-webapp/index` — 获取目录树
-- `GET /api/docs/rust-webapp/content/{path}` — 获取 Markdown 内容
+- `GET /api/docs/rust-webx/index` — 获取目录树
+- `GET /api/docs/rust-webx/content/{path}` — 获取 Markdown 内容
 
 ## 小结
 

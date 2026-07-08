@@ -7,7 +7,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use rust_webapp_host::auth_jwt::{JwtAuth, jwt_middleware};
+//! use rust_webx_host::auth_jwt::{JwtAuth, jwt_middleware};
 //! use jsonwebtoken::{DecodingKey, Validation};
 //!
 //! let auth = JwtAuth::new(
@@ -18,10 +18,10 @@
 //! ```
 
 use jsonwebtoken::{decode, DecodingKey, Validation};
-use rust_webapp_core::auth::{IAuthenticationHandler, IClaims};
-use rust_webapp_core::error::Result;
-use rust_webapp_core::http::IHttpContext;
-use rust_webapp_core::middleware::IMiddleware;
+use rust_webx_core::auth::{IAuthenticationHandler, IClaims};
+use rust_webx_core::error::Result;
+use rust_webx_core::http::IHttpContext;
+use rust_webx_core::middleware::IMiddleware;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ops::ControlFlow;

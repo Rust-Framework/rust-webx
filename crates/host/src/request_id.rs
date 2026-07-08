@@ -1,8 +1,8 @@
 //! Request ID middleware —injects a unique `x-request-id` header into every response.
 
-use rust_webapp_core::error::Result;
-use rust_webapp_core::http::IHttpContext;
-use rust_webapp_core::middleware::IMiddleware;
+use rust_webx_core::error::Result;
+use rust_webx_core::http::IHttpContext;
+use rust_webx_core::middleware::IMiddleware;
 use std::ops::ControlFlow;
 use uuid::Uuid;
 

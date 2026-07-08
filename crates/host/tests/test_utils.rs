@@ -5,8 +5,8 @@
 
 #![allow(dead_code)]
 
-use rust_webapp_core::auth::IClaims;
-use rust_webapp_core::http::{IClaimsExt, IHttpContext, IHttpRequest, IHttpResponse};
+use rust_webx_core::auth::IClaims;
+use rust_webx_core::http::{IClaimsExt, IHttpContext, IHttpRequest, IHttpResponse};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -131,13 +131,13 @@ impl IHttpRequest for TestHttpRequest {
         &mut self.route_pattern
     }
 
-    async fn body_bytes(&self) -> rust_webapp_core::error::Result<Vec<u8>> {
+    async fn body_bytes(&self) -> rust_webx_core::error::Result<Vec<u8>> {
         Ok(self.body_bytes.clone())
     }
 
-    async fn body_text(&self) -> rust_webapp_core::error::Result<String> {
+    async fn body_text(&self) -> rust_webx_core::error::Result<String> {
         String::from_utf8(self.body_bytes.clone())
-            .map_err(|e| rust_webapp_core::error::Error::Http(e.to_string()))
+            .map_err(|e| rust_webx_core::error::Error::Http(e.to_string()))
     }
 }
 
@@ -167,12 +167,12 @@ impl IHttpResponse for TestHttpResponse {
         self.headers.push((key.to_string(), value.to_string()));
     }
 
-    async fn write_bytes(&mut self, data: Vec<u8>) -> rust_webapp_core::error::Result<()> {
+    async fn write_bytes(&mut self, data: Vec<u8>) -> rust_webx_core::error::Result<()> {
         self.body = Some(data);
         Ok(())
     }
 
-    async fn write_text(&mut self, text: &str) -> rust_webapp_core::error::Result<()> {
+    async fn write_text(&mut self, text: &str) -> rust_webx_core::error::Result<()> {
         self.body = Some(text.as_bytes().to_vec());
         Ok(())
     }

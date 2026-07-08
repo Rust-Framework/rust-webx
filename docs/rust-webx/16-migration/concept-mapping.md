@@ -1,8 +1,8 @@
 # 概念对照表
 
-## ASP.NET Core ↔ rust-webapp
+## ASP.NET Core ↔ rust-webx
 
-| ASP.NET Core | rust-webapp | 说明 |
+| ASP.NET Core | rust-webx | 说明 |
 |-------------|-------------|------|
 | `Program.cs` / `Startup.cs` | `Host::builder()` | 应用入口 |
 | `IServiceCollection` | `ServiceCollection` | DI 注册 |
@@ -35,9 +35,9 @@
 | `BadRequest()` | `Error::Validation` | 400 |
 | `IApplicationBuilder` | `HostBuilder`（含 `use_middleware`） | 应用配置 |
 
-## Axum ↔ rust-webapp
+## Axum ↔ rust-webx
 
-| Axum | rust-webapp | 说明 |
+| Axum | rust-webx | 说明 |
 |------|-------------|------|
 | `Router::new().route()` | `#[get]` / `#[post]` | 路由定义 |
 | `handler function` | `IRequestHandler` | 处理器 |
@@ -52,7 +52,7 @@
 
 ## 生态对照
 
-| 需求 | ASP.NET Core | Axum | rust-webapp |
+| 需求 | ASP.NET Core | Axum | rust-webx |
 |------|-------------|------|-------------|
 | DI | 内置 | 手动/第三方 | rust-dicore |
 | ORM | EF Core | sqlx/sea-orm | 用户自选 |
@@ -67,6 +67,6 @@
 
 ---
 
-**恭喜读完 rust-webapp 开发者手册！**
+**恭喜读完 rust-webx 开发者手册！**
 
 回到 [目录](../INDEX.md) 查阅具体章节，或运行 `cargo run -p docbit` 开始实践。

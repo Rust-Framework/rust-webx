@@ -8,7 +8,7 @@
 //!
 //! 中介者模式下不需要 IBlogService 抽象 —— handler 直接使用 DbContext。
 
-use rust_webapp::*;
+use rust_webx::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

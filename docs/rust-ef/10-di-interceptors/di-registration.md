@@ -1,6 +1,6 @@
-# rust-dicore 集成与注册模�?
+# rust-dicore 集成与注册模�?
 
-`rust-ef` �?`rust-dicore` DI 容器深度集成，支持构造函数注入和接口解析�?
+`rust-ef` �?`rust-dicore` DI 容器深度集成，支持构造函数注入和接口解析�?
 
 ## 基础注册
 
@@ -17,14 +17,14 @@ let provider = ServiceCollection::new()
     .build()
     .unwrap();
 
-// 解析�?trait object
+// 解析�?trait object
 let ctx: Arc<dyn IDbContext> = provider.get();
 ```
 
-## �?Handler 中注�?
+## �?Handler 中注�?
 
 ```rust
-use rust_webapp::*;
+use rust_webx::*;
 use rust_ef::db_context::IDbContext;
 use std::sync::Arc;
 
@@ -36,8 +36,8 @@ pub struct ListBlogsHandler {
 #[async_trait]
 impl IRequestHandler<ListBlogsRequest, Vec<BlogDto>> for ListBlogsHandler {
     async fn handle(&self, _req: ListBlogsRequest) -> Result<Vec<BlogDto>> {
-        // 注意：IDbContext �?object-safe，但 set() 需�?&mut DbContext
-        // 实际使用时可向下转换或封�?Repository
+        // 注意：IDbContext �?object-safe，但 set() 需�?&mut DbContext
+        // 实际使用时可向下转换或封�?Repository
         Ok(vec![])
     }
 }
@@ -63,8 +63,8 @@ impl BlogRepository {
 
 | 实践 | 说明 |
 |------|------|
-| `Arc<dyn IDbContext>` 适合跨层传�?| object-safe，可�?trait 边界中使�?|
-| 实际查询时需�?`&mut DbContext` | 考虑�?Service/Repository 层持有具体类�?|
-| 每个请求一�?DbContext | 避免长生命周期导致的并发问题 |
+| `Arc<dyn IDbContext>` 适合跨层传�?| object-safe，可�?trait 边界中使�?|
+| 实际查询时需�?`&mut DbContext` | 考虑�?Service/Repository 层持有具体类�?|
+| 每个请求一�?DbContext | 避免长生命周期导致的并发问题 |
 
 下一节：[多数据库 Keyed 注册](keyed-databases.md)

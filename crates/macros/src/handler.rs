@@ -51,7 +51,7 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     // Choose factory body: DI injection vs Default
     //
-    // `__rdi_construct_<Handler>(resolver)` returns `Arc<Handler>` (per rust-dicore 0.5).
+    // `__rdi_construct_<Handler>(resolver)` returns `Arc<Handler>` (per rust-dix 0.6).
     // The Arc is freshly created inside the constructor, so refcount == 1 and
     // `Arc::try_unwrap` succeeds — yielding an owned `Handler` that supports
     // `handle(&mut self, ...)`.
@@ -78,7 +78,7 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         #[doc(hidden)]
         fn #factory_fn(
-            resolver: &dyn ::rust_webapp::rust_dicore::IServiceResolver,
+            resolver: &dyn ::rust_webx::rust_dix::IServiceResolver,
         ) -> ::std::boxed::Box<dyn ::std::any::Any + Send> {
             #factory_body
         }
@@ -87,7 +87,7 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
         fn #call_fn(
             handler: ::std::boxed::Box<dyn ::std::any::Any + Send>,
             request: ::std::boxed::Box<dyn ::std::any::Any + Send>,
-        ) -> ::std::pin::Pin<Box<dyn ::std::future::Future<Output = ::rust_webapp::Result<::std::boxed::Box<dyn ::std::any::Any + Send>>> + Send>> {
+        ) -> ::std::pin::Pin<Box<dyn ::std::future::Future<Output = ::rust_webx::Result<::std::boxed::Box<dyn ::std::any::Any + Send>>> + Send>> {
             Box::pin(async move {
                 let mut h = *handler
                     .downcast::<#handler_ty>()
@@ -101,7 +101,7 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
 
         ::inventory::submit! {
-            ::rust_webapp::HandlerRegistration {
+            ::rust_webx::HandlerRegistration {
                 req_type_name: #req_ty_name,
                 factory: #factory_fn,
                 call: #call_fn,

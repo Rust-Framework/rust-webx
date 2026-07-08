@@ -2,7 +2,7 @@
 
 ## Error 类型
 
-框架统一错误类型 `rust_webapp::Error`：
+框架统一错误类型 `rust_webx::Error`：
 
 ```rust
 pub enum Error {
@@ -70,7 +70,7 @@ let data = self.external_api.fetch().await
 框架支持标准化问题详情：
 
 ```rust
-use rust_webapp::{ProblemDetails, FieldError};
+use rust_webx::{ProblemDetails, FieldError};
 
 let problem = ProblemDetails::validation_error()
     .with_title("Validation failed")

@@ -7,14 +7,14 @@
 ## Current State（已验证）
 
 ### 已完成 ✅
-- [crates/host/src/auth_jwt.rs](file:///e:/GitCode/RF/rust-webapp/crates/host/src/auth_jwt.rs)
+- [crates/host/src/auth_jwt.rs](file:///e:/GitCode/RF/rust-webx/crates/host/src/auth_jwt.rs)
   - L163-166：`authenticate` 解码失败返 `Ok(None)`（不再返 `Err`）
   - L213-215：`init_jwt_secret` 幂等化（`let _ = JWT_ENCODING_SECRET.set(...)`）
   - 文档注释已从 `# Panics` 改为 `Idempotent: subsequent calls are no-ops`
 
 ### 待执行（本 plan 范围）
 - 改动 2：调整 `auth_test.rs` 3 处 `is_err()` 断言
-- 改动 3：`Cargo.toml` 加 `rust-webapp` dev-dep
+- 改动 3：`Cargo.toml` 加 `rust-webx` dev-dep
 - 改动 4：新增 `auth_integration_test.rs`（5 个 JWT 端到端测试）
 - 改动 5：扩展 `IHttpResponse` trait（`body_bytes()` + `header()` 默认方法）
 - 改动 6：`HttpResponse` 实现真实 `body_bytes` + `header`
@@ -26,7 +26,7 @@
 
 ### 改动 2：调整 auth_test.rs 断言
 
-**文件**：[crates/host/tests/auth_test.rs](file:///e:/GitCode/RF/rust-webapp/crates/host/tests/auth_test.rs)
+**文件**：[crates/host/tests/auth_test.rs](file:///e:/GitCode/RF/rust-webx/crates/host/tests/auth_test.rs)
 
 **为什么**：改动 1 让解码失败返 `Ok(None)`，原 `is_err()` 断言会失败。
 
@@ -44,26 +44,26 @@
    - 测试名改为 `auth_expired_token_returns_none`
    - L145：`assert!(result.is_err(), "Expired token should be rejected")` → `assert!(result.unwrap().is_none(), "Expired token should return None")`
 
-**验证**：`cargo test -p rust-webapp-host --test auth_test` 全部通过。
+**验证**：`cargo test -p rust-webx-host --test auth_test` 全部通过。
 
 ---
 
-### 改动 3：Cargo.toml 加 rust-webapp dev-dep
+### 改动 3：Cargo.toml 加 rust-webx dev-dep
 
-**文件**：[crates/host/Cargo.toml](file:///e:/GitCode/RF/rust-webapp/crates/host/Cargo.toml) L40 后
+**文件**：[crates/host/Cargo.toml](file:///e:/GitCode/RF/rust-webx/crates/host/Cargo.toml) L40 后
 
-**为什么**：`#[get]`/`#[handler]` 宏生成 `::rust_webapp::RouteEntry`/`::rust_webapp::HttpMethod`/`::rust_webapp::HandlerCache` 等路径（已通过 Grep 确认 [crates/macros/src/endpoint.rs](file:///e:/GitCode/RF/rust-webapp/crates/macros/src/endpoint.rs) L130/131/225），test crate 必须依赖 umbrella crate 才能解析。
+**为什么**：`#[get]`/`#[handler]` 宏生成 `::rust_webx::RouteEntry`/`::rust_webx::HttpMethod`/`::rust_webx::HandlerCache` 等路径（已通过 Grep 确认 [crates/macros/src/endpoint.rs](file:///e:/GitCode/RF/rust-webx/crates/macros/src/endpoint.rs) L130/131/225），test crate 必须依赖 umbrella crate 才能解析。
 
 **实现**：`[dev-dependencies]` 段末尾追加：
 ```toml
-rust-webapp.workspace = true
+rust-webx.workspace = true
 ```
 
 ---
 
 ### 改动 4：新增 auth_integration_test.rs
 
-**文件**：新增 [crates/host/tests/auth_integration_test.rs](file:///e:/GitCode/RF/rust-webapp/crates/host/tests/auth_integration_test.rs)
+**文件**：新增 [crates/host/tests/auth_integration_test.rs](file:///e:/GitCode/RF/rust-webx/crates/host/tests/auth_integration_test.rs)
 
 **为什么**：验证 JWT 中间件 + `#[authorize]` 宏 + StubEndpoint 401/403 路径的端到端正确性。当前 `auth_test.rs` 仅单元测试 `JwtAuth`，未覆盖 HTTP 端到端路径。
 
@@ -76,13 +76,13 @@ rust-webapp.workspace = true
 #[derive(serde::Serialize, serde::Deserialize)]
 struct ProtectedReq;
 
-#[rust_webapp::get("/protected")]
-#[rust_webapp::authorize(role = "admin")]
+#[rust_webx::get("/protected")]
+#[rust_webx::authorize(role = "admin")]
 struct ProtectedHandler;
 
-#[rust_webapp::handler]
+#[rust_webx::handler]
 impl ProtectedHandler {
-    async fn handle(&self, _req: ProtectedReq) -> rust_webapp::Result<String> {
+    async fn handle(&self, _req: ProtectedReq) -> rust_webx::Result<String> {
         Ok("admin-area".to_string())
     }
 }
@@ -90,13 +90,13 @@ impl ProtectedHandler {
 #[derive(serde::Serialize, serde::Deserialize)]
 struct MeReq;
 
-#[rust_webapp::get("/me")]
-#[rust_webapp::authorize]
+#[rust_webx::get("/me")]
+#[rust_webx::authorize]
 struct MeHandler;
 
-#[rust_webapp::handler]
+#[rust_webx::handler]
 impl MeHandler {
-    async fn handle(&self, _req: MeReq) -> rust_webapp::Result<String> {
+    async fn handle(&self, _req: MeReq) -> rust_webx::Result<String> {
         Ok("authenticated".to_string())
     }
 }
@@ -108,8 +108,8 @@ async fn spawn_auth_host(port: u16) {
     let addr = format!("127.0.0.1:{}", port);
     // 双下划线分段配置：Jwt__Secret → APP__Jwt__Secret 环境变量
     std::env::set_var("APP__Jwt__Secret", "test-secret-key-for-integration");
-    let builder = rust_webapp_host::server::Host::builder()
-        .mode(rust_webapp_core::mode::AppMode::Development)
+    let builder = rust_webx_host::server::Host::builder()
+        .mode(rust_webx_core::mode::AppMode::Development)
         .no_spa()
         .add_authentication();
     let host = builder.build();
@@ -125,13 +125,13 @@ async fn spawn_auth_host(port: u16) {
    - `auth_expired_token_returns_401`：GET /protected + 过期 token → 401
    - `auth_authenticated_only_returns_200`：GET /me + 有效 token（无角色要求）→ 200
 
-**验证**：`cargo test -p rust-webapp-host --test auth_integration_test` 5 个测试通过。
+**验证**：`cargo test -p rust-webx-host --test auth_integration_test` 5 个测试通过。
 
 ---
 
 ### 改动 5：扩展 IHttpResponse trait
 
-**文件**：[crates/core/src/http.rs](file:///e:/GitCode/RF/rust-webapp/crates/core/src/http.rs) L104-123
+**文件**：[crates/core/src/http.rs](file:///e:/GitCode/RF/rust-webx/crates/core/src/http.rs) L104-123
 
 **为什么**：CompressionMiddleware 需在 after hook 读取已写入的响应体 + content-type 头。当前 trait 有 `set_header` 但无 `header()` 读方法，有 `write_bytes` 但无 `body_bytes()` 读方法。与 `IHttpRequest::body_bytes`/`IHttpRequest::header` 对称扩展。
 
@@ -163,7 +163,7 @@ pub trait IHttpResponse: Send {
 
 ### 改动 6：HttpResponse 实现真实 body_bytes + header
 
-**文件**：[crates/host/src/context.rs](file:///e:/GitCode/RF/rust-webapp/crates/host/src/context.rs) L240-266 HttpResponse impl 块
+**文件**：[crates/host/src/context.rs](file:///e:/GitCode/RF/rust-webx/crates/host/src/context.rs) L240-266 HttpResponse impl 块
 
 **为什么**：生产 impl 需提供真实读取能力，供 CompressionMiddleware after hook 使用。
 
@@ -184,7 +184,7 @@ fn header(&self, key: &str) -> Option<&str> {
 
 ### 改动 7：TestHttpResponse 实现真实 body_bytes + header
 
-**文件**：[crates/host/tests/test_utils.rs](file:///e:/GitCode/RF/rust-webapp/crates/host/tests/test_utils.rs) L152-179 TestHttpResponse impl 块
+**文件**：[crates/host/tests/test_utils.rs](file:///e:/GitCode/RF/rust-webx/crates/host/tests/test_utils.rs) L152-179 TestHttpResponse impl 块
 
 **为什么**：测试 mock 需同步实现，保持与生产 impl 一致。
 
@@ -208,15 +208,15 @@ fn header(&self, key: &str) -> Option<&str> {
 
 ### 改动 8：实现 CompressionMiddleware
 
-**文件**：[crates/host/src/compression.rs](file:///e:/GitCode/RF/rust-webapp/crates/host/src/compression.rs) 末尾追加
+**文件**：[crates/host/src/compression.rs](file:///e:/GitCode/RF/rust-webx/crates/host/src/compression.rs) 末尾追加
 
 **为什么**：补齐生产级中间件矩阵。当前仅有 `compress_gzip` 工具函数，未实现 `IMiddleware` trait。
 
 **实现**：
 ```rust
-use rust_webapp_core::error::Result;
-use rust_webapp_core::http::IHttpContext;
-use rust_webapp_core::middleware::IMiddleware;
+use rust_webx_core::error::Result;
+use rust_webx_core::http::IHttpContext;
+use rust_webx_core::middleware::IMiddleware;
 use std::ops::ControlFlow;
 
 pub struct CompressionMiddleware {
@@ -278,7 +278,7 @@ impl IMiddleware for CompressionMiddleware {
 
 ### 改动 9：扩展集成测试 — Compression
 
-**文件**：[crates/host/tests/integration_test.rs](file:///e:/GitCode/RF/rust-webapp/crates/host/tests/integration_test.rs) 末尾追加
+**文件**：[crates/host/tests/integration_test.rs](file:///e:/GitCode/RF/rust-webx/crates/host/tests/integration_test.rs) 末尾追加
 
 **为什么**：验证 CompressionMiddleware 端到端行为：大响应压缩、小响应跳过、无 accept-encoding 跳过。
 
@@ -293,7 +293,7 @@ impl IMiddleware for CompressionMiddleware {
 async fn integration_compression_gzips_large_response() {
     let port = find_free_port();
     spawn_test_host_with(port, |b| {
-        b.use_middleware::<rust_webapp_host::compression::CompressionMiddleware>()
+        b.use_middleware::<rust_webx_host::compression::CompressionMiddleware>()
     })
     .await;
 
@@ -318,7 +318,7 @@ async fn integration_compression_gzips_large_response() {
 async fn integration_compression_skips_small_response() {
     let port = find_free_port();
     spawn_test_host_with(port, |b| {
-        b.use_middleware::<rust_webapp_host::compression::CompressionMiddleware>()
+        b.use_middleware::<rust_webx_host::compression::CompressionMiddleware>()
     })
     .await;
 
@@ -340,7 +340,7 @@ async fn integration_compression_skips_small_response() {
 async fn integration_compression_skips_without_accept_encoding() {
     let port = find_free_port();
     spawn_test_host_with(port, |b| {
-        b.use_middleware::<rust_webapp_host::compression::CompressionMiddleware>()
+        b.use_middleware::<rust_webx_host::compression::CompressionMiddleware>()
     })
     .await;
 
@@ -368,7 +368,7 @@ async fn integration_compression_skips_without_accept_encoding() {
 4. **CompressionMiddleware 注册顺序**：通过 `use_middleware` 注册，由 DI `get_all` 收集。after hook 反向执行，CompressionMiddleware 的 after 会先于 SecurityHeaders/RequestId 的 after 执行（它们无 after 实现，用默认 no-op）。
 5. **OpenAPI spec 大小假设**：假设 `/api/openapi.json` 返回 > 1024 字节。若实际 < 1024，`integration_compression_gzips_large_response` 会失败，届时改用 `/api/openapi.html`。
 6. **header 大小写容错**：CompressionMiddleware 中 `accept-encoding` 和 `content-type` 读取都用 `to_lowercase().contains(...)` 容错。`TestHttpResponse.header()` 用 `eq_ignore_ascii_case` 容错。
-7. **test crate 内 `#[get]` 宏**：依赖 `rust-webapp` umbrella crate（dev-dep）。inventory 在 test binary 内天然链接，同 binary 多个 `#[get]` 同路径会冲突，但 `auth_integration_test.rs` 与 `integration_test.rs` 是不同 binary，互不干扰。
+7. **test crate 内 `#[get]` 宏**：依赖 `rust-webx` umbrella crate（dev-dep）。inventory 在 test binary 内天然链接，同 binary 多个 `#[get]` 同路径会冲突，但 `auth_integration_test.rs` 与 `integration_test.rs` 是不同 binary，互不干扰。
 8. **`APP__Jwt__Secret` 环境变量**：双下划线分段配置注入（`Jwt:Secret` → `APP__Jwt__Secret`），非 `JWT_SECRET`。
 9. **reqwest gzip 自动解压**：reqwest 默认启用 `gzip` feature，会自动解压 `content-encoding: gzip` 的响应体，`resp.json()` 直接拿到解压后的 JSON。
 
@@ -376,16 +376,16 @@ async fn integration_compression_skips_without_accept_encoding() {
 
 ```powershell
 # 1. AuthMiddleware 修复 + auth_test 调整
-cargo test -p rust-webapp-host --test auth_test
+cargo test -p rust-webx-host --test auth_test
 
 # 2. JWT 端到端集成测试
-cargo test -p rust-webapp-host --test auth_integration_test
+cargo test -p rust-webx-host --test auth_integration_test
 
 # 3. IHttpResponse trait 扩展（确保现有测试不破坏）
-cargo test -p rust-webapp-core
+cargo test -p rust-webx-core
 
 # 4. Compression 集成测试
-cargo test -p rust-webapp-host --test integration_test
+cargo test -p rust-webx-host --test integration_test
 
 # 5. 全量测试
 cargo test --workspace
@@ -398,7 +398,7 @@ cargo build -p docbit-host -p docbit-handlers -p docbit-contracts
 
 **方向 A（JWT）**：
 1. 改动 2：调整 auth_test.rs 断言 → 验证 `cargo test --test auth_test` 通过
-2. 改动 3：Cargo.toml 加 rust-webapp dev-dep
+2. 改动 3：Cargo.toml 加 rust-webx dev-dep
 3. 改动 4：新增 auth_integration_test.rs → 验证 5 个测试通过
 
 **方向 B（Compression）**：

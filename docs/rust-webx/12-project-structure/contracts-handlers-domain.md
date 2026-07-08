@@ -4,12 +4,12 @@
 
 ## contracts — API 与业务接口契约
 
-**仅依赖框架**（`rust_webapp` / `lrwf`），**禁止依赖 domain 或 handlers**。
+**仅依赖框架**（`rust_webx` / `lrwf`），**禁止依赖 domain 或 handlers**。
 
 ```rust
 // contracts/auth.rs — 定义「对外承诺什么」
 
-use rust_webapp::*;
+use rust_webx::*;
 
 #[derive(Deserialize)]
 pub struct LoginRequest {

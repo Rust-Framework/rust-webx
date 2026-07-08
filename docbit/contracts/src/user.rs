@@ -7,7 +7,7 @@
 //! - `roles: Vec<String>` added
 //! - `created_at` changed from String to i64
 
-use rust_webapp::*;
+use rust_webx::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

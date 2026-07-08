@@ -1,14 +1,14 @@
-# 第二层：rust-webapp 集成
+# 第二层：rust-webx 集成
 
-> rust-webapp 就相当于 ASP.NET Core。本节覆盖从 DbContext 注册到 Handler 实现的全部推荐写法，是生产环境的核心参考。
+> rust-webx 就相当于 ASP.NET Core。本节覆盖从 DbContext 注册到 Handler 实现的全部推荐写法，是生产环境的核心参考。
 
 ## 2.1 上下文注册（对标 AddDbContext）
 
 在 `main.rs` 的 `Host::builder()` 中使用 `add_dbcontext`，框架按 **Scoped** 生命周期管理。每个请求获得独立的 `DbContext` 实例，天然隔离，无需锁。
-> **rust-webapp 自动管理 Scope**：HTTP 管道为每个请求自动创建 DI Scope，Handler 通过 **owned 解析**（`get_owned()`）获得专属 `DbContext` 实例，**无需手动 `create_scope()`**。只有非请求场景（如 `IHostedService` 启动任务）才需要手动创建 Scope。
+> **rust-webx 自动管理 Scope**：HTTP 管道为每个请求自动创建 DI Scope，Handler 通过 **owned 解析**（`get_owned()`）获得专属 `DbContext` 实例，**无需手动 `create_scope()`**。只有非请求场景（如 `IHostedService` 启动任务）才需要手动创建 Scope。
 ```rust
 // main.rs — 组合根
-use rust_webapp::*;
+use rust_webx::*;
 use rust_ef::di::*;
 use rust_ef::db_context::DbContext;
 use rust_ef_sqlite::DbContextOptionsBuilderExt as _;
@@ -86,7 +86,7 @@ impl IHostedService for DbInitService {
 ## 2.2 Handler 注入模式（≈ 构造函数注入）
 
 每个 Handler 是一个独立的 struct，通过 `#[derive(Inject)]` 声明依赖。`ctx: DbContext` 字段（bare T）必须标记 `#[inject(owned)]`，由 DI 容器通过 **owned 解析**注入——类似 ASP.NET Core 的构造函数注入。`Arc<T>` 字段标记 `#[inject]`，未标记字段走 `Default::default()`。
-> **无需管理 Scope**：rust-webapp 的 HTTP 管道为每个请求创建 Scope，Handler 在此 Scope 内通过 `get_owned::<Handler>()` 解析，每个请求获得独立 `DbContext` 实例，天然隔离，无需锁。
+> **无需管理 Scope**：rust-webx 的 HTTP 管道为每个请求创建 Scope，Handler 在此 Scope 内通过 `get_owned::<Handler>()` 解析，每个请求获得独立 `DbContext` 实例，天然隔离，无需锁。
 >
 > **Owned 解析 + `&mut self`**：bare `T` 字段标记 `#[inject(owned)]` 后，`#[derive(Inject)]` 使用 `get_owned()` 解析；`Arc<T>` 字段标记 `#[inject]` 后使用 `get()` 解析。Handler 方法使用 `&mut self`，直接调用 `self.ctx.set::<T>()` / `self.ctx.save_changes()` —— 无需 `Arc<Mutex>`，无需内部可变性。
 >
@@ -131,7 +131,7 @@ pub struct DeleteBlogPostHandler {
 
 ```rust
 // contracts/blog.rs — 契约层，定义路由、DTO、接口
-use rust_webapp::*;
+use rust_webx::*;
 
 #[derive(Deserialize)]
 pub struct ListBlogPostsRequest;
@@ -335,7 +335,7 @@ impl IRequestHandler<DeleteBlogPostRequest, String> for DeleteBlogPostHandler {
 
 ## 2.7 错误处理
 
-统一使用 `rust_webapp::Error` 类型，按场景映射。
+统一使用 `rust_webx::Error` 类型，按场景映射。
 | 场景 | 错误类型 | 示例 |
 |------|----------|------|
 | 资源不存在 | `Error::NotFound` | `Error::NotFound(format!("Blog not found: {}", slug))` |

@@ -2,12 +2,12 @@
 
 ## 一、任务概述
 
-依据 **lref-skill** 领域技能指导，审查 `d:\GitCode\RF\rust-webapp\docbit` 子工作区（4-crate：contracts/domain/handlers/host）的 REF 框架使用，产出**审查报告 + 直接修复 P0/P1 问题**。
+依据 **lref-skill** 领域技能指导，审查 `d:\GitCode\RF\rust-webx\docbit` 子工作区（4-crate：contracts/domain/handlers/host）的 REF 框架使用，产出**审查报告 + 直接修复 P0/P1 问题**。
 
 **用户决策（已确认）**：
 - 受框架能力限制的红旗一律**按 lref-skill 严格定性**为违规/反模式，并推动框架补齐。
 - **必须升级 rust-ef 到 1.2.0**（用户强调 1.2.0 大幅简化了 REF 调用）。
-- **rust-webapp 必须支持 per-request scope**（架构设计最佳实践要求）。
+- **rust-webx 必须支持 per-request scope**（架构设计最佳实践要求）。
 - R1（消除 `Arc<Mutex<DbContext>>` 单例）**完整修复**：同时改本地框架 + docbit。
 
 ---
@@ -35,8 +35,8 @@
 
 ### 框架缺口（探索确认）
 
-1. **本地 rust-webapp 0.1.0 HTTP 管道不为每请求创建 DI Scope**：
-   - `crates/macros/src/endpoint.rs:228` `generate_dispatch_fn` 硬编码 `let provider = ::rust_webapp::global_provider();` 然后 `provider.get_optional::<dyn IRequestHandler<...>>()`。
+1. **本地 rust-webx 0.1.0 HTTP 管道不为每请求创建 DI Scope**：
+   - `crates/macros/src/endpoint.rs:228` `generate_dispatch_fn` 硬编码 `let provider = ::rust_webx::global_provider();` 然后 `provider.get_optional::<dyn IRequestHandler<...>>()`。
    - 从根 `ServiceProvider` 解析 Scoped 服务退化为每次新建（transient），违反 EFCore unit-of-work 语义。
 2. **handler 默认 Singleton**：docbit 所有 handler 用 `#[inject]`（无参数），rust-dicore-macros 默认 `Singleton`。当前是 captive dependency（Singleton handler 持有 Singleton `Mutex<DbContext>`）。
 3. **`add_dbcontext` 不在本地 `crates/core/src/di/ext.rs`**：但 rust-ef 1.2.0 的 `rust_ef::di::DbContextServiceCollectionExt` 扩展 trait 可直接 `use` 引入，无需改本地 ext.rs。
@@ -55,7 +55,7 @@
 4. **`save_changes(&mut self)` 访问模式**：Phase 1 读 1.2.0 源码确认；若需 `&mut`，则框架改动需保证 scope 内可获 `&mut`（如 `DbContext` 内部 `Mutex` 或 scope 解析返回可独占实例）。
 5. **R6 `detect_changes` 可达性**：通过 `IDbContext::change_tracker_mut(&mut self) -> &mut ChangeTracker` 调用 `ChangeTracker::detect_changes()`；若 `&mut` 不可得，则保留显式 `update()` 并在报告中标注。
 6. **R3 全局查询过滤器**：1.2.0 `EntityTypeBuilder` 仅暴露 `to_table/property_named/has_key_named/has_keys/has_data`，**未见 `has_query_filter`**。故 R3 长期方案（全局过滤器）在报告中标注为"框架待补齐"，本次直接修复聚焦补遗漏的 `is_deleted` 谓词。
-7. **审查报告输出位置**：`d:\GitCode\RF\rust-webapp\docbit\REVIEW.md`。
+7. **审查报告输出位置**：`d:\GitCode\RF\rust-webx\docbit\REVIEW.md`。
 8. **不动 docbit 之外的其他示例**（`examples/blog`、`examples/soft_delete`）：但 `endpoint.rs` 框架改动会影响全工作区，需 `cargo build --workspace` 验证。
 
 ---
@@ -63,7 +63,7 @@
 ## 四、修复方案（分阶段执行）
 
 ### Phase 0：升级 rust-ef 到 1.2.0
-- **文件**：`d:\GitCode\RF\rust-webapp\Cargo.toml` 第 46-48 行
+- **文件**：`d:\GitCode\RF\rust-webx\Cargo.toml` 第 46-48 行
 - **改动**：
   ```toml
   rust-ef = "1.2"
@@ -79,26 +79,26 @@
   - 确认 `ChangeTracker::detect_changes()` 通过 `change_tracker_mut()` 的可达性
 - **产出**：在计划执行记录中写明访问模式结论，指导 Phase 2-4 的具体写法
 
-### Phase 2：框架改造 — rust-webapp per-request scope
-- **文件**：`d:\GitCode\RF\rust-webapp\crates\macros\src\endpoint.rs` 第 215-251 行 `generate_dispatch_fn`
+### Phase 2：框架改造 — rust-webx per-request scope
+- **文件**：`d:\GitCode\RF\rust-webx\crates\macros\src\endpoint.rs` 第 215-251 行 `generate_dispatch_fn`
 - **改动**：第 228 行附近
   ```rust
   // 改前
-  let provider = ::rust_webapp::global_provider();
-  let handler: ::std::sync::Arc<dyn ::rust_webapp::IRequestHandler<#ty, #rsp_type>> =
+  let provider = ::rust_webx::global_provider();
+  let handler: ::std::sync::Arc<dyn ::rust_webx::IRequestHandler<#ty, #rsp_type>> =
       provider.get_optional().ok_or_else(|| ...)?;
 
   // 改后
-  let provider = ::rust_webapp::global_provider();
+  let provider = ::rust_webx::global_provider();
   let scope = provider.create_scope();
-  let handler: ::std::sync::Arc<dyn ::rust_webapp::IRequestHandler<#ty, #rsp_type>> =
+  let handler: ::std::sync::Arc<dyn ::rust_webx::IRequestHandler<#ty, #rsp_type>> =
       scope.get_optional().ok_or_else(|| ...)?;
   ```
 - **评估**：`crates/macros/src/handler.rs:48-55` `HandlerCache` 路径（启动时一次性构造并缓存）—— docbit 不用此路径（用 `#[inject]` 而非 `#[handler]`），但若 `HandlerCache` 缓存 Singleton handler 无 Scoped 依赖则不受影响；需确认不破坏。
-- **验证**：`cargo build -p rust-webapp-macros` → `cargo build --workspace`
+- **验证**：`cargo build -p rust-webx-macros` → `cargo build --workspace`
 
 ### Phase 3：R1 修复 — docbit DI 注册
-- **文件**：`d:\GitCode\RF\rust-webapp\docbit\host\src\main.rs` 第 44-65 行 `register_db_context`
+- **文件**：`d:\GitCode\RF\rust-webx\docbit\host\src\main.rs` 第 44-65 行 `register_db_context`
 - **改动**：
   ```rust
   use rust_ef::di::DbContextServiceCollectionExt as _;
@@ -113,7 +113,7 @@
   ```
   - 移除 `singleton::<Mutex<DbContext>>` 注册与 `DbContext::from_options` 手动构造
   - 移除 `use tokio::sync::Mutex;` 等不再需要的导入
-- **文件**：`d:\GitCode\RF\rust-webapp\docbit\host\src\startup.rs` 第 28-36 行 `DbInitService`
+- **文件**：`d:\GitCode\RF\rust-webx\docbit\host\src\startup.rs` 第 28-36 行 `DbInitService`
   - 字段 `ctx: Arc<Mutex<DbContext>>` → `ctx: Arc<dyn IDbContext>`
   - `#[inject]` → `#[inject(scoped)]`
   - 业务方法内 `let mut ctx = self.ctx.lock().await;` → 直接用 `self.ctx`（按 Phase 1 确认的访问模式调 `save_changes`）
@@ -170,7 +170,7 @@
 - **验证**：grep `\.update\(` 数量减少；cargo build 通过
 
 ### Phase 9：生成审查报告
-- **文件**：`d:\GitCode\RF\rust-webapp\docbit\REVIEW.md`
+- **文件**：`d:\GitCode\RF\rust-webx\docbit\REVIEW.md`
 - **内容**：
   - 审查依据（lref-skill 条目对标）
   - R1-R8 完整清单（位置、定性、修复状态）

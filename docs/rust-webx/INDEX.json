@@ -6,7 +6,7 @@
     "description": "生产级 Rust Web 服务框架，提供编译时路由扫描、零配置 Handler 注册、JWT 认证授权、统一异常中间件、事件发布/订阅及 SPA 托管能力。支持 OpenAPI 集成，适合构建高内聚低耦合的模块化应用。",
     "category": "framework",
     "tags": ["rust","webapp", "webapi", "mediator"],
-    "repoUrl": "https://gitcode.com/rf2026/rust-webapp",
+    "repoUrl": "https://gitcode.com/rf2026/rust-webx",
     "demoUrl": "",
     "featured": true,
     "sortOrder": 1,
@@ -27,12 +27,12 @@
       "chapters": [
         {
           "id": "01-introduction",
-          "title": "认识 rust-webapp",
+          "title": "认识 rust-webx",
           "subtitle": "框架定位、适用场景与生态全景",
           "sections": [
             {
-              "id": "what-is-rust-webapp",
-              "title": "什么是 rust-webapp",
+              "id": "what-is-rust-webx",
+              "title": "什么是 rust-webx",
               "summary": "框架定义、核心能力与设计目标",
               "readingTime": 8,
               "difficulty": "beginner"

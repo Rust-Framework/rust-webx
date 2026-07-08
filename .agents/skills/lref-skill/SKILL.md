@@ -5,7 +5,7 @@ description: Rust Entity Framework (REF) ORM 框架开发指南。涵盖实体�
 
 # REF 框架开发指南
 Rust Entity Framework（接口驱动、EFCore 风格 ORM）。本指南以**渐进式披露**组织，先掌握高频基础，再深入进阶模式，最后了解避坑要点。
-> **rust-webapp 就相当于 ASP.NET Core**：`add_dbcontext` 对应 `AddDbContext<T>`，Handler 注入对应构造函数注入，`IRequestHandler` 对应 Controller Action。详见[第二层：Web 应用集成](references/webapp-integration.md)。
+> **rust-webx 就相当于 ASP.NET Core**：`add_dbcontext` 对应 `AddDbContext<T>`，Handler 注入对应构造函数注入，`IRequestHandler` 对应 Controller Action。详见[第二层：Web 应用集成](references/webapp-integration.md)。
 ---
 
 ## 第一层：快速入门
@@ -27,7 +27,7 @@ Rust Entity Framework（接口驱动、EFCore 风格 ORM）。本指南以**渐�
 
 ## 第二层：Web 应用集成
 
-> rust-webapp 生产环境核心参考。详见[references/webapp-integration.md](references/webapp-integration.md)
+> rust-webx 生产环境核心参考。详见[references/webapp-integration.md](references/webapp-integration.md)
 
 | 主题 | 对标 ASP.NET Core | 要点 |
 |------|:---:|------|

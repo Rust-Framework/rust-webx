@@ -10,7 +10,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use rust_webapp_host::authz::{ResourceAuthorization, resource_auth_middleware};
+//! use rust_webx_host::authz::{ResourceAuthorization, resource_auth_middleware};
 //!
 //! let policy = ResourceAuthorization::new()
 //!     .allow_role("/api/users", "admin")
@@ -23,7 +23,7 @@
 //! # Dynamic authorizer (preferred)
 //!
 //! ```ignore
-//! use rust_webapp_core::auth::{IClaims, IDynamicAuthorizer};
+//! use rust_webx_core::auth::{IClaims, IDynamicAuthorizer};
 //!
 //! #[derive(Default)]
 //! struct RoleAuthorizer;
@@ -42,10 +42,10 @@
 //! svc.singleton::<dyn IDynamicAuthorizer>(|_| Arc::new(RoleAuthorizer::default()))
 //! ```
 
-use rust_webapp_core::auth::{IAuthorizationPolicy, IClaims, IDynamicAuthorizer};
-use rust_webapp_core::error::Result;
-use rust_webapp_core::http::IHttpContext;
-use rust_webapp_core::middleware::IMiddleware;
+use rust_webx_core::auth::{IAuthorizationPolicy, IClaims, IDynamicAuthorizer};
+use rust_webx_core::error::Result;
+use rust_webx_core::http::IHttpContext;
+use rust_webx_core::middleware::IMiddleware;
 use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::sync::Arc;
@@ -129,7 +129,7 @@ impl IAuthorizationPolicy for ResourceAuthorization {
         }
 
         // No matching policies found —deny by default
-        Err(rust_webapp_core::error::Error::Http(format!(
+        Err(rust_webx_core::error::Error::Http(format!(
             "Forbidden: no policy grants access to '{} {}'",
             _method, resource_key
         )))
@@ -166,7 +166,7 @@ impl IMiddleware for ResourceAuthMiddleware {
         // IHttpContext extends IClaimsExt, so claims() is available directly.
         match ctx.claims() {
             Some(claims) => self.policy.authorize(claims, &route_pattern, &method).await.map(|_| ControlFlow::Continue(())),
-            None => Err(rust_webapp_core::error::Error::Http(
+            None => Err(rust_webx_core::error::Error::Http(
                 "Unauthorized: no authentication claims found".to_string(),
             )),
         }
@@ -226,7 +226,7 @@ impl AuthorizerSet {
 /// Result from collecting `IDynamicAuthorizer` instances from DI.
 /// `None` means no authorizers are registered (pass-through mode).
 pub fn collect_authorizers(
-    provider: &rust_dicore::ServiceProvider,
+    provider: &rust_dix::ServiceProvider,
 ) -> Option<Arc<AuthorizerSet>> {
     let authorizers: Vec<Arc<dyn IDynamicAuthorizer>> = provider.get_all();
     if authorizers.is_empty() {

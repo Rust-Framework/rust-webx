@@ -1,4 +1,4 @@
-﻿use rust_webapp_core::routing::HttpMethod;
+use rust_webx_core::routing::HttpMethod;
 
 #[test]
 fn http_method_as_str_get() {

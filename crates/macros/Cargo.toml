@@ -1,9 +1,9 @@
 [package]
-name = "rust-webapp-macros"
+name = "rust-webx-macros"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "rust-webapp procedural macros: route shortcuts (#[get], #[post], #[put], #[delete]), #[handler] auto-registration, #[claims], #[authorize]"
+description = "rust-webx procedural macros: route shortcuts (#[get], #[post], #[put], #[delete]), #[handler] auto-registration, #[claims], #[authorize]"
 repository.workspace = true
 homepage.workspace = true
 documentation.workspace = true

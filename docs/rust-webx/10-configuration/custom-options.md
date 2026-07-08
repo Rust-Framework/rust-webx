@@ -3,7 +3,7 @@
 ## 定义配置类型
 
 ```rust
-use rust_webapp::IAppOptions;
+use rust_webx::IAppOptions;
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -31,7 +31,7 @@ impl IAppOptions for SiteSection {}
 ## 绑定
 
 ```rust
-use rust_webapp::bind_config;
+use rust_webx::bind_config;
 
 Host::builder()
     .configure(|app| {

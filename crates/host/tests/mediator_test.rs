@@ -4,20 +4,20 @@
 //! `HandlerCache` (populated by `HandlerRegistration` inventory submissions)
 //! and dispatches requests through the factory + call bridge.
 //!
-//! `publish` tests verify event-handler resolution from the rust_dicore
+//! `publish` tests verify event-handler resolution from the rust_dix
 //! ServiceProvider.
 //!
 //! Handlers are registered manually via `inventory::submit!` with
 //! `HandlerRegistration` (same mechanism as `#[handler]` macro) using
-//! `rust_webapp_core::` paths directly, since `rust-webapp-host` cannot
-//! depend on the `rust_webapp` umbrella crate (circular dependency).
+//! `rust_webx_core::` paths directly, since `rust-webx-host` cannot
+//! depend on the `rust_webx` umbrella crate (circular dependency).
 
-use rust_dicore::ServiceCollection;
-use rust_webapp_core::error::{Error, Result as LrwfResult};
-use rust_webapp_core::handler::{IEventHandler, IRequestHandler};
-use rust_webapp_core::mediator::{IEventRequest, IMediator, IRequest};
-use rust_webapp_core::mediator::Mediator;
-use rust_webapp_core::route::scan::HandlerRegistration;
+use rust_dix::ServiceCollection;
+use rust_webx_core::error::{Error, Result as LrwfResult};
+use rust_webx_core::handler::{IEventHandler, IRequestHandler};
+use rust_webx_core::mediator::{IEventRequest, IMediator, IRequest};
+use rust_webx_core::mediator::Mediator;
+use rust_webx_core::route::scan::HandlerRegistration;
 use std::sync::{Arc, Mutex};
 
 // --- Request / Response Types ---
@@ -34,7 +34,7 @@ impl IRequest<HelloResponse> for HelloRequest {}
 // --- Handlers ---
 //
 // Manually registered via `inventory::submit!` — equivalent to what the
-// `#[handler]` macro generates, but using `rust_webapp_core::` paths.
+// `#[handler]` macro generates, but using `rust_webx_core::` paths.
 
 #[derive(Default)]
 struct HelloHandler;
@@ -49,7 +49,7 @@ impl IRequestHandler<HelloRequest, HelloResponse> for HelloHandler {
 }
 
 fn __factory_hello_handler(
-    _resolver: &dyn rust_dicore::IServiceResolver,
+    _resolver: &dyn rust_dix::IServiceResolver,
 ) -> Box<dyn std::any::Any + Send> {
     Box::new(HelloHandler::default()) as Box<dyn std::any::Any + Send>
 }
@@ -94,7 +94,7 @@ impl IRequestHandler<HelloRequest, HelloResponse> for FailingHandler {
 }
 
 fn __factory_failing_handler(
-    _resolver: &dyn rust_dicore::IServiceResolver,
+    _resolver: &dyn rust_dix::IServiceResolver,
 ) -> Box<dyn std::any::Any + Send> {
     Box::new(FailingHandler::default()) as Box<dyn std::any::Any + Send>
 }
@@ -167,8 +167,8 @@ impl IEventHandler<TestEvent> for FailingEventHandler {
 // `mediator_send_handler_not_registered` test uses a dedicated request type
 // with no registration to verify the not-registered error path.
 
-fn build_provider() -> Arc<rust_dicore::ServiceProvider> {
-    Arc::new(ServiceCollection::new().build().unwrap())
+fn build_provider() -> Arc<rust_dix::ServiceProvider> {
+    ServiceCollection::new().build().unwrap()
 }
 
 #[tokio::test]
@@ -206,16 +206,14 @@ async fn mediator_publish_single_handler() {
     let counter = Arc::new(Mutex::new(Vec::new()));
     let counter_clone = Arc::clone(&counter);
 
-    let provider = Arc::new(
-        ServiceCollection::new()
+    let provider = ServiceCollection::new()
             .singleton::<dyn IEventHandler<TestEvent>>(move |_| {
                 Arc::new(CountingEventHandler {
                     counter: Arc::clone(&counter_clone),
                 })
             })
             .build()
-            .unwrap(),
-    );
+            .unwrap();
     let mediator = Mediator::new(provider);
     mediator
         .publish(TestEvent {
@@ -235,8 +233,7 @@ async fn mediator_publish_multiple_handlers() {
     let c1 = Arc::clone(&counter);
     let c2 = Arc::clone(&counter);
 
-    let provider = Arc::new(
-        ServiceCollection::new()
+    let provider = ServiceCollection::new()
             .singleton::<dyn IEventHandler<TestEvent>>(move |_| {
                 Arc::new(CountingEventHandler {
                     counter: Arc::clone(&c1),
@@ -248,8 +245,7 @@ async fn mediator_publish_multiple_handlers() {
                 })
             })
             .build()
-            .unwrap(),
-    );
+            .unwrap();
     let mediator = Mediator::new(provider);
     mediator
         .publish(TestEvent {
@@ -266,12 +262,10 @@ async fn mediator_publish_multiple_handlers() {
 
 #[tokio::test]
 async fn mediator_publish_handler_returns_error() {
-    let provider = Arc::new(
-        ServiceCollection::new()
+    let provider = ServiceCollection::new()
             .singleton::<dyn IEventHandler<TestEvent>>(|_| Arc::new(FailingEventHandler))
             .build()
-            .unwrap(),
-    );
+            .unwrap();
     let mediator = Mediator::new(provider);
     let result = mediator
         .publish(TestEvent {
@@ -325,7 +319,7 @@ impl IRequest<ScopeProbeResponse> for ScopeProbeRequest {}
 /// Factory that resolves `ScopedService` twice from the same resolver and
 /// records whether the two resolutions returned the same instance.
 fn __factory_scope_probe_handler(
-    resolver: &dyn rust_dicore::IServiceResolver,
+    resolver: &dyn rust_dix::IServiceResolver,
 ) -> Box<dyn std::any::Any + Send> {
     // Use get_any (the only non-Sized-bound resolver method) + downcast.
     let key = std::any::type_name::<ScopedService>();
@@ -389,15 +383,13 @@ inventory::submit! {
 async fn mediator_send_uses_per_call_scope_for_scoped_services() {
     SCOPED_COUNTER.store(0, Ordering::SeqCst);
 
-    let provider = Arc::new(
-        ServiceCollection::new()
+    let provider = ServiceCollection::new()
             .scoped::<ScopedService>(|_| {
                 let id = SCOPED_COUNTER.fetch_add(1, Ordering::SeqCst) + 1;
                 Arc::new(ScopedService { instance_id: id })
             })
             .build()
-            .unwrap(),
-    );
+            .unwrap();
     let mediator = Mediator::new(provider);
 
     let r1 = mediator.send(ScopeProbeRequest).await.expect("send #1 failed");
@@ -419,7 +411,7 @@ async fn mediator_send_uses_per_call_scope_for_scoped_services() {
 // Behaviors wrap the handler in a MediatR-style chain: each behavior can
 // inspect/modify the request, short-circuit, or pass through to the next.
 
-use rust_webapp_core::pipeline::{BoxedNextFn, IPipelineBehavior};
+use rust_webx_core::pipeline::{BoxedNextFn, IPipelineBehavior};
 
 struct BehaviorProbeRequest;
 
@@ -445,7 +437,7 @@ impl IRequestHandler<BehaviorProbeRequest, BehaviorProbeResponse> for BehaviorPr
 }
 
 fn __factory_behavior_probe_handler(
-    _resolver: &dyn rust_dicore::IServiceResolver,
+    _resolver: &dyn rust_dix::IServiceResolver,
 ) -> Box<dyn std::any::Any + Send> {
     Box::new(BehaviorProbeHandler::default()) as Box<dyn std::any::Any + Send>
 }
@@ -520,14 +512,12 @@ async fn mediator_send_pipeline_behavior_executes_before_handler() {
         called: Arc::clone(&behavior_called),
     });
 
-    let provider = Arc::new(
-        ServiceCollection::new()
+    let provider = ServiceCollection::new()
             .singleton::<dyn IPipelineBehavior>(move |_| {
                 Arc::clone(&behavior) as Arc<dyn IPipelineBehavior>
             })
             .build()
-            .unwrap(),
-    );
+            .unwrap();
     let mediator = Mediator::new(provider);
 
     let rsp = mediator
@@ -542,14 +532,12 @@ async fn mediator_send_pipeline_behavior_executes_before_handler() {
 
 #[tokio::test]
 async fn mediator_send_pipeline_behavior_can_short_circuit() {
-    let provider = Arc::new(
-        ServiceCollection::new()
+    let provider = ServiceCollection::new()
             .singleton::<dyn IPipelineBehavior>(|_| {
                 Arc::new(ShortCircuitBehavior) as Arc<dyn IPipelineBehavior>
             })
             .build()
-            .unwrap(),
-    );
+            .unwrap();
     let mediator = Mediator::new(provider);
 
     let rsp = mediator

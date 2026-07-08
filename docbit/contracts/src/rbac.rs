@@ -1,6 +1,6 @@
 //! RBAC contracts — roles, resources (通用资源模型), and authorizations.
 
-use rust_webapp::*;
+use rust_webx::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

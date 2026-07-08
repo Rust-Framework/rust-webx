@@ -2,9 +2,9 @@
 //!
 //! Adds recommended security-related HTTP response headers to every response.
 
-use rust_webapp_core::error::Result;
-use rust_webapp_core::http::IHttpContext;
-use rust_webapp_core::middleware::IMiddleware;
+use rust_webx_core::error::Result;
+use rust_webx_core::http::IHttpContext;
+use rust_webx_core::middleware::IMiddleware;
 use std::ops::ControlFlow;
 
 /// Middleware that adds a standard set of security headers to every response.

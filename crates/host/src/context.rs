@@ -3,9 +3,9 @@
 use http_body_util::Full;
 use hyper::body::{Bytes, Incoming};
 use hyper::Request;
-use rust_webapp_core::auth::IClaims;
-use rust_webapp_core::error::Result;
-use rust_webapp_core::http::{IClaimsExt, IHttpContext, IHttpRequest, IHttpResponse};
+use rust_webx_core::auth::IClaims;
+use rust_webx_core::error::Result;
+use rust_webx_core::http::{IClaimsExt, IHttpContext, IHttpRequest, IHttpResponse};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -197,7 +197,7 @@ impl IHttpRequest for HttpRequest {
 
     async fn body_text(&self) -> Result<String> {
         String::from_utf8(self.body_bytes.clone())
-            .map_err(|e| rust_webapp_core::error::Error::Http(e.to_string()))
+            .map_err(|e| rust_webx_core::error::Error::Http(e.to_string()))
     }
 }
 

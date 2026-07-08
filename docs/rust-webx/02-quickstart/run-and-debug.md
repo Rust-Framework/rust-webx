@@ -84,7 +84,7 @@ tracing_subscriber::fmt::init();
 
 ```bash
 cargo check 2>&1 | head -50   # 查看编译错误
-cargo test -p rust-webapp-host # 运行框架集成测试
+cargo test -p rust-webx-host # 运行框架集成测试
 ```
 
 ## 热重载
@@ -107,6 +107,6 @@ Workspace 的 release profile 已配置 LTO 与 strip，产物体积与性能均
 
 ## 小结
 
-运行 rust-webapp 应用只需 `cargo run`；验证通过 curl、Swagger UI 或集成测试。遇到问题时，先查 Handler 注册与路由标注两个最高频原因。
+运行 rust-webx 应用只需 `cargo run`；验证通过 curl、Swagger UI 或集成测试。遇到问题时，先查 Handler 注册与路由标注两个最高频原因。
 
 本章完成！下一章进入设计哲学：[第三章](../03-philosophy/INDEX.md)

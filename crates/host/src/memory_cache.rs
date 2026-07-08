@@ -3,8 +3,8 @@
 //! Implements [`IDistributedCache`] and provides typed access
 //! via [`DistributedCacheExtensions`].
 
-use rust_webapp_core::cache::options::DistributedCacheEntryOptions;
-use rust_webapp_core::cache::trait_def::{CacheError, IDistributedCache, Result};
+use rust_webx_core::cache::options::DistributedCacheEntryOptions;
+use rust_webx_core::cache::trait_def::{CacheError, IDistributedCache, Result};
 use std::collections::HashMap;
 use std::time::Instant;
 use tokio::sync::RwLock;

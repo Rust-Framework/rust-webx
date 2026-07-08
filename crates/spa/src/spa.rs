@@ -3,9 +3,9 @@
 //! Serves files from a configured root directory.
 //! For SPA routing, non-file requests fall back to index.html.
 
-use rust_webapp_core::error::Result;
-use rust_webapp_core::http::{HttpStatus, IHttpContext};
-use rust_webapp_core::middleware::IMiddleware;
+use rust_webx_core::error::Result;
+use rust_webx_core::http::{HttpStatus, IHttpContext};
+use rust_webx_core::middleware::IMiddleware;
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 
@@ -229,11 +229,11 @@ fn mime_type(path: &Path) -> &'static str {
 }
 
 /// Resolve a SPA root path by first checking the application base directory
-/// (as resolved by `rust_webapp_core::paths::app_base`), then as-is.
+/// (as resolved by `rust_webx_core::paths::app_base`), then as-is.
 ///
 /// This mirrors the strategy used by `config::load_appsettings` so that
 /// `use_spa("wwwroot")` works whether the user runs from `demo/`, from
-/// the workspace root (`rust-webapp/`), or from a deployment directory
+/// the workspace root (`rust-webx/`), or from a deployment directory
 /// (exe alongside `wwwroot/`).
 fn resolve_spa_root(root: PathBuf) -> PathBuf {
     // If the path is already absolute or exists, use it directly.
@@ -242,7 +242,7 @@ fn resolve_spa_root(root: PathBuf) -> PathBuf {
     }
 
     // 应用基准目录（exe 同级 / cwd / 上溯统一由 app_base 处理）。
-    let candidate = rust_webapp_core::paths::app_base().join(&root);
+    let candidate = rust_webx_core::paths::app_base().join(&root);
     if candidate.exists() {
         return candidate;
     }

@@ -7,7 +7,7 @@
 `src/contracts/user.rs`：
 
 ```rust
-use rust_webapp::*;
+use rust_webx::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -68,7 +68,7 @@ impl IRequest<()> for DeleteUserRequest {}
 ```rust
 use std::collections::HashMap;
 use std::sync::Arc;
-use rust_webapp::*;
+use rust_webx::*;
 use tokio::sync::RwLock;
 use crate::contracts::user::*;
 
@@ -193,6 +193,6 @@ async fn handle(&self, req: GetUserRequest) -> Result<UserDto> {
 
 ## 小结
 
-CRUD 是检验框架能力的试金石。rust-webapp 用统一的四步模式覆盖全部 HTTP 方法，无需为每种方法学习不同 API。
+CRUD 是检验框架能力的试金石。rust-webx 用统一的四步模式覆盖全部 HTTP 方法，无需为每种方法学习不同 API。
 
 下一节：[运行、调试与验证](run-and-debug.md)

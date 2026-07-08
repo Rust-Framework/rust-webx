@@ -1,6 +1,6 @@
 //! Tracking contracts — site visit statistics.
 
-use rust_webapp::*;
+use rust_webx::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

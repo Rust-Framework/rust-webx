@@ -9,15 +9,15 @@ use hyper::body::{Bytes, Incoming};
 use hyper::service::service_fn;
 use hyper::Request;
 use hyper_util::rt::TokioIo;
-use rust_dicore::{ServiceCollection, ServiceProvider};
-use rust_webapp_core::app::IHost;
-use rust_webapp_core::config::{self, AppOptions};
-use rust_webapp_core::error::Result;
-use rust_webapp_core::handler::IHostedService;
-use rust_webapp_core::http::IHttpContext;
-use rust_webapp_core::middleware::IMiddleware;
-use rust_webapp_core::mode::AppMode;
-use rust_webapp_core::routing::{HttpMethod, IEndpoint, IRouter};
+use rust_dix::{ServiceCollection, ServiceProvider};
+use rust_webx_core::app::IHost;
+use rust_webx_core::config::{self, AppOptions};
+use rust_webx_core::error::Result;
+use rust_webx_core::handler::IHostedService;
+use rust_webx_core::http::IHttpContext;
+use rust_webx_core::middleware::IMiddleware;
+use rust_webx_core::mode::AppMode;
+use rust_webx_core::routing::{HttpMethod, IEndpoint, IRouter};
 
 use crate::auth_jwt::{init_jwt_secret, jwt_middleware, JwtAuth};
 use crate::authz::collect_authorizers;
@@ -29,9 +29,9 @@ use crate::memory_cache::MemoryCache;
 use crate::pipeline::{HandlerFn, MiddlewarePipeline};
 use crate::router::Router;
 use jsonwebtoken::{DecodingKey, Validation};
-use rust_webapp_core::route::scan::RouteEntry;
-use rust_webapp_openapi::{generate_openapi_spec, APIUI_HTML};
-use rust_webapp_spa::SpaMiddleware;
+use rust_webx_core::route::scan::RouteEntry;
+use rust_webx_openapi::{generate_openapi_spec, APIUI_HTML};
+use rust_webx_spa::SpaMiddleware;
 
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig;
@@ -309,21 +309,21 @@ impl HostBuilder {
         let health_registry = Arc::clone(&self.health_registry);
         svc = svc.instance(health_registry);
 
-        let provider = Arc::new(svc.build().unwrap_or_else(|e| {
+        let provider = svc.build().unwrap_or_else(|e| {
             panic!(
                 "Failed to build ServiceProvider: {}. Check your DI registrations.",
                 e
-            );
-        }));
+            )
+        });
 
         // Set the global provider so #[handler] factories can resolve DI dependencies.
-        rust_webapp_core::route::scan::set_global_provider(Arc::clone(&provider));
+        rust_webx_core::route::scan::set_global_provider(Arc::clone(&provider));
 
         // Initialize the global handler cache from inventory registrations.
         // Handlers registered via #[handler] are collected into HandlerCache.
         // If a handler struct also has #[inject_attr], its factory will resolve
         // dependencies via the global provider set above.
-        rust_webapp_core::route::scan::HandlerCache::init_global();
+        rust_webx_core::route::scan::HandlerCache::init_global();
 
         let mut pipeline = MiddlewarePipeline::new();
 
@@ -366,7 +366,7 @@ impl HostBuilder {
             None
         } else {
             self.spa_root.clone().or_else(|| {
-                let candidate = rust_webapp_core::paths::app_base().join("wwwroot");
+                let candidate = rust_webx_core::paths::app_base().join("wwwroot");
                 if candidate.is_dir() {
                     tracing::info!("[Host] Auto-detected SPA root: {}", candidate.display());
                     Some(candidate.to_string_lossy().into_owned())
@@ -430,17 +430,17 @@ impl HostBuilder {
                 Vec<u8>,
                 std::collections::HashMap<String, String>,
                 std::collections::HashMap<String, String>,
-                Option<Box<dyn rust_webapp_core::auth::IClaims>>,
+                Option<Box<dyn rust_webx_core::auth::IClaims>>,
             ) -> std::pin::Pin<
                 Box<
                     dyn std::future::Future<
-                            Output = rust_webapp_core::error::Result<rust_webapp_core::route::scan::ResponseData>,
+                            Output = rust_webx_core::error::Result<rust_webx_core::route::scan::ResponseData>,
                         > + Send,
                 >,
             >,
         > = std::collections::HashMap::new();
 
-        for dispatch in inventory::iter::<rust_webapp_core::route::scan::RouteDispatch> {
+        for dispatch in inventory::iter::<rust_webx_core::route::scan::RouteDispatch> {
             dispatch_map.insert(dispatch.handler_type, dispatch.dispatch);
         }
 
@@ -507,7 +507,7 @@ impl HostBuilder {
             let version = env!("CARGO_PKG_VERSION");
             tracing::info!("");
             tracing::info!("  ----------------------------------------------------------------");
-            tracing::info!("    Rust WebApplication Framework v{}", version);
+            tracing::info!("    Rust WebX Framework v{}", version);
             tracing::info!("  ----------------------------------------------------------------");
             tracing::info!("    App:      {}", options.app.name);
             tracing::info!("    CORS:     enabled");
@@ -660,7 +660,7 @@ impl Host {
                 "http" => http_addrs.push(addr),
                 "https" => https_addrs.push(addr),
                 other => {
-                    return Err(rust_webapp_core::error::Error::Http(format!(
+                    return Err(rust_webx_core::error::Error::Http(format!(
                         "Unsupported URL scheme '{}' in '{}'",
                         other, url
                     )))
@@ -671,7 +671,7 @@ impl Host {
         let acceptor = if !https_addrs.is_empty() {
             let tls = &self.options.tls;
             if tls.cert_path.is_empty() || tls.key_path.is_empty() {
-                return Err(rust_webapp_core::error::Error::Http(
+                return Err(rust_webx_core::error::Error::Http(
                     "HTTPS URLs require Tls.CertPath and Tls.KeyPath".into(),
                 ));
             }
@@ -950,7 +950,7 @@ fn parse_url(url: &str) -> Result<(&str, String)> {
     } else if let Some(rest) = url.strip_prefix("http://") {
         Ok(("http", rest.to_string()))
     } else {
-        Err(rust_webapp_core::error::Error::Http(format!(
+        Err(rust_webx_core::error::Error::Http(format!(
             "Invalid URL '{}'. Use http://host:port or https://host:port",
             url
         )))
@@ -1141,25 +1141,25 @@ fn build_tls_acceptor(cert_path: &str, key_path: &str) -> Result<TlsAcceptor> {
     use std::io::BufReader;
 
     if cert_path.is_empty() || key_path.is_empty() {
-        return Err(rust_webapp_core::error::Error::Http(
+        return Err(rust_webx_core::error::Error::Http(
             "TLS certificate or key path not configured.".into(),
         ));
     }
 
     let cert_file = File::open(cert_path).map_err(|e| {
-        rust_webapp_core::error::Error::Http(format!("Cannot open cert '{}': {}", cert_path, e))
+        rust_webx_core::error::Error::Http(format!("Cannot open cert '{}': {}", cert_path, e))
     })?;
     let mut cert_reader = BufReader::new(cert_file);
     let certs: Vec<CertificateDer> = certs(&mut cert_reader).filter_map(|r| r.ok()).collect();
     if certs.is_empty() {
-        return Err(rust_webapp_core::error::Error::Http(format!(
+        return Err(rust_webx_core::error::Error::Http(format!(
             "No valid certs in '{}'",
             cert_path
         )));
     }
 
     let key_file = File::open(key_path).map_err(|e| {
-        rust_webapp_core::error::Error::Http(format!("Cannot open key '{}': {}", key_path, e))
+        rust_webx_core::error::Error::Http(format!("Cannot open key '{}': {}", key_path, e))
     })?;
     let mut key_reader = BufReader::new(key_file);
     let key = pkcs8_private_keys(&mut key_reader)
@@ -1176,13 +1176,13 @@ fn build_tls_acceptor(cert_path: &str, key_path: &str) -> Result<TlsAcceptor> {
             rsa_keys.into_iter().next()
         })
         .ok_or_else(|| {
-            rust_webapp_core::error::Error::Http(format!("No valid private key in '{}'", key_path))
+            rust_webx_core::error::Error::Http(format!("No valid private key in '{}'", key_path))
         })?;
 
     let config = ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(certs, key)
-        .map_err(|e| rust_webapp_core::error::Error::Http(format!("TLS config error: {}", e)))?;
+        .map_err(|e| rust_webx_core::error::Error::Http(format!("TLS config error: {}", e)))?;
 
     Ok(TlsAcceptor::from(std::sync::Arc::new(config)))
 }

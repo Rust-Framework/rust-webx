@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use rust_webapp::*;
+use rust_webx::*;
 
 use docbit_contracts::cache::CacheStatsRequest;
 

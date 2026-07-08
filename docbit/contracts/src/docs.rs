@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use rust_webapp::*;
+use rust_webx::*;
 use serde::{Deserialize, Serialize};
 
 use crate::exhibition::ExhibitionModel;

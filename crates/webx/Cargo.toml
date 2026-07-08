@@ -1,21 +1,21 @@
 [package]
-name = "rust-webapp"
+name = "rust-webx"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "rust-webapp — A Rust WebApi framework inspired by ASP.NET Core"
+description = "rust-webx — A Rust WebApi framework inspired by ASP.NET Core"
 repository.workspace = true
 homepage.workspace = true
 documentation.workspace = true
 
 [dependencies]
-rust-webapp-core.workspace = true
-rust-webapp-host.workspace = true
-rust-webapp-macros.workspace = true
-rust-webapp-spa.workspace = true
-rust-webapp-openapi.workspace = true
-rust-dicore.workspace = true
-rust-dicore-macros.workspace = true
+rust-webx-core.workspace = true
+rust-webx-host.workspace = true
+rust-webx-macros.workspace = true
+rust-webx-spa.workspace = true
+rust-webx-openapi.workspace = true
+rust-dix.workspace = true
+rust-dix-macros.workspace = true
 async-trait.workspace = true
 tokio.workspace = true
 hyper.workspace = true

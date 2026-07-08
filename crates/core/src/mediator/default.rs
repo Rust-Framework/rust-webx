@@ -15,7 +15,7 @@ use crate::error::{Error, Result};
 use crate::handler::IEventHandler;
 use super::pipeline::build_chain;
 use super::{IEventRequest, IMediator, IRequest};
-use rust_dicore::{IServiceResolver, ServiceProvider};
+use rust_dix::{IServiceResolver, ScopeFactory, ServiceProvider};
 use std::sync::Arc;
 
 /// Default implementation of IMediator.

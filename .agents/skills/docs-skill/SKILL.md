@@ -32,7 +32,7 @@ description: >
 | [reference/progressive-disclosure.md](reference/progressive-disclosure.md) | 规划章节顺序、控密度 | 披露层级、单节编排、边界写法 |
 | [reference/writing-style.md](reference/writing-style.md) | 撰写或润色正文 | 模板、符号、代码块、导航 |
 | [examples/chapter-patterns.md](examples/chapter-patterns.md) | 需要结构范例 | 通用章/节模式 |
-| [examples/rust-webapp-reference.md](examples/rust-webapp-reference.md) | 需要完整落地样例 | rust-webapp 参考实现路径 |
+| [examples/rust-webx-reference.md](examples/rust-webx-reference.md) | 需要完整落地样例 | rust-webx 参考实现路径 |
 
 ---
 
@@ -140,5 +140,5 @@ docs/
 
 - 一本书一个 `{slug}`； monorepo 多框架 → 多个 `docs/{slug}/` 并列
 - `INDEX.json` 与 Markdown 不同步会导致 Docbit 导航缺失
-- 需要完整样例时读 [examples/rust-webapp-reference.md](examples/rust-webapp-reference.md)，勿把样例约定硬编码到其他项目
+- 需要完整样例时读 [examples/rust-webx-reference.md](examples/rust-webx-reference.md)，勿把样例约定硬编码到其他项目
 - API 大全指向 crate rustdoc 或项目 reference；书籍保持指南形态

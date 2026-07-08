@@ -1,8 +1,8 @@
-# 什么是 rust-webapp
+# 什么是 rust-webx
 
 ## 一句话定义
 
-**rust-webapp** 是一个受 ASP.NET Core 启发的 Rust WebApi 框架，以 **DI（依赖注入）+ Mediator（中介者）** 为双核心，通过 **「请求即端点」** 模式，让开发者用类型安全的 Rust 代码定义完整的 HTTP API，而无需手动拼装路由表与处理器映射。
+**rust-webx** 是一个受 ASP.NET Core 启发的 Rust WebApi 框架，以 **DI（依赖注入）+ Mediator（中介者）** 为双核心，通过 **「请求即端点」** 模式，让开发者用类型安全的 Rust 代码定义完整的 HTTP API，而无需手动拼装路由表与处理器映射。
 
 ## 解决的核心痛点
 
@@ -12,9 +12,9 @@
 选择路由库 → 手写路由表 → 自行设计 DI → 拼装中间件 → 统一错误处理 → 重复劳动
 ```
 
-每一步都需要架构决策，团队难以形成统一规范。rust-webapp 将这些**横切关注点内聚到框架层**：
+每一步都需要架构决策，团队难以形成统一规范。rust-webx 将这些**横切关注点内聚到框架层**：
 
-| 痛点 | rust-webapp 的解法 |
+| 痛点 | rust-webx 的解法 |
 |------|-------------------|
 | 路由与处理器脱节 | `IRequest<T>` 自带路由元数据，`#[get("/path")]` 编译时注册 |
 | Handler 注册样板代码 | `#[handler]` 宏自动向 DI 容器注册 |
@@ -24,7 +24,7 @@
 
 ## 产品形态：框架为你提供的应用骨架
 
-使用 rust-webapp 构建的应用，天然具备以下**产品级形态**：
+使用 rust-webx 构建的应用，天然具备以下**产品级形态**：
 
 ```mermaid
 graph TB
@@ -52,7 +52,7 @@ graph TB
 一个典型的 `main.rs` 只有十几行：
 
 ```rust
-use rust_webapp::*;
+use rust_webx::*;
 
 #[tokio::main]
 async fn main() {
@@ -126,14 +126,14 @@ Handler 不直接调用彼此，而是通过 `IMediator` 调度。这带来：
 
 ## 与生态中其他方案的定位
 
-| 方案 | 定位 | rust-webapp 的差异 |
+| 方案 | 定位 | rust-webx 的差异 |
 |------|------|-------------------|
-| Axum / Actix | 轻量路由 + 自由组合 | rust-webapp 提供完整应用骨架与约定 |
-| Rocket | 宏驱动路由 | rust-webapp 强调 DI + Mediator 工程化 |
-| ASP.NET Core | 企业级 .NET Web 框架 | rust-webapp 是其 Rust 精神续作 |
+| Axum / Actix | 轻量路由 + 自由组合 | rust-webx 提供完整应用骨架与约定 |
+| Rocket | 宏驱动路由 | rust-webx 强调 DI + Mediator 工程化 |
+| ASP.NET Core | 企业级 .NET Web 框架 | rust-webx 是其 Rust 精神续作 |
 
 ## 小结
 
-rust-webapp 的产品形态是：**一个约定优于配置、类型安全、模块边界清晰的 WebApi 应用平台**。你专注于 `contracts` + `handlers` 的业务逻辑，框架负责 HTTP 管道、DI 解析、路由匹配与横切能力。
+rust-webx 的产品形态是：**一个约定优于配置、类型安全、模块边界清晰的 WebApi 应用平台**。你专注于 `contracts` + `handlers` 的业务逻辑，框架负责 HTTP 管道、DI 解析、路由匹配与横切能力。
 
 下一节：[适用场景与边界](who-should-use.md)

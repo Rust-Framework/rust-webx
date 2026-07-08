@@ -104,6 +104,6 @@ async fn handle(&self, req: GetUserRequest) -> Result<UserDto> {
 
 ## 小结
 
-rust-webapp 的设计原则可浓缩为：**用类型承载契约，用约定减少配置，用 trait 隔离变化**。下一节看这些原则如何从 ASP.NET Core 传承而来。
+rust-webx 的设计原则可浓缩为：**用类型承载契约，用约定减少配置，用 trait 隔离变化**。下一节看这些原则如何从 ASP.NET Core 传承而来。
 
 下一节：[ASP.NET Core 的启发](aspnet-inspiration.md)

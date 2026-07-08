@@ -19,9 +19,9 @@
 
 ### 2.1 当前依赖与版本
 
-* 根 [Cargo.toml](file:///e:/GitCode/RF/rust-webapp/Cargo.toml#L4-L12) workspace members 包含 `"docbit"`（单一 crate）
+* 根 [Cargo.toml](file:///e:/GitCode/RF/rust-webx/Cargo.toml#L4-L12) workspace members 包含 `"docbit"`（单一 crate）
 
-* [docbit/Cargo.toml](file:///e:/GitCode/RF/rust-webapp/docbit/Cargo.toml#L10-L11) 依赖 `rust-ef = "0.3.5"` + `rust-ef-sqlite = "0.3.5"`
+* [docbit/Cargo.toml](file:///e:/GitCode/RF/rust-webx/docbit/Cargo.toml#L10-L11) 依赖 `rust-ef = "0.3.5"` + `rust-ef-sqlite = "0.3.5"`
 
 * workspace 依赖 `rust-dicore = "0.3.2"`
 
@@ -51,11 +51,11 @@ docbit/
 ### 2.3 当前实现的痛点（必须解决）
 
 1. **错误类型过时**：`common/mod.rs` 使用 `LrefResult`/`LrefError`，1.1.0 已重命名为 `EFResult`/`EFError`
-2. **原始 SQL 泛滥**：[handlers/auth.rs](file:///e:/GitCode/RF/rust-webapp/docbit/src/handlers/auth.rs#L112-L120) 与 [handlers/user.rs](file:///e:/GitCode/RF/rust-webapp/docbit/src/handlers/user.rs#L95-L109) 用 `escape_sql()` + 字符串拼接 INSERT/UPDATE/DELETE，违背 1.1.0 的 `set::<T>().add()` / `update()` / `save_changes()` Unit of Work 模式
-3. **博客文件存储**：[handlers/blog\_service.rs](file:///e:/GitCode/RF/rust-webapp/docbit/src/handlers/blog_service.rs#L40-L53) 用 `blog-data/{user_id}/INDEX.json` + markdown 文件，需改为数据库
+2. **原始 SQL 泛滥**：[handlers/auth.rs](file:///e:/GitCode/RF/rust-webx/docbit/src/handlers/auth.rs#L112-L120) 与 [handlers/user.rs](file:///e:/GitCode/RF/rust-webx/docbit/src/handlers/user.rs#L95-L109) 用 `escape_sql()` + 字符串拼接 INSERT/UPDATE/DELETE，违背 1.1.0 的 `set::<T>().add()` / `update()` / `save_changes()` Unit of Work 模式
+3. **博客文件存储**：[handlers/blog\_service.rs](file:///e:/GitCode/RF/rust-webx/docbit/src/handlers/blog_service.rs#L40-L53) 用 `blog-data/{user_id}/INDEX.json` + markdown 文件，需改为数据库
 4. **User 表设计陈旧**：`id: String`（hex 时间戳）、`role: String`（单角色字符串），需改为 `id: i32` 自增 + 多角色 RBAC
-5. **Comment 表无引用/回复**：[domain/comment.rs](file:///e:/GitCode/RF/rust-webapp/docbit/src/domain/comment.rs#L6-L18) 无 `parent_id` / `quoted_id`，需双自外键
-6. **鉴权粗放**：[common/mod.rs](file:///e:/GitCode/RF/rust-webapp/docbit/src/common/mod.rs#L24-L49) `RoleAuthorizer` 仅判断 admin，需接入 Resource + Authorize 动态鉴权
+5. **Comment 表无引用/回复**：[domain/comment.rs](file:///e:/GitCode/RF/rust-webx/docbit/src/domain/comment.rs#L6-L18) 无 `parent_id` / `quoted_id`，需双自外键
+6. **鉴权粗放**：[common/mod.rs](file:///e:/GitCode/RF/rust-webx/docbit/src/common/mod.rs#L24-L49) `RoleAuthorizer` 仅判断 admin，需接入 Resource + Authorize 动态鉴权
 7. **m001-m004 迁移冗余**：将废弃，改用 `ensure_created()` + `has_data()` 种子
 
 ### 2.4 保留项（不动）
@@ -64,7 +64,7 @@ docbit/
 
 * `appsettings.json` 的 `App` / `Jwt` / `Cors` 配置结构
 
-* `rust-webapp` 框架的 `#[handler(inject)]` / `#[get]` / `#[post]` / `#[authorize]` / `IRequestHandler` / `IHostedService` / `Host::builder()` 模式
+* `rust-webx` 框架的 `#[handler(inject)]` / `#[get]` / `#[post]` / `#[authorize]` / `IRequestHandler` / `IHostedService` / `Host::builder()` 模式
 
 * `rust-dicore` 的 `#[rust_dicore::inject_attr]` 自动注册模式
 
@@ -141,13 +141,13 @@ docbit/
 **依赖方向（严格分层）**：
 
 ```
-contracts  ──→  rust-webapp, serde
+contracts  ──→  rust-webx, serde
     ▲
 domain     ──→  contracts, rust-ef
     ▲
-handlers   ──→  contracts, domain, rust-ef, rust-webapp, rust-dicore
+handlers   ──→  contracts, domain, rust-ef, rust-webx, rust-dicore
     ▲
-host       ──→  contracts, domain, handlers, rust-ef, rust-ef-sqlite, rust-ef-mysql, rust-webapp
+host       ──→  contracts, domain, handlers, rust-ef, rust-ef-sqlite, rust-ef-mysql, rust-webx
 ```
 
 ### 3.2 审计字段与软删除约定（适用大部分主表）
@@ -401,7 +401,7 @@ host       ──→  contracts, domain, handlers, rust-ef, rust-ef-sqlite, rust
 
 > 命名规则：实体类型简化（`Blog` 非 `BlogEntity`）；DTO 保留 `*Model` 后缀。审计字段 `created_id`/`updated_id` 一律 `Option<i32>` + `#[index]`，**不加** **`#[foreign_key]`**。
 
-### 5.1 [domain/src/entities/user.rs](file:///e:/GitCode/RF/rust-webapp/docbit/domain/src/entities/user.rs)
+### 5.1 [domain/src/entities/user.rs](file:///e:/GitCode/RF/rust-webx/docbit/domain/src/entities/user.rs)
 
 ```rust
 use rust_ef::prelude::*;
@@ -423,7 +423,7 @@ pub struct User {
 }
 ```
 
-### 5.2 [domain/src/entities/role.rs](file:///e:/GitCode/RF/rust-webapp/docbit/domain/src/entities/role.rs)
+### 5.2 [domain/src/entities/role.rs](file:///e:/GitCode/RF/rust-webx/docbit/domain/src/entities/role.rs)
 
 ```rust
 use rust_ef::prelude::*;
@@ -455,7 +455,7 @@ pub struct RoleUser {
 }
 ```
 
-### 5.3 [domain/src/entities/category.rs](file:///e:/GitCode/RF/rust-webapp/docbit/domain/src/entities/category.rs)
+### 5.3 [domain/src/entities/category.rs](file:///e:/GitCode/RF/rust-webx/docbit/domain/src/entities/category.rs)
 
 ```rust
 use rust_ef::prelude::*;
@@ -478,7 +478,7 @@ pub struct Category {
 }
 ```
 
-### 5.4 [domain/src/entities/blog.rs](file:///e:/GitCode/RF/rust-webapp/docbit/domain/src/entities/blog.rs)
+### 5.4 [domain/src/entities/blog.rs](file:///e:/GitCode/RF/rust-webx/docbit/domain/src/entities/blog.rs)
 
 ```rust
 use rust_ef::prelude::*;
@@ -509,7 +509,7 @@ pub struct Blog {
 }
 ```
 
-### 5.5 [domain/src/entities/comment.rs](file:///e:/GitCode/RF/rust-webapp/docbit/domain/src/entities/comment.rs)（双自外键规避）
+### 5.5 [domain/src/entities/comment.rs](file:///e:/GitCode/RF/rust-webx/docbit/domain/src/entities/comment.rs)（双自外键规避）
 
 ```rust
 use rust_ef::prelude::*;
@@ -537,7 +537,7 @@ pub struct Comment {
 }
 ```
 
-### 5.6 [domain/src/entities/exhibition.rs](file:///e:/GitCode/RF/rust-webapp/docbit/domain/src/entities/exhibition.rs)
+### 5.6 [domain/src/entities/exhibition.rs](file:///e:/GitCode/RF/rust-webx/docbit/domain/src/entities/exhibition.rs)
 
 ```rust
 use rust_ef::prelude::*;
@@ -568,7 +568,7 @@ pub struct Exhibition {
 }
 ```
 
-### 5.7 [domain/src/entities/resource.rs](file:///e:/GitCode/RF/rust-webapp/docbit/domain/src/entities/resource.rs)（重新设计）
+### 5.7 [domain/src/entities/resource.rs](file:///e:/GitCode/RF/rust-webx/docbit/domain/src/entities/resource.rs)（重新设计）
 
 ```rust
 use rust_ef::prelude::*;
@@ -603,7 +603,7 @@ pub struct Authorize {
 
 > **注意**：`type` 是 Rust 关键字，字段名用 `r#type` 转义；rust-ef 按字段名生成列名 `type`（SQLite/MySQL 均为合法列名，无需引号）。
 
-### 5.8 [domain/src/entities/tracking.rs](file:///e:/GitCode/RF/rust-webapp/docbit/domain/src/entities/tracking.rs)
+### 5.8 [domain/src/entities/tracking.rs](file:///e:/GitCode/RF/rust-webx/docbit/domain/src/entities/tracking.rs)
 
 ```rust
 use rust_ef::prelude::*;
@@ -688,7 +688,7 @@ let category_name: String = e.category.get().map(|c| c.name.clone()).unwrap_or_d
 
 ### 步骤 1 ✅ workspace 配置
 
-根 [Cargo.toml](file:///e:/GitCode/RF/rust-webapp/Cargo.toml) 已加 4 个 docbit 子 crate member + workspace deps（rust-ef 1.1、rust-ef-sqlite 1.1、rust-ef-mysql 1.1）。
+根 [Cargo.toml](file:///e:/GitCode/RF/rust-webx/Cargo.toml) 已加 4 个 docbit 子 crate member + workspace deps（rust-ef 1.1、rust-ef-sqlite 1.1、rust-ef-mysql 1.1）。
 
 ### 步骤 2 ✅ contracts crate（已完成编译）
 

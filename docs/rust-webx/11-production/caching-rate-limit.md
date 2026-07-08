@@ -11,7 +11,7 @@ Host::builder().use_memory_cache()
 ### 在 Handler 中使用
 
 ```rust
-use rust_webapp::{IDistributedCache, DistributedCacheExtensions};
+use rust_webx::{IDistributedCache, DistributedCacheExtensions};
 
 let cached = self.cache.get_or_create("user:123", async {
     self.repo.find("123").await

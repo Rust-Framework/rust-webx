@@ -8,7 +8,7 @@
 //! 2. `/api/comments*` 评论接口允许已登录用户访问（所有权检查在 handler 内）；
 //! 3. 其他 `/api/*` 管理接口要求 `admin` 角色。
 
-use rust_webapp::*;
+use rust_webx::*;
 
 // `#[derive(Inject)]` 生成 `__rdi_construct_RoleAuthorizer` 构造器。
 #[derive(Inject)]

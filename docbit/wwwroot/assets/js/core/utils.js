@@ -36,7 +36,7 @@
     heroAccent: "/assets/logo-64.svg",
     heroBg: "/assets/logo-128.svg",
     brand: "/assets/logo-32.svg",
-    workRust: "/assets/works/rust-webapp.svg",
+    workRust: "/assets/works/rust-webx.svg",
     workDocbit: "/assets/works/docbit.svg",
   };
 

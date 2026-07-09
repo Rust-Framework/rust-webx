@@ -133,10 +133,6 @@ pub struct ResponseData {
 
 inventory::collect!(RouteDispatch);
 
-// SAFETY: RouteDispatch is only used at startup, single-threaded context.
-unsafe impl Sync for RouteDispatch {}
-unsafe impl Send for RouteDispatch {}
-
 impl RouteEntry {
     /// Create a new route entry.
     #[allow(clippy::too_many_arguments)]

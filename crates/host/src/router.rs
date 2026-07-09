@@ -25,7 +25,9 @@ impl MethodRouter {
 
     fn insert(&mut self, path: &str, endpoint: Arc<dyn IEndpoint>) {
         let value = (endpoint, path.to_string());
-        let _ = self.inner.insert(path, value);
+        if let Err(e) = self.inner.insert(path, value) {
+            tracing::warn!("[Router] Failed to register route '{}': {}", path, e);
+        }
     }
 
     fn at<'a>(&'a self, path: &'a str) -> Option<matchit::Match<'a, 'a, &'a RouteValue>> {
@@ -80,6 +82,17 @@ impl Router {
             HttpMethod::Options => &self.options,
         }
     }
+
+    /// Check if a path is registered for any HTTP method.
+    pub fn path_exists(&self, path: &str) -> bool {
+        self.get.at(path).is_some()
+            || self.post.at(path).is_some()
+            || self.put.at(path).is_some()
+            || self.delete.at(path).is_some()
+            || self.patch.at(path).is_some()
+            || self.head.at(path).is_some()
+            || self.options.at(path).is_some()
+    }
 }
 
 #[async_trait::async_trait]
@@ -94,7 +107,10 @@ impl IRouter for Router {
     ) -> Result<Option<(Arc<dyn IEndpoint>, HashMap<String, String>, String)>> {
         let path = ctx.request().path();
         let method_str = ctx.request().method();
-        let method = HttpMethod::from_str(method_str).unwrap_or(HttpMethod::Get);
+        let method = match HttpMethod::from_str(method_str) {
+            Some(m) => m,
+            None => return Ok(None),
+        };
 
         let router = self.method_router(method);
 

@@ -1,4 +1,4 @@
-﻿//! Unified error type for the LRWF framework.
+//! Unified error type for the rust-webx framework.
 
 use thiserror::Error;
 
@@ -7,6 +7,15 @@ use thiserror::Error;
 pub enum Error {
     #[error("HTTP error: {0}")]
     Http(String),
+
+    #[error("Status {0}: {1}")]
+    Status(u16, String),
+
+    #[error("Unauthorized: {0}")]
+    Unauthorized(String),
+
+    #[error("Forbidden: {0}")]
+    Forbidden(String),
 
     #[error("DI error: {0}")]
     Di(String),
@@ -44,6 +53,9 @@ impl Error {
     pub fn status_code(&self) -> u16 {
         match self {
             Error::Http(_) => 400,
+            Error::Status(code, _) => *code,
+            Error::Unauthorized(_) => 401,
+            Error::Forbidden(_) => 403,
             Error::Di(_) => 500,
             Error::Routing(_) => 404,
             Error::Serialization(_) => 400,

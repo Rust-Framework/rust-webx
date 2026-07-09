@@ -1,7 +1,7 @@
 //! Core caching trait — `IDistributedCache`.
 //!
 //! Matches ASP.NET Core `IDistributedCache` interface:
-//| ASP.NET Core                    | LRWF                            |
+//| ASP.NET Core                    | rust-webx                       |
 //|---------------------------------|---------------------------------|
 //| `GetAsync(string, tok)`         | `get(&self, key)`               |
 //| `SetAsync(string, byte[], opts)`| `set(&self, key, value, opts)`  |

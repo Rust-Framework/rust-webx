@@ -1,4 +1,4 @@
-﻿// lrwf-core DI extensions — automatic service registration and module scanning.
+// rust-webx-core DI extensions — automatic service registration and module scanning.
 
 pub mod diagnostics;
 pub mod ext;

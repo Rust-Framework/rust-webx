@@ -19,3 +19,4 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["sync", "macros"] }
 rust-dix.workspace = true
 inventory.workspace = true
+tracing.workspace = true

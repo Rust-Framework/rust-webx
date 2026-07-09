@@ -7,14 +7,13 @@
 
 use rust_webx_core::auth::IClaims;
 use rust_webx_core::http::{IClaimsExt, IHttpContext, IHttpRequest, IHttpResponse};
-use std::cell::RefCell;
 use std::collections::HashMap;
 
 /// A minimal mock IHttpContext for tests.
 pub struct TestHttpContext {
     req: TestHttpRequest,
     resp: TestHttpResponse,
-    claims: RefCell<Option<Box<dyn IClaims>>>,
+    claims: Option<Box<dyn IClaims>>,
 }
 
 impl TestHttpContext {
@@ -34,7 +33,7 @@ impl TestHttpContext {
                 headers: Vec::new(),
                 body: None,
             },
-            claims: RefCell::new(None),
+            claims: None,
         }
     }
 
@@ -56,14 +55,11 @@ impl TestHttpContext {
 
 impl IClaimsExt for TestHttpContext {
     fn set_claims(&mut self, claims: Box<dyn IClaims>) {
-        *self.claims.borrow_mut() = Some(claims);
+        self.claims = Some(claims);
     }
 
     fn claims(&self) -> Option<&dyn IClaims> {
-        let borrowed = self.claims.borrow();
-        borrowed
-            .as_ref()
-            .map(|b| unsafe { &*(&**b as *const dyn IClaims) })
+        self.claims.as_deref()
     }
 }
 

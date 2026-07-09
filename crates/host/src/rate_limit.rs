@@ -54,6 +54,7 @@ pub struct RateLimiter {
     rate: f64,
     burst: f64,
     max_ips: usize,
+    trust_proxy: bool,
 }
 
 impl RateLimiter {
@@ -63,7 +64,13 @@ impl RateLimiter {
             rate: requests_per_second,
             burst: burst_size as f64,
             max_ips: max_tracked_ips.max(1),
+            trust_proxy: false,
         }
+    }
+
+    pub fn with_trust_proxy(mut self, trust: bool) -> Self {
+        self.trust_proxy = trust;
+        self
     }
 
     async fn allow(&self, ip: IpAddr) -> bool {
@@ -98,6 +105,7 @@ fn evict_oldest(buckets: &mut HashMap<IpAddr, TokenBucket>) {
 
 pub struct RateLimitMiddleware {
     limiter: RateLimiter,
+    trust_proxy: bool,
 }
 
 impl RateLimitMiddleware {
@@ -108,22 +116,26 @@ impl RateLimitMiddleware {
     pub fn new_with_max_ips(requests_per_second: f64, burst_size: u32, max_tracked_ips: usize) -> Self {
         Self {
             limiter: RateLimiter::new(requests_per_second, burst_size, max_tracked_ips),
+            trust_proxy: false,
         }
     }
 
     pub fn from_config(cfg: &RateLimitSection) -> Self {
-        Self::new_with_max_ips(
-            cfg.requests_per_second,
-            cfg.burst_size,
-            cfg.max_tracked_ips,
-        )
+        Self {
+            limiter: RateLimiter::new(
+                cfg.requests_per_second,
+                cfg.burst_size,
+                cfg.max_tracked_ips,
+            ),
+            trust_proxy: cfg.trust_proxy,
+        }
     }
 }
 
 #[async_trait::async_trait]
 impl IMiddleware for RateLimitMiddleware {
     async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
-        let ip = extract_client_ip(ctx);
+        let ip = extract_client_ip(ctx, self.trust_proxy);
 
         if !self.limiter.allow(ip).await {
             write_problem(ctx, 429, "Too Many Requests").await;
@@ -134,17 +146,19 @@ impl IMiddleware for RateLimitMiddleware {
     }
 }
 
-fn extract_client_ip(ctx: &dyn IHttpContext) -> IpAddr {
-    if let Some(fwd) = ctx.request().header("x-forwarded-for") {
-        let first = fwd.split(',').next().unwrap_or("").trim();
-        if let Ok(ip) = IpAddr::from_str(first) {
-            return ip;
+fn extract_client_ip(ctx: &dyn IHttpContext, trust_proxy: bool) -> IpAddr {
+    if trust_proxy {
+        if let Some(fwd) = ctx.request().header("x-forwarded-for") {
+            let first = fwd.split(',').next().unwrap_or("").trim();
+            if let Ok(ip) = IpAddr::from_str(first) {
+                return ip;
+            }
         }
-    }
 
-    if let Some(real) = ctx.request().header("x-real-ip") {
-        if let Ok(ip) = IpAddr::from_str(real.trim()) {
-            return ip;
+        if let Some(real) = ctx.request().header("x-real-ip") {
+            if let Ok(ip) = IpAddr::from_str(real.trim()) {
+                return ip;
+            }
         }
     }
 

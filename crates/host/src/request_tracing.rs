@@ -5,9 +5,9 @@ use rust_webx_core::http::IHttpContext;
 use rust_webx_core::middleware::IMiddleware;
 use std::ops::ControlFlow;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{LazyLock, Mutex};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
+static TRACE_SEQ: AtomicU64 = AtomicU64::new(0);
 
 pub struct RequestTracing {
     pub log_all: bool,
@@ -31,7 +31,9 @@ impl Default for RequestTracing {
 #[async_trait::async_trait]
 impl IMiddleware for RequestTracing {
     async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
-        let tid = next_trace_id();
+        // Propagate existing request ID from upstream, or generate a new one.
+        let tid = ctx.request().header("x-request-id").map(|s| s.to_string())
+            .unwrap_or_else(next_trace_id);
         ctx.response_mut().set_header("x-trace-id", &tid);
         Ok(ControlFlow::Continue(()))
     }
@@ -64,44 +66,7 @@ impl IMiddleware for RequestTracing {
     }
 }
 
-struct XorShift(std::sync::Mutex<u64>);
-static XORSHIFT: LazyLock<XorShift> = LazyLock::new(|| {
-    XorShift(Mutex::new(
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or(1),
-    ))
-});
-
-
-static TRACE_BUF: LazyLock<Mutex<String>> = LazyLock::new(|| Mutex::new(String::with_capacity(16)));
-
 fn next_trace_id() -> String {
-    let id = {
-        let mut x = match XORSHIFT.0.lock() {
-            Ok(g) => g,
-            Err(_) => return format!("{:016x}", fast_rand()),
-        };
-        *x ^= *x << 13;
-        *x ^= *x >> 7;
-        *x ^= *x << 17;
-        *x
-    };
-    let mut buf = match TRACE_BUF.lock() {
-        Ok(g) => g,
-        Err(_) => return format!("{:016x}", id),
-    };
-    buf.clear();
-    use std::fmt::Write;
-    let _ = write!(&mut *buf, "{:016x}", id);
-    buf.clone()
-}
-
-fn fast_rand() -> u64 {
-    let t = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(42);
-    t.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407)
+    let id = TRACE_SEQ.fetch_add(1, Ordering::Relaxed);
+    format!("{:016x}", id)
 }

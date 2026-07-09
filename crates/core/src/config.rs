@@ -38,6 +38,9 @@ pub struct AppSection {
     /// Maximum request body size in bytes. Default: 10 MB.
     #[serde(default = "default_max_body_size", rename = "MaxBodySize")]
     pub max_body_size: usize,
+    /// Maximum concurrent connections. Default: 10000.
+    #[serde(default = "default_max_connections", rename = "MaxConnections")]
+    pub max_connections: usize,
 }
 
 impl Default for AppSection {
@@ -46,6 +49,7 @@ impl Default for AppSection {
             name: String::new(),
             urls: default_urls(),
             max_body_size: default_max_body_size(),
+            max_connections: default_max_connections(),
         }
     }
 }
@@ -56,6 +60,10 @@ fn default_urls() -> Vec<String> {
 
 fn default_max_body_size() -> usize {
     10 * 1024 * 1024 // 10 MB
+}
+
+fn default_max_connections() -> usize {
+    10_000
 }
 
 /// JWT authentication section.
@@ -78,6 +86,9 @@ pub struct CorsSection {
     /// Allowed headers. Default: Content-Type, Authorization.
     #[serde(default = "default_cors_headers")]
     pub headers: Vec<String>,
+    /// Response headers exposed to the client. Default: empty.
+    #[serde(default)]
+    pub expose_headers: Vec<String>,
     /// Allow credentials. Default: false.
     #[serde(default)]
     pub allow_credentials: bool,
@@ -92,6 +103,7 @@ impl Default for CorsSection {
             origins: default_origins(),
             methods: default_cors_methods(),
             headers: default_cors_headers(),
+            expose_headers: Vec::new(),
             allow_credentials: false,
             max_age: default_max_age(),
         }
@@ -136,6 +148,10 @@ pub struct RateLimitSection {
     /// Maximum distinct client IPs tracked (LRU eviction when exceeded).
     #[serde(default = "default_rate_limit_max_ips", rename = "MaxTrackedIps")]
     pub max_tracked_ips: usize,
+    /// Trust X-Forwarded-For / X-Real-IP headers for client IP extraction.
+    /// Only enable when behind a trusted reverse proxy. Default: false.
+    #[serde(default, rename = "TrustProxy")]
+    pub trust_proxy: bool,
 }
 
 impl Default for RateLimitSection {
@@ -145,6 +161,7 @@ impl Default for RateLimitSection {
             requests_per_second: default_rate_limit_rps(),
             burst_size: default_rate_limit_burst(),
             max_tracked_ips: default_rate_limit_max_ips(),
+            trust_proxy: false,
         }
     }
 }
@@ -295,18 +312,27 @@ pub fn bind_config<T: for<'de> Deserialize<'de> + Default>(
     section: &str,
 ) -> T {
     if section.is_empty() || section == "." {
-        serde_json::from_value(config.clone()).unwrap_or_default()
+        serde_json::from_value(config.clone()).unwrap_or_else(|e| {
+            tracing::warn!("[Config] Failed to bind root config to {}: {}, using defaults", std::any::type_name::<T>(), e);
+            T::default()
+        })
     } else {
         config
             .get(section)
-            .map(|v| serde_json::from_value(v.clone()).unwrap_or_default())
+            .map(|v| serde_json::from_value(v.clone()).unwrap_or_else(|e| {
+                tracing::warn!("[Config] Failed to bind section '{}' to {}: {}, using defaults", section, std::any::type_name::<T>(), e);
+                T::default()
+            }))
             .unwrap_or_default()
     }
 }
 
 /// Bind the entire config JSON to a type (for root-level deserialization).
 pub fn bind_root<T: for<'de> Deserialize<'de> + Default>(config: &serde_json::Value) -> T {
-    serde_json::from_value(config.clone()).unwrap_or_default()
+    serde_json::from_value(config.clone()).unwrap_or_else(|e| {
+        tracing::warn!("[Config] Failed to bind root config to {}: {}, using defaults", std::any::type_name::<T>(), e);
+        T::default()
+    })
 }
 
 // ---------------------------------------------------------------------------

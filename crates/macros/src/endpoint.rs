@@ -110,6 +110,7 @@ fn emit_endpoint(attr: TokenStream, item: TokenStream) -> TokenStream {
         &req_type_name,
         &path_params,
         is_body_method,
+        rsp_type_str == "()",
     );
 
     let dispatch_fn_name = format_ident!("__lrwf_dispatch_{}", req_type_name.replace("::", "_"));
@@ -155,6 +156,7 @@ fn generate_dispatch_fn(
     type_name: &str,
     path_params: &[String],
     is_body: bool,
+    is_unit_response: bool,
 ) -> proc_macro2::TokenStream {
     let fn_name = format_ident!("__lrwf_dispatch_{}", type_name.replace("::", "_"));
 
@@ -224,9 +226,15 @@ fn generate_dispatch_fn(
                 let mediator = ::rust_webx::Mediator::new(::std::sync::Arc::clone(::rust_webx::global_provider()));
                 let result: #rsp_type = mediator.send(request).await?;
 
-                let json_bytes = ::serde_json::to_vec(&result).unwrap_or_default();
+                let status = if #is_unit_response { 204 } else { 200 };
+                let json_bytes = if #is_unit_response {
+                    Vec::new()
+                } else {
+                    ::serde_json::to_vec(&result)
+                        .map_err(|e| ::rust_webx::Error::Internal(format!("response serialization failed: {}", e)))?
+                };
                 Ok(::rust_webx::ResponseData {
-                    status: 200,
+                    status,
                     content_type: "application/json".to_string(),
                     body: json_bytes,
                 })

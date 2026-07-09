@@ -63,49 +63,52 @@ impl HealthCheckRegistry {
         }
     }
     pub fn all_healthy(&self) -> bool {
-        self.checks
-            .lock()
-            .map(|c| c.iter().all(|(_, f)| f().status != "fail"))
-            .unwrap_or(false)
+        let checks = match self.checks.lock() {
+            Ok(c) => c.clone(),
+            Err(_) => return false,
+        };
+        checks.iter().all(|(_, f)| f().status != "fail")
     }
 
     /// 返回所有健康检查项的当前快照。
     pub fn snapshot(&self) -> Vec<HealthCheckEntry> {
-        self.checks
-            .lock()
-            .map(|c| {
-                c.iter()
-                    .map(|(name, f)| {
-                        let s = f();
-                        HealthCheckEntry {
-                            name: name.clone(),
-                            status: s.status.to_string(),
-                            detail: s.detail.clone(),
-                        }
-                    })
-                    .collect()
+        let checks = match self.checks.lock() {
+            Ok(c) => c.clone(),
+            Err(_) => return Vec::new(),
+        };
+        checks
+            .iter()
+            .map(|(name, f)| {
+                let s = f();
+                HealthCheckEntry {
+                    name: name.clone(),
+                    status: s.status.to_string(),
+                    detail: s.detail.clone(),
+                }
             })
-            .unwrap_or_default()
+            .collect()
     }
 
     /// 计算整体状态：fail 优先于 warn 优先于 pass；空列表视为 pass。
     /// Mutex poisoned 时保守返回 "fail"。
     pub fn overall_status(&self) -> &'static str {
-        self.checks
-            .lock()
-            .map(|c| {
-                let entries: Vec<_> = c.iter().map(|(_, f)| f()).collect();
-                if entries.is_empty() {
-                    "pass"
-                } else if entries.iter().any(|e| e.status == "fail") {
-                    "fail"
-                } else if entries.iter().any(|e| e.status == "warn") {
-                    "warn"
-                } else {
-                    "pass"
-                }
-            })
-            .unwrap_or("fail")
+        let checks = match self.checks.lock() {
+            Ok(c) => c.clone(),
+            Err(_) => return "fail",
+        };
+        if checks.is_empty() {
+            "pass"
+        } else {
+            let any_fail = checks.iter().any(|(_, f)| f().status == "fail");
+            let any_warn = checks.iter().any(|(_, f)| f().status == "warn");
+            if any_fail {
+                "fail"
+            } else if any_warn {
+                "warn"
+            } else {
+                "pass"
+            }
+        }
     }
 }
 

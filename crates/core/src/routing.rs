@@ -2,6 +2,7 @@
 
 use crate::error::Result;
 use crate::http::IHttpContext;
+use std::sync::Arc;
 
 /// HTTP methods supported by the framework.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -92,5 +93,3 @@ pub trait IRouter: Send + Sync {
         )>,
     >;
 }
-
-use std::sync::Arc;

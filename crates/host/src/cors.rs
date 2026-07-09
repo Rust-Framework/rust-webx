@@ -17,6 +17,8 @@ pub struct CorsConfig {
     pub methods: Vec<String>,
     /// Allowed request headers.
     pub headers: Vec<String>,
+    /// Response headers exposed to the client (via access-control-expose-headers).
+    pub expose_headers: Vec<String>,
     /// Whether credentials (cookies) are allowed.
     pub allow_credentials: bool,
     /// Max age for preflight cache (seconds).
@@ -36,6 +38,7 @@ impl Default for CorsConfig {
                 "OPTIONS".to_string(),
             ],
             headers: vec!["Content-Type".to_string(), "Authorization".to_string()],
+            expose_headers: Vec::new(),
             allow_credentials: false,
             max_age: 86400,
         }
@@ -71,7 +74,11 @@ impl IMiddleware for CorsMiddleware {
             .cloned();
 
         if let Some(ref origin_value) = allowed {
-            let header_value = if origin_value == "*" {
+            // When allow_credentials is true, "*" cannot be used per CORS spec;
+            // echo the request's Origin header instead.
+            let header_value = if origin_value == "*" && self.config.allow_credentials {
+                origin.unwrap_or("*").to_string()
+            } else if origin_value == "*" {
                 "*".to_string()
             } else if let Some(o) = origin {
                 o.to_string()
@@ -106,14 +113,12 @@ impl IMiddleware for CorsMiddleware {
             return Ok(ControlFlow::Break(()));
         }
 
-        // For normal requests, expose headers
-        if let Some(ref expose) = allowed {
-            if expose != "*" {
-                ctx.response_mut().set_header(
-                    "access-control-expose-headers",
-                    &self.config.headers.join(", "),
-                );
-            }
+        // For normal requests, expose specified response headers to the client
+        if !self.config.expose_headers.is_empty() {
+            ctx.response_mut().set_header(
+                "access-control-expose-headers",
+                &self.config.expose_headers.join(", "),
+            );
         }
 
         Ok(ControlFlow::Continue(()))

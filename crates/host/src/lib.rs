@@ -1,4 +1,4 @@
-// lrwf-http — HTTP server, middleware pipeline, and routing.
+// rust-webx-host — HTTP server, middleware pipeline, and routing.
 
 pub mod auth_jwt;
 pub mod authz;

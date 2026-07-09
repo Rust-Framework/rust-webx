@@ -33,7 +33,7 @@ where
 
     let scope = provider.create_scope();
     let resolver: &dyn rust_dix::IServiceResolver = &scope;
-    let handler = (entry.factory)(resolver);
+    let handler = (entry.factory)(resolver)?;
 
     let behaviors: Vec<Arc<dyn crate::pipeline::IPipelineBehavior>> =
         scope.get_all::<dyn crate::pipeline::IPipelineBehavior>();
@@ -47,7 +47,7 @@ where
 
     let chain = build_pipeline_chain(behaviors, terminal);
     let result_box = chain(Box::new(req)).await?;
-    Ok(*result_box
-        .downcast::<R>()
-        .expect("Response type mismatch in dispatch call bridge"))
+    Ok(*result_box.downcast::<R>().map_err(|_| {
+        crate::Error::Internal("Response type mismatch in dispatch call bridge".to_string())
+    })?)
 }

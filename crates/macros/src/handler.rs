@@ -60,16 +60,17 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
             format_ident!("__rdi_construct_{}", handler_ty_name.replace("::", "_"));
         quote! {
             let arc: ::std::sync::Arc<#handler_ty> = #constructor_fn(resolver);
-            let owned: #handler_ty = match ::std::sync::Arc::try_unwrap(arc) {
-                Ok(o) => o,
-                Err(_) => panic!("handler Arc must be uniquely owned after fresh construction"),
-            };
-            ::std::boxed::Box::new(owned) as ::std::boxed::Box<dyn ::std::any::Any + Send>
+            match ::std::sync::Arc::try_unwrap(arc) {
+                Ok(owned) => Ok(::std::boxed::Box::new(owned) as ::std::boxed::Box<dyn ::std::any::Any + Send>),
+                Err(_) => Err(::rust_webx::Error::Internal(
+                    format!("handler Arc must be uniquely owned after fresh construction: {}", #handler_ty_name)
+                )),
+            }
         }
     } else {
         quote! {
-            ::std::boxed::Box::new(<#handler_ty as ::std::default::Default>::default())
-                as ::std::boxed::Box<dyn ::std::any::Any + Send>
+            Ok(::std::boxed::Box::new(<#handler_ty as ::std::default::Default>::default())
+                as ::std::boxed::Box<dyn ::std::any::Any + Send>)
         }
     };
 
@@ -79,7 +80,7 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
         #[doc(hidden)]
         fn #factory_fn(
             resolver: &dyn ::rust_webx::rust_dix::IServiceResolver,
-        ) -> ::std::boxed::Box<dyn ::std::any::Any + Send> {
+        ) -> ::rust_webx::Result<::std::boxed::Box<dyn ::std::any::Any + Send>> {
             #factory_body
         }
 
@@ -91,10 +92,14 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
             Box::pin(async move {
                 let mut h = *handler
                     .downcast::<#handler_ty>()
-                    .expect("Handler downcast failed");
+                    .map_err(|_| ::rust_webx::Error::Internal(
+                        format!("Handler downcast failed for: {}", #handler_ty_name)
+                    ))?;
                 let req = *request
                     .downcast::<#req_ty>()
-                    .expect("Request downcast failed");
+                    .map_err(|_| ::rust_webx::Error::Internal(
+                        format!("Request downcast failed for: {}", #req_ty_name)
+                    ))?;
                 let result: #rsp_ty = h.handle(req).await?;
                 Ok(::std::boxed::Box::new(result) as ::std::boxed::Box<dyn ::std::any::Any + Send>)
             })

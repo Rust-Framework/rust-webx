@@ -50,8 +50,8 @@ impl IRequestHandler<HelloRequest, HelloResponse> for HelloHandler {
 
 fn __factory_hello_handler(
     _resolver: &dyn rust_dix::IServiceResolver,
-) -> Box<dyn std::any::Any + Send> {
-    Box::new(HelloHandler::default()) as Box<dyn std::any::Any + Send>
+) -> LrwfResult<Box<dyn std::any::Any + Send>> {
+    Ok(Box::new(HelloHandler::default()) as Box<dyn std::any::Any + Send>)
 }
 
 fn __call_hello_handler(
@@ -66,10 +66,10 @@ fn __call_hello_handler(
     Box::pin(async move {
         let mut h = *handler
             .downcast::<HelloHandler>()
-            .expect("Handler downcast failed");
+            .map_err(|_| Error::Internal("Handler downcast failed".into()))?;
         let req = *request
             .downcast::<HelloRequest>()
-            .expect("Request downcast failed");
+            .map_err(|_| Error::Internal("Request downcast failed".into()))?;
         let result: HelloResponse = h.handle(req).await?;
         Ok(Box::new(result) as Box<dyn std::any::Any + Send>)
     })
@@ -96,8 +96,8 @@ impl IRequestHandler<HelloRequest, HelloResponse> for FailingHandler {
 
 fn __factory_failing_handler(
     _resolver: &dyn rust_dix::IServiceResolver,
-) -> Box<dyn std::any::Any + Send> {
-    Box::new(FailingHandler::default()) as Box<dyn std::any::Any + Send>
+) -> LrwfResult<Box<dyn std::any::Any + Send>> {
+    Ok(Box::new(FailingHandler::default()) as Box<dyn std::any::Any + Send>)
 }
 
 fn __call_failing_handler(
@@ -112,10 +112,10 @@ fn __call_failing_handler(
     Box::pin(async move {
         let mut h = *handler
             .downcast::<FailingHandler>()
-            .expect("Handler downcast failed");
+            .map_err(|_| Error::Internal("Handler downcast failed".into()))?;
         let req = *request
             .downcast::<HelloRequest>()
-            .expect("Request downcast failed");
+            .map_err(|_| Error::Internal("Request downcast failed".into()))?;
         let result: HelloResponse = h.handle(req).await?;
         Ok(Box::new(result) as Box<dyn std::any::Any + Send>)
     })
@@ -322,29 +322,29 @@ impl IRequest<ScopeProbeResponse> for ScopeProbeRequest {}
 /// records whether the two resolutions returned the same instance.
 fn __factory_scope_probe_handler(
     resolver: &dyn rust_dix::IServiceResolver,
-) -> Box<dyn std::any::Any + Send> {
+) -> LrwfResult<Box<dyn std::any::Any + Send>> {
     // Use get_any (the only non-Sized-bound resolver method) + downcast.
     let key = std::any::type_name::<ScopedService>();
     let a: Arc<ScopedService> = resolver
         .get_any(key)
         .and_then(|a| a.downcast::<Arc<ScopedService>>().ok())
         .map(|d| Arc::clone(&*d))
-        .expect("ScopedService not registered");
+        .ok_or_else(|| Error::Internal("ScopedService not registered".into()))?;
     let b: Arc<ScopedService> = resolver
         .get_any(key)
         .and_then(|a| a.downcast::<Arc<ScopedService>>().ok())
         .map(|d| Arc::clone(&*d))
-        .expect("ScopedService not registered");
+        .ok_or_else(|| Error::Internal("ScopedService not registered".into()))?;
     let within_call = if std::ptr::eq(Arc::as_ptr(&a), Arc::as_ptr(&b)) {
         "same"
     } else {
         "different"
     };
     let first_id = a.instance_id;
-    Box::new(ScopeProbeResult {
+    Ok(Box::new(ScopeProbeResult {
         within_call: within_call.to_string(),
         first_id,
-    }) as Box<dyn std::any::Any + Send>
+    }) as Box<dyn std::any::Any + Send>)
 }
 
 struct ScopeProbeResult {
@@ -364,7 +364,7 @@ fn __call_scope_probe_handler(
     Box::pin(async move {
         let h = *handler
             .downcast::<ScopeProbeResult>()
-            .expect("ScopeProbeResult downcast failed");
+            .map_err(|_| Error::Internal("ScopeProbeResult downcast failed".into()))?;
         let rsp = ScopeProbeResponse {
             within_call: h.within_call,
             first_id: h.first_id,
@@ -441,8 +441,8 @@ impl IRequestHandler<BehaviorProbeRequest, BehaviorProbeResponse> for BehaviorPr
 
 fn __factory_behavior_probe_handler(
     _resolver: &dyn rust_dix::IServiceResolver,
-) -> Box<dyn std::any::Any + Send> {
-    Box::new(BehaviorProbeHandler::default()) as Box<dyn std::any::Any + Send>
+) -> LrwfResult<Box<dyn std::any::Any + Send>> {
+    Ok(Box::new(BehaviorProbeHandler::default()) as Box<dyn std::any::Any + Send>)
 }
 
 fn __call_behavior_probe_handler(
@@ -457,10 +457,10 @@ fn __call_behavior_probe_handler(
     Box::pin(async move {
         let mut h = *handler
             .downcast::<BehaviorProbeHandler>()
-            .expect("Handler downcast failed");
+            .map_err(|_| Error::Internal("Handler downcast failed".into()))?;
         let req = *request
             .downcast::<BehaviorProbeRequest>()
-            .expect("Request downcast failed");
+            .map_err(|_| Error::Internal("Request downcast failed".into()))?;
         let result: BehaviorProbeResponse = h.handle(req).await?;
         Ok(Box::new(result) as Box<dyn std::any::Any + Send>)
     })

@@ -7,7 +7,33 @@
 
 use super::options::DistributedCacheEntryOptions;
 use super::trait_def::{CacheError, IDistributedCache, Result};
+use std::collections::HashMap;
 use std::future::Future;
+use std::sync::{Arc, OnceLock};
+use tokio::sync::Mutex;
+
+type KeyLockMap = Mutex<HashMap<String, Arc<Mutex<()>>>>;
+
+fn key_locks() -> &'static KeyLockMap {
+    static KEY_LOCKS: OnceLock<KeyLockMap> = OnceLock::new();
+    KEY_LOCKS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+async fn with_key_lock<F, Fut, T>(key: &str, f: F) -> T
+where
+    F: FnOnce() -> Fut + Send,
+    Fut: Future<Output = T> + Send,
+    T: Send,
+{
+    let lock = {
+        let mut map = key_locks().lock().await;
+        map.entry(key.to_string())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    };
+    let _guard = lock.lock().await;
+    f().await
+}
 
 #[async_trait::async_trait]
 pub trait DistributedCacheExtensions: IDistributedCache {
@@ -91,9 +117,15 @@ impl<T: IDistributedCache + ?Sized + Sync> DistributedCacheExtensions for T {
         if let Some(val) = self.get_string::<U>(key).await? {
             return Ok(val);
         }
-        let val = factory().await;
-        self.set_string(key, &val, opts).await?;
-        Ok(val)
+        with_key_lock(key, || async {
+            if let Some(val) = self.get_string::<U>(key).await? {
+                return Ok(val);
+            }
+            let val = factory().await;
+            self.set_string(key, &val, opts).await?;
+            Ok(val)
+        })
+        .await
     }
 
     async fn get_or_try_create<U, F, Fut, E>(
@@ -111,10 +143,16 @@ impl<T: IDistributedCache + ?Sized + Sync> DistributedCacheExtensions for T {
         if let Some(val) = self.get_string::<U>(key).await? {
             return Ok(val);
         }
-        let val = factory()
-            .await
-            .map_err(|e| CacheError::Message(e.to_string()))?;
-        self.set_string(key, &val, opts).await?;
-        Ok(val)
+        with_key_lock(key, || async {
+            if let Some(val) = self.get_string::<U>(key).await? {
+                return Ok(val);
+            }
+            let val = factory()
+                .await
+                .map_err(|e| CacheError::Message(e.to_string()))?;
+            self.set_string(key, &val, opts).await?;
+            Ok(val)
+        })
+        .await
     }
 }

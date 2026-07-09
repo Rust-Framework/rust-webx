@@ -23,6 +23,7 @@
 //! ```
 //!
 //! - 禁止链式 `self.ctx.set::<T>().add(...)`
+//!
 //! Post-save reload: `ef_require_by_id!`（crate 根宏）
 //!
 //! ### 软删除与持久化

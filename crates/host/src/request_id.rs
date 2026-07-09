@@ -24,7 +24,11 @@ impl Default for RequestIdMiddleware {
 #[async_trait::async_trait]
 impl IMiddleware for RequestIdMiddleware {
     async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
-        let id = Uuid::new_v4().to_string();
+        let id = ctx
+            .request()
+            .header("x-request-id")
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
         ctx.response_mut().set_header("x-request-id", &id);
         Ok(ControlFlow::Continue(()))
     }

@@ -12,6 +12,11 @@
 //! `rust_webx_core::` paths directly, since `rust-webx-host` cannot
 //! depend on the `rust_webx` umbrella crate (circular dependency).
 
+// Manual handler-bridge functions mimic `#[handler]` macro output, whose
+// `Pin<Box<dyn Future<Output = Result<Box<dyn Any + Send>>> + Send>>` return
+// type is inherent to the dispatch bridge pattern.
+#![allow(clippy::type_complexity)]
+
 use rust_dix::ServiceCollection;
 use rust_webx_core::error::{Error, Result as LrwfResult};
 use rust_webx_core::handler::{IEventHandler, IRequestHandler};
@@ -51,7 +56,7 @@ impl IRequestHandler<HelloRequest, HelloResponse> for HelloHandler {
 fn __factory_hello_handler(
     _resolver: &dyn rust_dix::IServiceResolver,
 ) -> LrwfResult<Box<dyn std::any::Any + Send>> {
-    Ok(Box::new(HelloHandler::default()) as Box<dyn std::any::Any + Send>)
+    Ok(Box::new(HelloHandler) as Box<dyn std::any::Any + Send>)
 }
 
 fn __call_hello_handler(
@@ -97,7 +102,7 @@ impl IRequestHandler<HelloRequest, HelloResponse> for FailingHandler {
 fn __factory_failing_handler(
     _resolver: &dyn rust_dix::IServiceResolver,
 ) -> LrwfResult<Box<dyn std::any::Any + Send>> {
-    Ok(Box::new(FailingHandler::default()) as Box<dyn std::any::Any + Send>)
+    Ok(Box::new(FailingHandler) as Box<dyn std::any::Any + Send>)
 }
 
 fn __call_failing_handler(
@@ -442,7 +447,7 @@ impl IRequestHandler<BehaviorProbeRequest, BehaviorProbeResponse> for BehaviorPr
 fn __factory_behavior_probe_handler(
     _resolver: &dyn rust_dix::IServiceResolver,
 ) -> LrwfResult<Box<dyn std::any::Any + Send>> {
-    Ok(Box::new(BehaviorProbeHandler::default()) as Box<dyn std::any::Any + Send>)
+    Ok(Box::new(BehaviorProbeHandler) as Box<dyn std::any::Any + Send>)
 }
 
 fn __call_behavior_probe_handler(

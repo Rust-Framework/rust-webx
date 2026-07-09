@@ -25,7 +25,7 @@ pub use startup::DbInitService;
 pub fn build_host() -> Host {
     let mode = AppMode::from_env();
     let mut builder = Host::builder()
-        .register(|svc| register_db_context(svc))
+        .register(register_db_context)
         .register(|svc| svc.add_mediator())
         .add_options::<SiteConfig>("Site")
         .add_authentication()

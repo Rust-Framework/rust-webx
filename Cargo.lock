@@ -2440,7 +2440,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "hyper",
@@ -2461,7 +2461,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-core"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "inventory",
@@ -2475,7 +2475,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-host"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "compact_str",
@@ -2510,7 +2510,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-macros"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2519,7 +2519,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-openapi"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "inventory",
  "rust-webx-core",
@@ -2528,7 +2528,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-spa"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "rust-webx-core",

@@ -17,7 +17,7 @@ async fn cors_wildcard_sets_star_origin() {
     let mut ctx = test_utils::TestHttpContext::new("GET", "/api/data")
         .with_header("origin", "https://example.com");
 
-    middleware.invoke(&mut ctx).await.unwrap();
+    let _ = middleware.invoke(&mut ctx).await.unwrap();
 
     let (_status, headers, _body) = ctx.into_response_parts();
     assert_eq!(
@@ -37,7 +37,7 @@ async fn cors_exact_origin_match() {
     let mut ctx = test_utils::TestHttpContext::new("GET", "/api/data")
         .with_header("origin", "https://myapp.com");
 
-    middleware.invoke(&mut ctx).await.unwrap();
+    let _ = middleware.invoke(&mut ctx).await.unwrap();
 
     let (_status, headers, _body) = ctx.into_response_parts();
     assert_eq!(
@@ -57,7 +57,7 @@ async fn cors_disallowed_origin_no_header() {
     let mut ctx = test_utils::TestHttpContext::new("GET", "/api/data")
         .with_header("origin", "https://evil.com");
 
-    middleware.invoke(&mut ctx).await.unwrap();
+    let _ = middleware.invoke(&mut ctx).await.unwrap();
 
     let (_status, headers, _body) = ctx.into_response_parts();
     assert!(
@@ -73,7 +73,7 @@ async fn cors_preflight_options_request() {
     let mut ctx = test_utils::TestHttpContext::new("OPTIONS", "/api/data")
         .with_header("origin", "https://example.com");
 
-    middleware.invoke(&mut ctx).await.unwrap();
+    let _ = middleware.invoke(&mut ctx).await.unwrap();
 
     let (status, headers, _body) = ctx.into_response_parts();
     assert_eq!(status, 204);
@@ -92,7 +92,7 @@ async fn cors_no_origin_header_no_cors_response() {
     let middleware = CorsMiddleware::new(config);
     let mut ctx = test_utils::TestHttpContext::new("GET", "/api/data");
 
-    middleware.invoke(&mut ctx).await.unwrap();
+    let _ = middleware.invoke(&mut ctx).await.unwrap();
 
     let (_status, headers, _body) = ctx.into_response_parts();
     assert!(
@@ -112,7 +112,7 @@ async fn cors_credentials_allowed() {
     let mut ctx = test_utils::TestHttpContext::new("GET", "/api/data")
         .with_header("origin", "https://example.com");
 
-    middleware.invoke(&mut ctx).await.unwrap();
+    let _ = middleware.invoke(&mut ctx).await.unwrap();
 
     let (_status, headers, _body) = ctx.into_response_parts();
     assert_eq!(
@@ -129,7 +129,7 @@ async fn cors_credentials_not_set_when_disabled() {
     let mut ctx = test_utils::TestHttpContext::new("GET", "/api/data")
         .with_header("origin", "https://example.com");
 
-    middleware.invoke(&mut ctx).await.unwrap();
+    let _ = middleware.invoke(&mut ctx).await.unwrap();
 
     let (_status, headers, _body) = ctx.into_response_parts();
     assert!(find_header(&headers, "access-control-allow-credentials").is_none());

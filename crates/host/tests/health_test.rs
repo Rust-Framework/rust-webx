@@ -9,7 +9,7 @@ use std::sync::Arc;
 #[test]
 fn registry_snapshot_returns_registered_checks() {
     let registry = HealthCheckRegistry::new();
-    registry.register("db", Arc::new(|| HealthStatus::pass()));
+    registry.register("db", Arc::new(HealthStatus::pass));
     registry.register("cache", Arc::new(|| HealthStatus::fail("down")));
 
     let snap = registry.snapshot();
@@ -25,7 +25,7 @@ fn registry_snapshot_returns_registered_checks() {
 #[test]
 fn registry_overall_status_fail_dominates() {
     let registry = HealthCheckRegistry::new();
-    registry.register("db", Arc::new(|| HealthStatus::pass()));
+    registry.register("db", Arc::new(HealthStatus::pass));
     registry.register("cache", Arc::new(|| HealthStatus::fail("down")));
 
     assert_eq!(registry.overall_status(), "fail");
@@ -34,7 +34,7 @@ fn registry_overall_status_fail_dominates() {
 #[test]
 fn registry_overall_status_warn_when_no_fail() {
     let registry = HealthCheckRegistry::new();
-    registry.register("db", Arc::new(|| HealthStatus::pass()));
+    registry.register("db", Arc::new(HealthStatus::pass));
     registry.register("cache", Arc::new(|| HealthStatus::warn("degraded")));
 
     assert_eq!(registry.overall_status(), "warn");
@@ -50,8 +50,8 @@ fn registry_empty_returns_pass() {
 #[test]
 fn registry_all_pass_returns_pass() {
     let registry = HealthCheckRegistry::new();
-    registry.register("db", Arc::new(|| HealthStatus::pass()));
-    registry.register("cache", Arc::new(|| HealthStatus::pass()));
+    registry.register("db", Arc::new(HealthStatus::pass));
+    registry.register("cache", Arc::new(HealthStatus::pass));
 
     assert_eq!(registry.overall_status(), "pass");
     assert!(registry.all_healthy());
@@ -60,7 +60,7 @@ fn registry_all_pass_returns_pass() {
 #[test]
 fn registry_all_healthy_false_when_any_fail() {
     let registry = HealthCheckRegistry::new();
-    registry.register("db", Arc::new(|| HealthStatus::pass()));
+    registry.register("db", Arc::new(HealthStatus::pass));
     registry.register("cache", Arc::new(|| HealthStatus::fail("down")));
 
     assert!(!registry.all_healthy());

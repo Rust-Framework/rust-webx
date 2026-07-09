@@ -871,11 +871,15 @@ async fn handle_request(
     max_body_size: usize,
 ) -> std::result::Result<hyper::Response<Full<Bytes>>, std::convert::Infallible> {
     let mut ctx = HttpContext::new(req, max_body_size).await;
-    let result = pipeline.execute(&mut ctx, router_handler).await;
 
-    if let Err(e) = result {
-        let status = e.status_code();
-        write_error_response(&mut ctx, status, &e.to_string()).await;
+    // If HttpContext::new already set an error response (e.g. 413 Payload Too Large),
+    // skip the pipeline — the response is final.
+    if ctx.response().status() < 400 {
+        let result = pipeline.execute(&mut ctx, router_handler).await;
+        if let Err(e) = result {
+            let status = e.status_code();
+            write_error_response(&mut ctx, status, &e.to_string()).await;
+        }
     }
 
     Ok(ctx.into_response())
@@ -1103,6 +1107,7 @@ async fn serve_http(
 }
 
 /// Serve HTTPS (TLS) on the given address.
+#[allow(clippy::too_many_arguments)]
 async fn serve_https(
     addr: String,
     acceptor: TlsAcceptor,

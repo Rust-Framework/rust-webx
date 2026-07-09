@@ -203,6 +203,7 @@ fn generate_dispatch_fn(
     };
 
     quote! {
+        #[allow(clippy::needless_update)]
         fn #fn_name(
             body_bytes: Vec<u8>,
             route_params: ::std::collections::HashMap<String, String>,

@@ -1,4 +1,4 @@
-﻿//! Pagination types for list endpoints.
+//! Pagination types for list endpoints.
 
 use serde::{Deserialize, Serialize};
 
@@ -54,7 +54,7 @@ pub struct PagedResponse<T: Serialize> {
 impl<T: Serialize> PagedResponse<T> {
     pub fn new(items: Vec<T>, total: u64, page: u32, page_size: u32) -> Self {
         let total_pages = if page_size > 0 {
-            ((total as f64) / (page_size as f64)).ceil() as u32
+            total.div_ceil(page_size as u64) as u32
         } else {
             0
         };

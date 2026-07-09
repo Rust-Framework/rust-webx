@@ -101,7 +101,7 @@ async fn auth_empty_token_returns_none() {
 }
 
 #[tokio::test]
-async fn auth_invalid_token_returns_none() {
+async fn auth_invalid_token_returns_err() {
     let secret = b"test-secret-key";
     let auth = JwtAuth::new(DecodingKey::from_secret(secret), Validation::default());
 
@@ -110,13 +110,13 @@ async fn auth_invalid_token_returns_none() {
 
     let result = auth.authenticate(&mut ctx).await;
     assert!(
-        result.unwrap().is_none(),
-        "Invalid token should return None"
+        result.is_err(),
+        "Invalid token should return Err"
     );
 }
 
 #[tokio::test]
-async fn auth_wrong_secret_key_returns_none() {
+async fn auth_wrong_secret_key_returns_err() {
     let secret = b"real-secret";
     let wrong_secret = b"wrong-secret";
     let token = create_test_token(secret, "user-1", &[], &[]);
@@ -130,13 +130,13 @@ async fn auth_wrong_secret_key_returns_none() {
 
     let result = auth.authenticate(&mut ctx).await;
     assert!(
-        result.unwrap().is_none(),
-        "Token signed with different key should return None"
+        result.is_err(),
+        "Token signed with different key should return Err"
     );
 }
 
 #[tokio::test]
-async fn auth_expired_token_returns_none() {
+async fn auth_expired_token_returns_err() {
     let secret = b"test-secret-key-expiry";
     let token = create_expired_token(secret);
     let auth = JwtAuth::new(DecodingKey::from_secret(secret), Validation::default());
@@ -146,13 +146,13 @@ async fn auth_expired_token_returns_none() {
 
     let result = auth.authenticate(&mut ctx).await;
     assert!(
-        result.unwrap().is_none(),
-        "Expired token should return None"
+        result.is_err(),
+        "Expired token should return Err"
     );
 }
 
 #[tokio::test]
-async fn auth_bearer_prefix_case_sensitive() {
+async fn auth_bearer_prefix_case_insensitive() {
     let secret = b"test-secret-key";
     let token = create_test_token(secret, "user-1", &[], &[]);
     let auth = JwtAuth::new(DecodingKey::from_secret(secret), Validation::default());
@@ -162,8 +162,8 @@ async fn auth_bearer_prefix_case_sensitive() {
 
     let result = auth.authenticate(&mut ctx).await.unwrap();
     assert!(
-        result.is_none(),
-        "Lowercase 'bearer' should not be recognized"
+        result.is_some(),
+        "Lowercase 'bearer' should be accepted (RFC 6750)"
     );
 }
 

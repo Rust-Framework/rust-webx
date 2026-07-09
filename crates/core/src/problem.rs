@@ -1,4 +1,4 @@
-﻿//! RFC 7807 / RFC 9457 Problem Details for HTTP APIs.
+//! RFC 7807 / RFC 9457 Problem Details for HTTP APIs.
 //!
 //! Standard error response format for machine-readable errors.
 
@@ -73,7 +73,7 @@ impl ProblemDetails {
     pub fn to_error(self) -> crate::error::Error {
         let title = self.title.clone();
         let fallback = serde_json::to_string(&self).unwrap_or(title);
-        crate::error::Error::Http(fallback)
+        crate::error::Error::Status(self.status, fallback)
     }
 }
 

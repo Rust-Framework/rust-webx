@@ -1,6 +1,6 @@
 //! Typed cache extensions — matches ASP.NET Core's `DistributedCacheExtensions`.
 //!
-//| ASP.NET Core                          | LRWF                                    |
+//| ASP.NET Core                          | rust-webx                               |
 //|---------------------------------------|-----------------------------------------|
 //| `GetStringAsync(cache, key, token)`   | `get_string(&self, key)`                |
 //| `SetStringAsync(cache, key, val, opts)`| `set_string(&self, key, &val, opts)`    |

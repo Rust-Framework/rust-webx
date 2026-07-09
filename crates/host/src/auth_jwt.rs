@@ -1,4 +1,4 @@
-//! JWT authentication module for the LRWF framework.
+//! JWT authentication module for the rust-webx framework.
 //!
 //! Provides `JwtAuth` —an `IAuthenticationHandler` implementation that reads
 //! a Bearer token from the `Authorization` header and validates it using
@@ -150,20 +150,26 @@ impl IAuthenticationHandler for JwtAuth {
     async fn authenticate(&self, ctx: &mut dyn IHttpContext) -> Result<Option<Box<dyn IClaims>>> {
         // Extract token synchronously —avoids holding &dyn IHttpContext
         // across any async boundary, keeping the future Send.
-        let token = match ctx.request().header("authorization") {
-            Some(h) => h.strip_prefix("Bearer ").map(|t| t.trim().to_string()),
+        let header = match ctx.request().header("authorization") {
+            Some(h) => h,
             None => return Ok(None),
         };
 
-        let token = match token {
-            Some(t) if !t.is_empty() => t,
-            _ => return Ok(None),
+        // RFC 6750: scheme is case-insensitive
+        let token = if header.len() >= 7 && header[..7].eq_ignore_ascii_case("Bearer ") {
+            header[7..].trim().to_string()
+        } else {
+            return Ok(None);
         };
 
-        let token_data = match decode::<RawClaims>(&token, &self.decoding_key, &self.validation) {
-            Ok(d) => d,
-            Err(_) => return Ok(None),
-        };
+        if token.is_empty() {
+            return Ok(None);
+        }
+
+        let token_data = decode::<RawClaims>(&token, &self.decoding_key, &self.validation)
+            .map_err(|e| rust_webx_core::error::Error::Unauthorized(format!(
+                "invalid or expired token: {}", e
+            )))?;
 
         let claims: JwtClaims = token_data.claims.into();
         Ok(Some(Box::new(claims)))

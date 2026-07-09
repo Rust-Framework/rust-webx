@@ -102,6 +102,7 @@ impl IMiddleware for CompressionMiddleware {
 
         if let Some(compressed) = compress_gzip(&body, self.config.level) {
             ctx.response_mut().set_header("content-encoding", "gzip");
+            ctx.response_mut().remove_header("content-length");
             ctx.response_mut().write_bytes(compressed).await?;
         }
         Ok(())

@@ -1,4 +1,4 @@
-// lrwf-openapi — OpenAPI specification generation and API docs UI.
+// rust-webx-openapi — OpenAPI specification generation and API docs UI.
 
 mod apiui;
 mod openapi;

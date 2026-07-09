@@ -1,4 +1,4 @@
-//! Resource-based authorization module for the LRWF framework.
+//! Resource-based authorization module for the rust-webx framework.
 //!
 //! Provides:
 //! - `ResourceAuthorization` —an `IAuthorizationPolicy` that checks
@@ -129,8 +129,8 @@ impl IAuthorizationPolicy for ResourceAuthorization {
         }
 
         // No matching policies found —deny by default
-        Err(rust_webx_core::error::Error::Http(format!(
-            "Forbidden: no policy grants access to '{} {}'",
+        Err(rust_webx_core::error::Error::Forbidden(format!(
+            "no policy grants access to '{} {}'",
             _method, resource_key
         )))
     }
@@ -166,8 +166,8 @@ impl IMiddleware for ResourceAuthMiddleware {
         // IHttpContext extends IClaimsExt, so claims() is available directly.
         match ctx.claims() {
             Some(claims) => self.policy.authorize(claims, &route_pattern, &method).await.map(|_| ControlFlow::Continue(())),
-            None => Err(rust_webx_core::error::Error::Http(
-                "Unauthorized: no authentication claims found".to_string(),
+            None => Err(rust_webx_core::error::Error::Unauthorized(
+                "no authentication claims found".to_string(),
             )),
         }
     }

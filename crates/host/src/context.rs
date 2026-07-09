@@ -8,7 +8,6 @@ use rust_webx_core::error::Result;
 use rust_webx_core::http::{IClaimsExt, IHttpContext, IHttpRequest, IHttpResponse};
 
 use crate::problem_response::{build_problem, problem_to_bytes};
-use std::cell::RefCell;
 use std::collections::HashMap;
 
 /// Concrete implementation of IHttpContext wrapping a hyper request and response.
@@ -19,7 +18,7 @@ pub struct HttpContext {
     req: HttpRequest,
     resp: HttpResponse,
     /// Authentication claims set by authentication middleware.
-    claims: RefCell<Option<Box<dyn IClaims>>>,
+    claims: Option<Box<dyn IClaims>>,
 }
 
 impl HttpContext {
@@ -101,7 +100,7 @@ impl HttpContext {
         Self {
             req,
             resp,
-            claims: RefCell::new(None),
+            claims: None,
         }
     }
 
@@ -112,18 +111,11 @@ impl HttpContext {
 
 impl IClaimsExt for HttpContext {
     fn set_claims(&mut self, claims: Box<dyn IClaims>) {
-        *self.claims.borrow_mut() = Some(claims);
+        self.claims = Some(claims);
     }
 
     fn claims(&self) -> Option<&dyn IClaims> {
-        let borrowed = self.claims.borrow();
-        // SAFETY: We extend the Ref's lifetime to match &self. This is sound
-        // because set_claims requires &mut self and can't be called concurrently
-        // with any &self method, so the RefCell's contents are stable for the
-        // duration of &self.
-        borrowed
-            .as_ref()
-            .map(|b| unsafe { &*(&**b as *const dyn IClaims) })
+        self.claims.as_deref()
     }
 }
 
@@ -254,6 +246,10 @@ impl IHttpResponse for HttpResponse {
 
     fn set_header(&mut self, key: &str, value: &str) {
         self.headers.insert(key.to_string(), value.to_string());
+    }
+
+    fn remove_header(&mut self, key: &str) {
+        self.headers.remove(key);
     }
 
     async fn write_bytes(&mut self, data: Vec<u8>) -> Result<()> {

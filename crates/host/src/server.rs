@@ -384,6 +384,7 @@ impl HostBuilder {
                 origins: cs.origins.clone(),
                 methods: cs.methods.clone(),
                 headers: cs.headers.clone(),
+                expose_headers: cs.expose_headers.clone(),
                 allow_credentials: cs.allow_credentials,
                 max_age: cs.max_age,
             }
@@ -724,6 +725,7 @@ impl Host {
         let router_handler = self.router_handler.clone();
         let mode = self.mode;
         let max_body_size = self.options.app.max_body_size;
+        let max_connections = self.options.app.max_connections;
 
         for addr in &http_addrs {
             let addr = addr.clone();
@@ -737,6 +739,7 @@ impl Host {
                 rh,
                 mode,
                 max_body_size,
+                max_connections,
             )));
         }
 
@@ -755,6 +758,7 @@ impl Host {
                     rh,
                     mode,
                     max_body_size,
+                    max_connections,
                 )));
             }
         }
@@ -783,6 +787,7 @@ impl Host {
             self.router_handler.clone(),
             self.mode,
             self.options.app.max_body_size,
+            self.options.app.max_connections,
         )
         .await;
 
@@ -841,11 +846,16 @@ fn make_router_handler(router: Arc<Router>) -> HandlerFn {
                     endpoint.handle(ctx).await
                 }
                 None => {
+                    let path_exists = router.path_exists(ctx.request().path());
                     drop(router);
                     // Don't overwrite if a middleware (e.g. SPA) already
                     // wrote a response body (static file, index.html fallback).
                     if !ctx.response().has_body() {
-                        write_error_response(ctx, 404, "Not Found").await;
+                        if path_exists {
+                            write_error_response(ctx, 405, "Method Not Allowed").await;
+                        } else {
+                            write_error_response(ctx, 404, "Not Found").await;
+                        }
                     }
                     Ok(())
                 }
@@ -1010,6 +1020,7 @@ async fn serve_http(
     router_handler: HandlerFn,
     mode: AppMode,
     max_body_size: usize,
+    max_connections: usize,
 ) {
     let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(l) => l,
@@ -1019,6 +1030,7 @@ async fn serve_http(
         }
     };
 
+    let sem = Arc::new(tokio::sync::Semaphore::new(max_connections));
     let mut join_set = JoinSet::new();
 
     loop {
@@ -1035,11 +1047,17 @@ async fn serve_http(
 
                 while join_set.try_join_next().is_some() {}
 
+                let permit = match sem.clone().acquire_owned().await {
+                    Ok(p) => p,
+                    Err(_) => continue,
+                };
+
                 let io = TokioIo::new(stream);
                 let pipeline = Arc::clone(&pipeline);
                 let router_handler = router_handler.clone();
 
                 join_set.spawn(async move {
+                    let _permit = permit;
                     let svc_fn = service_fn(move |req: Request<Incoming>| {
                         let pipeline = Arc::clone(&pipeline);
                         let router_handler = router_handler.clone();
@@ -1093,6 +1111,7 @@ async fn serve_https(
     router_handler: HandlerFn,
     mode: AppMode,
     max_body_size: usize,
+    max_connections: usize,
 ) {
     let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(l) => l,
@@ -1102,6 +1121,7 @@ async fn serve_https(
         }
     };
 
+    let sem = Arc::new(tokio::sync::Semaphore::new(max_connections));
     let mut join_set = JoinSet::new();
 
     loop {
@@ -1118,11 +1138,17 @@ async fn serve_https(
 
                 while join_set.try_join_next().is_some() {}
 
+                let permit = match sem.clone().acquire_owned().await {
+                    Ok(p) => p,
+                    Err(_) => continue,
+                };
+
                 let acceptor = acceptor.clone();
                 let pipeline = Arc::clone(&pipeline);
                 let router_handler = router_handler.clone();
 
                 join_set.spawn(async move {
+                    let _permit = permit;
                     match acceptor.accept(stream).await {
                         Ok(tls_stream) => {
                             let io = TokioIo::new(tls_stream);

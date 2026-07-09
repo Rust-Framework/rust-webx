@@ -1,4 +1,4 @@
-//! Authentication and authorization traits for the LRWF framework.
+//! Authentication and authorization traits for the rust-webx framework.
 //!
 //! Provides:
 //! - `IClaims`: Extracted auth claims (JWT or other token types).

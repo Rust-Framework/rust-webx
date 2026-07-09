@@ -1,4 +1,4 @@
-//! Security headers middleware for the LRWF framework.
+//! Security headers middleware for the rust-webx framework.
 //!
 //! Adds recommended security-related HTTP response headers to every response.
 
@@ -34,8 +34,8 @@ impl IMiddleware for SecurityHeadersMiddleware {
         // Prevent clickjacking
         resp.set_header("x-frame-options", "DENY");
 
-        // Enable browser XSS filter
-        resp.set_header("x-xss-protection", "1; mode=block");
+        // Force HTTPS for 1 year (HSTS)
+        resp.set_header("strict-transport-security", "max-age=31536000; includeSubDomains");
 
         // Referrer policy
         resp.set_header("referrer-policy", "strict-origin-when-cross-origin");
@@ -46,7 +46,7 @@ impl IMiddleware for SecurityHeadersMiddleware {
             "camera=(), microphone=(), geolocation=()",
         );
 
-        // Cache control for API responses
+        // Cache control for API responses (overridable by static-file middleware)
         resp.set_header("cache-control", "no-store");
 
         Ok(ControlFlow::Continue(()))

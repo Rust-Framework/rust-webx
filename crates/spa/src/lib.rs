@@ -1,4 +1,4 @@
-// lrwf-web — SPA static file serving middleware.
+// rust-webx-spa — SPA static file serving middleware.
 
 mod spa;
 

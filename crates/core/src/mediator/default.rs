@@ -43,10 +43,18 @@ impl IMediator for Mediator {
         let scope = self.provider.create_scope();
         let handlers: Vec<Arc<dyn IEventHandler<T>>> = scope.get_all::<dyn IEventHandler<T>>();
 
+        let mut first_err: Option<crate::error::Error> = None;
         for handler in handlers {
-            handler.handle(event.clone()).await?;
+            if let Err(e) = handler.handle(event.clone()).await {
+                if first_err.is_none() {
+                    first_err = Some(e);
+                }
+            }
         }
 
-        Ok(())
+        match first_err {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
     }
 }

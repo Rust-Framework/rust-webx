@@ -13,7 +13,7 @@ pub trait IServiceCollectionExt: Sized {
     /// Register the mediator in the DI container.
     ///
     /// The actual `IRequestHandler` and `IEventHandler` implementations
-    /// are registered via `#[rust_dix::module]` blocks (re-exported as `lrwf::module`).
+    /// are registered via `#[rust_dix::module]` blocks (re-exported as `webx::module`).
     fn add_mediator(self) -> Self;
 
     /// Signal that endpoints should be auto-discovered from `#[get]` / `#[endpoint]`

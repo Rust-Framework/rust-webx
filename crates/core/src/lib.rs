@@ -1,4 +1,4 @@
-// lrwf-core — Core traits for the LRWF framework.
+// rust-webx-core — Core traits for the rust-webx framework.
 
 pub mod app;
 pub mod auth;

@@ -174,7 +174,7 @@ impl rust_webx_core::http::IHttpResponse for TestResp {
 struct TestContext {
     req: TestReq,
     resp: TestResp,
-    claims: std::cell::RefCell<Option<Box<dyn rust_webx_core::auth::IClaims>>>,
+    claims: Option<Box<dyn rust_webx_core::auth::IClaims>>,
 }
 
 impl TestContext {
@@ -194,19 +194,17 @@ impl TestContext {
                 headers: Vec::new(),
                 body: None,
             },
-            claims: std::cell::RefCell::new(None),
+            claims: None,
         }
     }
 }
 
 impl rust_webx_core::http::IClaimsExt for TestContext {
     fn set_claims(&mut self, c: Box<dyn rust_webx_core::auth::IClaims>) {
-        *self.claims.borrow_mut() = Some(c);
+        self.claims = Some(c);
     }
     fn claims(&self) -> Option<&dyn rust_webx_core::auth::IClaims> {
-        let b = self.claims.borrow();
-        b.as_ref()
-            .map(|c| unsafe { &*(&**c as *const dyn rust_webx_core::auth::IClaims) })
+        self.claims.as_deref()
     }
 }
 

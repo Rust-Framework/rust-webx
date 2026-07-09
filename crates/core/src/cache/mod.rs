@@ -1,9 +1,9 @@
 //! Unified caching abstraction — `IDistributedCache` trait + `MemoryCache` implementation.
 //!
-//| ASP.NET Core                  | LRWF                                    |
+//| ASP.NET Core                  | rust-webx                               |
 //|-------------------------------|-----------------------------------------|
 //| `IDistributedCache`           | `IDistributedCache` (trait_def)         |
-//| `IMemoryCache`                | `MemoryCache` (in lrwf-http)            |
+//| `IMemoryCache`                | `MemoryCache` (in rust-webx-host)       |
 //| `DistributedCacheExtensions`  | `DistributedCacheExtensions` (cache_ext)|
 //| `DistributedCacheEntryOptions`| `DistributedCacheEntryOptions` (options)|
 

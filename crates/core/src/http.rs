@@ -1,7 +1,7 @@
 //! HTTP abstraction traits: IHttpContext, IHttpRequest, IHttpResponse.
 //!
 //! This module defines the core interfaces for HTTP request/response handling
-//! in the LRWF framework. All types are defined as traits to enable testability
+//! in the rust-webx framework. All types are defined as traits to enable testability
 //! and middleware composition.
 //!
 //! # Traits
@@ -42,7 +42,7 @@ impl HttpStatus {
 
 /// Extension trait that adds claims storage to an `IHttpContext`.
 ///
-/// Implemented by `HttpContext` in `lrwf-http`. This trait is a supertrait
+/// Implemented by `HttpContext` in `rust-webx-host`. This trait is a supertrait
 /// of `IHttpContext` so that authentication/authorization middleware can
 /// store and retrieve claims through `&mut dyn IHttpContext` directly.
 pub trait IClaimsExt {
@@ -107,6 +107,9 @@ pub trait IHttpResponse: Send {
     fn status(&self) -> u16;
     fn set_status(&mut self, code: u16);
     fn set_header(&mut self, key: &str, value: &str);
+
+    /// Remove a response header by name. Default is a no-op.
+    fn remove_header(&mut self, _key: &str) {}
 
     /// Whether a response body has been written.
     fn has_body(&self) -> bool {

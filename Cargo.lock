@@ -684,6 +684,69 @@ dependencies = [
 ]
 
 [[package]]
+name = "dmbit-contracts"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "inventory",
+ "rust-webx",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "dmbit-domain"
+version = "0.1.0"
+dependencies = [
+ "dmbit-contracts",
+ "rust-ef",
+ "rust-webx-core",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "dmbit-handlers"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcrypt",
+ "dmbit-contracts",
+ "dmbit-domain",
+ "inventory",
+ "jsonwebtoken",
+ "rust-dix",
+ "rust-ef",
+ "rust-webx",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "dmbit-host"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcrypt",
+ "dmbit-contracts",
+ "dmbit-domain",
+ "dmbit-handlers",
+ "inventory",
+ "rust-dix",
+ "rust-ef",
+ "rust-ef-mysql",
+ "rust-ef-sqlite",
+ "rust-webx",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "docbit-contracts"
 version = "0.1.0"
 dependencies = [

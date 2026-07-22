@@ -12,6 +12,10 @@ members = [
     "docbit/domain",
     "docbit/handlers",
     "docbit/host",
+    "dmbit/contracts",
+    "dmbit/domain",
+    "dmbit/handlers",
+    "dmbit/host",
 ]
 
 [workspace.package]
@@ -37,6 +41,11 @@ rust-webx-openapi = { version = "0.3.0", path = "crates/openapi" }
 docbit-contracts = { version = "0.1.0", path = "docbit/contracts" }
 docbit-domain = { version = "0.1.0", path = "docbit/domain" }
 docbit-handlers = { version = "0.1.0", path = "docbit/handlers" }
+
+# Dmbit sub-crates
+dmbit-contracts = { version = "0.1.0", path = "dmbit/contracts" }
+dmbit-domain = { version = "0.1.0", path = "dmbit/domain" }
+dmbit-handlers = { version = "0.1.0", path = "dmbit/handlers" }
 
 # DI framework (crates.io — no local path required)
 rust-dix = "0.6"

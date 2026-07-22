@@ -1,0 +1,334 @@
+/* 智算机房管理 admin — Ant Design standard layout */
+
+html, body {
+  margin: 0;
+  min-height: 100%;
+  background: #f5f5f5;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+}
+
+#root { min-height: 100vh; }
+
+.admin-layout {
+  min-height: 100vh;
+  background: #f5f5f5 !important;
+}
+
+.admin-topbar.ant-layout-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  height: 64px;
+  padding: 0 24px;
+  background: #fff !important;
+  border-bottom: 1px solid #f0f0f0;
+  line-height: 1.2;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.topbar-right { flex-shrink: 0; }
+
+.brand-logo {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  object-fit: contain;
+  display: block;
+}
+
+.login-brand .brand-logo {
+  width: 40px;
+  height: 40px;
+}
+
+.brand-name {
+  font-weight: 600;
+  font-size: 16px;
+  color: rgba(0, 0, 0, 0.88);
+  line-height: 1.2;
+}
+
+.topbar-title {
+  display: block;
+  font-size: 12px !important;
+}
+
+.screen-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  color: #1677ff;
+  background: rgba(22, 119, 255, 0.06);
+  border: 1px solid rgba(22, 119, 255, 0.18);
+  text-decoration: none;
+  font-size: 13px;
+  line-height: 1.4;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.screen-link:hover {
+  color: #0958d9;
+  background: rgba(22, 119, 255, 0.12);
+  border-color: rgba(22, 119, 255, 0.35);
+  text-decoration: none;
+}
+
+.screen-link-icon {
+  font-size: 14px;
+}
+
+button.help-link {
+  cursor: pointer;
+  font: inherit;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.help-modal .help-modal-body {
+  max-height: min(70vh, 640px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.help-modal .help-modal-body .ant-typography {
+  margin-bottom: 8px;
+}
+
+.help-modal .help-modal-body h5.ant-typography {
+  margin-top: 16px;
+  margin-bottom: 8px;
+}
+
+.help-modal .help-modal-body h5.ant-typography:first-child {
+  margin-top: 0;
+}
+
+.help-modal .help-modal-body ul,
+.help-modal .help-modal-body ol {
+  margin: 0 0 12px;
+  padding-left: 1.35em;
+}
+
+.help-modal .help-modal-body li {
+  margin-bottom: 6px;
+  line-height: 1.6;
+}
+
+.admin-content {
+  padding: 24px;
+  max-width: 1400px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.toolbar-card {
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.toolbar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.panel-card {
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.panel-card.master-table {
+  min-height: 420px;
+}
+
+.panel-card .ant-table-wrapper {
+  padding: 0;
+}
+
+/* Ant Design nested expand: keep default expanded cell padding */
+.panel-card .ant-table-expanded-row > .ant-table-cell {
+  padding: 16px 24px !important;
+  background: #fafafa;
+}
+
+.panel-card .ant-table-expanded-row .ant-table {
+  margin: 0;
+  background: #fff;
+}
+
+.panel-card .ant-table-expanded-row .ant-table-thead > tr > th {
+  background: #fafafa !important;
+}
+
+.product-row {
+  cursor: pointer;
+}
+
+/* 展开/收起：antd icons RightOutlined / DownOutlined */
+.dm-expand-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  cursor: pointer;
+  vertical-align: middle;
+  transition: color 0.2s, background 0.2s;
+}
+
+.dm-expand-btn:hover {
+  color: #1677ff;
+  background: rgba(22, 119, 255, 0.06);
+}
+
+.num-cell {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.form-section {
+  margin-bottom: 0;
+}
+
+.form-section + .form-section {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.form-section-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.88);
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.form-section-sub {
+  font-size: 12px !important;
+  font-weight: 400 !important;
+}
+
+.form-section-muted .form-section-title {
+  color: rgba(0, 0, 0, 0.45);
+  font-weight: 500;
+}
+
+.form-hint {
+  display: block;
+  margin: 0 0 8px !important;
+  font-size: 12px !important;
+}
+
+.goods-form .ant-form-item {
+  margin-bottom: 12px;
+}
+
+.goods-form .ant-form-item-label {
+  padding-bottom: 2px !important;
+}
+
+.goods-form .ant-form-item-label > label {
+  height: auto;
+}
+
+.goods-form .extra-row .ant-form-item {
+  margin-bottom: 8px;
+}
+
+.ant-modal .ant-modal-body {
+  overflow-x: hidden;
+}
+
+.goods-modal .ant-modal-body {
+  scrollbar-gutter: stable;
+  overflow-x: hidden;
+}
+
+.goods-form,
+.goods-form .ant-row,
+.goods-form .ant-table-wrapper {
+  max-width: 100%;
+}
+
+.dm-icon-btn.ant-btn {
+  width: 32px;
+  padding-inline: 0;
+}
+
+/* Login */
+.auth-body {
+  min-height: 100vh;
+  background: #f5f5f5;
+}
+
+.login-wrap {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.login-card {
+  width: min(400px, 100%);
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.login-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 992px) {
+  .admin-content { padding: 16px; }
+  .admin-topbar.ant-layout-header {
+    padding: 0 16px;
+    height: auto;
+    min-height: 64px;
+    flex-wrap: wrap;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+}

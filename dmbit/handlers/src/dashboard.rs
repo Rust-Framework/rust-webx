@@ -256,15 +256,11 @@ impl IRequestHandler<GetDashboardRequest, DashboardModel> for GetDashboardHandle
 
         Ok(DashboardModel {
             title: if self.site.title.is_empty() {
-                "智算机房管理".into()
+                "智算机房台账".into()
             } else {
                 self.site.title.clone()
             },
-            brand_name: if self.site.brand_name.is_empty() {
-                "智算机房管理".into()
-            } else {
-                self.site.brand_name.clone()
-            },
+            brand_name: self.site.brand_name.clone(),
             tagline: self.site.tagline.clone(),
             room_name: if self.site.room_name.is_empty() {
                 "直播数据智算机房".into()

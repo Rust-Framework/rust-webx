@@ -1,15 +1,20 @@
-/* global React, ReactDOM, antd, icons */
+/* global React, ReactDOM, antd */
 const {
   Layout, Typography, Button, Space, Table, Input, Select, Modal, Form,
   message, ConfigProvider, Avatar, Divider, Row, Col, Popconfirm, Tag, Empty,
   Tooltip,
 } = antd;
-const {
-  PlusOutlined, EditOutlined, DeleteOutlined, ExportOutlined, ImportOutlined,
-  RightOutlined, DownOutlined, DesktopOutlined, QuestionCircleOutlined,
-} = icons;
 const { Header, Content } = Layout;
 const { Text, Title, Paragraph } = Typography;
+
+/** iconfont helper: returns <i className="iconfont icon-{name}" /> */
+const ic = (name) => React.createElement('i', { className: `iconfont icon-${name}` });
+
+// Table cell styles for help modal
+const c0 = { padding: '6px 8px', borderBottom: '1px solid #e8e8e8' };
+const c1 = { padding: '6px 8px', borderBottom: '1px solid #e8e8e8' };
+const c2 = { padding: '6px 8px', borderBottom: '1px solid #e8e8e8', background: '#fafafa' };
+const c3 = { padding: '6px 8px', borderBottom: '1px solid #e8e8e8', background: '#fafafa' };
 
 if (!window.DmbitApi.getToken()) {
   location.replace('/admin/login.html');
@@ -432,7 +437,7 @@ function App() {
       render: (_, row) => brandSummary(row.goods),
     },
     {
-      title: '计划总量',
+      title: '数量',
       key: 'qty',
       width: 96,
       align: 'right',
@@ -447,11 +452,11 @@ function App() {
       render: (_, row) => (
         <Space size={4} onClick={(e) => e.stopPropagation()}>
           <Tooltip title="添加规格">
-            <Button type="text" className="dm-icon-btn" icon={<PlusOutlined />}
+            <Button type="text" className="dm-icon-btn" icon={ic('add')}
               onClick={(e) => { e.stopPropagation(); openAddSpec(row); }} />
           </Tooltip>
           <Tooltip title="编辑">
-            <Button type="text" className="dm-icon-btn" icon={<EditOutlined />}
+            <Button type="text" className="dm-icon-btn" icon={ic('edit')}
               onClick={(e) => {
                 e.stopPropagation();
                 setEditingProduct(row);
@@ -470,7 +475,7 @@ function App() {
               catch (ex) { if (ex.status === 401) { window.DmbitApi.clearSession(); location.replace('/admin/login.html'); return; } message.error(ex.message || '删除失败'); }
             }}>
             <Tooltip title="删除">
-              <Button type="text" danger className="dm-icon-btn" icon={<DeleteOutlined />}
+              <Button type="text" danger className="dm-icon-btn" icon={ic('delete')}
                 onClick={(e) => e.stopPropagation()} />
             </Tooltip>
           </Popconfirm>
@@ -490,7 +495,7 @@ function App() {
         title: '部件', key: 'parts', ellipsis: true, render: (_, row) => partsSummary(row),
       },
       {
-        title: '计划数量', dataIndex: 'planned_quantity', key: 'qty', width: 100, align: 'right',
+        title: '数量', dataIndex: 'planned_quantity', key: 'qty', width: 88, align: 'right',
         render: (v, row) => `${Number(v || 0).toLocaleString('zh-CN')} ${row.unit || ''}`,
       },
       {
@@ -502,7 +507,7 @@ function App() {
         render: (_, row) => (
           <Space size={4} onClick={(e) => e.stopPropagation()}>
             <Tooltip title="编辑">
-              <Button type="text" className="dm-icon-btn" icon={<EditOutlined />}
+              <Button type="text" className="dm-icon-btn" icon={ic('edit')}
                 onClick={(e) => { e.stopPropagation(); openEditSpec(product, row); }} />
             </Tooltip>
             <Popconfirm title="确定删除该规格？"
@@ -511,7 +516,7 @@ function App() {
                 catch (ex) { if (ex.status === 401) { window.DmbitApi.clearSession(); location.replace('/admin/login.html'); return; } message.error(ex.message || '删除失败'); }
               }}>
               <Tooltip title="删除">
-                <Button type="text" danger className="dm-icon-btn" icon={<DeleteOutlined />}
+                <Button type="text" danger className="dm-icon-btn" icon={ic('delete')}
                   onClick={(e) => e.stopPropagation()} />
               </Tooltip>
             </Popconfirm>
@@ -545,7 +550,7 @@ function App() {
     <button type="button" className="dm-expand-btn"
       aria-label={expanded ? '收起' : '展开'}
       onClick={(e) => { e.stopPropagation(); onExpand(record, e); }}>
-      {expanded ? <DownOutlined /> : <RightOutlined />}
+      {expanded ? ic('down') : ic('right')}
     </button>
   );
 
@@ -595,7 +600,7 @@ function App() {
         render: (_, field) =>
           fields.length > 1 ? (
             <Tooltip title="删除">
-              <Button type="text" danger className="dm-icon-btn" icon={<DeleteOutlined />}
+              <Button type="text" danger className="dm-icon-btn" icon={ic('delete')}
                 onClick={() => remove(field.name)} />
             </Tooltip>
           ) : null,
@@ -612,11 +617,11 @@ function App() {
           <div><div className="brand-name">智算机房管理</div></div>
           <Divider type="vertical" />
           <a className="screen-link" href="/" title="打开监控大屏">
-            <DesktopOutlined className="screen-link-icon" /><span>大屏</span>
+            {ic('pc')}<span>大屏</span>
           </a>
           <button type="button" className="screen-link help-link" title="使用说明"
             onClick={() => setHelpOpen(true)}>
-            <QuestionCircleOutlined className="screen-link-icon" /><span>帮助</span>
+            <span className="screen-link-icon help-icon">?</span><span>帮助</span>
           </button>
         </div>
         <div className="topbar-right">
@@ -641,10 +646,10 @@ function App() {
             <Space wrap>
               <input ref={importRef} type="file" accept=".csv,text/csv"
                 style={{ display: 'none' }} onChange={onImportFile} />
-              <Button loading={importing} icon={<ImportOutlined />}
+              <Button loading={importing} icon={ic('import')}
                 onClick={() => importRef.current && importRef.current.click()}>导入</Button>
-              <Button loading={exporting} icon={<ExportOutlined />} onClick={exportInventory}>导出</Button>
-              <Button type="primary" icon={<PlusOutlined />}
+              <Button loading={exporting} icon={ic('export')} onClick={exportInventory}>导出</Button>
+              <Button type="primary" icon={ic('add')}
                 onClick={() => {
                   setEditingProduct(null); productForm.resetFields();
                   productForm.setFieldsValue({ category: 'compute', sort_order: 0 });
@@ -675,19 +680,25 @@ function App() {
         onCancel={() => setProductOpen(false)} onOk={saveProduct} destroyOnClose
         okText="保存" cancelText="取消" className="product-modal" styles={{ body: { overflowX: 'hidden' } }}>
         <Form form={productForm} layout="vertical" requiredMark={false} size="middle">
-          <Form.Item name="name" label="名称" rules={[{ required: true, message: '必填' }]}>
-            <Input placeholder="例：运算服务器" />
-          </Form.Item>
-          <Form.Item name="code" label="编码" rules={[{ required: true, message: '必填' }]}>
-            <Input placeholder="例：CMP-SRV" />
-          </Form.Item>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="name" label="名称" rules={[{ required: true, message: '必填' }]}>
+                <Input placeholder="例：运算服务器" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="code" label="编码" rules={[{ required: true, message: '必填' }]}>
+                <Input placeholder="例：CMP-SRV" />
+              </Form.Item>
+            </Col>
+          </Row>
           <Form.Item name="category" label="类别" initialValue="compute" rules={[{ required: true }]}>
             <Select options={CATEGORY_OPTIONS} />
           </Form.Item>
           <Form.Item name="remark" label="备注">
             <Input.TextArea rows={2} placeholder="可选说明" />
           </Form.Item>
-          <Form.Item name="sort_order" label="排序" initialValue={0}>
+          <Form.Item name="sort_order" label="排序" initialValue={0} style={{ marginBottom: 0 }}>
             <Input type="number" />
           </Form.Item>
         </Form>
@@ -701,31 +712,26 @@ function App() {
         styles={{ body: { paddingTop: 8, maxHeight: '72vh', overflowY: 'auto', overflowX: 'hidden' } }}>
         <Form form={specForm} layout="vertical" requiredMark={false} className="goods-form" size="middle">
           <div className="form-section">
-            <div className="form-section-title">标识与数量</div>
+            <div className="form-section-title">基本信息</div>
             <Row gutter={[16, 0]}>
-              <Col span={8}>
+              <Col span={12}>
                 <Form.Item name="code" label="规格编码" rules={[{ required: true, message: '必填' }]}>
                   <Input placeholder="例：CMP-BASE" />
                 </Form.Item>
               </Col>
-              <Col span={8}>
+              <Col span={12}>
                 <Form.Item name="brand" label="品牌" rules={[{ required: true, message: '必填' }]}>
                   <Input placeholder="例：定制" />
                 </Form.Item>
               </Col>
-              <Col span={8}>
-                <Form.Item name="planned_quantity" label="计划数量" rules={[{ required: true }]}>
+              <Col span={12}>
+                <Form.Item name="planned_quantity" label="数量" rules={[{ required: true }]}>
                   <Input type="number" min={0} />
                 </Form.Item>
               </Col>
-              <Col span={8}>
+              <Col span={12}>
                 <Form.Item name="unit" label="单位" initialValue="台">
                   <Input />
-                </Form.Item>
-              </Col>
-              <Col span={8}>
-                <Form.Item name="sort_order" label="排序" initialValue={0}>
-                  <Input type="number" />
                 </Form.Item>
               </Col>
             </Row>
@@ -734,10 +740,19 @@ function App() {
           <div className="form-section">
             <div className="form-section-title">机箱参数</div>
             <Row gutter={[16, 0]}>
-              {PARAM_KEYS.map((k) => (
+              {PARAM_KEYS.slice(0, 4).map((k) => (
+                <Col span={6} key={k}>
+                  <Form.Item name={k} label={k}>
+                    <Input placeholder={k === '扩展' ? '6槽位PCIe' : undefined} />
+                  </Form.Item>
+                </Col>
+              ))}
+            </Row>
+            <Row gutter={[16, 0]}>
+              {PARAM_KEYS.slice(4).map((k) => (
                 <Col span={8} key={k}>
                   <Form.Item name={k} label={k}>
-                    <Input placeholder={k === '扩展' ? 'PCIe×6' : undefined} />
+                    <Input placeholder={k === '电源' ? '长城GW-800W' : undefined} />
                   </Form.Item>
                 </Col>
               ))}
@@ -757,7 +772,7 @@ function App() {
                   <Table size="middle" pagination={false} rowKey="key"
                     dataSource={fields} locale={{ emptyText: '暂无部件' }}
                     columns={componentColumns(fields, remove)} />
-                  <Button type="dashed" block icon={<PlusOutlined />} style={{ marginTop: 8 }}
+                  <Button type="dashed" block icon={ic('add')} style={{ marginTop: 8 }}
                     onClick={() => add({
                       kind: defaultComponentKind(specProductCategory),
                       model: '',
@@ -791,17 +806,27 @@ function App() {
                       </Col>
                       <Col span={2} style={{ textAlign: 'center' }}>
                         <Tooltip title="删除">
-                          <Button type="text" danger className="dm-icon-btn" icon={<DeleteOutlined />}
+                          <Button type="text" danger className="dm-icon-btn" icon={ic('delete')}
                             onClick={() => remove(field.name)} />
                         </Tooltip>
                       </Col>
                     </Row>
                   ))}
-                  <Button type="dashed" block icon={<PlusOutlined />}
+                  <Button type="dashed" block icon={ic('add')}
                     onClick={() => add({ key: '', value: '' })}>添加自定义参数</Button>
                 </>
               )}
             </Form.List>
+          </div>
+
+          <div className="form-section">
+            <Row gutter={[16, 0]}>
+              <Col span={8}>
+                <Form.Item name="sort_order" label="排序" initialValue={0}>
+                  <Input type="number" />
+                </Form.Item>
+              </Col>
+            </Row>
           </div>
         </Form>
       </Modal>
@@ -809,41 +834,153 @@ function App() {
       {/* Help Modal */}
       <Modal title="使用说明" open={helpOpen} onCancel={() => setHelpOpen(false)}
         footer={[<Button key="ok" type="primary" onClick={() => setHelpOpen(false)}>知道了</Button>]}
-        width={720} className="help-modal" destroyOnClose>
+        width={760} className="help-modal" destroyOnClose>
         <div className="help-modal-body">
-          <Title level={5}>三个概念</Title>
-          <ul>
-            <li><strong>产品</strong>：设备大类（名称、唯一编码、类别：算力/存储）。</li>
-            <li><strong>规格</strong>：该产品下的一种具体配置（规格编码、品牌、机箱参数、计划数量、部件）。</li>
-            <li><strong>部件</strong>：每台设备上的加速卡或硬盘（型号 + 单台数量；硬盘需填容量）。</li>
-          </ul>
+
+          <Title level={4}>一、这个系统是干什么的</Title>
           <Paragraph>
-            <strong>重要：</strong>大屏上的卡数、盘数只统计「部件」表。只把「RTX5090×6」写在参数里、不建部件 → 大屏<strong>统计不到</strong>。
+            登记机房有多少台服务器、每台配了什么卡和硬盘，然后大屏自动统计展示。
+            <strong>你在本页改数据，大屏立刻看到变化。</strong>
+          </Paragraph>
+          <Paragraph>
+            举个例子：机房里计划上架 150 台装 RTX5090 的运算服务器，每台插 6 张卡。
+            你在系统里填好，大屏就会自动算出"RTX5090 共 900 张"。
           </Paragraph>
 
-          <Title level={5}>第一次怎么用</Title>
-          <ol>
-            <li>右上角<strong>新增产品</strong>：填名称（如"运算服务器"）、编码（如"CMP-SRV"）、选类别。</li>
-            <li>在该产品行点 <strong>+</strong> 添加规格：填规格编码（如"CMP-5090"）、品牌、计划数量。</li>
-            <li>在规格表单里维护<strong>部件</strong>：算力填加速卡（如 RTX5090、单台 6）；存储填硬盘（型号、容量、单台块数）。</li>
-            <li>点击产品行可展开查看规格列表。</li>
+          <Title level={4}>二、三个名词（用大白话说）</Title>
+          <div style={{ background: '#f0f5ff', padding: '12px 16px', borderRadius: 8, marginBottom: 12 }}>
+            <p style={{ margin: '4px 0' }}><strong>产品</strong> — 服务器的大类。比如"运算服务器""存储服务器"。每个产品有一个唯一编码。</p>
+            <p style={{ margin: '4px 0' }}><strong>规格</strong> — 产品下面的一种具体配置。比如运算服务器有"基础版（无显卡）""RTX5090 版""RTX4090 版"三种规格。每种规格有自己的品牌、参数、数量和部件。</p>
+            <p style={{ margin: '4px 0' }}><strong>部件</strong> — 每台设备上装的卡或盘。比如 RTX5090 加速卡（每台 6 张）、DC HC320 硬盘（每台 36 块，每块 8TB）。</p>
+          </div>
+          <Paragraph type="danger">
+            <strong>最重要的规则：</strong>显卡和硬盘信息必须填在"部件"里，大屏才能统计到。
+            只在参数里写"RTX5090×6"而不建部件 = 大屏上<strong>什么都看不到</strong>。
+          </Paragraph>
+
+          <Title level={4}>三、第一次使用（跟着做就行）</Title>
+          <ol style={{ lineHeight: 2 }}>
+            <li>点右上角 <strong>新增产品</strong>：名称填"运算服务器"，编码填"CMP-SRV"，类别选"算力"，点保存。</li>
+            <li>同样的方法再建一个"存储服务器"，编码"STO-SRV"，类别选"存储"。</li>
+            <li>点击"运算服务器"那一行（展开），点 <strong>+</strong> 添加规格。</li>
+            <li>规格编码填"CMP-5090"，品牌填"定制"，数量填 150，机箱参数按实际情况填写。</li>
+            <li>在"加速卡部件"区域填：型号"RTX5090"，单台数量 6。点保存。</li>
+            <li>同样方法再建 CMP-BASE（无显卡，数量 1800）、CMP-4090（RTX4090×6，数量 150）。</li>
+            <li>给存储服务器建规格 STO-8TB：数量 388，硬盘部件填"DC HC320"、容量"8TB"、单台数量 36。</li>
+            <li>打开 <a href="/" target="_blank">监控大屏</a>，检查数据是否正确。</li>
+          </ol>
+          <Paragraph>
+            <strong>更快的方法：</strong>直接下载我们准备好的 <a href="/sample/import.csv" download>导入模板</a>，
+            用 Excel 打开看看格式，然后导入即可（见下面导入教程）。
+          </Paragraph>
+
+          <Title level={4}>四、批量导入 CSV（推荐）</Title>
+          <Paragraph><strong>什么时候用：</strong>设备种类多、数量大，不想一条条手工录入。</Paragraph>
+
+          <Paragraph><strong>完整流程（5 步）：</strong></Paragraph>
+          <ol style={{ lineHeight: 2 }}>
+            <li><strong>导出模板：</strong>点页面上方"导出"按钮，得到一个 CSV 文件。这是当前系统里的数据。</li>
+            <li><strong>用 Excel 打开编辑：</strong>双击 CSV 文件，Excel 会自动打开。每一列就是一个字段，跟表格一样。</li>
+            <li><strong>修改数据：</strong>改数量、改参数、加新行。注意<strong>不要改第一行（表头）</strong>，不要删列。</li>
+            <li><strong>保存：</strong>在 Excel 里点"文件 → 另存为"，格式选"CSV UTF-8（逗号分隔）"。</li>
+            <li><strong>导入：</strong>点页面上方"导入"按钮，选择刚才保存的 CSV 文件。</li>
           </ol>
 
-          <Title level={5}>批量导入 / 导出</Title>
-          <Paragraph>
-            推荐流程：先<strong>导出</strong> → Excel 另存为 CSV（UTF-8）→ 改完再<strong>导入</strong>。
-            表头与导出一致，勿改列名。14 列格式：产品名称、产品编码、类别、规格编码、品牌、参数、单位、计划数量、部件类型、部件型号、容量、单台数量、备注、排序。
-          </Paragraph>
-          <ul>
-            <li>同一规格多个部件：<strong>首行</strong>写满产品/规格字段（可带第一个部件）；<strong>续行</strong>只填规格编码 + 部件列，其余留空。</li>
-            <li>若产品编码或规格编码已存在，会先列出冲突；确认后才覆盖，取消则保持原样。</li>
-            <li>导入只创建/更新规格定义，不自动创建设备实例。</li>
+          <Paragraph><strong>导入时会发生什么：</strong></Paragraph>
+          <ul style={{ lineHeight: 1.8 }}>
+            <li>系统先检查一遍，看看有没有和现有数据冲突的编码。</li>
+            <li>如果有冲突（比如"CMP-SRV"已经存在），会弹窗告诉你哪些编码冲突了。</li>
+            <li>点"确认更新"会用 CSV 的内容覆盖旧数据；点"取消"则不导入任何东西。</li>
+            <li>整个导入要么全部成功，要么全部不写（不会出现"改了一半"的情况）。</li>
           </ul>
 
-          <Title level={5}>账号与安全</Title>
+          <Title level={4}>五、CSV 每一列是什么意思</Title>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, lineHeight: 1.8 }}>
+              <thead>
+                <tr style={{ background: '#f5f5f5' }}>
+                  <th style={{ padding: '6px 8px', textAlign: 'left', borderBottom: '1px solid #e8e8e8' }}>列名</th>
+                  <th style={{ padding: '6px 8px', textAlign: 'left', borderBottom: '1px solid #e8e8e8' }}>必填？</th>
+                  <th style={{ padding: '6px 8px', textAlign: 'left', borderBottom: '1px solid #e8e8e8' }}>填什么</th>
+                  <th style={{ padding: '6px 8px', textAlign: 'left', borderBottom: '1px solid #e8e8e8' }}>示例</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td style={c0}>产品名称</td><td style={c0}>首行必填</td><td style={c0}>服务器的大类名称</td><td style={c1}>运算服务器</td></tr>
+                <tr><td style={c2}>产品编码</td><td style={c2}>必填</td><td style={c2}>唯一标识，建议英文+短横线</td><td style={c3}>CMP-SRV</td></tr>
+                <tr><td style={c0}>类别</td><td style={c0}>必填</td><td style={c0}>算力 或 存储（中英文都行）</td><td style={c1}>算力</td></tr>
+                <tr><td style={c2}>规格编码</td><td style={c2}>必填</td><td style={c2}>唯一标识，格式：产品缩写-特征</td><td style={c3}>CMP-5090</td></tr>
+                <tr><td style={c0}>品牌</td><td style={c0}>必填</td><td style={c0}>品牌简称</td><td style={c1}>定制</td></tr>
+                <tr><td style={c2}>机箱</td><td style={c2}>可选</td><td style={c2}>机箱规格描述</td><td style={c3}>4U服务器机箱</td></tr>
+                <tr><td style={c0}>主板</td><td style={c0}>可选</td><td style={c0}>主板型号</td><td style={c1}>嵌入式工业级主板</td></tr>
+                <tr><td style={c2}>内存</td><td style={c2}>可选</td><td style={c2}>内存规格</td><td style={c3}>SO-DIMM内存</td></tr>
+                <tr><td style={c0}>接口</td><td style={c0}>可选</td><td style={c0}>IO 接口描述</td><td style={c1}>VGA、USB、以太网</td></tr>
+                <tr><td style={c2}>扩展</td><td style={c2}>可选</td><td style={c2}>PCIe 扩展槽位</td><td style={c3}>6槽位PCIe扩展板</td></tr>
+                <tr><td style={c0}>电源</td><td style={c0}>可选</td><td style={c0}>电源型号和功率</td><td style={c1}>定制多路输出电源</td></tr>
+                <tr><td style={c2}>光模块</td><td style={c2}>可选</td><td style={c2}>网络光模块</td><td style={c3}>双光千兆</td></tr>
+                <tr><td style={c0}>附加参数</td><td style={c0}>可选</td><td style={c0}>上面没列出的其他参数，用；分隔</td><td style={c1}>CPU：Intel Xeon；网卡：双口光纤</td></tr>
+                <tr><td style={c2}>单位</td><td style={c2}>必填</td><td style={c2}>计量单位</td><td style={c3}>台</td></tr>
+                <tr><td style={c0}><strong>数量</strong></td><td style={c0}><strong>必填</strong></td><td style={c0}>这个规格一共多少台</td><td style={c1}>150</td></tr>
+                <tr><td style={c2}>部件类型</td><td style={c2}>有部件时必填</td><td style={c2}>加速卡 或 硬盘</td><td style={c3}>加速卡</td></tr>
+                <tr><td style={c0}>部件型号</td><td style={c0}>有部件时必填</td><td style={c0}>具体型号</td><td style={c1}>RTX5090</td></tr>
+                <tr><td style={c2}>容量</td><td style={c2}>硬盘必填</td><td style={c2}>每块硬盘的容量，如 8TB、960GB</td><td style={c3}>8TB</td></tr>
+                <tr><td style={c0}>单台数量</td><td style={c0}>有部件时必填</td><td style={c0}>每台设备装几个这种部件</td><td style={c1}>6</td></tr>
+                <tr><td style={c2}>备注</td><td style={c2}>可选</td><td style={c2}>任何你想备注的信息</td><td style={c3}></td></tr>
+                <tr><td style={c0}>排序</td><td style={c0}>可选</td><td style={c0}>数字越小越靠前</td><td style={c1}>1</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <Title level={4}>六、一个规格有多个部件怎么写</Title>
           <Paragraph>
-            使用部署时提供的管理员账号登录；首次登录后请尽快在右上角<strong>修改密码</strong>。
+            假设一台服务器同时装了 RTX5090 加速卡和 DC HC320 硬盘，需要写<strong>两行</strong>：
           </Paragraph>
+          <div style={{ background: '#f6f8fa', padding: '12px 16px', borderRadius: 6, fontFamily: 'monospace', fontSize: 12, overflowX: 'auto', marginBottom: 12 }}>
+            运算服务器,CMP-SRV,算力,CMP-HYBRID,定制,4U机箱,,,,,,,双光千兆,,台,100,加速卡,RTX5090,,6,,1<br/>
+            ,CMP-SRV,,CMP-HYBRID,定制,,,,,,,,,台,100,硬盘,DC HC320,8TB,12,,
+          </div>
+          <Paragraph>
+            <strong>规则：</strong>第一行写全部信息+第一个部件；第二行只填<strong>规格编码</strong>和<strong>部件四列</strong>，其余留空（会自动继承第一行的数据）。
+          </Paragraph>
+
+          <Title level={4}>七、常见错误和怎么改</Title>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, lineHeight: 1.8 }}>
+            <thead>
+              <tr style={{ background: '#fff2f0' }}>
+                <th style={{ ...c0, borderBottom: '1px solid #ffccc7' }}>错误现象</th>
+                <th style={{ ...c0, borderBottom: '1px solid #ffccc7' }}>原因</th>
+                <th style={{ ...c0, borderBottom: '1px solid #ffccc7' }}>怎么改</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td style={c0}>大屏上显卡数量是 0</td><td style={c0}>只把显卡型号写在了参数里，没有在部件列填</td><td style={c1}>在 CSV 的部件类型/部件型号/单台数量列填上显卡信息</td></tr>
+              <tr><td style={c2}>导入报"表头不正确"</td><td style={c2}>改了第一行（表头），或者列的顺序变了</td><td style={c3}>重新导出一份 CSV，在导出的基础上改数据，不要动表头</td></tr>
+              <tr><td style={c0}>导入报"第 N 行列数不足"</td><td style={c0}>某行少填了列，或者逗号数量不对</td><td style={c1}>用 Excel 打开检查，确保每行都有 21 个逗号分隔的值</td></tr>
+              <tr><td style={c2}>导入报"加速卡不应填写容量"</td><td style={c2}>加速卡那一行的容量列填了数字</td><td style={c3}>加速卡的容量列留空，只有硬盘才填容量</td></tr>
+              <tr><td style={c0}>提示"编码冲突"</td><td style={c0}>CSV 里的编码和系统里已有的重复了</td><td style={c1}>点"确认更新"会覆盖旧数据；如果是不小心写重了编码，改 CSV 里的编码再导入</td></tr>
+              <tr><td style={c2}>大屏存储容量不对</td><td style={c2}>容量列填了非标准格式</td><td style={c3}>容量写"8TB"或"8000"都行（系统会自动换算），不要写"8T"或"8 TB"（中间有空格）</td></tr>
+            </tbody>
+          </table>
+
+          <Title level={4}>八、大屏上能看到什么</Title>
+          <ul style={{ lineHeight: 2 }}>
+            <li><strong>总台数：</strong>所有规格的数量加起来</li>
+            <li><strong>算力 / 存储分项：</strong>按产品类别自动分类统计</li>
+            <li><strong>加速卡汇总：</strong>每种型号各多少张（规格数量 × 单台数量）</li>
+            <li><strong>硬盘汇总：</strong>每种型号各多少块，以及总存储容量</li>
+            <li><strong>产品构成饼图：</strong>各产品占比</li>
+            <li><strong>运行状态：</strong>运行中 / 联调中 / 待上架 / 已交付 各多少台</li>
+          </ul>
+          <Paragraph>
+            大屏每 60 秒自动刷新。你也可以手动刷新浏览器。
+          </Paragraph>
+
+          <Title level={4}>九、账号与安全</Title>
+          <Paragraph>
+            用管理员账号登录后，建议马上在右上角<strong>修改密码</strong>。
+            密码至少 6 位。如果忘记了密码，需要联系系统管理员重置。
+          </Paragraph>
+
         </div>
       </Modal>
 

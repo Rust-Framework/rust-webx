@@ -440,8 +440,8 @@
       brandEl.hidden = !brand;
     }
     document.getElementById('page-title').textContent =
-      data.title || '智算机房台账';
-    document.title = data.title || '智算机房台账';
+      data.title || '智算机房设备概览';
+    document.title = data.title || '智算机房设备概览';
     document.getElementById('room-name').textContent =
       data.room_name || '直播数据智算机房';
 

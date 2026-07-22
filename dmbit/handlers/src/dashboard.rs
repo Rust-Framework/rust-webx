@@ -256,7 +256,7 @@ impl IRequestHandler<GetDashboardRequest, DashboardModel> for GetDashboardHandle
 
         Ok(DashboardModel {
             title: if self.site.title.is_empty() {
-                "智算机房台账".into()
+                "智算机房设备概览".into()
             } else {
                 self.site.title.clone()
             },

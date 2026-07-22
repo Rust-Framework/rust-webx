@@ -10,8 +10,9 @@ pub struct ComponentModel {
     /// accelerator | disk
     pub kind: String,
     pub model: String,
+    /// Disk capacity in GB (decimal). Must be `0` for accelerator.
     #[serde(default)]
-    pub capacity: String,
+    pub capacity_gb: i64,
     pub qty_per_unit: i32,
     #[serde(default)]
     pub sort_order: i32,
@@ -37,26 +38,32 @@ pub struct GoodsModel {
     pub components: Vec<ComponentModel>,
 }
 
+#[claims]
 #[derive(Default)]
 pub struct ListGoodsRequest;
 
 #[get("/api/goods")]
+#[authorize(role = "admin")]
 impl IRequest<Vec<GoodsModel>> for ListGoodsRequest {}
 
+#[claims]
 #[derive(Default)]
 pub struct ListProductGoodsRequest {
     pub id: String,
 }
 
 #[get("/api/products/{id}/goods")]
+#[authorize(role = "admin")]
 impl IRequest<Vec<GoodsModel>> for ListProductGoodsRequest {}
 
+#[claims]
 #[derive(Default)]
 pub struct GetGoodsRequest {
     pub id: String,
 }
 
 #[get("/api/goods/{id}")]
+#[authorize(role = "admin")]
 impl IRequest<GoodsModel> for GetGoodsRequest {}
 
 #[claims]

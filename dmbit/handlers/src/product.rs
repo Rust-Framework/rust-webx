@@ -9,7 +9,10 @@ use dmbit_domain::entities::{Goods, GoodsComponent, Product};
 use dmbit_domain::new_id;
 
 use crate::db::{save_changes, EfResultExt};
-use crate::mapping::{goods_to_model, load_components_for, normalize_category};
+use crate::mapping::{
+    assert_product_code_available, goods_to_model, load_components_for, normalize_category,
+    optional_text, require_text, MAX_PRODUCT_CODE, MAX_PRODUCT_NAME, MAX_PRODUCT_REMARK,
+};
 use crate::util::{now_secs, operator_id, parse_id};
 
 fn product_to_model(p: Product, goods: Vec<GoodsModel>) -> ProductModel {
@@ -125,21 +128,20 @@ impl IRequestHandler<GetProductRequest, ProductModel> for GetProductHandler {
 #[async_trait]
 impl IRequestHandler<CreateProductRequest, ProductModel> for CreateProductHandler {
     async fn handle(&mut self, req: CreateProductRequest) -> Result<ProductModel> {
-        if req.name.trim().is_empty() {
-            return Err(Error::Validation("产品名称不能为空".into()));
-        }
-        if req.code.trim().is_empty() {
-            return Err(Error::Validation("编码不能为空".into()));
-        }
+        let name = require_text("产品名称", &req.name, MAX_PRODUCT_NAME)?;
+        let code = require_text("产品编码", &req.code, MAX_PRODUCT_CODE)?;
+        let remark = optional_text("备注", &req.remark, MAX_PRODUCT_REMARK)?;
+        let category = normalize_category(&req.category)?;
+        assert_product_code_available(&mut self.ctx, &code, None).await?;
 
         let now = now_secs();
         let op = operator_id();
         let entity = Product {
             id: new_id(),
-            name: req.name.trim().to_string(),
-            code: req.code.trim().to_string(),
-            category: normalize_category(&req.category),
-            remark: req.remark,
+            name,
+            code,
+            category,
+            remark,
             sort_order: req.sort_order,
             created_id: op.clone(),
             created_at: now,
@@ -169,22 +171,18 @@ impl IRequestHandler<UpdateProductRequest, ProductModel> for UpdateProductHandle
         );
 
         if let Some(name) = req.name {
-            if name.trim().is_empty() {
-                return Err(Error::Validation("产品名称不能为空".into()));
-            }
-            p.name = name.trim().to_string();
+            p.name = require_text("产品名称", &name, MAX_PRODUCT_NAME)?;
         }
         if let Some(code) = req.code {
-            if code.trim().is_empty() {
-                return Err(Error::Validation("编码不能为空".into()));
-            }
-            p.code = code.trim().to_string();
+            let code = require_text("产品编码", &code, MAX_PRODUCT_CODE)?;
+            assert_product_code_available(&mut self.ctx, &code, Some(&p.id)).await?;
+            p.code = code;
         }
         if let Some(category) = req.category {
-            p.category = normalize_category(&category);
+            p.category = normalize_category(&category)?;
         }
         if let Some(remark) = req.remark {
-            p.remark = remark;
+            p.remark = optional_text("备注", &remark, MAX_PRODUCT_REMARK)?;
         }
         if let Some(sort_order) = req.sort_order {
             p.sort_order = sort_order;
@@ -244,6 +242,6 @@ impl IRequestHandler<DeleteProductRequest, String> for DeleteProductHandler {
         self.ctx.set::<Product>().update(p);
         save_changes(&mut self.ctx).await?;
 
-        Ok(format!("Deleted product {}", id))
+        Ok(format!("已删除产品 {}", id))
     }
 }

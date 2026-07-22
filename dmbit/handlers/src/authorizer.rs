@@ -1,4 +1,4 @@
-//! Role-based authorizer.
+﻿//! Role-based authorizer.
 
 use rust_webx::*;
 
@@ -23,8 +23,7 @@ impl IDynamicAuthorizer for RoleAuthorizer {
         }
 
         Err(Error::Http(format!(
-            "Forbidden: admin role required for '{}'",
-            route_pattern
+            "无权限访问「{route_pattern}」，需要管理员角色"
         )))
     }
 }

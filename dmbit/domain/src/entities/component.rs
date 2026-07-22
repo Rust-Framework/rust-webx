@@ -22,9 +22,9 @@ pub struct GoodsComponent {
     #[required]
     #[max_length(80)]
     pub model: String,
-    /// disk capacity e.g. 8TB; empty for accelerator
-    #[max_length(40)]
-    pub capacity: String,
+    /// Disk capacity in **GB** (decimal). `0` for accelerator. Source of truth for capacity math.
+    #[required]
+    pub capacity_gb: i64,
     /// count installed on each server unit
     #[required]
     pub qty_per_unit: i32,

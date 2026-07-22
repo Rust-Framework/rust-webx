@@ -45,7 +45,7 @@ impl IHostedService for DbInitService {
         configure_for_init(&mut ctx);
         ensure_schema(&mut ctx).await?;
 
-        tracing::info!("[DbInit] Tables created and seed data applied.");
+        tracing::info!("[DbInit] Tables created; default admin seeded (no inventory seed).");
         tracing::info!("[DbInit] Default admin: admin@dmbit.local / admin123");
         Ok(())
     }

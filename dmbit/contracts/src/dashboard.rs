@@ -1,4 +1,6 @@
 //! Dashboard — 智算机房台账.
+//!
+//! Aggregates are derived only from persisted product / goods / component rows.
 
 use rust_webx::*;
 use serde::{Deserialize, Serialize};
@@ -28,7 +30,6 @@ pub struct DeviceOverviewRow {
     pub product_name: String,
     pub product_category: String,
     pub brand: String,
-    pub config_summary: String,
     pub parts_summary: String,
     pub quantity: i32,
     pub unit: String,
@@ -36,11 +37,7 @@ pub struct DeviceOverviewRow {
     pub location: String,
     pub asset_code: String,
     pub parameters: String,
-    pub storage_pb: f64,
-    pub power_mw: f64,
     pub sort_order: i32,
-    pub featured: bool,
-    pub visual: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,14 +47,12 @@ pub struct DashboardStats {
     pub total_quantity: i32,
     pub compute_quantity: i32,
     pub storage_quantity: i32,
-    pub rack_count: i32,
-    pub storage_pb: f64,
-    pub power_mw: f64,
+    /// Σ(disk block count × capacity_gb). Integer GB; no string parsing when aggregating.
+    pub storage_capacity_gb: i64,
     pub running_quantity: i32,
     pub commissioning_quantity: i32,
     pub pending_quantity: i32,
     pub delivered_quantity: i32,
-    pub health_percent: i32,
     pub status_buckets: Vec<StatusBucket>,
 }
 
@@ -65,7 +60,6 @@ pub struct DashboardStats {
 pub struct DashboardModel {
     pub title: String,
     pub brand_name: String,
-    pub tagline: String,
     pub room_name: String,
     pub stats: DashboardStats,
     pub accelerator_totals: Vec<PartTotal>,

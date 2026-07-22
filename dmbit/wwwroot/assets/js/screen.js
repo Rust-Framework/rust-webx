@@ -449,7 +449,20 @@
     animateText(document.getElementById('kpi-total'), s.total_quantity);
     animateText(document.getElementById('kpi-compute'), s.compute_quantity);
     animateText(document.getElementById('kpi-storage'), s.storage_quantity);
-    animateText(document.getElementById('kpi-pb'), s.storage_pb, 1);
+    // 存储容量：整数 GB 汇总（API: storage_capacity_gb）
+    const capGb = Number(s.storage_capacity_gb || 0);
+    const capEl = document.getElementById('kpi-cap');
+    const unitEl = document.getElementById('kpi-cap-unit');
+    if (capGb >= 1000000) {
+      if (unitEl) unitEl.textContent = 'PB';
+      animateText(capEl, capGb / 1000000, capGb % 1000000 === 0 ? 0 : 1);
+    } else if (capGb >= 1000) {
+      if (unitEl) unitEl.textContent = 'TB';
+      animateText(capEl, capGb / 1000, capGb % 1000 === 0 ? 0 : 1);
+    } else {
+      if (unitEl) unitEl.textContent = 'GB';
+      animateText(capEl, capGb, 0);
+    }
 
     renderAccelChart(data.accelerator_totals);
     renderDiskChart(data.disk_totals);

@@ -1,4 +1,4 @@
-//! Goods entity — device SKU / 设备规格（从表）.
+//! Goods entity — 台账行（从表）.
 
 use rust_ef::prelude::*;
 
@@ -15,11 +15,11 @@ pub struct Goods {
     #[index]
     #[max_length(36)]
     pub product_id: String,
-    /// 品牌 / 型号名称
+    /// 品牌短码 / 型号系列短名（非整机配置摘要）
     #[required]
     #[max_length(100)]
     pub brand: String,
-    /// 参数明细（多行）
+    /// 机箱参数明细（多行「键：值」）
     #[required]
     pub parameters: String,
     #[required]
@@ -34,7 +34,7 @@ pub struct Goods {
     /// 机房机位，如 A区·R12
     #[max_length(100)]
     pub location: String,
-    /// 资产编码前缀
+    /// 资产编码
     #[max_length(50)]
     pub asset_code: String,
     #[required]

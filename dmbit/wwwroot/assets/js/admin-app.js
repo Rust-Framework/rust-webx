@@ -87,6 +87,14 @@ function qtySum(goods) {
   return (goods || []).reduce((s, g) => s + (Number(g.quantity) || 0), 0);
 }
 
+function formatCapacityLabel(gb) {
+  const n = Number(gb) || 0;
+  if (n <= 0) return '';
+  if (n % 1000000 === 0) return n / 1000000 + 'PB';
+  if (n % 1000 === 0) return n / 1000 + 'TB';
+  return n + 'GB';
+}
+
 function formatComponents(components) {
   const list = components || [];
   if (!list.length) return '—';
@@ -94,8 +102,8 @@ function formatComponents(components) {
     .map((c) => {
       const model = String(c.model || '').trim() || '?';
       const qty = Number(c.qty_per_unit) || 0;
-      if (c.kind === 'disk' && c.capacity) {
-        return model + '·' + c.capacity + '×' + qty;
+      if (c.kind === 'disk' && c.capacity_gb > 0) {
+        return model + '·' + formatCapacityLabel(c.capacity_gb) + '×' + qty;
       }
       return model + '×' + qty;
     })
@@ -208,7 +216,7 @@ function App() {
         {
           kind: defaultComponentKind(category),
           model: '',
-          capacity: '',
+          capacity_gb: category === 'storage' ? 8000 : 0,
           qty_per_unit: 1,
           sort_order: 0,
         },
@@ -233,7 +241,7 @@ function App() {
       .map((c, i) => ({
         kind: expectKind,
         model: c.model || '',
-        capacity: c.capacity || '',
+        capacity_gb: expectKind === 'disk' ? Number(c.capacity_gb) || 0 : 0,
         qty_per_unit: c.qty_per_unit ?? 1,
         sort_order: c.sort_order ?? i,
         id: c.id || '',
@@ -253,7 +261,7 @@ function App() {
             {
               kind: expectKind,
               model: '',
-              capacity: '',
+              capacity_gb: expectKind === 'disk' ? 8000 : 0,
               qty_per_unit: 1,
               sort_order: 0,
             },
@@ -309,7 +317,7 @@ function App() {
         .map((c, i) => ({
           kind: expectKind,
           model: String(c.model || '').trim(),
-          capacity: expectKind === 'disk' ? String(c.capacity || '').trim() : '',
+          capacity_gb: expectKind === 'disk' ? Math.max(0, Number(c.capacity_gb) || 0) : 0,
           qty_per_unit: Math.max(1, Number(c.qty_per_unit) || 1),
           sort_order: Number(c.sort_order) || i,
           id: c.id || undefined,
@@ -690,16 +698,24 @@ function App() {
     ];
     if (isStorage) {
       cols.push({
-        title: '容量',
-        width: 100,
+        title: '容量(GB)',
+        width: 120,
         render: (_, field) => (
           <Form.Item
             {...field}
-            name={[field.name, 'capacity']}
-            rules={[{ required: true, message: '必填' }]}
+            name={[field.name, 'capacity_gb']}
+            rules={[
+              { required: true, message: '必填' },
+              {
+                validator: (_, v) =>
+                  Number(v) > 0
+                    ? Promise.resolve()
+                    : Promise.reject(new Error('须为正整数 GB')),
+              },
+            ]}
             style={{ marginBottom: 0 }}
           >
-            <Input placeholder="8TB" />
+            <Input type="number" min={1} step={1} placeholder="8000(=8TB)" />
           </Form.Item>
         ),
       });
@@ -1027,7 +1043,8 @@ function App() {
                       add({
                         kind: defaultComponentKind(goodsProductCategory),
                         model: '',
-                        capacity: '',
+                        capacity_gb:
+                          defaultComponentKind(goodsProductCategory) === 'disk' ? 8000 : 0,
                         qty_per_unit: 1,
                         sort_order: fields.length,
                       })
@@ -1102,67 +1119,87 @@ function App() {
         destroyOnClose
       >
         <div className="help-modal-body">
-          <Title level={5}>系统简介</Title>
+          <Title level={5}>这个系统做什么</Title>
           <Paragraph>
-            智算机房管理面向机房设备台账：<strong>大屏</strong>（公开页）展示整机台数、算力/存储、加速卡与硬盘汇总及构成图；
-            <strong>后台</strong>（本页）供管理员维护产品、台账与部件，改动能实时反映到大屏。
+            <strong>后台</strong>（本页）登记机房有哪些整机、各多少台、每台挂几张卡/几块盘；
+            <strong>大屏</strong>（首页）自动汇总展示。改完后台刷新大屏即可看到变化。
           </Paragraph>
 
-          <Title level={5}>核心概念</Title>
+          <Title level={5}>三个名词（务必分清）</Title>
           <ul>
             <li>
-              <strong>产品</strong>：设备型号主数据（名称、编码、类别「算力 / 存储」）。
+              <strong>产品</strong>：整机型号（名称、唯一编码、类别：算力或存储）。
             </li>
             <li>
-              <strong>台账</strong>：某产品下的具体批次/规格行（品牌短码、数量、状态、机位、资产编码、机箱参数等）。
+              <strong>台账</strong>：该型号下的一批机器（品牌短码、台数、状态、机位、资产编码、机箱参数等）。
             </li>
             <li>
-              <strong>部件</strong>：挂在台账上的加速卡或硬盘（型号、单台数量；硬盘还需容量）。大屏卡/盘张数由此汇总。
+              <strong>部件</strong>：每台机器上的加速卡或硬盘（型号 + 单台数量；硬盘还要填容量）。
             </li>
           </ul>
+          <Paragraph>
+            <strong>重要：</strong>大屏上的卡数、盘数只统计「部件」表。
+            只把「RTX5090×6」写在扩展说明里、不建部件 → 大屏<strong>统计不到</strong>。
+            公式：卡/盘总数 = 台账台数 × 该部件「单台数量」。
+          </Paragraph>
 
-          <Title level={5}>日常维护</Title>
+          <Title level={5}>第一次怎么用（手工登记）</Title>
           <ol>
             <li>
-              点右上角<strong>新增产品</strong>，填写名称、编码与类别。
+              右上角<strong>新增产品</strong>：填名称、编码、选类别（算力 / 存储）。
             </li>
             <li>
-              在产品行点「添加台账」或展开行后编辑已有台账；保存后整单替换该台账的部件列表。
+              在该产品行点<strong>添加台账</strong>：填品牌短码、数量、状态、机位等。
             </li>
             <li>
-              点击产品行可展开/收起，查看品牌、状态、部件摘要与机位。
+              在台账表单里维护<strong>部件</strong>：算力填加速卡（如型号 RTX5090、单台 6）；
+              存储填硬盘（型号、容量 GB 如 8000=8TB、单台块数）。保存后即整单替换该台账的部件列表。
+            </li>
+            <li>
+              点击产品行可展开，查看已有台账与部件摘要；需要时再点编辑。
             </li>
           </ol>
           <Paragraph>
-            <strong>算力</strong>台账默认维护加速卡（型号 × 单台张数）；
-            <strong>存储</strong>台账默认维护硬盘（型号 · 容量 × 单台块数）。容量对硬盘为必填。
+            <strong>示例：</strong>新增「昇腾算力服务器」→ 类别选算力 → 添加台账数量 80 →
+            部件填 Ascend910B、单台 8 → 大屏加速卡会出现 Ascend910B，张数 = 80×8。
           </Paragraph>
 
-          <Title level={5}>导入 / 导出</Title>
+          <Title level={5}>批量导入 / 导出</Title>
           <Paragraph>
-            导出与导入使用相同的中文表头。建议流程：先<strong>导出</strong> → 用 Excel 修改 → 再<strong>导入</strong>。
-            每一行对应一个部件；同一台账的多部件会重复产品/台账字段。无部件时部件列可留空。
+            推荐流程：先<strong>导出</strong> → Excel 另存为 CSV（UTF-8）→ 改完再<strong>导入</strong>。
+            表头与导出一致，勿改列名。
           </Paragraph>
-          <Paragraph>
-            若 CSV 中的<strong>产品编码</strong>或匹配台账（产品 + 品牌 + 资产编码 + 机位）已在库中存在，系统会先列出冲突并<strong>不写入</strong>；
-            确认更新后才会覆盖（含清空再写入部件）。取消则保持原数据不变。
-          </Paragraph>
-          <Paragraph type="secondary">
-            表头示例：产品名称、产品编码、类别、品牌短码、状态、数量、单位、机位、资产编码、机箱…光模块、其他参数、部件类型、部件型号、容量、单台数量。
-          </Paragraph>
-
-          <Title level={5}>大屏看什么</Title>
           <ul>
-            <li>总台数，以及算力 / 存储分项</li>
-            <li>加速卡按型号张数、硬盘按「型号 · 容量」块数</li>
-            <li>估算存储容量（PB）与算力功耗（MW）</li>
-            <li>产品构成、运行状态分布，以及明细表</li>
+            <li>
+              同一台账：<strong>首行</strong>写满产品/台账字段（可带第一个部件）；
+              <strong>续行</strong>只填四键（产品编码、品牌短码、资产编码、机位）+ 部件列，其余留空。
+            </li>
+            <li>
+              续行若误填状态、数量等且与首行不同，导入会报错并指出行号。
+            </li>
+            <li>
+              该台账任一行填了部件列 → 重建部件；部件列全空 → <strong>不改动</strong>库里已有部件。
+            </li>
+            <li>
+              若产品编码或台账（产品 + 品牌 + 资产编码 + 机位）已存在，会先列出冲突；
+              确认后才覆盖，取消则保持原样。整次导入一次提交。
+            </li>
           </ul>
 
-          <Title level={5}>登录账号</Title>
+          <Title level={5}>大屏上看什么</Title>
+          <ul>
+            <li>设备总台数，以及算力 / 存储分项（来自台账数量 × 产品类别）</li>
+            <li>加速卡按型号张数；硬盘按「型号 · 容量」块数（来自部件）</li>
+            <li>
+              存储容量：各硬盘部件「容量(GB) × 块数」整数汇总；CSV 里可写 8TB，入库时换算为 GB
+            </li>
+            <li>产品构成、运行状态分布</li>
+          </ul>
+
+          <Title level={5}>账号与安全</Title>
           <Paragraph>
-            默认管理员：<Text code>admin@dmbit.local</Text> / <Text code>admin123</Text>
-            （以部署说明或种子数据为准；生产环境请尽快改密）。
+            使用部署时提供的管理员账号登录；首次登录后请尽快在右上角<strong>修改密码</strong>。
+            请勿在公共场合展示口令。
           </Paragraph>
         </div>
       </Modal>

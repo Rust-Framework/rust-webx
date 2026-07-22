@@ -6,7 +6,7 @@ const {
 } = antd;
 const {
   PlusOutlined, EditOutlined, DeleteOutlined, ExportOutlined, ImportOutlined,
-  FileAddOutlined, RightOutlined, DownOutlined, DesktopOutlined, QuestionCircleOutlined,
+  RightOutlined, DownOutlined, DesktopOutlined, QuestionCircleOutlined,
 } = icons;
 const { Header, Content } = Layout;
 const { Text, Title, Paragraph } = Typography;
@@ -15,12 +15,6 @@ if (!window.DmbitApi.getToken()) {
   location.replace('/admin/login.html');
 }
 
-const STATUS_OPTIONS = [
-  { value: '运行中', color: 'success' },
-  { value: '联调中', color: 'warning' },
-  { value: '待上架', color: 'default' },
-  { value: '已交付', color: 'processing' },
-];
 const CATEGORY_OPTIONS = [
   { value: 'compute', label: '算力' },
   { value: 'storage', label: '存储' },
@@ -30,17 +24,11 @@ const PARAM_KEY_SET = new Set(PARAM_KEYS);
 
 const zhCN = antd.locales?.zh_CN;
 
-function statusColor(status) {
-  const hit = STATUS_OPTIONS.find((s) => s.value === status);
-  return hit ? hit.color : 'default';
-}
-
 function categoryLabel(cat) {
   const hit = CATEGORY_OPTIONS.find((c) => c.value === cat);
   return hit ? hit.label : cat || '—';
 }
 
-/** Map parameters text lines key：value or key:value -> object */
 function paramMap(text) {
   const map = {};
   String(text || '')
@@ -54,7 +42,6 @@ function paramMap(text) {
   return map;
 }
 
-/** Extra (non-standard) parameter rows from text */
 function extraParamRows(text) {
   const map = paramMap(text);
   return Object.keys(map)
@@ -62,7 +49,6 @@ function extraParamRows(text) {
     .map((k) => ({ key: k, value: map[k] || '' }));
 }
 
-/** Join standard keys + extra rows into parameters text (preserves custom keys) */
 function buildParameters(values, extras) {
   const lines = [];
   PARAM_KEYS.forEach((k) => {
@@ -78,13 +64,13 @@ function buildParameters(values, extras) {
   return lines.join('\n');
 }
 
-function brandSummary(goods) {
-  const brands = [...new Set((goods || []).map((g) => g.brand).filter(Boolean))];
+function brandSummary(specs) {
+  const brands = [...new Set((specs || []).map((s) => s.brand).filter(Boolean))];
   return brands.length ? brands.join('、') : '—';
 }
 
-function qtySum(goods) {
-  return (goods || []).reduce((s, g) => s + (Number(g.quantity) || 0), 0);
+function specTotal(specs) {
+  return (specs || []).reduce((s, sp) => s + (Number(sp.planned_quantity) || 0), 0);
 }
 
 function formatCapacityLabel(gb) {
@@ -110,9 +96,9 @@ function formatComponents(components) {
     .join(' · ');
 }
 
-function partsSummary(row) {
-  if (row && row.parts_summary) return row.parts_summary;
-  return formatComponents(row && row.components);
+function partsSummary(spec) {
+  if (spec && spec.parts_summary) return spec.parts_summary;
+  return formatComponents(spec && spec.components);
 }
 
 function downloadCsv(csv, filename) {
@@ -134,7 +120,6 @@ function App() {
   const user = window.DmbitApi.getUser() || {};
   const [products, setProducts] = React.useState([]);
   const [search, setSearch] = React.useState('');
-  const [statusFilter, setStatusFilter] = React.useState('');
   const [loading, setLoading] = React.useState(false);
   const [importing, setImporting] = React.useState(false);
   const [exporting, setExporting] = React.useState(false);
@@ -145,11 +130,11 @@ function App() {
   const [editingProduct, setEditingProduct] = React.useState(null);
   const [productForm] = Form.useForm();
 
-  const [goodsOpen, setGoodsOpen] = React.useState(false);
-  const [goodsProductId, setGoodsProductId] = React.useState(null);
-  const [goodsProductCategory, setGoodsProductCategory] = React.useState('compute');
-  const [editingGoods, setEditingGoods] = React.useState(null);
-  const [goodsForm] = Form.useForm();
+  const [specOpen, setSpecOpen] = React.useState(false);
+  const [specProductId, setSpecProductId] = React.useState(null);
+  const [specProductCategory, setSpecProductCategory] = React.useState('compute');
+  const [editingSpec, setEditingSpec] = React.useState(null);
+  const [specForm] = Form.useForm();
 
   const [pwdOpen, setPwdOpen] = React.useState(false);
   const [pwdForm] = Form.useForm();
@@ -178,38 +163,29 @@ function App() {
 
   const filtered = React.useMemo(() => {
     const q = search.trim().toLowerCase();
-    return products
-      .map((p) => {
-        let goods = p.goods || [];
-        if (statusFilter) {
-          goods = goods.filter((g) => g.status === statusFilter);
-        }
-        return { ...p, goods };
-      })
-      .filter((p) => {
-        if (statusFilter && !(p.goods || []).length) return false;
-        if (!q) return true;
-        const orig = products.find((x) => x.id === p.id) || p;
-        const brands = (orig.goods || []).map((g) => g.brand || '').join(' ');
-        const hay = [p.name, p.code, p.remark, p.category, brands].join(' ').toLowerCase();
-        return hay.includes(q);
-      });
-  }, [products, search, statusFilter]);
+    return products.filter((p) => {
+      if (!q) return true;
+      const specs = p.goods || [];
+      const brands = specs.map((s) => s.brand || '').join(' ');
+      const codes = specs.map((s) => s.code || '').join(' ');
+      const hay = [p.name, p.code, p.remark, p.category, brands, codes].join(' ').toLowerCase();
+      return hay.includes(q);
+    });
+  }, [products, search]);
 
   function defaultComponentKind(category) {
     return category === 'storage' ? 'disk' : 'accelerator';
   }
 
-  function openAddGoods(product) {
+  function openAddSpec(product) {
     const category = product.category || 'compute';
-    setGoodsProductId(product.id);
-    setGoodsProductCategory(category);
-    setEditingGoods(null);
-    goodsForm.resetFields();
+    setSpecProductId(product.id);
+    setSpecProductCategory(category);
+    setEditingSpec(null);
+    specForm.resetFields();
     const init = {
-      status: '待上架',
       unit: '台',
-      quantity: 0,
+      planned_quantity: 0,
       sort_order: 0,
       extras: [],
       components: [
@@ -222,56 +198,46 @@ function App() {
         },
       ],
     };
-    PARAM_KEYS.forEach((k) => {
-      init[k] = '';
-    });
-    goodsForm.setFieldsValue(init);
-    setGoodsOpen(true);
+    PARAM_KEYS.forEach((k) => { init[k] = ''; });
+    specForm.setFieldsValue(init);
+    setSpecOpen(true);
   }
 
-  function openEditGoods(product, row) {
+  function openEditSpec(product, row) {
     const category = product.category || 'compute';
     const expectKind = defaultComponentKind(category);
-    setGoodsProductId(product.id);
-    setGoodsProductCategory(category);
-    setEditingGoods(row);
+    setSpecProductId(product.id);
+    setSpecProductCategory(category);
+    setEditingSpec(row);
     const pm = paramMap(row.parameters);
-    const comps = (row.components || [])
-      .filter((c) => (c.kind || expectKind) === expectKind)
-      .map((c, i) => ({
-        kind: expectKind,
-        model: c.model || '',
-        capacity_gb: expectKind === 'disk' ? Number(c.capacity_gb) || 0 : 0,
-        qty_per_unit: c.qty_per_unit ?? 1,
-        sort_order: c.sort_order ?? i,
-        id: c.id || '',
-      }));
+    const comps = (row.components || []).map((c, i) => ({
+      kind: c.kind || expectKind,
+      model: c.model || '',
+      capacity_gb: c.capacity_gb ?? (category === 'storage' ? 8000 : 0),
+      qty_per_unit: c.qty_per_unit ?? 1,
+      sort_order: c.sort_order ?? i,
+      id: c.id || '',
+    }));
     const fields = {
-      brand: row.brand,
-      asset_code: row.asset_code || '',
-      location: row.location || '',
-      status: row.status || '待上架',
+      code: row.code || '',
+      brand: row.brand || '',
       unit: row.unit || '台',
-      quantity: row.quantity ?? 0,
+      planned_quantity: row.planned_quantity ?? 0,
       sort_order: row.sort_order ?? 0,
       extras: extraParamRows(row.parameters),
       components: comps.length
         ? comps
-        : [
-            {
-              kind: expectKind,
-              model: '',
-              capacity_gb: expectKind === 'disk' ? 8000 : 0,
-              qty_per_unit: 1,
-              sort_order: 0,
-            },
-          ],
+        : [{
+            kind: expectKind,
+            model: '',
+            capacity_gb: category === 'storage' ? 8000 : 0,
+            qty_per_unit: 1,
+            sort_order: 0,
+          }],
     };
-    PARAM_KEYS.forEach((k) => {
-      fields[k] = pm[k] || '';
-    });
-    goodsForm.setFieldsValue(fields);
-    setGoodsOpen(true);
+    PARAM_KEYS.forEach((k) => { fields[k] = pm[k] || ''; });
+    specForm.setFieldsValue(fields);
+    setSpecOpen(true);
   }
 
   async function saveProduct() {
@@ -296,57 +262,54 @@ function App() {
       productForm.resetFields();
       await load();
     } catch (ex) {
+      if (ex.status === 401) { window.DmbitApi.clearSession(); location.replace('/admin/login.html'); return; }
       if (ex.errorFields) return;
       message.error(ex.message || '保存失败');
     }
   }
 
-  async function saveGoods() {
-    if (!goodsProductId) {
+  async function saveSpec() {
+    if (!specProductId) {
       message.warning('请先选择产品');
       return;
     }
     try {
-      const values = await goodsForm.validateFields();
+      const values = await specForm.validateFields();
       const paramValues = {};
-      PARAM_KEYS.forEach((k) => {
-        paramValues[k] = values[k];
-      });
-      const expectKind = defaultComponentKind(goodsProductCategory);
+      PARAM_KEYS.forEach((k) => { paramValues[k] = values[k]; });
       const components = (values.components || [])
         .map((c, i) => ({
-          kind: expectKind,
+          kind: c.kind || defaultComponentKind(specProductCategory),
           model: String(c.model || '').trim(),
-          capacity_gb: expectKind === 'disk' ? Math.max(0, Number(c.capacity_gb) || 0) : 0,
+          capacity_gb: specProductCategory === 'storage' ? Math.max(0, Number(c.capacity_gb) || 0) : 0,
           qty_per_unit: Math.max(1, Number(c.qty_per_unit) || 1),
           sort_order: Number(c.sort_order) || i,
           id: c.id || undefined,
         }))
         .filter((c) => c.model);
       const payload = {
+        code: values.code,
         brand: values.brand,
-        asset_code: values.asset_code || '',
-        location: values.location || '',
-        status: values.status,
         unit: values.unit || '台',
-        quantity: Number(values.quantity) || 0,
+        planned_quantity: Number(values.planned_quantity) || 0,
         sort_order: Number(values.sort_order) || 0,
         parameters: buildParameters(paramValues, values.extras || []),
-        product_id: goodsProductId,
+        product_id: specProductId,
         components,
       };
-      if (editingGoods) {
-        await window.DmbitApi.put('/api/goods/' + editingGoods.id, payload);
-        message.success('台账已更新');
+      if (editingSpec) {
+        await window.DmbitApi.put('/api/specs/' + editingSpec.id, payload);
+        message.success('规格已更新');
       } else {
-        await window.DmbitApi.post('/api/goods', payload);
-        message.success('台账已创建');
+        await window.DmbitApi.post('/api/specs', payload);
+        message.success('规格已创建');
       }
-      setGoodsOpen(false);
-      setEditingGoods(null);
-      goodsForm.resetFields();
+      setSpecOpen(false);
+      setEditingSpec(null);
+      specForm.resetFields();
       await load();
     } catch (ex) {
+      if (ex.status === 401) { window.DmbitApi.clearSession(); location.replace('/admin/login.html'); return; }
       if (ex.errorFields) return;
       message.error(ex.message || '保存失败');
     }
@@ -363,6 +326,7 @@ function App() {
       setPwdOpen(false);
       pwdForm.resetFields();
     } catch (ex) {
+      if (ex.status === 401) { window.DmbitApi.clearSession(); location.replace('/admin/login.html'); return; }
       if (ex.errorFields) return;
       message.error(ex.message || '修改失败');
     }
@@ -373,11 +337,8 @@ function App() {
     try {
       const data = await window.DmbitApi.get('/api/inventory/export');
       const csv = data && data.csv != null ? data.csv : '';
-      if (!csv) {
-        message.error('导出内容为空');
-        return;
-      }
-      downloadCsv(csv, '智算机房台账.csv');
+      if (!csv) { message.error('导出内容为空'); return; }
+      downloadCsv(csv, '智算机房规格清单.csv');
       message.success('已导出');
     } catch (ex) {
       if (ex.status === 401) {
@@ -400,7 +361,7 @@ function App() {
 
   function askImportConfirm(csv, result) {
     const codes = (result.conflict_product_codes || []).join('、') || '（无）';
-    const labels = (result.conflict_goods_labels || []).join('、') || '（无）';
+    const specs = (result.conflict_goods_labels || []).join('、') || '（无）';
     Modal.confirm({
       title: '检测到编号冲突',
       width: 560,
@@ -409,7 +370,7 @@ function App() {
         null,
         React.createElement('p', null, result.message || '以下编号已存在，继续将覆盖更新；取消则不写入任何数据。'),
         React.createElement('p', null, React.createElement('strong', null, '产品编码：'), codes),
-        React.createElement('p', null, React.createElement('strong', null, '已有台账：'), labels)
+        React.createElement('p', null, React.createElement('strong', null, '规格编码：'), specs)
       ),
       okText: '确认更新',
       cancelText: '取消',
@@ -420,11 +381,7 @@ function App() {
           message.success((again && again.message) || '导入完成');
           await load();
         } catch (ex) {
-          if (ex.status === 401) {
-            window.DmbitApi.clearSession();
-            location.replace('/admin/login.html');
-            return;
-          }
+          if (ex.status === 401) { window.DmbitApi.clearSession(); location.replace('/admin/login.html'); return; }
           message.error(ex.message || '导入失败');
           throw ex;
         } finally {
@@ -449,11 +406,7 @@ function App() {
       message.success((result && result.message) || '导入完成');
       await load();
     } catch (ex) {
-      if (ex.status === 401) {
-        window.DmbitApi.clearSession();
-        location.replace('/admin/login.html');
-        return;
-      }
+      if (ex.status === 401) { window.DmbitApi.clearSession(); location.replace('/admin/login.html'); return; }
       message.error(ex.message || '导入失败');
     } finally {
       setImporting(false);
@@ -461,15 +414,16 @@ function App() {
   }
 
   const productColumns = [
-    { title: '产品', dataIndex: 'name', key: 'name' },
+    { title: '产品', dataIndex: 'name', key: 'name', ellipsis: true },
     {
       title: '类别',
       dataIndex: 'category',
       key: 'category',
       width: 88,
-      render: (v) => (
-        <Tag color={v === 'storage' ? 'purple' : 'blue'}>{categoryLabel(v)}</Tag>
-      ),
+      render: (v) => (<Tag color={v === 'storage' ? 'purple' : 'blue'}>{categoryLabel(v)}</Tag>),
+    },
+    {
+      title: '编码', dataIndex: 'code', key: 'code', width: 120, ellipsis: true,
     },
     {
       title: '品牌',
@@ -478,12 +432,12 @@ function App() {
       render: (_, row) => brandSummary(row.goods),
     },
     {
-      title: '总数',
+      title: '计划总量',
       key: 'qty',
-      width: 88,
+      width: 96,
       align: 'right',
       render: (_, row) => (
-        <span className="num-cell">{qtySum(row.goods).toLocaleString('zh-CN')}</span>
+        <span className="num-cell">{specTotal(row.goods).toLocaleString('zh-CN')}</span>
       ),
     },
     {
@@ -492,56 +446,32 @@ function App() {
       width: 132,
       render: (_, row) => (
         <Space size={4} onClick={(e) => e.stopPropagation()}>
-          <Tooltip title="添加台账">
-            <Button
-              type="text"
-              className="dm-icon-btn"
-              icon={<FileAddOutlined />}
-              onClick={(e) => {
-                e.stopPropagation();
-                openAddGoods(row);
-              }}
-            />
+          <Tooltip title="添加规格">
+            <Button type="text" className="dm-icon-btn" icon={<PlusOutlined />}
+              onClick={(e) => { e.stopPropagation(); openAddSpec(row); }} />
           </Tooltip>
           <Tooltip title="编辑">
-            <Button
-              type="text"
-              className="dm-icon-btn"
-              icon={<EditOutlined />}
+            <Button type="text" className="dm-icon-btn" icon={<EditOutlined />}
               onClick={(e) => {
                 e.stopPropagation();
                 setEditingProduct(row);
                 productForm.setFieldsValue({
-                  name: row.name,
-                  code: row.code,
+                  name: row.name, code: row.code,
                   category: row.category || 'compute',
                   remark: row.remark || '',
                   sort_order: row.sort_order ?? 0,
                 });
                 setProductOpen(true);
-              }}
-            />
+              }} />
           </Tooltip>
-          <Popconfirm
-            title="确定删除该产品及全部台账？"
+          <Popconfirm title="确定删除该产品及全部规格？"
             onConfirm={async () => {
-              try {
-                await window.DmbitApi.del('/api/products/' + row.id);
-                message.success('已删除');
-                await load();
-              } catch (ex) {
-                message.error(ex.message || '删除失败');
-              }
-            }}
-          >
+              try { await window.DmbitApi.del('/api/products/' + row.id); message.success('已删除'); await load(); }
+              catch (ex) { if (ex.status === 401) { window.DmbitApi.clearSession(); location.replace('/admin/login.html'); return; } message.error(ex.message || '删除失败'); }
+            }}>
             <Tooltip title="删除">
-              <Button
-                type="text"
-                danger
-                className="dm-icon-btn"
-                icon={<DeleteOutlined />}
-                onClick={(e) => e.stopPropagation()}
-              />
+              <Button type="text" danger className="dm-icon-btn" icon={<DeleteOutlined />}
+                onClick={(e) => e.stopPropagation()} />
             </Tooltip>
           </Popconfirm>
         </Space>
@@ -549,76 +479,40 @@ function App() {
     },
   ];
 
-  function goodsColumns(product) {
+  function specColumns(product) {
     return [
+      {
+        title: '规格编码', dataIndex: 'code', key: 'code', width: 130, ellipsis: true,
+        render: (v) => <Text code>{v || '—'}</Text>,
+      },
       { title: '品牌', dataIndex: 'brand', key: 'brand', width: 120, ellipsis: true },
       {
-        title: '状态',
-        dataIndex: 'status',
-        key: 'status',
-        width: 96,
-        render: (v) => <Tag color={statusColor(v)}>{v || '—'}</Tag>,
+        title: '部件', key: 'parts', ellipsis: true, render: (_, row) => partsSummary(row),
       },
       {
-        title: '部件',
-        key: 'parts',
-        ellipsis: true,
-        render: (_, row) => partsSummary(row),
+        title: '计划数量', dataIndex: 'planned_quantity', key: 'qty', width: 100, align: 'right',
+        render: (v, row) => `${Number(v || 0).toLocaleString('zh-CN')} ${row.unit || ''}`,
       },
       {
-        title: '数量',
-        dataIndex: 'quantity',
-        key: 'quantity',
-        width: 88,
-        align: 'right',
-        render: (v, row) =>
-          `${Number(v || 0).toLocaleString('zh-CN')} ${row.unit || ''}`,
+        title: '已有设备', dataIndex: 'device_count', key: 'dev', width: 88, align: 'right',
+        render: (v) => (v || 0).toLocaleString('zh-CN'),
       },
       {
-        title: '机位',
-        dataIndex: 'location',
-        key: 'location',
-        width: 160,
-        ellipsis: true,
-        render: (v) => v || '—',
-      },
-      {
-        title: '操作',
-        key: 'actions',
-        width: 96,
+        title: '操作', key: 'actions', width: 96,
         render: (_, row) => (
           <Space size={4} onClick={(e) => e.stopPropagation()}>
             <Tooltip title="编辑">
-              <Button
-                type="text"
-                className="dm-icon-btn"
-                icon={<EditOutlined />}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  openEditGoods(product, row);
-                }}
-              />
+              <Button type="text" className="dm-icon-btn" icon={<EditOutlined />}
+                onClick={(e) => { e.stopPropagation(); openEditSpec(product, row); }} />
             </Tooltip>
-            <Popconfirm
-              title="确定删除该台账行？"
+            <Popconfirm title="确定删除该规格？"
               onConfirm={async () => {
-                try {
-                  await window.DmbitApi.del('/api/goods/' + row.id);
-                  message.success('已删除');
-                  await load();
-                } catch (ex) {
-                  message.error(ex.message || '删除失败');
-                }
-              }}
-            >
+                try { await window.DmbitApi.del('/api/specs/' + row.id); message.success('已删除'); await load(); }
+                catch (ex) { if (ex.status === 401) { window.DmbitApi.clearSession(); location.replace('/admin/login.html'); return; } message.error(ex.message || '删除失败'); }
+              }}>
               <Tooltip title="删除">
-                <Button
-                  type="text"
-                  danger
-                  className="dm-icon-btn"
-                  icon={<DeleteOutlined />}
-                  onClick={(e) => e.stopPropagation()}
-                />
+                <Button type="text" danger className="dm-icon-btn" icon={<DeleteOutlined />}
+                  onClick={(e) => e.stopPropagation()} />
               </Tooltip>
             </Popconfirm>
           </Space>
@@ -628,25 +522,16 @@ function App() {
   }
 
   const expandedRowRender = (record) => {
-    const goods = record.goods || [];
-    if (!goods.length) {
+    const specs = record.goods || [];
+    if (!specs.length) {
       return (
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description="暂无台账，请点击「添加台账」"
-          style={{ margin: '8px 0' }}
-        />
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description="暂无规格，请点击「添加规格」" style={{ margin: '8px 0' }} />
       );
     }
     return (
-      <Table
-        size="small"
-        rowKey="id"
-        pagination={false}
-        columns={goodsColumns(record)}
-        dataSource={goods}
-        scroll={{ x: 860 }}
-      />
+      <Table size="small" rowKey="id" pagination={false}
+        columns={specColumns(record)} dataSource={specs} scroll={{ x: 860 }} />
     );
   };
 
@@ -657,20 +542,14 @@ function App() {
   }
 
   const expandIcon = ({ expanded, onExpand, record }) => (
-    <button
-      type="button"
-      className="dm-expand-btn"
+    <button type="button" className="dm-expand-btn"
       aria-label={expanded ? '收起' : '展开'}
-      onClick={(e) => {
-        e.stopPropagation();
-        onExpand(record, e);
-      }}
-    >
+      onClick={(e) => { e.stopPropagation(); onExpand(record, e); }}>
       {expanded ? <DownOutlined /> : <RightOutlined />}
     </button>
   );
 
-  const isStorage = goodsProductCategory === 'storage';
+  const isStorage = specProductCategory === 'storage';
 
   const componentColumns = (fields, remove) => {
     const cols = [
@@ -678,18 +557,10 @@ function App() {
         title: isStorage ? '硬盘型号' : '加速卡型号',
         render: (_, field) => (
           <>
-            <Form.Item name={[field.name, 'kind']} hidden>
-              <Input />
-            </Form.Item>
-            <Form.Item name={[field.name, 'id']} hidden>
-              <Input />
-            </Form.Item>
-            <Form.Item
-              {...field}
-              name={[field.name, 'model']}
-              rules={[{ required: true, message: '必填' }]}
-              style={{ marginBottom: 0 }}
-            >
+            <Form.Item name={[field.name, 'kind']} hidden><Input /></Form.Item>
+            <Form.Item name={[field.name, 'id']} hidden><Input /></Form.Item>
+            <Form.Item {...field} name={[field.name, 'model']}
+              rules={[{ required: true, message: '必填' }]} style={{ marginBottom: 0 }}>
               <Input placeholder={isStorage ? 'HC320' : 'RTX5090'} />
             </Form.Item>
           </>
@@ -698,23 +569,12 @@ function App() {
     ];
     if (isStorage) {
       cols.push({
-        title: '容量(GB)',
-        width: 120,
+        title: '容量', width: 120,
         render: (_, field) => (
-          <Form.Item
-            {...field}
-            name={[field.name, 'capacity_gb']}
-            rules={[
-              { required: true, message: '必填' },
-              {
-                validator: (_, v) =>
-                  Number(v) > 0
-                    ? Promise.resolve()
-                    : Promise.reject(new Error('须为正整数 GB')),
-              },
-            ]}
-            style={{ marginBottom: 0 }}
-          >
+          <Form.Item {...field} name={[field.name, 'capacity_gb']}
+            rules={[{ required: true, message: '必填' },
+              { validator: (_, v) => Number(v) > 0 ? Promise.resolve() : Promise.reject(new Error('须为正整数')) }]}
+            style={{ marginBottom: 0 }}>
             <Input type="number" min={1} step={1} placeholder="8000(=8TB)" />
           </Form.Item>
         ),
@@ -722,32 +582,21 @@ function App() {
     }
     cols.push(
       {
-        title: '单台数量',
-        width: 100,
+        title: '单台数量', width: 100,
         render: (_, field) => (
-          <Form.Item
-            {...field}
-            name={[field.name, 'qty_per_unit']}
-            rules={[{ required: true, message: '必填' }]}
-            style={{ marginBottom: 0 }}
-          >
+          <Form.Item {...field} name={[field.name, 'qty_per_unit']}
+            rules={[{ required: true, message: '必填' }]} style={{ marginBottom: 0 }}>
             <Input type="number" min={1} />
           </Form.Item>
         ),
       },
       {
-        title: '',
-        width: 48,
+        title: '', width: 48,
         render: (_, field) =>
           fields.length > 1 ? (
             <Tooltip title="删除">
-              <Button
-                type="text"
-                danger
-                className="dm-icon-btn"
-                icon={<DeleteOutlined />}
-                onClick={() => remove(field.name)}
-              />
+              <Button type="text" danger className="dm-icon-btn" icon={<DeleteOutlined />}
+                onClick={() => remove(field.name)} />
             </Tooltip>
           ) : null,
       }
@@ -760,22 +609,14 @@ function App() {
       <Header className="admin-topbar">
         <div className="topbar-left">
           <img src="/assets/logo.svg" alt="智算机房管理" className="brand-logo" />
-          <div>
-            <div className="brand-name">智算机房管理</div>
-          </div>
+          <div><div className="brand-name">智算机房管理</div></div>
           <Divider type="vertical" />
           <a className="screen-link" href="/" title="打开监控大屏">
-            <DesktopOutlined className="screen-link-icon" />
-            <span>大屏</span>
+            <DesktopOutlined className="screen-link-icon" /><span>大屏</span>
           </a>
-          <button
-            type="button"
-            className="screen-link help-link"
-            title="使用说明"
-            onClick={() => setHelpOpen(true)}
-          >
-            <QuestionCircleOutlined className="screen-link-icon" />
-            <span>帮助</span>
+          <button type="button" className="screen-link help-link" title="使用说明"
+            onClick={() => setHelpOpen(true)}>
+            <QuestionCircleOutlined className="screen-link-icon" /><span>帮助</span>
           </button>
         </div>
         <div className="topbar-right">
@@ -784,24 +625,8 @@ function App() {
               {(user.name || user.email || 'A').slice(0, 1).toUpperCase()}
             </Avatar>
             <Text>{user.name || user.email || 'Admin'}</Text>
-            <Button
-              type="link"
-              onClick={() => {
-                pwdForm.resetFields();
-                setPwdOpen(true);
-              }}
-            >
-              改密
-            </Button>
-            <Button
-              type="link"
-              onClick={() => {
-                window.DmbitApi.clearSession();
-                location.replace('/admin/login.html');
-              }}
-            >
-              退出
-            </Button>
+            <Button type="link" onClick={() => { pwdForm.resetFields(); setPwdOpen(true); }}>改密</Button>
+            <Button type="link" onClick={() => { window.DmbitApi.clearSession(); location.replace('/admin/login.html'); }}>退出</Button>
           </Space>
         </div>
       </Header>
@@ -810,114 +635,53 @@ function App() {
         <div className="toolbar-card">
           <div className="toolbar-row">
             <Space wrap size="middle">
-              <Input.Search
-                allowClear
-                size="middle"
-                placeholder="搜索产品名 / 编码 / 品牌短码"
-                style={{ width: 300 }}
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-              <Select
-                allowClear
-                size="middle"
-                placeholder="按状态筛选"
-                style={{ width: 140 }}
-                value={statusFilter || undefined}
-                onChange={(v) => setStatusFilter(v || '')}
-                options={STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.value }))}
-              />
+              <Input.Search allowClear size="middle" placeholder="搜索产品名 / 编码 / 品牌 / 规格编码"
+                style={{ width: 300 }} value={search} onChange={(e) => setSearch(e.target.value)} />
             </Space>
             <Space wrap>
-              <input
-                ref={importRef}
-                type="file"
-                accept=".csv,text/csv"
-                style={{ display: 'none' }}
-                onChange={onImportFile}
-              />
-              <Button
-                loading={importing}
-                icon={<ImportOutlined />}
-                onClick={() => importRef.current && importRef.current.click()}
-              >
-                导入
-              </Button>
-              <Button loading={exporting} icon={<ExportOutlined />} onClick={exportInventory}>
-                导出
-              </Button>
-              <Button
-                type="primary"
-                icon={<PlusOutlined />}
+              <input ref={importRef} type="file" accept=".csv,text/csv"
+                style={{ display: 'none' }} onChange={onImportFile} />
+              <Button loading={importing} icon={<ImportOutlined />}
+                onClick={() => importRef.current && importRef.current.click()}>导入</Button>
+              <Button loading={exporting} icon={<ExportOutlined />} onClick={exportInventory}>导出</Button>
+              <Button type="primary" icon={<PlusOutlined />}
                 onClick={() => {
-                  setEditingProduct(null);
-                  productForm.resetFields();
+                  setEditingProduct(null); productForm.resetFields();
                   productForm.setFieldsValue({ category: 'compute', sort_order: 0 });
                   setProductOpen(true);
-                }}
-              >
-                新增产品
-              </Button>
+                }}>新增产品</Button>
             </Space>
           </div>
         </div>
 
         <div className="panel-card master-table">
-          <Table
-            size="middle"
-            rowKey="id"
-            loading={loading}
-            columns={productColumns}
-            dataSource={filtered}
+          <Table size="middle" rowKey="id" loading={loading}
+            columns={productColumns} dataSource={filtered}
             pagination={{ pageSize: 10, showSizeChanger: false }}
             expandable={{
-              expandedRowRender,
-              expandedRowKeys: expandedKeys,
-              onExpandedRowsChange: setExpandedKeys,
-              expandIcon,
+              expandedRowRender, expandedRowKeys: expandedKeys,
+              onExpandedRowsChange: setExpandedKeys, expandIcon,
               rowExpandable: () => true,
             }}
-            onRow={(record) => ({
-              onClick: () => toggleExpand(record),
-              className: 'product-row',
-            })}
+            onRow={(record) => ({ onClick: () => toggleExpand(record), className: 'product-row' })}
             scroll={{ x: true }}
-            locale={{
-              emptyText: (
-                <Empty
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description="暂无产品 — 先新建产品，再添加台账"
-                />
-              ),
-            }}
+            locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无产品 — 先新建产品，再添加规格" /> }}
           />
         </div>
       </Content>
 
-      <Modal
-        title={editingProduct ? '编辑产品' : '新增产品'}
-        open={productOpen}
-        onCancel={() => setProductOpen(false)}
-        onOk={saveProduct}
-        destroyOnClose
-        okText="保存"
-        cancelText="取消"
-        className="product-modal"
-        styles={{ body: { overflowX: 'hidden' } }}
-      >
+      {/* Product Modal */}
+      <Modal title={editingProduct ? '编辑产品' : '新增产品'} open={productOpen}
+        onCancel={() => setProductOpen(false)} onOk={saveProduct} destroyOnClose
+        okText="保存" cancelText="取消" className="product-modal" styles={{ body: { overflowX: 'hidden' } }}>
         <Form form={productForm} layout="vertical" requiredMark={false} size="middle">
           <Form.Item name="name" label="名称" rules={[{ required: true, message: '必填' }]}>
-            <Input placeholder="例：RTX 5090 算力服务器" />
+            <Input placeholder="例：运算服务器" />
           </Form.Item>
           <Form.Item name="code" label="编码" rules={[{ required: true, message: '必填' }]}>
-            <Input placeholder="例：compute-5090" />
+            <Input placeholder="例：CMP-SRV" />
           </Form.Item>
-          <Form.Item
-            name="category"
-            label="类别"
-            initialValue="compute"
-            rules={[{ required: true, message: '必填' }]}
-          >
+          <Form.Item name="category" label="类别" initialValue="compute" rules={[{ required: true }]}>
             <Select options={CATEGORY_OPTIONS} />
           </Form.Item>
           <Form.Item name="remark" label="备注">
@@ -929,48 +693,28 @@ function App() {
         </Form>
       </Modal>
 
+      {/* Spec Modal */}
       <Modal
-        title={
-          editingGoods
-            ? '编辑台账 · ' + (isStorage ? '存储' : '算力')
-            : '添加台账 · ' + (isStorage ? '存储' : '算力')
-        }
-        open={goodsOpen}
-        onCancel={() => setGoodsOpen(false)}
-        onOk={saveGoods}
-        destroyOnClose
-        width={740}
-        okText="保存"
-        cancelText="取消"
-        className="goods-modal"
-        styles={{ body: { paddingTop: 8, maxHeight: '72vh', overflowY: 'auto', overflowX: 'hidden' } }}
-      >
-        <Form
-          form={goodsForm}
-          layout="vertical"
-          requiredMark={false}
-          className="goods-form"
-          size="middle"
-        >
+        title={editingSpec ? '编辑规格 · ' + (isStorage ? '存储' : '算力') : '添加规格 · ' + (isStorage ? '存储' : '算力')}
+        open={specOpen} onCancel={() => setSpecOpen(false)} onOk={saveSpec} destroyOnClose
+        width={740} okText="保存" cancelText="取消" className="goods-modal"
+        styles={{ body: { paddingTop: 8, maxHeight: '72vh', overflowY: 'auto', overflowX: 'hidden' } }}>
+        <Form form={specForm} layout="vertical" requiredMark={false} className="goods-form" size="middle">
           <div className="form-section">
-            <div className="form-section-title">身份与数量</div>
+            <div className="form-section-title">标识与数量</div>
             <Row gutter={[16, 0]}>
-              <Col span={12}>
-                <Form.Item
-                  name="brand"
-                  label="品牌短码"
-                  rules={[{ required: true, message: '必填' }]}
-                >
-                  <Input placeholder={isStorage ? 'HC320' : 'RTX5090'} />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item name="status" label="状态" rules={[{ required: true }]}>
-                  <Select options={STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.value }))} />
+              <Col span={8}>
+                <Form.Item name="code" label="规格编码" rules={[{ required: true, message: '必填' }]}>
+                  <Input placeholder="例：CMP-BASE" />
                 </Form.Item>
               </Col>
               <Col span={8}>
-                <Form.Item name="quantity" label="数量" rules={[{ required: true, message: '必填' }]}>
+                <Form.Item name="brand" label="品牌" rules={[{ required: true, message: '必填' }]}>
+                  <Input placeholder="例：定制" />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name="planned_quantity" label="计划数量" rules={[{ required: true }]}>
                   <Input type="number" min={0} />
                 </Form.Item>
               </Col>
@@ -982,22 +726,6 @@ function App() {
               <Col span={8}>
                 <Form.Item name="sort_order" label="排序" initialValue={0}>
                   <Input type="number" />
-                </Form.Item>
-              </Col>
-            </Row>
-          </div>
-
-          <div className="form-section">
-            <div className="form-section-title">位置与资产</div>
-            <Row gutter={[16, 0]}>
-              <Col span={12}>
-                <Form.Item name="location" label="机位">
-                  <Input placeholder="例：A区 · R01–R08" />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item name="asset_code" label="资产编码">
-                  <Input placeholder="例：CMP-5090" />
                 </Form.Item>
               </Col>
             </Row>
@@ -1026,30 +754,17 @@ function App() {
             <Form.List name="components">
               {(fields, { add, remove }) => (
                 <>
-                  <Table
-                    size="middle"
-                    pagination={false}
-                    rowKey="key"
-                    dataSource={fields}
-                    locale={{ emptyText: '暂无部件' }}
-                    columns={componentColumns(fields, remove)}
-                  />
-                  <Button
-                    type="dashed"
-                    block
-                    icon={<PlusOutlined />}
-                    style={{ marginTop: 8 }}
-                    onClick={() =>
-                      add({
-                        kind: defaultComponentKind(goodsProductCategory),
-                        model: '',
-                        capacity_gb:
-                          defaultComponentKind(goodsProductCategory) === 'disk' ? 8000 : 0,
-                        qty_per_unit: 1,
-                        sort_order: fields.length,
-                      })
-                    }
-                  >
+                  <Table size="middle" pagination={false} rowKey="key"
+                    dataSource={fields} locale={{ emptyText: '暂无部件' }}
+                    columns={componentColumns(fields, remove)} />
+                  <Button type="dashed" block icon={<PlusOutlined />} style={{ marginTop: 8 }}
+                    onClick={() => add({
+                      kind: defaultComponentKind(specProductCategory),
+                      model: '',
+                      capacity_gb: defaultComponentKind(specProductCategory) === 'disk' ? 8000 : 0,
+                      qty_per_unit: 1,
+                      sort_order: fields.length,
+                    })}>
                     {isStorage ? '添加硬盘' : '添加加速卡'}
                   </Button>
                 </>
@@ -1065,39 +780,25 @@ function App() {
                   {fields.map((field) => (
                     <Row gutter={12} key={field.key} align="middle" className="extra-row">
                       <Col span={8}>
-                        <Form.Item
-                          {...field}
-                          name={[field.name, 'key']}
-                          rules={[{ required: true, message: '键名' }]}
-                        >
+                        <Form.Item {...field} name={[field.name, 'key']} rules={[{ required: true, message: '键名' }]}>
                           <Input placeholder="参数名" />
                         </Form.Item>
                       </Col>
                       <Col span={14}>
-                        <Form.Item
-                          {...field}
-                          name={[field.name, 'value']}
-                          rules={[{ required: true, message: '值' }]}
-                        >
+                        <Form.Item {...field} name={[field.name, 'value']} rules={[{ required: true, message: '值' }]}>
                           <Input placeholder="参数值" />
                         </Form.Item>
                       </Col>
                       <Col span={2} style={{ textAlign: 'center' }}>
                         <Tooltip title="删除">
-                          <Button
-                            type="text"
-                            danger
-                            className="dm-icon-btn"
-                            icon={<DeleteOutlined />}
-                            onClick={() => remove(field.name)}
-                          />
+                          <Button type="text" danger className="dm-icon-btn" icon={<DeleteOutlined />}
+                            onClick={() => remove(field.name)} />
                         </Tooltip>
                       </Col>
                     </Row>
                   ))}
-                  <Button type="dashed" block icon={<PlusOutlined />} onClick={() => add({ key: '', value: '' })}>
-                    添加自定义参数
-                  </Button>
+                  <Button type="dashed" block icon={<PlusOutlined />}
+                    onClick={() => add({ key: '', value: '' })}>添加自定义参数</Button>
                 </>
               )}
             </Form.List>
@@ -1105,150 +806,66 @@ function App() {
         </Form>
       </Modal>
 
-      <Modal
-        title="使用说明"
-        open={helpOpen}
-        onCancel={() => setHelpOpen(false)}
-        footer={[
-          <Button key="ok" type="primary" onClick={() => setHelpOpen(false)}>
-            知道了
-          </Button>,
-        ]}
-        width={720}
-        className="help-modal"
-        destroyOnClose
-      >
+      {/* Help Modal */}
+      <Modal title="使用说明" open={helpOpen} onCancel={() => setHelpOpen(false)}
+        footer={[<Button key="ok" type="primary" onClick={() => setHelpOpen(false)}>知道了</Button>]}
+        width={720} className="help-modal" destroyOnClose>
         <div className="help-modal-body">
-          <Title level={5}>这个系统做什么</Title>
-          <Paragraph>
-            <strong>后台</strong>（本页）登记机房有哪些整机、各多少台、每台挂几张卡/几块盘；
-            <strong>大屏</strong>（首页）自动汇总展示。改完后台刷新大屏即可看到变化。
-          </Paragraph>
-
-          <Title level={5}>三个名词（务必分清）</Title>
+          <Title level={5}>三个概念</Title>
           <ul>
-            <li>
-              <strong>产品</strong>：整机型号（名称、唯一编码、类别：算力或存储）。
-            </li>
-            <li>
-              <strong>台账</strong>：该型号下的一批机器（品牌短码、台数、状态、机位、资产编码、机箱参数等）。
-            </li>
-            <li>
-              <strong>部件</strong>：每台机器上的加速卡或硬盘（型号 + 单台数量；硬盘还要填容量）。
-            </li>
+            <li><strong>产品</strong>：设备大类（名称、唯一编码、类别：算力/存储）。</li>
+            <li><strong>规格</strong>：该产品下的一种具体配置（规格编码、品牌、机箱参数、计划数量、部件）。</li>
+            <li><strong>部件</strong>：每台设备上的加速卡或硬盘（型号 + 单台数量；硬盘需填容量）。</li>
           </ul>
           <Paragraph>
-            <strong>重要：</strong>大屏上的卡数、盘数只统计「部件」表。
-            只把「RTX5090×6」写在扩展说明里、不建部件 → 大屏<strong>统计不到</strong>。
-            公式：卡/盘总数 = 台账台数 × 该部件「单台数量」。
+            <strong>重要：</strong>大屏上的卡数、盘数只统计「部件」表。只把「RTX5090×6」写在参数里、不建部件 → 大屏<strong>统计不到</strong>。
           </Paragraph>
 
-          <Title level={5}>第一次怎么用（手工登记）</Title>
+          <Title level={5}>第一次怎么用</Title>
           <ol>
-            <li>
-              右上角<strong>新增产品</strong>：填名称、编码、选类别（算力 / 存储）。
-            </li>
-            <li>
-              在该产品行点<strong>添加台账</strong>：填品牌短码、数量、状态、机位等。
-            </li>
-            <li>
-              在台账表单里维护<strong>部件</strong>：算力填加速卡（如型号 RTX5090、单台 6）；
-              存储填硬盘（型号、容量 GB 如 8000=8TB、单台块数）。保存后即整单替换该台账的部件列表。
-            </li>
-            <li>
-              点击产品行可展开，查看已有台账与部件摘要；需要时再点编辑。
-            </li>
+            <li>右上角<strong>新增产品</strong>：填名称（如"运算服务器"）、编码（如"CMP-SRV"）、选类别。</li>
+            <li>在该产品行点 <strong>+</strong> 添加规格：填规格编码（如"CMP-5090"）、品牌、计划数量。</li>
+            <li>在规格表单里维护<strong>部件</strong>：算力填加速卡（如 RTX5090、单台 6）；存储填硬盘（型号、容量、单台块数）。</li>
+            <li>点击产品行可展开查看规格列表。</li>
           </ol>
-          <Paragraph>
-            <strong>示例：</strong>新增「昇腾算力服务器」→ 类别选算力 → 添加台账数量 80 →
-            部件填 Ascend910B、单台 8 → 大屏加速卡会出现 Ascend910B，张数 = 80×8。
-          </Paragraph>
 
           <Title level={5}>批量导入 / 导出</Title>
           <Paragraph>
             推荐流程：先<strong>导出</strong> → Excel 另存为 CSV（UTF-8）→ 改完再<strong>导入</strong>。
-            表头与导出一致，勿改列名。
+            表头与导出一致，勿改列名。14 列格式：产品名称、产品编码、类别、规格编码、品牌、参数、单位、计划数量、部件类型、部件型号、容量、单台数量、备注、排序。
           </Paragraph>
           <ul>
-            <li>
-              同一台账：<strong>首行</strong>写满产品/台账字段（可带第一个部件）；
-              <strong>续行</strong>只填四键（产品编码、品牌短码、资产编码、机位）+ 部件列，其余留空。
-            </li>
-            <li>
-              续行若误填状态、数量等且与首行不同，导入会报错并指出行号。
-            </li>
-            <li>
-              该台账任一行填了部件列 → 重建部件；部件列全空 → <strong>不改动</strong>库里已有部件。
-            </li>
-            <li>
-              若产品编码或台账（产品 + 品牌 + 资产编码 + 机位）已存在，会先列出冲突；
-              确认后才覆盖，取消则保持原样。整次导入一次提交。
-            </li>
-          </ul>
-
-          <Title level={5}>大屏上看什么</Title>
-          <ul>
-            <li>设备总台数，以及算力 / 存储分项（来自台账数量 × 产品类别）</li>
-            <li>加速卡按型号张数；硬盘按「型号 · 容量」块数（来自部件）</li>
-            <li>
-              存储容量：各硬盘部件「容量(GB) × 块数」整数汇总；CSV 里可写 8TB，入库时换算为 GB
-            </li>
-            <li>产品构成、运行状态分布</li>
+            <li>同一规格多个部件：<strong>首行</strong>写满产品/规格字段（可带第一个部件）；<strong>续行</strong>只填规格编码 + 部件列，其余留空。</li>
+            <li>若产品编码或规格编码已存在，会先列出冲突；确认后才覆盖，取消则保持原样。</li>
+            <li>导入只创建/更新规格定义，不自动创建设备实例。</li>
           </ul>
 
           <Title level={5}>账号与安全</Title>
           <Paragraph>
             使用部署时提供的管理员账号登录；首次登录后请尽快在右上角<strong>修改密码</strong>。
-            请勿在公共场合展示口令。
           </Paragraph>
         </div>
       </Modal>
 
-      <Modal
-        title="修改密码"
-        open={pwdOpen}
-        onCancel={() => setPwdOpen(false)}
-        onOk={savePassword}
-        destroyOnClose
-        okText="确定修改"
-        cancelText="取消"
-        className="pwd-modal"
-        styles={{ body: { overflowX: 'hidden' } }}
-      >
+      {/* Password Modal */}
+      <Modal title="修改密码" open={pwdOpen} onCancel={() => setPwdOpen(false)} onOk={savePassword}
+        destroyOnClose okText="确定修改" cancelText="取消" className="pwd-modal" styles={{ body: { overflowX: 'hidden' } }}>
         <Form form={pwdForm} layout="vertical" requiredMark={false} size="middle">
-          <Form.Item
-            name="old_password"
-            label="原密码"
-            rules={[{ required: true, message: '请输入原密码' }]}
-          >
+          <Form.Item name="old_password" label="原密码" rules={[{ required: true, message: '请输入原密码' }]}>
             <Input.Password autoComplete="current-password" />
           </Form.Item>
-          <Form.Item
-            name="new_password"
-            label="新密码"
-            rules={[
-              { required: true, message: '请输入新密码' },
-              { min: 6, message: '至少 6 位' },
-            ]}
-          >
+          <Form.Item name="new_password" label="新密码" rules={[{ required: true, message: '请输入新密码' }, { min: 6, message: '至少 6 位' }]}>
             <Input.Password autoComplete="new-password" />
           </Form.Item>
-          <Form.Item
-            name="confirm"
-            label="确认新密码"
-            dependencies={['new_password']}
-            rules={[
-              { required: true, message: '请再次输入' },
+          <Form.Item name="confirm" label="确认新密码" dependencies={['new_password']}
+            rules={[{ required: true, message: '请再次输入' },
               ({ getFieldValue }) => ({
                 validator(_, value) {
-                  if (!value || getFieldValue('new_password') === value) {
-                    return Promise.resolve();
-                  }
+                  if (!value || getFieldValue('new_password') === value) return Promise.resolve();
                   return Promise.reject(new Error('两次密码不一致'));
                 },
               }),
-            ]}
-          >
+            ]}>
             <Input.Password autoComplete="new-password" />
           </Form.Item>
         </Form>
@@ -1258,19 +875,14 @@ function App() {
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(
-  <ConfigProvider
-    locale={zhCN}
+  <ConfigProvider locale={zhCN}
     theme={{
       token: {
-        colorPrimary: '#2563eb',
-        colorInfo: '#7c3aed',
-        borderRadius: 8,
+        colorPrimary: '#2563eb', colorInfo: '#7c3aed', borderRadius: 8,
         colorBgLayout: '#f5f7fb',
-        fontFamily:
-          '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif',
       },
-    }}
-  >
+    }}>
     <App />
   </ConfigProvider>
 );

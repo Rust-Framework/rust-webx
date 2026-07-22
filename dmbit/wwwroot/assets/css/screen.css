@@ -8,8 +8,8 @@
   --blue: #2563eb;
   --blue-deep: #1d4ed8;
   --purple: #7c3aed;
-  --mono: "JetBrains Mono", ui-monospace, monospace;
-  --sans: "Outfit", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --mono: "Cascadia Code", "Consolas", "Courier New", ui-monospace, monospace;
+  --sans: "PingFang SC", "Microsoft YaHei", "Helvetica Neue", "Helvetica", "Arial", sans-serif;
 }
 
 * { box-sizing: border-box; }

@@ -1,12 +1,12 @@
-//! Goods entity — 台账行（从表）.
+//! Spec entity — 设备规格定义.
 
 use rust_ef::prelude::*;
 
 use super::product::Product;
 
 #[derive(Debug, Clone, EntityType)]
-#[table("goods")]
-pub struct Goods {
+#[table("specs")]
+pub struct Spec {
     #[primary_key]
     #[max_length(36)]
     pub id: String,
@@ -15,7 +15,12 @@ pub struct Goods {
     #[index]
     #[max_length(36)]
     pub product_id: String,
-    /// 品牌短码 / 型号系列短名（非整机配置摘要）
+    /// 规格编码（业务唯一键），如 CMP-BASE / CMP-5090 / STO-8TB
+    #[required]
+    #[max_length(50)]
+    #[unique]
+    pub code: String,
+    /// 品牌短码
     #[required]
     #[max_length(100)]
     pub brand: String,
@@ -25,18 +30,9 @@ pub struct Goods {
     #[required]
     #[max_length(20)]
     pub unit: String,
+    /// 计划数量（此规格下 Device 的预期/计划数量）
     #[required]
-    pub quantity: i32,
-    /// 运行中 / 联调中 / 待上架 / 已交付
-    #[required]
-    #[max_length(20)]
-    pub status: String,
-    /// 机房机位，如 A区·R12
-    #[max_length(100)]
-    pub location: String,
-    /// 资产编码
-    #[max_length(50)]
-    pub asset_code: String,
+    pub planned_quantity: i32,
     #[required]
     pub sort_order: i32,
     #[index]
@@ -54,4 +50,8 @@ pub struct Goods {
     pub is_deleted: bool,
     #[navigation]
     pub product: BelongsTo<Product>,
+    #[navigation]
+    pub components: HasMany<super::spec_component::SpecComponent>,
+    #[navigation]
+    pub devices: HasMany<super::device::Device>,
 }

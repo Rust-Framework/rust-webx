@@ -2,8 +2,6 @@
 
 use rust_ef::prelude::*;
 
-use super::goods::Goods;
-
 #[derive(Debug, Clone, EntityType)]
 #[table("products")]
 pub struct Product {
@@ -39,5 +37,5 @@ pub struct Product {
     #[index]
     pub is_deleted: bool,
     #[navigation]
-    pub goods: HasMany<Goods>,
+    pub specs: HasMany<super::spec::Spec>,
 }

@@ -2,7 +2,7 @@
 const {
   Layout, Typography, Button, Space, Table, Input, Select, Modal, Form,
   message, ConfigProvider, Avatar, Divider, Row, Col, Popconfirm, Tag, Empty,
-  Tooltip,
+  Tooltip, Dropdown,
 } = antd;
 const { Header, Content } = Layout;
 const { Text, Title, Paragraph } = Typography;
@@ -492,7 +492,27 @@ function App() {
       },
       { title: '品牌', dataIndex: 'brand', key: 'brand', width: 120, ellipsis: true },
       {
-        title: '部件', key: 'parts', ellipsis: true, render: (_, row) => partsSummary(row),
+        title: '参数', key: 'params', width: 240,
+        render: (_, row) => {
+          const text = (row.parameters || '').trim();
+          if (!text) return React.createElement('span', { style: { color: '#94a3b8' } }, '—');
+          const lines = text.split('\n').filter(l => l.trim());
+          const max = 3;
+          const shown = lines.slice(0, max);
+          const more = lines.length > max;
+          const cell = React.createElement('div', { style: { fontSize: 12, lineHeight: '18px', color: '#475569' } },
+            ...shown.map((l, i) => React.createElement('div', { key: i }, l)),
+            more ? React.createElement('div', { key: 'more', style: { color: '#94a3b8', fontSize: 11 } }, `…共${lines.length}项`) : null
+          );
+          return React.createElement(
+            Tooltip,
+            { title: React.createElement('div', { style: { maxWidth: 420, fontSize: 12, lineHeight: '20px' } },
+                ...lines.map((l, i) => React.createElement('div', { key: i }, l))
+              ), placement: 'left', overlayStyle: { maxWidth: 460 }
+            },
+            cell
+          );
+        },
       },
       {
         title: '数量', dataIndex: 'planned_quantity', key: 'qty', width: 88, align: 'right',
@@ -625,14 +645,23 @@ function App() {
           </button>
         </div>
         <div className="topbar-right">
-          <Space size="middle">
-            <Avatar size="small" style={{ background: 'linear-gradient(135deg,#2563eb,#7c3aed)' }}>
-              {(user.name || user.email || 'A').slice(0, 1).toUpperCase()}
-            </Avatar>
-            <Text>{user.name || user.email || 'Admin'}</Text>
-            <Button type="link" onClick={() => { pwdForm.resetFields(); setPwdOpen(true); }}>改密</Button>
-            <Button type="link" onClick={() => { window.DmbitApi.clearSession(); location.replace('/admin/login.html'); }}>退出</Button>
-          </Space>
+          <Dropdown
+            menu={{
+              items: [
+                { key: 'pwd', label: '修改密码', onClick: () => { pwdForm.resetFields(); setPwdOpen(true); } },
+                { type: 'divider' },
+                { key: 'logout', label: '退出登录', danger: true, onClick: () => { window.DmbitApi.clearSession(); location.replace('/admin/login.html'); } },
+              ],
+            }}
+            trigger={['click']}
+          >
+            <Space size="small" style={{ cursor: 'pointer' }}>
+              <Avatar size="small" style={{ background: 'linear-gradient(135deg,#2563eb,#7c3aed)' }}>
+                {(user.name || user.email || 'A').slice(0, 1).toUpperCase()}
+              </Avatar>
+              <Text>{user.name || user.email || 'Admin'}</Text>
+            </Space>
+          </Dropdown>
         </div>
       </Header>
 
@@ -975,10 +1004,19 @@ function App() {
             大屏每 60 秒自动刷新。你也可以手动刷新浏览器。
           </Paragraph>
 
-          <Title level={4}>九、账号与安全</Title>
+          <Title level={4}>九、账号信息</Title>
+          <div style={{ background: '#f6f8fa', padding: '12px 16px', borderRadius: 6, marginBottom: 12 }}>
+            <table style={{ lineHeight: 2 }}>
+              <tbody>
+                <tr><td style={{ color: '#64748b', width: 72 }}>管理地址</td><td><code>http://localhost:5100/admin/login.html</code></td></tr>
+                <tr><td style={{ color: '#64748b' }}>默认账号</td><td><code>admin@dmbit.local</code></td></tr>
+                <tr><td style={{ color: '#64748b' }}>默认密码</td><td><code>admin123</code></td></tr>
+              </tbody>
+            </table>
+          </div>
           <Paragraph>
-            用管理员账号登录后，建议马上在右上角<strong>修改密码</strong>。
-            密码至少 6 位。如果忘记了密码，需要联系系统管理员重置。
+            首次登录后请及时<strong>修改密码</strong>（点击右上角头像 → 修改密码）。
+            密码至少 6 位，建议使用字母、数字和符号的组合。
           </Paragraph>
 
         </div>

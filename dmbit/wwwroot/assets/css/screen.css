@@ -1,0 +1,248 @@
+:root {
+  --ink: #0f172a;
+  --muted: #64748b;
+  --line: rgba(148, 163, 184, 0.18);
+  --glass: rgba(255, 255, 255, 0.28);
+  --glass-strong: rgba(255, 255, 255, 0.38);
+  --glass-edge: rgba(255, 255, 255, 0.35);
+  --blue: #2563eb;
+  --blue-deep: #1d4ed8;
+  --purple: #7c3aed;
+  --mono: "JetBrains Mono", ui-monospace, monospace;
+  --sans: "Outfit", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  min-height: 100%;
+  color: var(--ink);
+  font-family: var(--sans);
+  background:
+    radial-gradient(1000px 480px at 12% -20%, rgba(37, 99, 235, 0.12), transparent 55%),
+    radial-gradient(800px 420px at 100% 0%, rgba(124, 58, 237, 0.1), transparent 50%),
+    radial-gradient(600px 360px at 50% 100%, rgba(14, 165, 233, 0.06), transparent 45%),
+    #eef2f7;
+}
+
+.screen {
+  width: min(1280px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 24px 0 40px;
+  display: grid;
+  gap: 20px;
+}
+
+/* —— Banner —— */
+.banner {
+  display: grid;
+  grid-template-columns: minmax(200px, 0.85fr) minmax(420px, 1.6fr) auto;
+  gap: 20px;
+  align-items: stretch;
+  padding: 20px 24px;
+  border: none;
+  border-radius: 20px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.16) 55%, rgba(237, 233, 254, 0.14)),
+    var(--glass);
+  backdrop-filter: blur(18px) saturate(1.35);
+  -webkit-backdrop-filter: blur(18px) saturate(1.35);
+  box-shadow:
+    0 8px 28px rgba(37, 99, 235, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+
+.banner-left {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  min-width: 0;
+}
+
+.brand-logo {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  object-fit: contain;
+  display: block;
+}
+
+.brand {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--purple);
+}
+
+.banner-titles h1 {
+  margin: 2px 0 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+}
+
+.room-line {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.banner-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  min-width: 0;
+  align-self: center;
+}
+
+.bm {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.22);
+  border: none;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  min-width: 0;
+  min-height: 76px;
+}
+
+.bm span {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.bm strong {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-family: var(--mono);
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  color: var(--ink);
+  line-height: 1.1;
+}
+
+.bm strong small {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.bm.primary {
+  background: linear-gradient(160deg, rgba(37, 99, 235, 0.12), rgba(124, 58, 237, 0.05) 60%, rgba(255, 255, 255, 0.18));
+}
+
+.bm.primary strong {
+  color: var(--blue-deep);
+}
+
+.banner-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 8px;
+}
+
+.banner-right time,
+.banner-right .refresh {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.link-admin {
+  text-decoration: none;
+  color: #fff;
+  background: linear-gradient(135deg, #1e293b, #0f172a);
+  padding: 7px 14px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.18);
+}
+
+/* —— 2×2 维度图 —— */
+.dim-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.dim-card {
+  border: none;
+  border-radius: 18px;
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0.12) 70%, rgba(239, 246, 255, 0.1)),
+    var(--glass);
+  backdrop-filter: blur(16px) saturate(1.3);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  padding: 16px 16px 8px;
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+}
+
+.dim-card header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+  padding: 0 4px;
+}
+
+.dim-card h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.dim-card header p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.chart {
+  flex: 1;
+  width: 100%;
+  min-height: 240px;
+}
+
+@media (max-width: 960px) {
+  .banner {
+    grid-template-columns: 1fr;
+  }
+  .banner-right {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-start;
+  }
+  .banner-metrics {
+    grid-template-columns: 1fr;
+  }
+  .dim-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .screen { width: calc(100% - 24px); }
+  .bm strong { font-size: 24px; }
+}

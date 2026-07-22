@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智算机房台账</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/css/screen.css">
+</head>
+<body>
+  <div class="screen">
+    <header class="banner">
+      <div class="banner-left">
+        <img src="/assets/logo.svg" alt="智算机房台账" class="brand-logo" />
+        <div class="banner-titles">
+          <p class="brand" id="brand-name" hidden></p>
+          <h1 id="page-title">智算机房台账</h1>
+          <p class="room-line"><span id="room-name">直播数据智算机房</span></p>
+        </div>
+      </div>
+      <div class="banner-metrics" aria-label="整机与容量">
+        <div class="bm primary">
+          <span>总台数</span>
+          <strong id="kpi-total">0</strong>
+        </div>
+        <div class="bm">
+          <span>算力</span>
+          <strong id="kpi-compute">0</strong>
+        </div>
+        <div class="bm">
+          <span>存储</span>
+          <strong id="kpi-storage">0</strong>
+        </div>
+        <div class="bm">
+          <span>存储容量</span>
+          <strong><b id="kpi-pb">0</b><small>PB</small></strong>
+        </div>
+      </div>
+      <div class="banner-right">
+        <time id="datetime">—</time>
+        <span class="refresh" id="data-refresh">—</span>
+        <a class="link-admin" href="/admin/login.html">数据维护</a>
+      </div>
+    </header>
+
+    <section class="dim-grid" aria-label="维度统计">
+      <article class="dim-card">
+        <header>
+          <h2>加速卡</h2>
+          <p>按型号 · 张</p>
+        </header>
+        <div id="chart-accel" class="chart"></div>
+      </article>
+      <article class="dim-card">
+        <header>
+          <h2>硬盘</h2>
+          <p>按规格 · 块</p>
+        </header>
+        <div id="chart-disk" class="chart"></div>
+      </article>
+      <article class="dim-card">
+        <header>
+          <h2>产品构成</h2>
+          <p>整机台数占比</p>
+        </header>
+        <div id="chart-type" class="chart"></div>
+      </article>
+      <article class="dim-card">
+        <header>
+          <h2>运行状态</h2>
+          <p>整机台数分布</p>
+        </header>
+        <div id="chart-status" class="chart"></div>
+      </article>
+    </section>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+  <script src="/assets/js/api.js"></script>
+  <script src="/assets/js/screen.js"></script>
+</body>
+</html>

@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智算机房管理 · 登录</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/antd@5.22.2/dist/reset.css">
+<link rel="stylesheet" href="/assets/css/admin.css">
+<script crossorigin src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.13/dayjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/antd@5.22.2/dist/antd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.26.2/babel.min.js"></script>
+</head>
+<body class="auth-body">
+  <div id="root"></div>
+  <script src="/assets/js/api.js"></script>
+  <script type="text/babel" data-presets="react">
+    const { Form, Input, Button, Card, Typography, message, ConfigProvider } = antd;
+    const { Title, Text, Link } = Typography;
+    const zhCN = antd.locales?.zh_CN;
+
+    if (window.DmbitApi.getToken()) {
+      location.replace('/admin/index.html');
+    }
+
+    function LoginApp() {
+      const [loading, setLoading] = React.useState(false);
+
+      const onFinish = async (values) => {
+        setLoading(true);
+        try {
+          const data = await window.DmbitApi.post('/api/auth/login', {
+            email: values.email,
+            password: values.password,
+          });
+          window.DmbitApi.setSession(data.token, data.user);
+          message.success('登录成功');
+          location.replace('/admin/index.html');
+        } catch (ex) {
+          message.error(ex.message || '登录失败');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      return (
+        <div className="login-wrap">
+          <Card className="login-card" bordered={false}>
+            <div className="login-brand">
+              <img src="/assets/logo.svg" alt="智算机房管理" className="brand-logo" />
+              <div>
+                <Title level={3} style={{ margin: 0 }}>智算机房管理</Title>
+                <Text type="secondary">管理员登录</Text>
+              </div>
+            </div>
+            <Form
+              layout="vertical"
+              requiredMark={false}
+              initialValues={{ email: 'admin@dmbit.local', password: 'admin123' }}
+              onFinish={onFinish}
+            >
+              <Form.Item
+                label="邮箱"
+                name="email"
+                rules={[{ required: true, message: '请输入邮箱' }, { type: 'email', message: '邮箱格式不正确' }]}
+              >
+                <Input size="large" placeholder="admin@dmbit.local" autoComplete="username" />
+              </Form.Item>
+              <Form.Item
+                label="密码"
+                name="password"
+                rules={[{ required: true, message: '请输入密码' }]}
+              >
+                <Input.Password size="large" placeholder="密码" autoComplete="current-password" />
+              </Form.Item>
+              <Button type="primary" htmlType="submit" size="large" block loading={loading}>
+                登录
+              </Button>
+            </Form>
+            <div className="login-foot">
+              <Link href="/">返回大屏</Link>
+              <Text type="secondary">默认账号 admin@dmbit.local / admin123</Text>
+            </div>
+          </Card>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(
+      <ConfigProvider
+        locale={zhCN}
+        theme={{
+          token: {
+            colorPrimary: '#2563eb',
+            colorInfo: '#7c3aed',
+            borderRadius: 8,
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif',
+          },
+        }}
+      >
+        <LoginApp />
+      </ConfigProvider>
+    );
+  </script>
+</body>
+</html>

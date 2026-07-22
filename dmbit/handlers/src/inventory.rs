@@ -86,18 +86,36 @@ fn csv_header_line() -> String {
     CSV_HEADERS.join(",")
 }
 
-fn headers_match(header: &str) -> bool {
+/// Returns Ok(()) if headers match, otherwise Err with specific mismatch info.
+fn check_headers(header: &str) -> Result<()> {
     let cols = parse_csv_line(header);
     if cols.len() < CSV_HEADERS.len() {
-        return false;
+        return Err(Error::Validation(format!(
+            "CSV 表头只有 {} 列，需要 {} 列。请用导出功能获取正确格式的CSV文件。",
+            cols.len(),
+            CSV_HEADERS.len()
+        )));
     }
     if cols[CSV_HEADERS.len()..].iter().any(|c| !c.trim().is_empty()) {
-        return false;
+        return Err(Error::Validation(
+            "CSV 表头有多余列。请确保列数与导出文件一致，不要添加额外列。".into()
+        ));
     }
-    cols.iter()
-        .take(CSV_HEADERS.len())
-        .zip(CSV_HEADERS.iter())
-        .all(|(a, b)| a.trim() == *b)
+    let mut mismatches = Vec::new();
+    for (i, (a, b)) in cols.iter().take(CSV_HEADERS.len()).zip(CSV_HEADERS.iter()).enumerate() {
+        if a.trim() != *b {
+            mismatches.push(format!("第{}列：CSV中是「{}」，应为「{}」", i + 1, a.trim(), b));
+        }
+    }
+    if mismatches.is_empty() {
+        Ok(())
+    } else {
+        Err(Error::Validation(format!(
+            "CSV 表头不匹配（共{}处）：\n{}\n\n提示：请用系统的「导出」功能获取正确格式的CSV，在导出的基础上修改数据。",
+            mismatches.len(),
+            mismatches.join("\n")
+        )))
+    }
 }
 
 fn csv_escape(s: &str) -> String {
@@ -393,12 +411,7 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
         let rows = parse_csv_rows(text);
         let mut lines = rows.into_iter();
         let header = lines.next().unwrap_or_default();
-        if !headers_match(&header) {
-            return Err(Error::Validation(format!(
-                "CSV 表头不正确，须与导出文件一致：{}",
-                CSV_HEADERS.join(",")
-            )));
-        }
+        check_headers(&header)?;
 
         let mut acc: Vec<AccSpec> = Vec::new();
         for (idx, line) in lines.enumerate() {
@@ -406,7 +419,10 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
             let cols = parse_csv_line(&line);
             if cols.iter().all(|c| c.trim().is_empty()) { continue; }
             if cols.len() < 4 {
-                return Err(Error::Validation(format!("第 {line_no} 行列数不足")));
+                return Err(Error::Validation(format!(
+                    "第 {line_no} 行：只有 {} 列数据，至少需要 4 列（产品名称、产品编码、类别、规格编码）。\n可能是：1) 该行是空行请删除；2) CSV 格式被破坏，请用 Excel 重新保存为 UTF-8 CSV",
+                    cols.len()
+                )));
             }
 
             let product_name = optional_text("产品名称", col(&cols, COL_PRODUCT_NAME), MAX_PRODUCT_NAME)
@@ -448,10 +464,14 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
             let mut component: Option<ComponentModel> = None;
             if has_comp {
                 if comp_model_raw.is_empty() {
-                    return Err(Error::Validation(format!("第 {line_no} 行：部件型号不能为空")));
+                    return Err(Error::Validation(format!(
+                        "第 {line_no} 行：部件类型已填写但部件型号为空。\n如果该行不需要部件，请把「部件类型」列也留空。"
+                    )));
                 }
                 let kind = normalize_comp_kind(comp_kind_raw).map_err(|_| {
-                    Error::Validation(format!("第 {line_no} 行：部件类型无效「{comp_kind_raw}」（支持：加速卡/硬盘）"))
+                    Error::Validation(format!(
+                        "第 {line_no} 行：部件类型「{comp_kind_raw}」无法识别。\n支持的类型：加速卡 / 硬盘（或 accelerator / disk / gpu / npu / hdd / ssd）"
+                    ))
                 })?;
                 let capacity_gb = if kind == "disk" {
                     parse_capacity_label_to_gb(comp_capacity_raw).map_err(|e| annotate_line(line_no, e))?
@@ -530,7 +550,10 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
             if let Some(c) = component {
                 let dup = slot.components.iter().any(|x| x.kind == c.kind && x.model == c.model && x.capacity_gb == c.capacity_gb);
                 if dup {
-                    return Err(Error::Validation(format!("第 {line_no} 行：同一规格下部件重复（{} / {} / {}GB）", c.kind, c.model, c.capacity_gb)));
+                    return Err(Error::Validation(format!(
+                        "第 {line_no} 行：部件重复。\n该规格已存在：{}/{}/{}GB，请检查是否误填了重复的部件行。",
+                        c.kind, c.model, c.capacity_gb
+                    )));
                 }
                 let sort_order = (slot.components.len() as i32) + 1;
                 slot.components.push(ComponentModel { sort_order, ..c });
@@ -559,9 +582,15 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
         if (!conflict_product_codes.is_empty() || !conflict_spec_codes.is_empty()) && !req.confirm_update {
             let n_p = conflict_product_codes.len();
             let n_s = conflict_spec_codes.len();
+            let product_codes_list = conflict_product_codes.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("、");
+            let spec_codes_list = conflict_spec_codes.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("、");
             return Ok(ImportInventoryResult {
                 products_upserted: 0, goods_upserted: 0, components_written: 0,
-                message: format!("检测到编号冲突（产品编码 {n_p} 个、规格编码 {n_s} 个）。确认后将覆盖更新，取消则不写入。"),
+                message: format!(
+                    "以下编码与现有数据冲突：\n产品（{n_p} 个）：{}\n规格（{n_s} 个）：{}\n\n点「确认更新」会用CSV覆盖旧数据；点「取消」则不导入任何内容。",
+                    product_codes_list,
+                    spec_codes_list,
+                ),
                 needs_confirm: true,
                 conflict_product_codes: conflict_product_codes.into_iter().collect(),
                 conflict_goods_labels: conflict_spec_codes.into_iter().collect(),
@@ -591,7 +620,10 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
                     self.ctx.set::<Product>().add(entity);
                     products_upserted += 1;
                 } else {
-                    return Err(Error::Validation(format!("产品编码「{}」新建时需要产品名称", row.product_code)));
+                    return Err(Error::Validation(format!(
+                        "产品编码「{0}」在系统中不存在。新建产品时需要同时填写「产品名称」列。\n当前CSV中该列值为空。",
+                        row.product_code
+                    )));
                 }
                 continue;
             }

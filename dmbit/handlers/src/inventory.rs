@@ -1,12 +1,21 @@
 //! Inventory CSV import / export.
 //!
-//! Flat row model: one CSV row per component line; product + goods fields are
-//! repeated when a goods has multiple components. Goods without components
-//! emit a single row with empty 部件* columns. Product-only rows (no brand /
-//! qty / components) update or create the product master.
+//! Sparse flat row model (single CSV):
+//! - Header row for each goods: full product + goods fields + first component
+//!   (or empty 部件* when no components).
+//! - Continuation rows for extra components: only business key
+//!   (产品编码, 品牌短码, 资产编码, 机位) + 部件* columns; other cells empty
+//!   and inherit from the header row on import.
+//! - Product-only rows (no brand / qty / components) update or create the
+//!   product master.
 //!
 //! Import conflict: if any product code (or matching goods) already exists and
 //! `confirm_update` is false, return conflict lists without writing.
+//!
+//! Component rebuild: only when 部件* columns are non-empty on at least one
+//! row for that goods (design §4.4). Empty 部件* leaves existing components.
+//!
+//! Persistence: all upserts stage in one Unit of Work and flush once.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -20,8 +29,10 @@ use dmbit_domain::new_id;
 
 use crate::db::{save_changes, EfResultExt};
 use crate::mapping::{
-    load_components_for, normalize_category, normalize_comp_kind, normalize_status,
-    replace_components,
+    format_capacity_label, load_components_for, normalize_category, normalize_comp_kind,
+    normalize_status, optional_text, parse_capacity_label_to_gb, replace_components,
+    strip_redundant_disk_params, require_text, MAX_ASSET_CODE, MAX_BRAND, MAX_COMP_MODEL,
+    MAX_LOCATION, MAX_PRODUCT_CODE, MAX_PRODUCT_NAME, MAX_PRODUCT_REMARK, MAX_UNIT,
 };
 use crate::util::{now_secs, operator_id};
 
@@ -48,6 +59,9 @@ const CSV_HEADERS: &[&str] = &[
     "部件型号",
     "容量",
     "单台数量",
+    "备注",
+    "产品排序",
+    "台账排序",
 ];
 
 const PARAM_KEYS: &[&str] = &["机箱", "主板", "内存", "接口", "扩展", "电源", "光模块"];
@@ -58,10 +72,18 @@ fn csv_header_line() -> String {
 
 fn headers_match(header: &str) -> bool {
     let cols = parse_csv_line(header);
-    if cols.len() != CSV_HEADERS.len() {
+    if cols.len() < CSV_HEADERS.len() {
+        return false;
+    }
+    // Excel often appends trailing empty columns — tolerate those only.
+    if cols[CSV_HEADERS.len()..]
+        .iter()
+        .any(|c| !c.trim().is_empty())
+    {
         return false;
     }
     cols.iter()
+        .take(CSV_HEADERS.len())
         .zip(CSV_HEADERS.iter())
         .all(|(a, b)| a.trim() == *b)
 }
@@ -106,6 +128,19 @@ fn parse_csv_line(line: &str) -> Vec<String> {
 
 fn col<'a>(cols: &'a [String], i: usize) -> &'a str {
     cols.get(i).map(|s| s.as_str()).unwrap_or("").trim()
+}
+
+fn annotate_line(line_no: usize, err: Error) -> Error {
+    match err {
+        Error::Validation(msg) => {
+            if msg.starts_with("第 ") {
+                Error::Validation(msg)
+            } else {
+                Error::Validation(format!("第 {line_no} 行：{msg}"))
+            }
+        }
+        other => other,
+    }
 }
 
 fn category_label(c: &str) -> &'static str {
@@ -193,7 +228,7 @@ fn build_parameters(
     lines.join("\n")
 }
 
-fn push_goods_row(
+fn push_goods_header_row(
     lines: &mut Vec<String>,
     p: &Product,
     g: &Goods,
@@ -204,7 +239,7 @@ fn push_goods_row(
 ) {
     let pm = parse_param_map(&g.parameters);
     lines.push(format!(
-        "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+        "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
         csv_escape(&p.name),
         csv_escape(&p.code),
         csv_escape(category_label(&p.category)),
@@ -226,6 +261,43 @@ fn push_goods_row(
         csv_escape(model),
         csv_escape(capacity),
         qty_per_unit,
+        csv_escape(&p.remark),
+        p.sort_order,
+        g.sort_order,
+    ));
+}
+
+/// Continuation row: business key + component only (sparse; no repeated chassis fields).
+fn push_component_continuation_row(
+    lines: &mut Vec<String>,
+    p: &Product,
+    g: &Goods,
+    kind: &str,
+    model: &str,
+    capacity: &str,
+    qty_per_unit: &str,
+) {
+    lines.push(format!(
+        ",{},,{},,,,{},{},,,,,,,,,,{},{},{},{},,,",
+        csv_escape(&p.code),
+        csv_escape(&g.brand),
+        csv_escape(&g.location),
+        csv_escape(&g.asset_code),
+        csv_escape(kind),
+        csv_escape(model),
+        csv_escape(capacity),
+        qty_per_unit,
+    ));
+}
+
+fn push_product_only_row(lines: &mut Vec<String>, p: &Product) {
+    lines.push(format!(
+        "{},{},{},,,,,,,,,,,,,,,,,,,{},{},",
+        csv_escape(&p.name),
+        csv_escape(&p.code),
+        csv_escape(category_label(&p.category)),
+        csv_escape(&p.remark),
+        p.sort_order,
     ));
 }
 
@@ -263,27 +335,34 @@ impl IRequestHandler<ExportInventoryRequest, InventoryCsvModel> for ExportInvent
             let mut rows: Vec<_> = goods.iter().filter(|g| g.product_id == p.id).collect();
             rows.sort_by(|a, b| a.sort_order.cmp(&b.sort_order));
             if rows.is_empty() {
-                lines.push(format!(
-                    "{},{},{},,,,,,,,,,,,,,,,,,",
-                    csv_escape(&p.name),
-                    csv_escape(&p.code),
-                    csv_escape(category_label(&p.category)),
-                ));
+                push_product_only_row(lines.as_mut(), p);
                 continue;
             }
             for g in rows {
                 let comps = cmap.get(&g.id).cloned().unwrap_or_default();
                 if comps.is_empty() {
-                    push_goods_row(lines.as_mut(), p, g, "", "", "", "");
+                    push_goods_header_row(lines.as_mut(), p, g, "", "", "", "");
                 } else {
-                    for c in comps {
-                        push_goods_row(
+                    let mut iter = comps.into_iter();
+                    if let Some(first) = iter.next() {
+                        push_goods_header_row(
+                            lines.as_mut(),
+                            p,
+                            g,
+                            kind_label(&first.kind),
+                            &first.model,
+                            &format_capacity_label(first.capacity_gb),
+                            &first.qty_per_unit.to_string(),
+                        );
+                    }
+                    for c in iter {
+                        push_component_continuation_row(
                             lines.as_mut(),
                             p,
                             g,
                             kind_label(&c.kind),
                             &c.model,
-                            &c.capacity,
+                            &format_capacity_label(c.capacity_gb),
                             &c.qty_per_unit.to_string(),
                         );
                     }
@@ -318,6 +397,8 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
             product_name: String,
             product_code: String,
             category: String,
+            remark: String,
+            product_sort: i32,
             brand: String,
             quantity: i32,
             unit: String,
@@ -325,7 +406,10 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
             location: String,
             asset_code: String,
             parameters: String,
+            goods_sort: i32,
             components: Vec<ComponentModel>,
+            /// True when any CSV row carried 部件* columns (design: rebuild only then).
+            components_touched: bool,
         }
 
         let mut acc: Vec<AccGoods> = Vec::new();
@@ -341,33 +425,24 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
                 )));
             }
 
-            let product_name = col(&cols, 0).to_string();
-            let product_code = col(&cols, 1).to_string();
-            if product_code.is_empty() {
-                return Err(Error::Validation(format!(
-                    "第 {line_no} 行：产品编码不能为空"
-                )));
-            }
-
-            let category = normalize_category(col(&cols, 2));
-            let brand = col(&cols, 3).to_string();
-            let status = normalize_status(col(&cols, 4));
-            let quantity: i32 = col(&cols, 5).parse().unwrap_or(0);
-            if quantity < 0 {
-                return Err(Error::Validation(format!(
-                    "第 {line_no} 行：数量不能为负"
-                )));
-            }
-            let unit = {
-                let u = col(&cols, 6);
-                if u.is_empty() {
-                    "台".into()
-                } else {
-                    u.to_string()
-                }
-            };
-            let location = col(&cols, 7).to_string();
-            let asset_code = col(&cols, 8).to_string();
+            let product_name = optional_text(
+                "产品名称",
+                col(&cols, 0),
+                MAX_PRODUCT_NAME,
+            )
+            .map_err(|e| annotate_line(line_no, e))?;
+            let product_code = require_text("产品编码", col(&cols, 1), MAX_PRODUCT_CODE)
+                .map_err(|e| annotate_line(line_no, e))?;
+            let category_raw = col(&cols, 2);
+            let brand = optional_text("品牌短码", col(&cols, 3), MAX_BRAND)
+                .map_err(|e| annotate_line(line_no, e))?;
+            let status_raw = col(&cols, 4);
+            let qty_raw = col(&cols, 5);
+            let unit_raw = col(&cols, 6);
+            let location = optional_text("机位", col(&cols, 7), MAX_LOCATION)
+                .map_err(|e| annotate_line(line_no, e))?;
+            let asset_code = optional_text("资产编码", col(&cols, 8), MAX_ASSET_CODE)
+                .map_err(|e| annotate_line(line_no, e))?;
             let parameters = build_parameters(
                 col(&cols, 9),
                 col(&cols, 10),
@@ -379,9 +454,41 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
                 col(&cols, 16),
             );
             let comp_kind_raw = col(&cols, 17);
-            let comp_model = col(&cols, 18).to_string();
-            let comp_capacity = col(&cols, 19).to_string();
+            let comp_model = optional_text("部件型号", col(&cols, 18), MAX_COMP_MODEL)
+                .map_err(|e| annotate_line(line_no, e))?;
+            let comp_capacity_raw = col(&cols, 19).trim();
             let comp_qty_raw = col(&cols, 20);
+            let remark = optional_text("备注", col(&cols, 21), MAX_PRODUCT_REMARK)
+                .map_err(|e| annotate_line(line_no, e))?;
+            let product_sort_raw = col(&cols, 22);
+            let goods_sort_raw = col(&cols, 23);
+
+            let quantity: i32 = if qty_raw.is_empty() {
+                0
+            } else {
+                qty_raw.parse().map_err(|_| {
+                    Error::Validation(format!("第 {line_no} 行：数量必须是整数"))
+                })?
+            };
+            if quantity < 0 {
+                return Err(Error::Validation(format!(
+                    "第 {line_no} 行：数量不能为负"
+                )));
+            }
+            let product_sort: Option<i32> = if product_sort_raw.is_empty() {
+                None
+            } else {
+                Some(product_sort_raw.parse().map_err(|_| {
+                    Error::Validation(format!("第 {line_no} 行：产品排序必须是整数"))
+                })?)
+            };
+            let goods_sort: Option<i32> = if goods_sort_raw.is_empty() {
+                None
+            } else {
+                Some(goods_sort_raw.parse().map_err(|_| {
+                    Error::Validation(format!("第 {line_no} 行：台账排序必须是整数"))
+                })?)
+            };
 
             let has_comp =
                 !comp_kind_raw.is_empty() || !comp_model.is_empty() || !comp_qty_raw.is_empty();
@@ -397,11 +504,16 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
                         "第 {line_no} 行：部件类型无效「{comp_kind_raw}」（支持：加速卡/硬盘）"
                     ))
                 })?;
-                if kind == "disk" && comp_capacity.trim().is_empty() {
+                let capacity_gb = if kind == "disk" {
+                    parse_capacity_label_to_gb(comp_capacity_raw)
+                        .map_err(|e| annotate_line(line_no, e))?
+                } else if !comp_capacity_raw.is_empty() {
                     return Err(Error::Validation(format!(
-                        "第 {line_no} 行：部件类型为硬盘时容量不能为空"
+                        "第 {line_no} 行：加速卡部件不应填写容量"
                     )));
-                }
+                } else {
+                    0
+                };
                 let comp_qty: i32 = if comp_qty_raw.is_empty() {
                     0
                 } else {
@@ -418,7 +530,7 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
                     id: String::new(),
                     kind,
                     model: comp_model,
-                    capacity: comp_capacity,
+                    capacity_gb,
                     qty_per_unit: comp_qty,
                     sort_order: 0,
                 });
@@ -435,12 +547,91 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
             });
 
             let slot = if let Some(i) = idx {
-                &mut acc[i]
+                // Continuation (or legacy full-repeat) row for an existing goods key.
+                let slot = &mut acc[i];
+                if !product_name.is_empty() && slot.product_name != product_name {
+                    return Err(Error::Validation(format!(
+                        "第 {line_no} 行：同一台账的产品名称与首行不一致（续行请留空继承）"
+                    )));
+                }
+                if !category_raw.is_empty() {
+                    let category = normalize_category(category_raw)
+                        .map_err(|e| annotate_line(line_no, e))?;
+                    if category != slot.category {
+                        return Err(Error::Validation(format!(
+                            "第 {line_no} 行：同一台账的类别与首行不一致（续行请留空继承）"
+                        )));
+                    }
+                }
+                if !status_raw.is_empty() {
+                    let status = normalize_status(status_raw)
+                        .map_err(|e| annotate_line(line_no, e))?;
+                    if status != slot.status {
+                        return Err(Error::Validation(format!(
+                            "第 {line_no} 行：同一台账的状态与首行不一致（续行请留空继承）"
+                        )));
+                    }
+                }
+                if !qty_raw.is_empty() && quantity != slot.quantity {
+                    return Err(Error::Validation(format!(
+                        "第 {line_no} 行：同一台账的数量与首行不一致（续行请留空继承）"
+                    )));
+                }
+                if !unit_raw.is_empty() {
+                    let unit = require_text("单位", unit_raw, MAX_UNIT)
+                        .map_err(|e| annotate_line(line_no, e))?;
+                    if unit != slot.unit {
+                        return Err(Error::Validation(format!(
+                            "第 {line_no} 行：同一台账的单位与首行不一致（续行请留空继承）"
+                        )));
+                    }
+                }
+                if !parameters.is_empty() && parameters != slot.parameters {
+                    return Err(Error::Validation(format!(
+                        "第 {line_no} 行：同一台账的机箱参数与首行不一致（续行请留空继承）"
+                    )));
+                }
+                if !remark.is_empty() && remark != slot.remark {
+                    return Err(Error::Validation(format!(
+                        "第 {line_no} 行：同一台账的备注与首行不一致（续行请留空继承）"
+                    )));
+                }
+                if let Some(ps) = product_sort {
+                    if ps != slot.product_sort {
+                        return Err(Error::Validation(format!(
+                            "第 {line_no} 行：同一台账的产品排序与首行不一致（续行请留空继承）"
+                        )));
+                    }
+                }
+                if let Some(gs) = goods_sort {
+                    if gs != slot.goods_sort {
+                        return Err(Error::Validation(format!(
+                            "第 {line_no} 行：同一台账的台账排序与首行不一致（续行请留空继承）"
+                        )));
+                    }
+                }
+                // Sparse continuation: empty main fields inherit; never overwrite from continuation.
+                if has_comp {
+                    slot.components_touched = true;
+                }
+                slot
             } else {
+                let category = normalize_category(category_raw)
+                    .map_err(|e| annotate_line(line_no, e))?;
+                let status = normalize_status(status_raw)
+                    .map_err(|e| annotate_line(line_no, e))?;
+                let unit = if unit_raw.is_empty() {
+                    "台".into()
+                } else {
+                    require_text("单位", unit_raw, MAX_UNIT)
+                        .map_err(|e| annotate_line(line_no, e))?
+                };
                 acc.push(AccGoods {
                     product_name,
                     product_code: product_code.clone(),
                     category,
+                    remark,
+                    product_sort: product_sort.unwrap_or(0),
                     brand,
                     quantity,
                     unit,
@@ -448,15 +639,23 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
                     location,
                     asset_code,
                     parameters,
+                    goods_sort: goods_sort.unwrap_or(0),
                     components: Vec::new(),
+                    components_touched: has_comp,
                 });
                 acc.last_mut().unwrap()
             };
 
-            if quantity > 0 {
-                slot.quantity = quantity;
-            }
             if let Some(c) = component {
+                let dup = slot.components.iter().any(|x| {
+                    x.kind == c.kind && x.model == c.model && x.capacity_gb == c.capacity_gb
+                });
+                if dup {
+                    return Err(Error::Validation(format!(
+                        "第 {line_no} 行：同一台账下部件重复（{} / {} / {}GB）",
+                        c.kind, c.model, c.capacity_gb
+                    )));
+                }
                 let sort_order = (slot.components.len() as i32) + 1;
                 slot.components.push(ComponentModel {
                     sort_order,
@@ -477,7 +676,7 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
             .into_iter()
             .map(|p| (p.id.clone(), p))
             .collect();
-        let existing_goods = linq!(self.ctx.set::<Goods>();).to_list().await.map_ef()?;
+        let mut existing_goods = linq!(self.ctx.set::<Goods>();).to_list().await.map_ef()?;
 
         let mut conflict_product_codes: BTreeSet<String> = BTreeSet::new();
         let mut conflict_goods_labels: BTreeSet<String> = BTreeSet::new();
@@ -485,8 +684,10 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
             if product_by_code.contains_key(&row.product_code) {
                 conflict_product_codes.insert(row.product_code.clone());
             }
-            let product_only =
-                row.brand.is_empty() && row.quantity == 0 && row.components.is_empty();
+            let product_only = row.brand.is_empty()
+                && row.quantity == 0
+                && !row.components_touched
+                && row.components.is_empty();
             if product_only {
                 continue;
             }
@@ -531,8 +732,10 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
         let mut components_written = 0i32;
 
         for row in acc {
-            let product_only =
-                row.brand.is_empty() && row.quantity == 0 && row.components.is_empty();
+            let product_only = row.brand.is_empty()
+                && row.quantity == 0
+                && !row.components_touched
+                && row.components.is_empty();
 
             if product_only {
                 if let Some(pid) = product_by_code.get(&row.product_code).cloned() {
@@ -541,6 +744,10 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
                             p.name = row.product_name;
                         }
                         p.category = row.category;
+                        if !row.remark.is_empty() {
+                            p.remark = row.remark;
+                        }
+                        p.sort_order = row.product_sort;
                         p.updated_at = now;
                         p.updated_id = op.clone();
                         product_entities.insert(pid, p.clone());
@@ -554,8 +761,8 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
                         name: row.product_name,
                         code: row.product_code.clone(),
                         category: row.category,
-                        remark: String::new(),
-                        sort_order: 0,
+                        remark: row.remark,
+                        sort_order: row.product_sort,
                         created_id: op.clone(),
                         created_at: now,
                         updated_id: op.clone(),
@@ -594,6 +801,14 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
                         p.category = row.category.clone();
                         changed = true;
                     }
+                    if !row.remark.is_empty() && p.remark != row.remark {
+                        p.remark = row.remark.clone();
+                        changed = true;
+                    }
+                    if p.sort_order != row.product_sort {
+                        p.sort_order = row.product_sort;
+                        changed = true;
+                    }
                     if changed {
                         p.updated_at = now;
                         p.updated_id = op.clone();
@@ -615,8 +830,8 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
                     name,
                     code: row.product_code.clone(),
                     category: row.category.clone(),
-                    remark: String::new(),
-                    sort_order: 0,
+                    remark: row.remark.clone(),
+                    sort_order: row.product_sort,
                     created_id: op.clone(),
                     created_at: now,
                     updated_id: op.clone(),
@@ -640,7 +855,9 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
                 g.quantity = row.quantity;
                 g.unit = row.unit.clone();
                 g.status = row.status.clone();
-                g.parameters = row.parameters.clone();
+                g.parameters =
+                    strip_redundant_disk_params(&row.parameters, &row.components);
+                g.sort_order = row.goods_sort;
                 g.updated_at = now;
                 g.updated_id = op.clone();
                 let id = g.id.clone();
@@ -651,15 +868,15 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
                 let id = new_id();
                 let entity = Goods {
                     id: id.clone(),
-                    product_id,
-                    brand: row.brand,
-                    parameters: row.parameters,
-                    unit: row.unit,
+                    product_id: product_id.clone(),
+                    brand: row.brand.clone(),
+                    parameters: strip_redundant_disk_params(&row.parameters, &row.components),
+                    unit: row.unit.clone(),
                     quantity: row.quantity,
-                    status: row.status,
-                    location: row.location,
-                    asset_code: row.asset_code,
-                    sort_order: 0,
+                    status: row.status.clone(),
+                    location: row.location.clone(),
+                    asset_code: row.asset_code.clone(),
+                    sort_order: row.goods_sort,
                     created_id: op.clone(),
                     created_at: now,
                     updated_id: op.clone(),
@@ -667,17 +884,20 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
                     is_deleted: false,
                     product: BelongsTo::new(),
                 };
+                existing_goods.push(entity.clone());
                 self.ctx.set::<Goods>().add(entity);
                 goods_upserted += 1;
                 id
             };
 
-            // Always replace components for goods rows (empty list clears on update).
-            save_changes(&mut self.ctx).await?;
-            components_written +=
-                replace_components(&mut self.ctx, &goods_id, &row.components).await?;
+            // Design §4.4: rebuild components only when 部件* columns are present.
+            if row.components_touched {
+                components_written +=
+                    replace_components(&mut self.ctx, &goods_id, &row.components).await?;
+            }
         }
 
+        // Single Unit of Work flush — avoids partial commits mid-import.
         save_changes(&mut self.ctx).await?;
 
         Ok(ImportInventoryResult {

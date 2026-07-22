@@ -10,7 +10,5 @@ pub struct SiteConfig {
     #[serde(default)]
     pub brand_name: String,
     #[serde(default)]
-    pub tagline: String,
-    #[serde(default)]
     pub room_name: String,
 }

@@ -698,11 +698,9 @@ dependencies = [
 name = "dmbit-domain"
 version = "0.1.0"
 dependencies = [
- "dmbit-contracts",
  "rust-ef",
  "rust-webx-core",
  "serde",
- "serde_json",
  "uuid",
 ]
 

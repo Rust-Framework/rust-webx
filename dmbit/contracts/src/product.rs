@@ -20,18 +20,22 @@ pub struct ProductModel {
     pub goods: Vec<GoodsModel>,
 }
 
+#[claims]
 #[derive(Default)]
 pub struct ListProductsRequest;
 
 #[get("/api/products")]
+#[authorize(role = "admin")]
 impl IRequest<Vec<ProductModel>> for ListProductsRequest {}
 
+#[claims]
 #[derive(Default)]
 pub struct GetProductRequest {
     pub id: String,
 }
 
 #[get("/api/products/{id}")]
+#[authorize(role = "admin")]
 impl IRequest<ProductModel> for GetProductRequest {}
 
 #[claims]

@@ -1,4 +1,4 @@
-//! Dmbit domain — entities, configuration, and seed data.
+//! Dmbit domain — entities, configuration, and default-admin seed.
 
 pub mod configure;
 pub mod entities;

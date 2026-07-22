@@ -1,28 +1,54 @@
-//! Shared goods → DTO mapping + component helpers.
+//! Shared goods → DTO mapping + component / uniqueness helpers.
+
+use std::collections::HashSet;
 
 use dmbit_contracts::goods::{ComponentModel, GoodsModel};
-use dmbit_domain::entities::{Goods, GoodsComponent};
+use dmbit_domain::entities::{Goods, GoodsComponent, Product};
 use dmbit_domain::new_id;
 use rust_ef::{db_context::DbContext, prelude::*};
 use rust_webx::*;
 
-use crate::db::{save_changes, EfResultExt};
+use crate::db::EfResultExt;
 use crate::util::{now_secs, operator_id};
 
-pub fn normalize_status(raw: &str) -> String {
-    match raw.trim() {
-        "运行中" | "联调中" | "待上架" | "已交付" => raw.trim().to_string(),
-        "" => "待上架".into(),
-        other => other.to_string(),
+/// Allowed goods statuses — must stay in sync with dashboard buckets / admin options.
+pub const GOODS_STATUSES: &[&str] = &["运行中", "联调中", "待上架", "已交付"];
+
+pub const MAX_PRODUCT_NAME: usize = 100;
+pub const MAX_PRODUCT_CODE: usize = 50;
+pub const MAX_PRODUCT_REMARK: usize = 500;
+pub const MAX_BRAND: usize = 100;
+pub const MAX_UNIT: usize = 20;
+pub const MAX_STATUS: usize = 20;
+pub const MAX_LOCATION: usize = 100;
+pub const MAX_ASSET_CODE: usize = 50;
+pub const MAX_COMP_MODEL: usize = 80;
+
+pub fn normalize_status(raw: &str) -> Result<String> {
+    let t = raw.trim();
+    if t.is_empty() {
+        return Ok("待上架".into());
     }
+    if GOODS_STATUSES.contains(&t) {
+        return Ok(t.to_string());
+    }
+    Err(Error::Validation(format!(
+        "状态无效「{t}」（支持：{}）",
+        GOODS_STATUSES.join(" / ")
+    )))
 }
 
-pub fn normalize_category(raw: &str) -> String {
+pub fn normalize_category(raw: &str) -> Result<String> {
     let t = raw.trim();
+    if t.is_empty() {
+        return Ok("compute".into());
+    }
     match t.to_ascii_lowercase().as_str() {
-        "storage" | "存储" => "storage".into(),
-        // compute / 算力 / empty / unknown → compute
-        _ => "compute".into(),
+        "storage" | "存储" => Ok("storage".into()),
+        "compute" | "算力" => Ok("compute".into()),
+        _ => Err(Error::Validation(format!(
+            "类别无效「{t}」（支持：算力/存储，或 compute/storage）"
+        ))),
     }
 }
 
@@ -37,12 +63,141 @@ pub fn normalize_comp_kind(raw: &str) -> Result<String> {
     }
 }
 
+/// Format GB for display / CSV (decimal: 1000 GB = 1 TB, 1000 TB = 1 PB).
+pub fn format_capacity_label(gb: i64) -> String {
+    if gb <= 0 {
+        return String::new();
+    }
+    if gb % 1_000_000 == 0 {
+        format!("{}PB", gb / 1_000_000)
+    } else if gb % 1000 == 0 {
+        format!("{}TB", gb / 1000)
+    } else {
+        format!("{gb}GB")
+    }
+}
+
+/// CSV / Excel boundary only: parse human labels like `8TB` into integer **GB**.
+/// Persisted model uses `capacity_gb`; never use the label string for aggregation.
+pub fn parse_capacity_label_to_gb(raw: &str) -> Result<i64> {
+    let t = raw.trim();
+    if t.is_empty() {
+        return Err(Error::Validation("容量不能为空".into()));
+    }
+    // Bare integer → GB
+    if let Ok(n) = t.parse::<i64>() {
+        if n <= 0 {
+            return Err(Error::Validation(format!("容量必须为正整数 GB「{t}」")));
+        }
+        return Ok(n);
+    }
+    let split = t
+        .char_indices()
+        .find(|(_, c)| c.is_alphabetic())
+        .map(|(i, _)| i)
+        .unwrap_or(t.len());
+    let (num_part, unit_part) = t.split_at(split);
+    let num: f64 = num_part.trim().parse().map_err(|_| {
+        Error::Validation(format!(
+            "容量数值无效「{t}」（示例：8TB / 960GB / 8000）"
+        ))
+    })?;
+    if !num.is_finite() || num <= 0.0 {
+        return Err(Error::Validation(format!("容量必须为正数「{t}」")));
+    }
+    let unit = unit_part.trim().to_ascii_uppercase();
+    let gb_f = match unit.as_str() {
+        "GB" | "G" => num,
+        "TB" | "T" => num * 1000.0,
+        "PB" | "P" => num * 1_000_000.0,
+        "" => {
+            return Err(Error::Validation(format!(
+                "容量缺少单位「{t}」（需带 TB/GB/PB，或直接写整数 GB）"
+            )));
+        }
+        _ => {
+            return Err(Error::Validation(format!(
+                "容量单位无效「{t}」（支持：TB / GB / PB）"
+            )));
+        }
+    };
+    let gb = gb_f.round();
+    if (gb_f - gb).abs() > 1e-6 {
+        return Err(Error::Validation(format!(
+            "容量必须能换算为整数 GB「{t}」"
+        )));
+    }
+    let gb = gb as i64;
+    if gb <= 0 {
+        return Err(Error::Validation(format!("容量必须为正「{t}」")));
+    }
+    Ok(gb)
+}
+
+pub fn require_disk_capacity_gb(gb: i64) -> Result<i64> {
+    if gb <= 0 {
+        return Err(Error::Validation(
+            "硬盘容量必须为正整数（单位 GB，例如 8TB 请填 8000）".into(),
+        ));
+    }
+    Ok(gb)
+}
+
+/// When disk components exist, drop free-text「硬盘」parameter lines (avoid duplicate UI attrs).
+pub fn strip_redundant_disk_params(parameters: &str, components: &[ComponentModel]) -> String {
+    if !components.iter().any(|c| c.kind == "disk") {
+        return parameters.to_string();
+    }
+    parameters
+        .lines()
+        .filter(|line| {
+            let t = line.trim();
+            if t.is_empty() {
+                return false;
+            }
+            if let Some((k, _)) = t.split_once('：').or_else(|| t.split_once(':')) {
+                if k.trim() == "硬盘" {
+                    return false;
+                }
+            }
+            true
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub fn require_text(field: &str, raw: &str, max: usize) -> Result<String> {
+    let t = raw.trim();
+    if t.is_empty() {
+        return Err(Error::Validation(format!("{field}不能为空")));
+    }
+    if t.chars().count() > max {
+        return Err(Error::Validation(format!("{field}长度不能超过 {max}")));
+    }
+    Ok(t.to_string())
+}
+
+pub fn optional_text(field: &str, raw: &str, max: usize) -> Result<String> {
+    let t = raw.trim();
+    if t.chars().count() > max {
+        return Err(Error::Validation(format!("{field}长度不能超过 {max}")));
+    }
+    Ok(t.to_string())
+}
+
+pub fn require_non_negative(field: &str, n: i32) -> Result<i32> {
+    if n < 0 {
+        return Err(Error::Validation(format!("{field}不能为负")));
+    }
+    Ok(n)
+}
+
 pub fn component_to_model(c: &GoodsComponent) -> ComponentModel {
     ComponentModel {
         id: c.id.clone(),
         kind: c.kind.clone(),
         model: c.model.clone(),
-        capacity: c.capacity.clone(),
+        capacity_gb: c.capacity_gb,
         qty_per_unit: c.qty_per_unit,
         sort_order: c.sort_order,
     }
@@ -75,10 +230,15 @@ pub fn parts_summary(components: &[ComponentModel]) -> String {
         .iter()
         .map(|c| {
             if c.kind == "disk" {
-                if c.capacity.is_empty() {
+                if c.capacity_gb <= 0 {
                     format!("{}×{}", c.model, c.qty_per_unit)
                 } else {
-                    format!("{} {}×{}", c.model, c.capacity, c.qty_per_unit)
+                    format!(
+                        "{} {}×{}",
+                        c.model,
+                        format_capacity_label(c.capacity_gb),
+                        c.qty_per_unit
+                    )
                 }
             } else {
                 format!("{}×{}", c.model, c.qty_per_unit)
@@ -86,6 +246,50 @@ pub fn parts_summary(components: &[ComponentModel]) -> String {
         })
         .collect::<Vec<_>>()
         .join(" · ")
+}
+
+pub async fn assert_product_code_available(
+    ctx: &mut DbContext,
+    code: &str,
+    exclude_id: Option<&str>,
+) -> Result<()> {
+    let q = code.to_string();
+    let rows = linq!(ctx.set::<Product>(), |p: Product| p.code == q)
+        .to_list()
+        .await
+        .map_ef()?;
+    if let Some(p) = rows.into_iter().next() {
+        if exclude_id.map(|id| id != p.id.as_str()).unwrap_or(true) {
+            return Err(Error::Conflict(format!("产品编码「{code}」已存在")));
+        }
+    }
+    Ok(())
+}
+
+pub async fn assert_goods_key_available(
+    ctx: &mut DbContext,
+    product_id: &str,
+    brand: &str,
+    asset_code: &str,
+    location: &str,
+    exclude_id: Option<&str>,
+) -> Result<()> {
+    let pid = product_id.to_string();
+    let rows = linq!(ctx.set::<Goods>(), |g: Goods| g.product_id == pid)
+        .to_list()
+        .await
+        .map_ef()?;
+    for g in rows {
+        if exclude_id.map(|id| id == g.id.as_str()).unwrap_or(false) {
+            continue;
+        }
+        if g.brand == brand && g.asset_code == asset_code && g.location == location {
+            return Err(Error::Conflict(format!(
+                "台账已存在：{brand} / {asset_code} / {location}"
+            )));
+        }
+    }
+    Ok(())
 }
 
 pub async fn load_components_for(
@@ -132,14 +336,35 @@ pub async fn replace_components(
     }
 
     let mut written = 0i32;
+    let mut seen: HashSet<String> = HashSet::new();
     for (idx, raw) in components.iter().enumerate() {
         let model = raw.model.trim();
         if model.is_empty() {
             continue;
         }
+        if model.chars().count() > MAX_COMP_MODEL {
+            return Err(Error::Validation(format!(
+                "部件型号长度不能超过 {MAX_COMP_MODEL}"
+            )));
+        }
         let kind = normalize_comp_kind(&raw.kind)?;
         if raw.qty_per_unit < 1 {
             return Err(Error::Validation("部件单台数量至少为 1".into()));
+        }
+        let capacity_gb = if kind == "disk" {
+            require_disk_capacity_gb(raw.capacity_gb)?
+        } else if raw.capacity_gb != 0 {
+            return Err(Error::Validation(
+                "加速卡部件不应填写容量（capacity_gb 须为 0）".into(),
+            ));
+        } else {
+            0
+        };
+        let dedupe = format!("{kind}|{model}|{capacity_gb}");
+        if !seen.insert(dedupe) {
+            return Err(Error::Validation(format!(
+                "同一台账下部件重复：{kind} / {model} / {capacity_gb}GB"
+            )));
         }
         let entity = GoodsComponent {
             id: if raw.id.trim().is_empty() {
@@ -150,7 +375,7 @@ pub async fn replace_components(
             goods_id: goods_id.to_string(),
             kind,
             model: model.to_string(),
-            capacity: raw.capacity.trim().to_string(),
+            capacity_gb,
             qty_per_unit: raw.qty_per_unit,
             sort_order: if raw.sort_order != 0 {
                 raw.sort_order
@@ -167,38 +392,32 @@ pub async fn replace_components(
         ctx.set::<GoodsComponent>().add(entity);
         written += 1;
     }
-    save_changes(ctx).await?;
+    // Caller owns the Unit of Work flush (single save_changes for atomic batches).
     Ok(written)
 }
 
-pub fn parse_tb(capacity: &str) -> f64 {
-    let s = capacity.trim().to_ascii_uppercase().replace(' ', "");
-    if s.is_empty() {
-        return 0.0;
-    }
-    let num: String = s.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
-    let n: f64 = num.parse().unwrap_or(0.0);
-    if s.contains("PB") {
-        n * 1024.0
-    } else if s.contains("TB") {
-        n
-    } else if s.contains("GB") {
-        n / 1024.0
-    } else {
-        n
-    }
-}
+#[cfg(test)]
+mod capacity_tests {
+    use super::*;
 
-/// MW per accelerator card (approx).
-pub fn mw_per_card(model: &str) -> f64 {
-    let m = model.to_ascii_uppercase();
-    if m.contains("5090") {
-        0.000533
-    } else if m.contains("4090") {
-        0.000533
-    } else if m.contains("ASCEND") || m.contains("910") {
-        0.0004
-    } else {
-        0.0003
+    #[test]
+    fn label_roundtrip_to_gb() {
+        assert_eq!(parse_capacity_label_to_gb("8TB").unwrap(), 8000);
+        assert_eq!(parse_capacity_label_to_gb("8 TB").unwrap(), 8000);
+        assert_eq!(parse_capacity_label_to_gb("960GB").unwrap(), 960);
+        assert_eq!(parse_capacity_label_to_gb("8000").unwrap(), 8000);
+        assert_eq!(parse_capacity_label_to_gb("1.2PB").unwrap(), 1_200_000);
+        assert_eq!(format_capacity_label(8000), "8TB");
+        assert_eq!(format_capacity_label(960), "960GB");
+        assert!(parse_capacity_label_to_gb("HC320").is_err());
+    }
+
+    #[test]
+    fn storage_sum_uses_integer_gb() {
+        // 388 台 × 36 块 × 8000 GB
+        let blocks = 388i64 * 36;
+        let gb = blocks * 8000;
+        assert_eq!(gb, 111_744_000);
+        assert_eq!(gb / 1_000_000, 111); // PB integer part
     }
 }

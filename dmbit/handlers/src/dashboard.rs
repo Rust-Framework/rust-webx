@@ -1,4 +1,7 @@
 //! Dashboard handler — 智算机房管理.
+//!
+//! Aggregates are sums of persisted goods + components only.
+//! Storage capacity = Σ(disk blocks × capacity_gb) — integer GB on the ledger.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -7,14 +10,13 @@ use rust_ef::{db_context::DbContext, prelude::*};
 use rust_webx::*;
 
 use dmbit_contracts::dashboard::*;
-use dmbit_contracts::goods::ComponentModel;
 use dmbit_contracts::product::ProductModel;
 use dmbit_contracts::site::SiteConfig;
 use dmbit_domain::entities::{Goods, Product};
 
 use crate::db::EfResultExt;
 use crate::mapping::{
-    goods_to_model, load_components_for, mw_per_card, parse_tb, parts_summary,
+    format_capacity_label, goods_to_model, load_components_for, parts_summary,
 };
 
 #[derive(Inject)]
@@ -25,91 +27,29 @@ pub struct GetDashboardHandler {
     site: Arc<SiteConfig>,
 }
 
-fn after_colon(line: &str) -> String {
-    line.split(['：', ':'])
-        .nth(1)
-        .unwrap_or("")
-        .trim()
-        .to_string()
-}
-
-fn config_summary(parameters: &str) -> String {
-    let lines: Vec<&str> = parameters
-        .lines()
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .collect();
-
-    let chassis = lines
-        .iter()
-        .find(|l| l.contains("机箱") || l.contains("4U"))
-        .map(|l| {
-            if l.contains("4U") {
-                "4U".into()
-            } else {
-                after_colon(l)
-            }
-        })
-        .unwrap_or_else(|| "4U".into());
-
-    let optic = lines
-        .iter()
-        .find(|l| l.contains("光模块"))
-        .map(|l| after_colon(l))
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "双光千兆".into());
-
-    format!("{chassis} / {optic}")
-}
-
-fn goods_metrics(quantity: i32, components: &[ComponentModel]) -> (f64, f64, String, bool) {
-    let qty = quantity as f64;
-    let mut storage_pb = 0.0;
-    let mut power_mw = 0.0;
-    let mut has_disk = false;
-    let mut has_accel = false;
-    let mut visual = "compute".to_string();
-
-    for c in components {
-        let total_parts = qty * c.qty_per_unit as f64;
-        if c.kind == "disk" {
-            has_disk = true;
-            storage_pb += total_parts * parse_tb(&c.capacity) / 1024.0;
-            visual = "storage".into();
-        } else if c.kind == "accelerator" {
-            has_accel = true;
-            power_mw += total_parts * mw_per_card(&c.model);
-            let m = c.model.to_ascii_uppercase();
-            if m.contains("5090") {
-                visual = "gpu5090".into();
-            } else if m.contains("4090") {
-                visual = "gpu4090".into();
-            }
-        }
-    }
-
-    let featured = has_disk || has_accel;
-    (storage_pb, power_mw, visual, featured)
-}
-
 fn push_part_total(
     map: &mut HashMap<String, PartTotal>,
     kind: &str,
     model: &str,
-    capacity: &str,
+    capacity_gb: i64,
     add: i32,
     unit: &str,
 ) {
-    let key = format!("{kind}|{model}|{capacity}");
-    let label = if kind == "disk" && !capacity.is_empty() {
-        format!("{model} · {capacity}")
+    let capacity_label = if kind == "disk" && capacity_gb > 0 {
+        format_capacity_label(capacity_gb)
+    } else {
+        String::new()
+    };
+    let key = format!("{kind}|{model}|{capacity_gb}");
+    let label = if kind == "disk" && !capacity_label.is_empty() {
+        format!("{model} · {capacity_label}")
     } else {
         model.to_string()
     };
     let entry = map.entry(key).or_insert_with(|| PartTotal {
         kind: kind.into(),
         model: model.into(),
-        capacity: capacity.into(),
+        capacity: capacity_label,
         label,
         count: 0,
         unit: unit.into(),
@@ -140,10 +80,9 @@ impl IRequestHandler<GetDashboardRequest, DashboardModel> for GetDashboardHandle
         let mut commissioning = 0i32;
         let mut pending = 0i32;
         let mut delivered = 0i32;
-        let mut storage_pb = 0.0;
-        let mut power_mw = 0.0;
         let mut accel_map: HashMap<String, PartTotal> = HashMap::new();
         let mut disk_map: HashMap<String, PartTotal> = HashMap::new();
+        let mut storage_capacity_gb = 0i64;
 
         for p in &products {
             let mut goods_models = Vec::new();
@@ -152,8 +91,9 @@ impl IRequestHandler<GetDashboardRequest, DashboardModel> for GetDashboardHandle
                 match g.status.as_str() {
                     "运行中" => running += g.quantity,
                     "联调中" => commissioning += g.quantity,
+                    "待上架" => pending += g.quantity,
                     "已交付" => delivered += g.quantity,
-                    _ => pending += g.quantity,
+                    _ => {}
                 }
 
                 if p.category.eq_ignore_ascii_case("storage") {
@@ -163,10 +103,6 @@ impl IRequestHandler<GetDashboardRequest, DashboardModel> for GetDashboardHandle
                 }
 
                 let comps = cmap.get(&g.id).cloned().unwrap_or_default();
-                let (pb, mw, visual, featured) = goods_metrics(g.quantity, &comps);
-                storage_pb += pb;
-                power_mw += mw;
-
                 for c in &comps {
                     let total = g.quantity.saturating_mul(c.qty_per_unit);
                     if c.kind == "disk" {
@@ -174,16 +110,18 @@ impl IRequestHandler<GetDashboardRequest, DashboardModel> for GetDashboardHandle
                             &mut disk_map,
                             "disk",
                             &c.model,
-                            &c.capacity,
+                            c.capacity_gb,
                             total,
                             "块",
                         );
+                        storage_capacity_gb = storage_capacity_gb
+                            .saturating_add(i64::from(total).saturating_mul(c.capacity_gb));
                     } else if c.kind == "accelerator" {
                         push_part_total(
                             &mut accel_map,
                             "accelerator",
                             &c.model,
-                            "",
+                            0,
                             total,
                             "张",
                         );
@@ -196,7 +134,6 @@ impl IRequestHandler<GetDashboardRequest, DashboardModel> for GetDashboardHandle
                     product_name: p.name.clone(),
                     product_category: p.category.clone(),
                     brand: g.brand.clone(),
-                    config_summary: config_summary(&g.parameters),
                     parts_summary: parts_summary(&comps),
                     quantity: g.quantity,
                     unit: g.unit.clone(),
@@ -204,11 +141,7 @@ impl IRequestHandler<GetDashboardRequest, DashboardModel> for GetDashboardHandle
                     location: g.location.clone(),
                     asset_code: g.asset_code.clone(),
                     parameters: g.parameters.clone(),
-                    storage_pb: pb,
-                    power_mw: mw,
                     sort_order: g.sort_order,
-                    featured,
-                    visual,
                 });
 
                 goods_models.push(goods_to_model(g.clone(), &p.name, comps));
@@ -228,9 +161,8 @@ impl IRequestHandler<GetDashboardRequest, DashboardModel> for GetDashboardHandle
         }
 
         devices.sort_by(|a, b| {
-            b.featured
-                .cmp(&a.featured)
-                .then(a.sort_order.cmp(&b.sort_order))
+            a.sort_order
+                .cmp(&b.sort_order)
                 .then(a.brand.cmp(&b.brand))
         });
 
@@ -239,21 +171,6 @@ impl IRequestHandler<GetDashboardRequest, DashboardModel> for GetDashboardHandle
         let mut disk_totals: Vec<PartTotal> = disk_map.into_values().collect();
         disk_totals.sort_by(|a, b| b.count.cmp(&a.count).then(a.label.cmp(&b.label)));
 
-        let rack_count = if total_quantity > 0 {
-            ((total_quantity as f64) / 59.24).round() as i32
-        } else {
-            0
-        };
-
-        let health_percent = if total_quantity > 0 {
-            ((running as i64 * 100) / total_quantity as i64) as i32
-        } else {
-            0
-        };
-
-        let storage_pb = (storage_pb * 10.0).round() / 10.0;
-        let power_mw = (power_mw * 100.0).round() / 100.0;
-
         Ok(DashboardModel {
             title: if self.site.title.is_empty() {
                 "智算机房设备概览".into()
@@ -261,7 +178,6 @@ impl IRequestHandler<GetDashboardRequest, DashboardModel> for GetDashboardHandle
                 self.site.title.clone()
             },
             brand_name: self.site.brand_name.clone(),
-            tagline: self.site.tagline.clone(),
             room_name: if self.site.room_name.is_empty() {
                 "直播数据智算机房".into()
             } else {
@@ -273,14 +189,11 @@ impl IRequestHandler<GetDashboardRequest, DashboardModel> for GetDashboardHandle
                 total_quantity,
                 compute_quantity,
                 storage_quantity,
-                rack_count,
-                storage_pb,
-                power_mw,
+                storage_capacity_gb,
                 running_quantity: running,
                 commissioning_quantity: commissioning,
                 pending_quantity: pending,
                 delivered_quantity: delivered,
-                health_percent,
                 status_buckets: vec![
                     StatusBucket {
                         status: "运行中".into(),

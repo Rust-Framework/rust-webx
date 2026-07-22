@@ -5,9 +5,7 @@ edition.workspace = true
 publish = false
 
 [dependencies]
-dmbit-contracts.workspace = true
 rust-webx-core.workspace = true
 rust-ef.workspace = true
 serde.workspace = true
-serde_json.workspace = true
 uuid.workspace = true

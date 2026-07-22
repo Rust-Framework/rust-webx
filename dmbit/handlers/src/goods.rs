@@ -9,7 +9,9 @@ use dmbit_domain::new_id;
 
 use crate::db::{save_changes, EfResultExt};
 use crate::mapping::{
-    goods_to_model, load_components_for, normalize_status, replace_components,
+    assert_goods_key_available, goods_to_model, load_components_for, normalize_status,
+    optional_text, replace_components, require_non_negative, require_text,
+    strip_redundant_disk_params, MAX_ASSET_CODE, MAX_BRAND, MAX_LOCATION, MAX_UNIT,
 };
 use crate::util::{now_secs, operator_id, parse_id};
 
@@ -138,18 +140,24 @@ impl IRequestHandler<GetGoodsRequest, GoodsModel> for GetGoodsHandler {
 #[async_trait]
 impl IRequestHandler<CreateGoodsRequest, GoodsModel> for CreateGoodsHandler {
     async fn handle(&mut self, req: CreateGoodsRequest) -> Result<GoodsModel> {
-        if req.brand.trim().is_empty() {
-            return Err(Error::Validation("品牌短码不能为空".into()));
-        }
-        if req.unit.trim().is_empty() {
-            return Err(Error::Validation("单位不能为空".into()));
-        }
-        if req.quantity < 0 {
-            return Err(Error::Validation("数量不能为负".into()));
-        }
+        let brand = require_text("品牌短码", &req.brand, MAX_BRAND)?;
+        let unit = require_text("单位", &req.unit, MAX_UNIT)?;
+        let quantity = require_non_negative("数量", req.quantity)?;
+        let location = optional_text("机位", &req.location, MAX_LOCATION)?;
+        let asset_code = optional_text("资产编码", &req.asset_code, MAX_ASSET_CODE)?;
+        let status = normalize_status(&req.status)?;
 
         let product_id = parse_id(&req.product_id)?;
         let name = product_name(&mut self.ctx, &product_id).await?;
+        assert_goods_key_available(
+            &mut self.ctx,
+            &product_id,
+            &brand,
+            &asset_code,
+            &location,
+            None,
+        )
+        .await?;
 
         let now = now_secs();
         let op = operator_id();
@@ -157,13 +165,13 @@ impl IRequestHandler<CreateGoodsRequest, GoodsModel> for CreateGoodsHandler {
         let entity = Goods {
             id: id.clone(),
             product_id,
-            brand: req.brand.trim().to_string(),
-            parameters: req.parameters,
-            unit: req.unit.trim().to_string(),
-            quantity: req.quantity,
-            status: normalize_status(&req.status),
-            location: req.location.trim().to_string(),
-            asset_code: req.asset_code.trim().to_string(),
+            brand,
+            parameters: strip_redundant_disk_params(&req.parameters, &req.components),
+            unit,
+            quantity,
+            status,
+            location,
+            asset_code,
             sort_order: req.sort_order,
             created_id: op.clone(),
             created_at: now,
@@ -174,8 +182,8 @@ impl IRequestHandler<CreateGoodsRequest, GoodsModel> for CreateGoodsHandler {
         };
 
         self.ctx.set::<Goods>().add(entity.clone());
-        save_changes(&mut self.ctx).await?;
         replace_components(&mut self.ctx, &id, &req.components).await?;
+        save_changes(&mut self.ctx).await?;
 
         goods_model(&mut self.ctx, entity, &name).await
     }
@@ -199,48 +207,61 @@ impl IRequestHandler<UpdateGoodsRequest, GoodsModel> for UpdateGoodsHandler {
             g.product_id = product_id;
         }
         if let Some(brand) = req.brand {
-            if brand.trim().is_empty() {
-                return Err(Error::Validation("品牌短码不能为空".into()));
-            }
-            g.brand = brand.trim().to_string();
+            g.brand = require_text("品牌短码", &brand, MAX_BRAND)?;
         }
         if let Some(parameters) = req.parameters {
             g.parameters = parameters;
         }
         if let Some(unit) = req.unit {
-            if unit.trim().is_empty() {
-                return Err(Error::Validation("单位不能为空".into()));
-            }
-            g.unit = unit.trim().to_string();
+            g.unit = require_text("单位", &unit, MAX_UNIT)?;
         }
         if let Some(quantity) = req.quantity {
-            if quantity < 0 {
-                return Err(Error::Validation("数量不能为负".into()));
-            }
-            g.quantity = quantity;
+            g.quantity = require_non_negative("数量", quantity)?;
         }
         if let Some(status) = req.status {
-            g.status = normalize_status(&status);
+            g.status = normalize_status(&status)?;
         }
         if let Some(location) = req.location {
-            g.location = location.trim().to_string();
+            g.location = optional_text("机位", &location, MAX_LOCATION)?;
         }
         if let Some(asset_code) = req.asset_code {
-            g.asset_code = asset_code.trim().to_string();
+            g.asset_code = optional_text("资产编码", &asset_code, MAX_ASSET_CODE)?;
         }
         if let Some(sort_order) = req.sort_order {
             g.sort_order = sort_order;
         }
+
+        assert_goods_key_available(
+            &mut self.ctx,
+            &g.product_id,
+            &g.brand,
+            &g.asset_code,
+            &g.location,
+            Some(&g.id),
+        )
+        .await?;
+
         g.updated_at = now_secs();
         g.updated_id = operator_id();
 
         let name = product_name(&mut self.ctx, &g.product_id).await?;
+
+        let comps_for_strip = if let Some(ref components) = req.components {
+            components.clone()
+        } else {
+            load_components_for(&mut self.ctx, &[id.clone()])
+                .await?
+                .remove(&id)
+                .unwrap_or_default()
+        };
+        g.parameters = strip_redundant_disk_params(&g.parameters, &comps_for_strip);
+
         self.ctx.set::<Goods>().update(g.clone());
-        save_changes(&mut self.ctx).await?;
 
         if let Some(components) = req.components {
             replace_components(&mut self.ctx, &id, &components).await?;
         }
+        save_changes(&mut self.ctx).await?;
 
         goods_model(&mut self.ctx, g, &name).await
     }
@@ -280,6 +301,6 @@ impl IRequestHandler<DeleteGoodsRequest, String> for DeleteGoodsHandler {
         self.ctx.set::<Goods>().update(g);
         save_changes(&mut self.ctx).await?;
 
-        Ok(format!("Deleted goods {}", id))
+        Ok(format!("已删除台账 {}", id))
     }
 }

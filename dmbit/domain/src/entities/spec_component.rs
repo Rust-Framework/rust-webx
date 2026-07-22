@@ -1,31 +1,31 @@
-//! GoodsComponent — countable parts (accelerator cards / disks) per goods row.
+//! SpecComponent — 规格部件（加速卡 / 硬盘 / NPU 等）.
 
 use rust_ef::prelude::*;
 
-use super::goods::Goods;
+use super::spec::Spec;
 
 #[derive(Debug, Clone, EntityType)]
-#[table("goods_components")]
-pub struct GoodsComponent {
+#[table("spec_components")]
+pub struct SpecComponent {
     #[primary_key]
     #[max_length(36)]
     pub id: String,
     #[required]
-    #[foreign_key(Goods)]
+    #[foreign_key(Spec)]
     #[index]
     #[max_length(36)]
-    pub goods_id: String,
-    /// accelerator | disk
+    pub spec_id: String,
+    /// accelerator | disk | npu | gpu | ...
     #[required]
     #[max_length(20)]
     pub kind: String,
     #[required]
     #[max_length(80)]
     pub model: String,
-    /// Disk capacity in **GB** (decimal). `0` for accelerator. Source of truth for capacity math.
+    /// 硬盘容量（GB 整数）。加速卡/NPU 为 0。
     #[required]
     pub capacity_gb: i64,
-    /// count installed on each server unit
+    /// 单台设备安装数量
     #[required]
     pub qty_per_unit: i32,
     #[required]
@@ -44,5 +44,5 @@ pub struct GoodsComponent {
     #[index]
     pub is_deleted: bool,
     #[navigation]
-    pub goods: BelongsTo<Goods>,
+    pub spec: BelongsTo<Spec>,
 }

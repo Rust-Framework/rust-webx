@@ -5,17 +5,42 @@ use rust_webx::*;
 
 use dmbit_contracts::goods::GoodsModel;
 use dmbit_contracts::product::*;
-use dmbit_domain::entities::{Goods, GoodsComponent, Product};
+use dmbit_contracts::spec::SpecModel;
+use dmbit_domain::entities::{Device, Product, Spec, SpecComponent};
 use dmbit_domain::new_id;
 
 use crate::db::{save_changes, EfResultExt};
 use crate::mapping::{
-    assert_product_code_available, goods_to_model, load_components_for, normalize_category,
-    optional_text, require_text, MAX_PRODUCT_CODE, MAX_PRODUCT_NAME, MAX_PRODUCT_REMARK,
+    assert_product_code_available, load_components_for_specs, load_device_counts,
+    normalize_category, optional_text, require_text, spec_to_model,
+    MAX_PRODUCT_CODE, MAX_PRODUCT_NAME, MAX_PRODUCT_REMARK,
 };
 use crate::util::{now_secs, operator_id, parse_id};
 
-fn product_to_model(p: Product, goods: Vec<GoodsModel>) -> ProductModel {
+/// Convert SpecModel to GoodsModel for backward compatibility with admin panel.
+fn spec_to_goods(s: &SpecModel) -> GoodsModel {
+    GoodsModel {
+        id: s.id.clone(),
+        product_id: s.product_id.clone(),
+        product_name: s.product_name.clone(),
+        code: s.code.clone(),
+        brand: s.brand.clone(),
+        parameters: s.parameters.clone(),
+        unit: s.unit.clone(),
+        quantity: s.planned_quantity,
+        planned_quantity: s.planned_quantity,
+        status: String::new(),
+        location: String::new(),
+        asset_code: String::new(),
+        sort_order: s.sort_order,
+        created_at: s.created_at,
+        updated_at: s.updated_at,
+        components: s.components.clone(),
+        device_count: s.device_count,
+    }
+}
+
+fn product_to_model(p: Product, specs: Vec<SpecModel>) -> ProductModel {
     ProductModel {
         id: p.id,
         name: p.name,
@@ -25,7 +50,7 @@ fn product_to_model(p: Product, goods: Vec<GoodsModel>) -> ProductModel {
         sort_order: p.sort_order,
         created_at: p.created_at,
         updated_at: p.updated_at,
-        goods,
+        goods: specs.iter().map(spec_to_goods).collect(),
     }
 }
 
@@ -69,23 +94,24 @@ impl IRequestHandler<ListProductsRequest, Vec<ProductModel>> for ListProductsHan
             .map_ef()?;
         products.sort_by(|a, b| a.sort_order.cmp(&b.sort_order).then(a.name.cmp(&b.name)));
 
-        let all_goods = linq!(self.ctx.set::<Goods>();).to_list().await.map_ef()?;
-        let ids: Vec<String> = all_goods.iter().map(|g| g.id.clone()).collect();
-        let cmap = load_components_for(&mut self.ctx, &ids).await?;
+        let all_specs = linq!(self.ctx.set::<Spec>();).to_list().await.map_ef()?;
+        let ids: Vec<String> = all_specs.iter().map(|s| s.id.clone()).collect();
+        let cmap = load_components_for_specs(&mut self.ctx, &ids).await?;
+        let dmap = load_device_counts(&mut self.ctx, &ids).await?;
 
         let mut result = Vec::with_capacity(products.len());
         for p in products {
-            let mut goods: Vec<GoodsModel> = all_goods
+            let mut specs: Vec<SpecModel> = all_specs
                 .iter()
-                .filter(|g| g.product_id == p.id)
-                .cloned()
-                .map(|g| {
-                    let comps = cmap.get(&g.id).cloned().unwrap_or_default();
-                    goods_to_model(g, &p.name, comps)
+                .filter(|s| s.product_id == p.id)
+                .map(|s| {
+                    let comps = cmap.get(&s.id).cloned().unwrap_or_default();
+                    let dc = dmap.get(&s.id).copied().unwrap_or(0);
+                    spec_to_model(s, &p.name, comps, dc)
                 })
                 .collect();
-            goods.sort_by(|a, b| a.sort_order.cmp(&b.sort_order));
-            result.push(product_to_model(p, goods));
+            specs.sort_by(|a, b| a.sort_order.cmp(&b.sort_order));
+            result.push(product_to_model(p, specs));
         }
         Ok(result)
     }
@@ -104,23 +130,25 @@ impl IRequestHandler<GetProductRequest, ProductModel> for GetProductHandler {
         );
 
         let pid = p.id.clone();
-        let goods_rows = linq!(self.ctx.set::<Goods>(), |g: Goods| g.product_id == pid)
+        let specs = linq!(self.ctx.set::<Spec>(), |s: Spec| s.product_id == pid)
             .to_list()
             .await
             .map_ef()?;
-        let ids: Vec<String> = goods_rows.iter().map(|g| g.id.clone()).collect();
-        let cmap = load_components_for(&mut self.ctx, &ids).await?;
+        let ids: Vec<String> = specs.iter().map(|s| s.id.clone()).collect();
+        let cmap = load_components_for_specs(&mut self.ctx, &ids).await?;
+        let dmap = load_device_counts(&mut self.ctx, &ids).await?;
 
-        let mut goods: Vec<GoodsModel> = goods_rows
+        let mut spec_models: Vec<SpecModel> = specs
             .into_iter()
-            .map(|g| {
-                let comps = cmap.get(&g.id).cloned().unwrap_or_default();
-                goods_to_model(g, &p.name, comps)
+            .map(|s| {
+                let comps = cmap.get(&s.id).cloned().unwrap_or_default();
+                let dc = dmap.get(&s.id).copied().unwrap_or(0);
+                spec_to_model(&s, &p.name, comps, dc)
             })
             .collect();
-        goods.sort_by(|a, b| a.sort_order.cmp(&b.sort_order));
+        spec_models.sort_by(|a, b| a.sort_order.cmp(&b.sort_order));
 
-        Ok(product_to_model(p, goods))
+        Ok(product_to_model(p, spec_models))
     }
 }
 
@@ -148,7 +176,7 @@ impl IRequestHandler<CreateProductRequest, ProductModel> for CreateProductHandle
             updated_id: op,
             updated_at: now,
             is_deleted: false,
-            goods: HasMany::new(),
+            specs: HasMany::new(),
         };
 
         self.ctx.set::<Product>().add(entity.clone());
@@ -193,7 +221,26 @@ impl IRequestHandler<UpdateProductRequest, ProductModel> for UpdateProductHandle
         self.ctx.set::<Product>().update(p.clone());
         save_changes(&mut self.ctx).await?;
 
-        Ok(product_to_model(p, Vec::new()))
+        // Load specs for response
+        let pid = p.id.clone();
+        let specs = linq!(self.ctx.set::<Spec>(), |s: Spec| s.product_id == pid)
+            .to_list()
+            .await
+            .map_ef()?;
+        let ids: Vec<String> = specs.iter().map(|s| s.id.clone()).collect();
+        let cmap = load_components_for_specs(&mut self.ctx, &ids).await?;
+        let dmap = load_device_counts(&mut self.ctx, &ids).await?;
+        let mut spec_models: Vec<SpecModel> = specs
+            .into_iter()
+            .map(|s| {
+                let comps = cmap.get(&s.id).cloned().unwrap_or_default();
+                let dc = dmap.get(&s.id).copied().unwrap_or(0);
+                spec_to_model(&s, &p.name, comps, dc)
+            })
+            .collect();
+        spec_models.sort_by(|a, b| a.sort_order.cmp(&b.sort_order));
+
+        Ok(product_to_model(p, spec_models))
     }
 }
 
@@ -216,14 +263,18 @@ impl IRequestHandler<DeleteProductRequest, String> for DeleteProductHandler {
         p.updated_id = op.clone();
 
         let pid = p.id.clone();
-        let children = linq!(self.ctx.set::<Goods>(), |g: Goods| g.product_id == pid)
-            .to_list()
-            .await
-            .map_ef()?;
-        for mut g in children {
-            let gid = g.id.clone();
+        // Cascade: delete specs → components + mark devices as 已淘汰
+        let child_specs =
+            linq!(self.ctx.set::<Spec>(), |s: Spec| s.product_id == pid)
+                .to_list()
+                .await
+                .map_ef()?;
+        for mut s in child_specs {
+            let sid = s.id.clone();
+            // Physical delete components
+            let sid2 = sid.clone();
             let comps =
-                linq!(self.ctx.set::<GoodsComponent>(), |c: GoodsComponent| c.goods_id == gid)
+                linq!(self.ctx.set::<SpecComponent>(), |c: SpecComponent| c.spec_id == sid2)
                     .to_list()
                     .await
                     .map_ef()?;
@@ -231,12 +282,24 @@ impl IRequestHandler<DeleteProductRequest, String> for DeleteProductHandler {
                 c.is_deleted = true;
                 c.updated_at = now;
                 c.updated_id = op.clone();
-                self.ctx.set::<GoodsComponent>().update(c);
+                self.ctx.set::<SpecComponent>().update(c);
             }
-            g.is_deleted = true;
-            g.updated_at = now;
-            g.updated_id = op.clone();
-            self.ctx.set::<Goods>().update(g);
+            // Mark devices as 已淘汰
+            let devs =
+                linq!(self.ctx.set::<Device>(), |d: Device| d.spec_id == sid)
+                    .to_list()
+                    .await
+                    .map_ef()?;
+            for mut d in devs {
+                d.status = "已淘汰".into();
+                d.updated_at = now;
+                d.updated_id = op.clone();
+                self.ctx.set::<Device>().update(d);
+            }
+            s.is_deleted = true;
+            s.updated_at = now;
+            s.updated_id = op.clone();
+            self.ctx.set::<Spec>().update(s);
         }
 
         self.ctx.set::<Product>().update(p);

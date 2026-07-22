@@ -1,7 +1,8 @@
 //! Dashboard handler — 智算机房管理.
 //!
-//! Aggregates are sums of persisted goods + components only.
-//! Storage capacity = Σ(disk blocks × capacity_gb) — integer GB on the ledger.
+//! Aggregation priority: Device records (actual machines) > Spec.planned_quantity (plan).
+//! When 0 Device records exist, falls back to Spec.planned_quantity so the big screen
+//! shows meaningful data immediately after CSV import.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -10,13 +11,13 @@ use rust_ef::{db_context::DbContext, prelude::*};
 use rust_webx::*;
 
 use dmbit_contracts::dashboard::*;
-use dmbit_contracts::product::ProductModel;
+use dmbit_contracts::goods::ComponentModel;
 use dmbit_contracts::site::SiteConfig;
-use dmbit_domain::entities::{Goods, Product};
+use dmbit_domain::entities::{Device, Product, Spec, SpecComponent};
 
 use crate::db::EfResultExt;
 use crate::mapping::{
-    format_capacity_label, goods_to_model, load_components_for, parts_summary,
+    component_to_model, format_capacity_label, parts_summary, spec_to_model,
 };
 
 #[derive(Inject)]
@@ -35,13 +36,13 @@ fn push_part_total(
     add: i32,
     unit: &str,
 ) {
-    let capacity_label = if kind == "disk" && capacity_gb > 0 {
+    let capacity_label = if (kind == "disk" || kind == "hdd" || kind == "ssd") && capacity_gb > 0 {
         format_capacity_label(capacity_gb)
     } else {
         String::new()
     };
     let key = format!("{kind}|{model}|{capacity_gb}");
-    let label = if kind == "disk" && !capacity_label.is_empty() {
+    let label = if !capacity_label.is_empty() {
         format!("{model} · {capacity_label}")
     } else {
         model.to_string()
@@ -61,18 +62,111 @@ fn push_part_total(
 #[async_trait]
 impl IRequestHandler<GetDashboardRequest, DashboardModel> for GetDashboardHandler {
     async fn handle(&mut self, _: GetDashboardRequest) -> Result<DashboardModel> {
-        let mut products = linq!(self.ctx.set::<Product>();)
+        let products = linq!(self.ctx.set::<Product>();)
             .to_list()
             .await
             .map_ef()?;
-        products.sort_by(|a, b| a.sort_order.cmp(&b.sort_order));
+        let specs = linq!(self.ctx.set::<Spec>();).to_list().await.map_ef()?;
+        let devices = linq!(self.ctx.set::<Device>();).to_list().await.map_ef()?;
+        let comps = linq!(self.ctx.set::<SpecComponent>();).to_list().await.map_ef()?;
 
-        let all_goods = linq!(self.ctx.set::<Goods>();).to_list().await.map_ef()?;
-        let ids: Vec<String> = all_goods.iter().map(|g| g.id.clone()).collect();
-        let cmap = load_components_for(&mut self.ctx, &ids).await?;
+        // Index: spec_id → (spec, product)
+        let spec_product: HashMap<String, (&Spec, &Product)> = specs
+            .iter()
+            .filter_map(|s| {
+                products
+                    .iter()
+                    .find(|p| p.id == s.product_id)
+                    .map(|p| (s.id.clone(), (s, p)))
+            })
+            .collect();
 
-        let mut models = Vec::with_capacity(products.len());
-        let mut devices = Vec::new();
+        // Index: spec_id → Vec<ComponentModel>
+        let mut comp_map: HashMap<String, Vec<ComponentModel>> = HashMap::new();
+        for c in &comps {
+            comp_map
+                .entry(c.spec_id.clone())
+                .or_default()
+                .push(component_to_model(c));
+        }
+
+        // Index: spec_id → Vec<&Device> (only if devices exist)
+        let mut dev_map: HashMap<String, Vec<&Device>> = HashMap::new();
+        for d in &devices {
+            dev_map.entry(d.spec_id.clone()).or_default().push(d);
+        }
+
+        let has_devices = !devices.is_empty();
+
+        // ── Build product models & devices_rows ──
+        let mut product_models = Vec::with_capacity(products.len());
+        let mut devices_rows = Vec::new();
+        let mut sort_order_counter: i32 = 0;
+
+        for p in &products {
+            let mut spec_models = Vec::new();
+            let product_specs: Vec<&Spec> = specs.iter().filter(|s| s.product_id == p.id).collect();
+            for s in &product_specs {
+                let scomps = comp_map.get(&s.id).cloned().unwrap_or_default();
+
+                if has_devices {
+                    // ── Device-driven: each device = one row ──
+                    let sdevs = dev_map.get(&s.id).cloned().unwrap_or_default();
+                    let dc = sdevs.len() as i32;
+                    for d in &sdevs {
+                        devices_rows.push(DeviceOverviewRow {
+                            id: d.id.clone(),
+                            product_id: p.id.clone(),
+                            product_name: p.name.clone(),
+                            product_category: p.category.clone(),
+                            brand: s.brand.clone(),
+                            parts_summary: parts_summary(&scomps),
+                            quantity: 1,
+                            unit: s.unit.clone(),
+                            status: d.status.clone(),
+                            location: d.location.clone(),
+                            asset_code: d.asset_code.clone(),
+                            parameters: s.parameters.clone(),
+                            sort_order: d.sort_order,
+                        });
+                    }
+                    spec_models.push(spec_to_model(s, &p.name, scomps, dc));
+                } else {
+                    // ── Plan-driven: one placeholder row per spec ──
+                    sort_order_counter += 1;
+                    devices_rows.push(DeviceOverviewRow {
+                        id: s.id.clone(),
+                        product_id: p.id.clone(),
+                        product_name: p.name.clone(),
+                        product_category: p.category.clone(),
+                        brand: s.brand.clone(),
+                        parts_summary: parts_summary(&scomps),
+                        quantity: s.planned_quantity,
+                        unit: s.unit.clone(),
+                        status: "待上架".to_string(),
+                        location: String::new(),
+                        asset_code: String::new(),
+                        parameters: s.parameters.clone(),
+                        sort_order: sort_order_counter,
+                    });
+                    spec_models.push(spec_to_model(s, &p.name, scomps, 0));
+                }
+            }
+            spec_models.sort_by(|a, b| a.sort_order.cmp(&b.sort_order));
+            product_models.push(dmbit_contracts::product::ProductModel {
+                id: p.id.clone(),
+                name: p.name.clone(),
+                code: p.code.clone(),
+                category: p.category.clone(),
+                remark: p.remark.clone(),
+                sort_order: p.sort_order,
+                created_at: p.created_at,
+                updated_at: p.updated_at,
+                goods: Vec::new(),
+            });
+        }
+
+        // ── Aggregate stats ──
         let mut total_quantity = 0i32;
         let mut compute_quantity = 0i32;
         let mut storage_quantity = 0i32;
@@ -84,83 +178,82 @@ impl IRequestHandler<GetDashboardRequest, DashboardModel> for GetDashboardHandle
         let mut disk_map: HashMap<String, PartTotal> = HashMap::new();
         let mut storage_capacity_gb = 0i64;
 
-        for p in &products {
-            let mut goods_models = Vec::new();
-            for g in all_goods.iter().filter(|g| g.product_id == p.id) {
-                total_quantity += g.quantity;
-                match g.status.as_str() {
-                    "运行中" => running += g.quantity,
-                    "联调中" => commissioning += g.quantity,
-                    "待上架" => pending += g.quantity,
-                    "已交付" => delivered += g.quantity,
+        if has_devices {
+            // ── Aggregate from Device records ──
+            for d in &devices {
+                total_quantity += 1;
+                match d.status.as_str() {
+                    "运行中" => running += 1,
+                    "联调中" => commissioning += 1,
+                    "待上架" => pending += 1,
+                    "已交付" => delivered += 1,
                     _ => {}
                 }
 
-                if p.category.eq_ignore_ascii_case("storage") {
-                    storage_quantity += g.quantity;
-                } else {
-                    compute_quantity += g.quantity;
+                if let Some((_s, p)) = spec_product.get(&d.spec_id) {
+                    match p.category.as_str() {
+                        "storage" => storage_quantity += 1,
+                        _ => compute_quantity += 1,
+                    };
                 }
 
-                let comps = cmap.get(&g.id).cloned().unwrap_or_default();
-                for c in &comps {
-                    let total = g.quantity.saturating_mul(c.qty_per_unit);
-                    if c.kind == "disk" {
-                        push_part_total(
-                            &mut disk_map,
-                            "disk",
-                            &c.model,
-                            c.capacity_gb,
-                            total,
-                            "块",
-                        );
-                        storage_capacity_gb = storage_capacity_gb
-                            .saturating_add(i64::from(total).saturating_mul(c.capacity_gb));
-                    } else if c.kind == "accelerator" {
-                        push_part_total(
-                            &mut accel_map,
-                            "accelerator",
-                            &c.model,
-                            0,
-                            total,
-                            "张",
-                        );
+                if let Some(scomps) = comp_map.get(&d.spec_id) {
+                    for c in scomps {
+                        if c.kind == "disk" {
+                            push_part_total(
+                                &mut disk_map, "disk", &c.model, c.capacity_gb,
+                                c.qty_per_unit, "块",
+                            );
+                            storage_capacity_gb = storage_capacity_gb
+                                .saturating_add(i64::from(c.qty_per_unit).saturating_mul(c.capacity_gb));
+                        } else {
+                            push_part_total(
+                                &mut accel_map, "accelerator", &c.model, 0,
+                                c.qty_per_unit, "张",
+                            );
+                        }
                     }
                 }
-
-                devices.push(DeviceOverviewRow {
-                    id: g.id.clone(),
-                    product_id: g.product_id.clone(),
-                    product_name: p.name.clone(),
-                    product_category: p.category.clone(),
-                    brand: g.brand.clone(),
-                    parts_summary: parts_summary(&comps),
-                    quantity: g.quantity,
-                    unit: g.unit.clone(),
-                    status: g.status.clone(),
-                    location: g.location.clone(),
-                    asset_code: g.asset_code.clone(),
-                    parameters: g.parameters.clone(),
-                    sort_order: g.sort_order,
-                });
-
-                goods_models.push(goods_to_model(g.clone(), &p.name, comps));
             }
-            goods_models.sort_by(|a, b| a.sort_order.cmp(&b.sort_order));
-            models.push(ProductModel {
-                id: p.id.clone(),
-                name: p.name.clone(),
-                code: p.code.clone(),
-                category: p.category.clone(),
-                remark: p.remark.clone(),
-                sort_order: p.sort_order,
-                created_at: p.created_at,
-                updated_at: p.updated_at,
-                goods: goods_models,
-            });
+        } else {
+            // ── Fallback: aggregate from Spec.planned_quantity ──
+            for s in &specs {
+                let pq = s.planned_quantity;
+                if pq <= 0 {
+                    continue;
+                }
+                total_quantity += pq;
+                pending += pq; // all planned devices are "待上架"
+
+                if let Some((_s, p)) = spec_product.get(&s.id) {
+                    match p.category.as_str() {
+                        "storage" => storage_quantity += pq,
+                        _ => compute_quantity += pq,
+                    };
+                }
+
+                if let Some(scomps) = comp_map.get(&s.id) {
+                    for c in scomps {
+                        let per_spec = i64::from(pq).saturating_mul(i64::from(c.qty_per_unit));
+                        if c.kind == "disk" {
+                            push_part_total(
+                                &mut disk_map, "disk", &c.model, c.capacity_gb,
+                                (pq * c.qty_per_unit) as i32, "块",
+                            );
+                            storage_capacity_gb = storage_capacity_gb
+                                .saturating_add(per_spec.saturating_mul(c.capacity_gb));
+                        } else {
+                            push_part_total(
+                                &mut accel_map, "accelerator", &c.model, 0,
+                                (pq * c.qty_per_unit) as i32, "张",
+                            );
+                        }
+                    }
+                }
+            }
         }
 
-        devices.sort_by(|a, b| {
+        devices_rows.sort_by(|a, b| {
             a.sort_order
                 .cmp(&b.sort_order)
                 .then(a.brand.cmp(&b.brand))
@@ -184,8 +277,8 @@ impl IRequestHandler<GetDashboardRequest, DashboardModel> for GetDashboardHandle
                 self.site.room_name.clone()
             },
             stats: DashboardStats {
-                product_count: models.len() as i32,
-                goods_count: all_goods.len() as i32,
+                product_count: products.len() as i32,
+                goods_count: specs.len() as i32,
                 total_quantity,
                 compute_quantity,
                 storage_quantity,
@@ -195,28 +288,16 @@ impl IRequestHandler<GetDashboardRequest, DashboardModel> for GetDashboardHandle
                 pending_quantity: pending,
                 delivered_quantity: delivered,
                 status_buckets: vec![
-                    StatusBucket {
-                        status: "运行中".into(),
-                        quantity: running,
-                    },
-                    StatusBucket {
-                        status: "联调中".into(),
-                        quantity: commissioning,
-                    },
-                    StatusBucket {
-                        status: "待上架".into(),
-                        quantity: pending,
-                    },
-                    StatusBucket {
-                        status: "已交付".into(),
-                        quantity: delivered,
-                    },
+                    StatusBucket { status: "运行中".into(), quantity: running },
+                    StatusBucket { status: "联调中".into(), quantity: commissioning },
+                    StatusBucket { status: "待上架".into(), quantity: pending },
+                    StatusBucket { status: "已交付".into(), quantity: delivered },
                 ],
             },
             accelerator_totals,
             disk_totals,
-            products: models,
-            devices,
+            products: product_models,
+            devices: devices_rows,
         })
     }
 }

@@ -9,7 +9,6 @@ use std::sync::Arc;
 use dmbit_contracts::site::SiteConfig;
 use dmbit_domain::prepare_context;
 use rust_ef::db_context::{DbContext, DbContextOptionsBuilder};
-use rust_ef_mysql::DbContextOptionsBuilderExt as _;
 use rust_ef_sqlite::DbContextOptionsBuilderExt as _;
 use rust_webx::rust_dix::ServiceCollection;
 use rust_webx::*;
@@ -40,19 +39,9 @@ pub fn build_host() -> Host {
 
 pub fn register_db_context(svc: ServiceCollection) -> ServiceCollection {
     let mut builder = DbContextOptionsBuilder::new();
-    match AppMode::from_env() {
-        AppMode::Production => {
-            let cs = std::env::var("DATABASE_URL")
-                .expect("DATABASE_URL environment variable required in Production");
-            builder.use_mysql(&cs);
-            tracing::info!("[dmbit] DbContext provider: MySQL");
-        }
-        AppMode::Development => {
-            let path = app_base().join("app.db");
-            builder.use_sqlite(&path.to_string_lossy());
-            tracing::info!("[dmbit] SQLite path: {}", path.display());
-        }
-    }
+    let path = app_base().join("app.db");
+    builder.use_sqlite(&path.to_string_lossy());
+    tracing::info!("[dmbit] SQLite path: {}", path.display());
 
     let options = Arc::new(builder.build());
     options

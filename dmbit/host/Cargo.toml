@@ -18,7 +18,6 @@ dmbit-domain.workspace = true
 dmbit-handlers.workspace = true
 rust-ef.workspace = true
 rust-ef-sqlite.workspace = true
-rust-ef-mysql.workspace = true
 rust-webx.workspace = true
 rust-dix.workspace = true
 async-trait.workspace = true

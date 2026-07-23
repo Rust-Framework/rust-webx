@@ -1,0 +1,22 @@
+# Local production-like stack for dmbit (SQLite-only, no external database).
+# Usage (from repo root):
+#   cp dmbit/.env.example dmbit/.env   # edit JWT_SECRET
+#   docker compose -f dmbit/docker-compose.yml --env-file dmbit/.env up --build
+
+services:
+  dmbit:
+    build:
+      context: ..
+      dockerfile: dmbit/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${DMBIT_PORT:-5100}:5100"
+    environment:
+      APP_ENV: Production
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in dmbit/.env (min 32 chars)}
+      APP__App__Urls: '["http://0.0.0.0:5100"]'
+    volumes:
+      - dmbit_data:/app
+
+volumes:
+  dmbit_data:

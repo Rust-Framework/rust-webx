@@ -6,6 +6,13 @@
   "description": "",
   "glyphs": [
     {
+      "icon_id": "7064730",
+      "name": "import",
+      "font_class": "import",
+      "unicode": "e65f",
+      "unicode_decimal": 58975
+    },
+    {
       "icon_id": "5085557",
       "name": "add",
       "font_class": "add",
@@ -53,13 +60,6 @@
       "font_class": "export",
       "unicode": "e615",
       "unicode_decimal": 58901
-    },
-    {
-      "icon_id": "19300994",
-      "name": "import",
-      "font_class": "import",
-      "unicode": "e619",
-      "unicode_decimal": 58905
     }
   ]
 }

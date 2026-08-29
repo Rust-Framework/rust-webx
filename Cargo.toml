@@ -23,8 +23,8 @@ version = "0.3.0"
 edition = "2021"
 license = "MIT"
 authors = ["Start"]
-homepage = "https://gitcode.com/rf2026/rust-webx"
-repository = "https://gitcode.com/rf2026/rust-webx"
+homepage = "https://github.com/Rust-Framework/rust-webx"
+repository = "https://github.com/Rust-Framework/rust-webx"
 documentation = "https://docs.rs/rust-webx"
 description = "rust-webx — A Rust WebApi framework inspired by ASP.NET Core, built on DI + Mediator pattern"
 

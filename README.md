@@ -1,17 +1,118 @@
-# rust-webx — Rust WebApi Framework
+**English** | [简体中文](README.zh-CN.md)
 
-ASP.NET Core 风格的 Rust WebApi 服务框架，基于 [rust-dix](https://crates.io/crates/rust-dix) DI + 中介者模式构建。
+<div align="center">
 
-## 特性
+# rust-webx
 
-- **DI + 中介者 双核心** — 以 `IRequest<T>` + `IRequestHandler<T, R>` 为载体，框架自动完成路由映射和 DI 解析
-- **编译时路由快捷键** — `#[get("/path")]` `#[post("/path")]` 等一行标注定义完整端点
-- **编译时自动扫描** — 通过 `inventory` 编译时收集路由元数据，`Host::build()` 时自动注册
-- **零配置 Handler 注册** — `#[handler]` 属性宏自动向 DI 容器注册 Handler
-- **身份认证和授权** — JWT Bearer + 基于资源的路由授权
-- **ORM 无关** — 框架不依赖 rust-ef；Docbit 在 `handlers/src/db.rs` 与 `host` 内联最少胶水
+**An ASP.NET Core-inspired Web API framework for Rust, built on DI + Mediator.**
 
-## 快速开始
+A type-safe, convention-over-configuration platform where *requests are endpoints* — declare a route with one attribute, implement a handler, and the framework takes care of routing, dependency injection, middleware, and error mapping.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![CI](https://github.com/Rust-Framework/rust-webx/actions/workflows/ci.yml/badge.svg)](https://github.com/Rust-Framework/rust-webx/actions/workflows/ci.yml)
+![Rust](https://img.shields.io/badge/rust-%3E%3D%201.81-orange.svg)
+
+</div>
+
+---
+
+## Table of Contents
+
+- [What is rust-webx](#what-is-rust-webx)
+- [Key Features](#key-features)
+- [Architecture](#architecture)
+- [Request-as-Endpoint: Hello World](#request-as-endpoint-hello-world)
+- [Core Concepts](#core-concepts)
+- [Example Applications](#example-applications)
+- [Quick Start](#quick-start)
+- [Production Readiness](#production-readiness)
+- [Environment Variables](#environment-variables)
+- [Error Mapping](#error-mapping)
+- [Documentation](#documentation)
+- [License](#license)
+
+---
+
+## What is rust-webx
+
+**rust-webx** is a Web API framework for Rust inspired by **ASP.NET Core**. It uses **DI (Dependency Injection) + Mediator** as its dual core. Through the *request-as-endpoint* pattern, developers define complete HTTP APIs with type-safe Rust code — no hand-written route tables, no manual handler registration, no scattered error handling.
+
+Instead of assembling routing libraries, DI containers, middleware and error handling yourself:
+
+```
+choose a router → hand-write route tables → design your own DI → wire middleware → unify errors → repeat
+```
+
+rust-webx folds these cross-cutting concerns into the framework layer:
+
+| Pain point | How rust-webx solves it |
+|------------|--------------------------|
+| Routing divorced from handlers | `IRequest<T>` carries route metadata; `#[get("/path")]` registers at compile time |
+| Handler registration boilerplate | `#[handler]` auto-registers the handler with the DI container |
+| Tight coupling between modules | `IMediator::send()` dispatches requests; `publish()` publishes events |
+| Scattered error → HTTP mapping | Unified `Error` type + built-in exception middleware |
+| Ad-hoc auth/authorization | `add_authentication()` + declarative `#[authorize]` |
+
+rust-webx is **not** a full-stack UI framework (pair it with any frontend), **not** an ORM (bring your own or use [`rust-ef`](https://crates.io/crates/rust-ef)), and **not** a microservice-governance platform.
+
+## Key Features
+
+- **DI + Mediator dual core** — `IRequest<T>` + `IRequestHandler<T, R>` as the carrier; the framework handles route mapping and DI resolution automatically.
+- **Compile-time route shortcuts** — `#[get("/path")]`, `#[post("/path")]`, `#[put("/path")]`, `#[delete("/path")]` define a full endpoint in one line.
+- **Compile-time scanning** — route metadata is collected at compile time via `inventory`; registered automatically in `Host::build()`.
+- **Zero-config handler registration** — the `#[handler]` attribute macro registers a handler with the DI container automatically.
+- **Authentication & authorization** — JWT Bearer auth + route-pattern-based resource authorization (`#[authorize]`, `#[claims]`).
+- **Production capabilities out of the box** — graceful shutdown, live health checks, security headers, request IDs, CORS, TLS, rate limiting, compression, OpenAPI + SPA hosting.
+- **ORM-agnostic** — the framework does not depend on `rust-ef`; the `docbit` reference app wires it in with minimal glue.
+
+## Architecture
+
+The framework is split into a small set of focused crates, re-exported through the `rust-webx` umbrella crate:
+
+```
+┌──────────────────────────────────────────────────────────┐
+│              rust-webx  (umbrella crate)                  │
+│  re-exports core / host / macros / spa / openapi + rust_dix│
+├──────────┬──────────┬──────────┬─────────────────────────┤
+│rust-webx-│rust-webx-│rust-webx-│ rust-webx-macros         │
+│host      │core      │openapi   │ #[get] #[post] #[handler]│
+│Host +    │traits +  │OpenAPI   │ #[authorize] #[claims]   │
+│pipeline  │config    │generation│                          │
+├──────────┴──────────┴──────────┴─────────────────────────┤
+│                    rust-webx-core                        │
+│  IHost / IHttpContext / IMiddleware / IRequestHandler    │
+│  IMediator / AppOptions / Error / AppMode                │
+└──────────────────────┬───────────────────────────────────┘
+                       │
+          ┌────────────┼────────────┐
+          ▼            ▼            ▼
+   ┌──────────┐ ┌──────────┐ ┌──────────┐
+   │ rust-dix │ │  hyper   │ │inventory │
+   │ (DI)     │ │ (HTTP)   │ │ (route   │
+   └──────────┘ └──────────┘ └────╌─────┘
+                                   collection
+```
+
+### Crate layout
+
+```
+rust-webx/
+├── Cargo.toml                 # workspace root (v0.3.0)
+├── crates/
+│   ├── core/                  # rust-webx-core  — traits, configuration
+│   ├── host/                  # rust-webx-host  — Host builder, middleware
+│   │                          #   pipeline, Trie-based router, hyper integration
+│   ├── macros/                # rust-webx-macros — procedural macros
+│   ├── spa/                   # rust-webx-spa   — static-file / SPA middleware
+│   ├── openapi/               # rust-webx-openapi — OpenAPI spec generation + UI
+│   └── webx/                  # rust-webx       — umbrella crate (re-exports)
+├── docbit/                    # reference app: portfolio + blog + RBAC + docs
+└── dmbit/                     # reference app: device & inventory management
+```
+
+## Request-as-Endpoint: Hello World
+
+Declare a request, map a route onto it, implement its handler — no route table to maintain:
 
 ```rust
 use rust_webx::*;
@@ -24,7 +125,7 @@ impl IRequest<String> for HelloRequest {}
 #[derive(Default)]
 struct HelloHandler;
 
-#[handler]
+#[handler] // compile-time registration into the DI container
 #[async_trait]
 impl IRequestHandler<HelloRequest, String> for HelloHandler {
     async fn handle(&self, _req: HelloRequest) -> Result<String> {
@@ -42,148 +143,152 @@ async fn main() {
 }
 ```
 
-## 架构
+Routing discovery, handler resolution, middleware orchestration, and graceful shutdown are all handled automatically by `Host::build()`.
 
-```
-┌──────────────────────────────────────────────────────────┐
-│                   rust-webx (umbrella)                   │
-│  重新导出 core / host / macros / spa / openapi + rust_dix│
-├──────────┬──────────┬──────────┬─────────────────────────┤
-│rust-webx-│rust-webx-│rust-webx-│ rust-webx-macros        │
-│host      │core      │openapi   │ #[get] #[post] #[handler]│
-│Host +    │traits +  │OpenAPI   │ #[authorize]             │
-│Pipeline  │config    │生成      │                          │
-│+ Router  │mediator  │          │                          │
-├──────────┴──────────┴──────────┴─────────────────────────┤
-│                    rust-webx-core                        │
-│  IHost / IHttpContext / IMiddleware / IRequestHandler    │
-│  IMediator / AppOptions / Error / AppMode                │
-└──────────────────────┬───────────────────────────────────┘
-                       │
-          ┌────────────┼────────────┐
-          ▼            ▼            ▼
-   ┌──────────┐ ┌──────────┐ ┌──────────┐
-   │ rust-dix │ │  hyper   │ │inventory │
-   │ (DI)     │ │(HTTP)    │ │(路由收集) │
-   └──────────┘ └──────────┘ └──────────┘
-```
+## Core Concepts
 
-### Crate 结构
+| Concept | Description |
+|---------|-------------|
+| `IRequest<TResponse>` | Generic request marker carrying the response type. `IRequest<()>` returns `204 No Content`. |
+| `IRequestHandler<T, R>` | Two-type-parameter handler; `T` is the request type, `R` the response type. |
+| `#[get("/path")]` | Route shortcut annotated on an `impl IRequest<T>` block; registered at compile time. |
+| `#[post("/path")]` / `#[put("/path")]` / `#[delete("/path")]` | HTTP-method route shortcuts. |
+| `IMediator` | Mediator; `send()` dispatches requests, `publish()` publishes events. |
+| `IMiddleware` | Middleware; sequential pipeline that can short-circuit requests. |
+| `IPipelineBehavior` | Mediator pipeline interceptor that wraps the request-handling chain. |
+| `IEventHandler<T>` | Event handler; broadcast to all registered handlers via `publish()`. |
+| `Error` | Unified error type automatically mapped to HTTP status codes. |
+| `IClaims` / `IAuthenticationHandler` | JWT auth interfaces that extract identity from the Bearer token. |
+| `IAuthorizationPolicy` | Authorization-policy interface; checks roles/permissions against route patterns. |
 
-```
-rust-webx/
-├── Cargo.toml              # workspace root (v0.2.0)
-├── docbit/                 # 参考应用（作品集 + 博客 + RBAC）
-└── crates/
-    ├── core/               # rust-webx-core — trait 与配置
-    ├── host/               # rust-webx-host — Host、管道、路由
-    ├── macros/             # rust-webx-macros — 过程宏
-    ├── spa/                # rust-webx-spa — 静态资源 / SPA
-    ├── openapi/            # rust-webx-openapi — OpenAPI 生成
-    └── webx/               # rust-webx — 伞 crate
-```
-
-## 核心概念
-
-| 概念 | 说明 |
-|------|------|
-| `IRequest<TResponse>` | 泛型请求标记，承载响应类型。`IRequest<()>` 返回 204 No Content |
-| `IRequestHandler<T, R>` | 双类型参数处理器，`T` 为请求类型，`R` 为响应类型 |
-| `#[get("/path")]` | 路由快捷键，标注在 `impl IRequest<T>` 块上，编译时注册 |
-| `#[post("/path")]` | POST 路由快捷键 |
-| `#[put("/path")]` | PUT 路由快捷键 |
-| `#[delete("/path")]` | DELETE 路由快捷键 |
-| `IMediator` | 中介者，`send()` 分发请求，`publish()` 发布事件 |
-| `IMiddleware` | 中间件，顺序管道，可短路请求 |
-| `IPipelineBehavior` | Mediator 管道拦截器，可包装请求处理链 |
-| `IEventHandler<T>` | 事件处理器，通过 `publish()` 广播到所有注册的 handler |
-| `Error` | 统一错误类型，自动映射 HTTP 状态码 |
-| `IClaims` / `IAuthenticationHandler` | JWT 认证接口，从 Bearer Token 提取用户身份 |
-| `IAuthorizationPolicy` | 授权策略接口，基于路由模式检查角色/权限 |
-
-## 请求处理流程
+### Request lifecycle
 
 ```
 HTTP Request
     │
     ▼
-HttpContext::new(req).await    ←  读取 body bytes
+HttpContext::new(req).await            ← read body bytes
     │
     ▼
-MiddlewarePipeline::execute()
-    │  中间件按注册顺序调用
-    │  每个可设置 response status 短路
+MiddlewarePipeline::execute()          ← middleware run in registration order;
+    │                                      each may short-circuit the response
     ▼
-Router::match_route(ctx)
-    │  Trie 树匹配 method + path
-    │  提取 {param} 值到 route_params
+Router::match_route(ctx)               ← Trie match on method + path;
+    │                                      {param} values → route_params
     ▼
-┌──────────────┐
-│ Route matched │──No──▶ 404 "Not Found"
-└──────┬───────┘
-       │ Yes
-       ▼
-IEndpoint::handle(ctx)
-    │  调用 handler，序列化响应
+Route matched?  ──No──▶  404 "Not Found"
+    │ Yes
     ▼
-HttpResponse → hyper::Response
-    │  若 Err → 内置异常中间件映射状态码
+IEndpoint::handle(ctx)                 ← invoke handler, serialize response
     ▼
-JSON 响应: RFC 7807 application/problem+json（404/5xx）
+HttpResponse → hyper::Response         ← on Err, built-in exception middleware maps status
+    ▼
+JSON: RFC 7807 application/problem+json (4xx / 5xx)
 ```
 
-## 生产就绪能力
+## Example Applications
 
-| 能力 | 状态 |
-|------|------|
-| 优雅关闭（Ctrl+C / SIGTERM） | ✅ |
-| 连接 drain（Production 30s） | ✅ |
-| 健康检查 `/health` `/health/ready`（运行时探针，fail→503） | ✅ |
-| 安全响应头 + Request ID | ✅ 默认启用 |
-| JWT Production fail-fast | ✅ |
-| CORS `*` Production fail-fast | ✅ |
-| OpenAPI UI | Development 模式 only |
-| 速率限制 / 压缩 | 应用层 opt-in（`use_middleware`） |
-| TLS | ✅ 配置 `App.Urls` + `Tls.CertPath/KeyPath` |
+Two full reference applications ship in this repository, demonstrating the framework, layered project structure (`contracts` / `handlers` / `domain`), JWT auth, RBAC, and SPA hosting:
 
-环境变量：`RUST_WEBX_APP_BASE`（应用目录）、`JWT_SECRET`、`APP__Jwt__Secret`、`APP__*` 覆盖 appsettings。详见 `docs/rust-webx/`。
+| Application | Description | Dev URL |
+|-------------|-------------|---------|
+| [`docbit`](docbit/) | Portfolio + blog + RBAC + a full docs site (`docs/`). Uses `rust-ef` (SQLite in dev, MySQL in production). | <http://localhost:5000> |
+| [`dmbit`](dmbit/) | Device & inventory management for a data-center rig (device/product/spec/stock management). SQLite-based. | <http://localhost:5100> |
 
-## 异常映射
-
-| Error 变体 | HTTP 状态码 | 说明 |
-|-----------|-----------|------|
-| `Error::NotFound(msg)` | 404 | 资源未找到 |
-| `Error::Validation(msg)` | 400 | 参数校验失败 |
-| `Error::Serialization(e)` | 400 | 序列化/反序列化错误 |
-| `Error::Http(msg)` | 400 | HTTP 协议错误（含 401 未认证、403 禁止访问） |
-| `Error::Di(msg)` | 500 | DI 容器错误 |
-| `Error::Internal(msg)` | 500 | 内部错误 |
-| `Error::Message(msg)` | 500 | 通用错误消息 |
-| `Error::Routing(msg)` | 404 | 路由错误 |
-
-## 示例应用
-
-参考应用 **docbit**（`docbit/host`）演示 rust-ef 集成、JWT、RBAC、SPA 托管：
+Run the reference apps in development:
 
 ```bash
-cargo run -p docbit-host
-# http://localhost:5000
+cargo run -p docbit-host     # → http://localhost:5000
+cargo run -p dmbit-host      # → http://localhost:5100
 ```
 
-生产部署见 `docbit/PRODUCTION.md`。
+For production deployment details, see [`docbit/PRODUCTION.md`](docbit/PRODUCTION.md).
 
-## 依赖
+## Quick Start
 
-| Package | 版本 | 用途 |
-|---------|------|------|
-| `rust-dix` | 0.6 | DI 容器 |
-| `rust-ef` | 1.5.1 | ORM（可选，docbit 使用） |
-| `hyper` | 1 | HTTP 服务器 |
-| `tokio` | 1 | 异步运行时 |
-| `serde` / `serde_json` | 1 | 序列化 |
-| `inventory` | 0.3 | 编译时路由收集 |
-| `jsonwebtoken` | 9 | JWT 认证 |
+### Build
 
-## 许可证
+```bash
+# release build of a specific application
+cargo build --release -p docbit-host
+cargo build --release -p dmbit-host
+```
 
-MIT
+### Run a reference app
+
+```bash
+cargo run -p docbit-host     # development (SQLite), http://localhost:5000
+```
+
+### Publish (bare metal)
+
+```bash
+# Linux / macOS
+chmod +x docbit/publish.sh
+./docbit/publish.sh /opt/docbit --production
+
+# Windows
+.\docbit\publish.ps1 -Destination D:\deploy\docbit -Production
+```
+
+Set `DATABASE_URL` and `JWT_SECRET` before starting, or edit the generated `run.sh` / `run.cmd`.
+
+### Docker
+
+```bash
+# standalone image
+docker build -f docbit/Dockerfile .
+
+# full local stack (docbit + MySQL)
+cp docbit/.env.example docbit/.env     # edit JWT_SECRET and MYSQL_ROOT_PASSWORD
+docker compose -f docbit/docker-compose.yml --env-file docbit/.env up --build
+# → http://localhost:8100
+```
+
+## Production Readiness
+
+| Capability | Status |
+|------------|--------|
+| Graceful shutdown (Ctrl+C / SIGTERM) | ✅ |
+| Connection drain (30s in Production) | ✅ |
+| Health checks `/health` `/health/ready` (runtime probes, fail → 503) | ✅ |
+| Security response headers + Request ID | ✅ on by default |
+| JWT production fail-fast | ✅ |
+| CORS `*` production fail-fast | ✅ |
+| OpenAPI UI | Development mode only |
+| Rate limiting / compression | app-layer opt-in (`use_middleware`) |
+| TLS | ✅ via `App.Urls` + `Tls.CertPath/KeyPath` |
+
+## Environment Variables
+
+- `APP_ENV` — application environment (`Development` / `Production`).
+- `RUST_WEBX_APP_BASE` — application base directory.
+- `JWT_SECRET` — JWT signing secret (≥32 chars; requires `APP_ENV=Production`).
+- `APP__Jwt__Secret` — overrides `JWT_SECRET`.
+- `DATABASE_URL` — database connection string (docbit production, e.g. `mysql://user:pass@host:3306/docbit`).
+- `APP__*` — inline JSON override of any `appsettings.json` key (e.g. `APP__App__Urls`, `APP__Cors__Origins`).
+
+See the configuration chapter under `docs/rust-webx/` for the full variable reference.
+
+## Error Mapping
+
+| `Error` variant | HTTP status | Meaning |
+|-----------------|-------------|---------|
+| `Error::NotFound(msg)` | 404 | Resource not found |
+| `Error::Validation(msg)` | 400 | Validation failure |
+| `Error::Serialization(e)` | 400 | (De)serialization error |
+| `Error::Http(msg)` | 400 | HTTP protocol error (incl. 401 Unauthorized, 403 Forbidden) |
+| `Error::Di(msg)` | 500 | DI container error |
+| `Error::Internal(msg)` | 500 | Internal error |
+| `Error::Message(msg)` | 500 | Generic error message |
+| `Error::Routing(msg)` | 404 | Routing error |
+
+## Documentation
+
+- **rust-webx developer's manual** — a progressive-disclosure book under [`docs/rust-webx/`](docs/rust-webx/INDEX.md) (16 chapters, Chinese): introduction, quick start, architecture, DI & lifecycle, middleware, mediator & events, auth & security, configuration, production, project structure, extensibility, best practices, case study and migration guides.
+- **rust-ef reference** — the ORM handbook under [`docs/rust-ef/`](docs/rust-ef/INDEX.md), used by the `docbit` example.
+- The `docbit` reference app also serves these docs as a live website (`GET /api/docs/rust-webx/...`).
+
+## License
+
+[MIT](LICENSE)

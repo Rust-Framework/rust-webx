@@ -8,6 +8,7 @@
 
 A type-safe, convention-over-configuration platform where *requests are endpoints* — declare a route with one attribute, implement a handler, and the framework takes care of routing, dependency injection, middleware, and error mapping.
 
+[![Crates.io Version](https://img.shields.io/crates/v/rust-webx)](https://crates.io/crates/rust-webx)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![CI](https://github.com/Rust-Framework/rust-webx/actions/workflows/ci.yml/badge.svg)](https://github.com/Rust-Framework/rust-webx/actions/workflows/ci.yml)
 ![Rust](https://img.shields.io/badge/rust-%3E%3D%201.81-orange.svg)

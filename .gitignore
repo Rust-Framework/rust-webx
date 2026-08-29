@@ -15,3 +15,11 @@ publish/
 *.db
 *.db-shm
 *.db-wal
+
+# IDE / AI agent helpers (do not publish)
+.trae/
+.agents/
+.idea/
+.vscode/
+*.swp
+*.swo

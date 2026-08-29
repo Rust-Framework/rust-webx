@@ -2,9 +2,27 @@
 
 All notable changes to **rust-webx** are documented in this file.
 
-## [0.3.1] — 2026-08-16 — crates.io 再发布对齐
+## [0.3.1] — 2026-08-16 — crates.io 再发布对齐 · Re-release alignment
+
+> **English** · **简体中文**
+
+### English
+
+The `rust-webx` crate family has been re-published to crates.io and is now managed
+under the `Rust-Framework` organization.
 
 ### Changed
+
+- **crates.io re-publish**: `rust-webx` / `rust-webx-core` / `rust-webx-host` /
+  `rust-webx-macros` / `rust-webx-spa` / `rust-webx-openapi` aligned; repository
+  metadata (`license`, `repository`, `documentation`) aligned with the GitHub repo.
+- **Automated publishing**: new GitHub Actions `publish.yml` publishes crates in
+  dependency order on `v*` tag push.
+- **Docs landing page**: added `docs/README.md` bilingual navigation.
+
+> Maintenance release; the runtime API is unchanged.
+
+### 简体中文
 
 - **crates.io 再发布**：`rust-webx` / `rust-webx-core` / `rust-webx-host` / `rust-webx-macros`
   / `rust-webx-spa` / `rust-webx-openapi` 全系重新发布到 crates.io，归入 `Rust-Framework`

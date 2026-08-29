@@ -2,6 +2,18 @@
 
 All notable changes to **rust-webx** are documented in this file.
 
+## [0.3.1] — 2026-08-16 — crates.io 再发布对齐
+
+### Changed
+
+- **crates.io 再发布**：`rust-webx` / `rust-webx-core` / `rust-webx-host` / `rust-webx-macros`
+  / `rust-webx-spa` / `rust-webx-openapi` 全系重新发布到 crates.io，归入 `Rust-Framework`
+  组织统一管理；仓库元数据（`license`、`repository`、`documentation`）对齐 GitHub 仓库。
+- **自动化发布**：新增 GitHub Actions `publish.yml`，推送 `v*` tag 时按依赖顺序自动发布。
+- **文档落地页**：新增 `docs/README.md` 中英文档导航入口。
+
+> 本版本为发布维护迭代，不改变运行时 API。
+
 ## [0.3.0] — 2026-07-09
 
 ### Changed (Breaking)

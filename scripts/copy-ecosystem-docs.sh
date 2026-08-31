@@ -22,6 +22,19 @@ copy_doc_tree() {
     rm -rf "$dest"
     mkdir -p "$dest"
     cp -a "$src/." "$dest/"
+
+    # serde_json rejects UTF-8 BOM; strip from INDEX.json if an editor saved one.
+    local index_path="$dest/INDEX.json"
+    if [[ -f "$index_path" ]] && [[ "$(head -c 3 "$index_path" | wc -c)" -eq 3 ]]; then
+        local bom
+        bom="$(od -An -tx1 -N3 "$index_path" | tr -d ' \n')"
+        if [[ "$bom" == "efbbbf" ]]; then
+            tail -c +4 "$index_path" > "$index_path.tmp"
+            mv "$index_path.tmp" "$index_path"
+            echo "Stripped UTF-8 BOM from $index_path"
+        fi
+    fi
+
     echo "Copied $label -> $dest"
 }
 

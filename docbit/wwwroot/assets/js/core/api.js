@@ -29,7 +29,17 @@
     if (res.status === 204) return null;
     const text = await res.text();
     if (!text) return null;
-    return JSON.parse(text);
+    try {
+      return JSON.parse(text);
+    } catch (e) {
+      const looksHtml = /^\s*</.test(text);
+      const preview = text.trim().slice(0, 80).replace(/\s+/g, " ");
+      throw new Error(
+        looksHtml
+          ? `Expected JSON from ${path} but got HTML (${res.status}). Check API routing.`
+          : `Invalid JSON from ${path}: ${e.message}. Preview: ${preview}`
+      );
+    }
   }
 
   function get(path, auth) {

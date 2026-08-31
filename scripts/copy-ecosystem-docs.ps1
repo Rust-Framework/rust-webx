@@ -54,6 +54,17 @@ function Copy-DocTree {
 
     New-Item -ItemType Directory -Path $Dest -Force | Out-Null
     Copy-Item -Path (Join-Path $Source '*') -Destination $Dest -Recurse -Force
+
+    # serde_json rejects UTF-8 BOM; strip from INDEX.json if an editor saved one.
+    $indexPath = Join-Path $Dest 'INDEX.json'
+    if (Test-Path -LiteralPath $indexPath) {
+        $bytes = [System.IO.File]::ReadAllBytes($indexPath)
+        if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+            [System.IO.File]::WriteAllBytes($indexPath, [byte[]]$bytes[3..($bytes.Length - 1)])
+            Write-Host "Stripped UTF-8 BOM from $indexPath"
+        }
+    }
+
     Write-Host "Copied $Label -> $Dest"
 }
 

@@ -1,4 +1,4 @@
-﻿{
+{
   "meta": {
     "title": "Rust Web Framework",
     "subtitle": "高内聚·编译时路由·DI+中介者双核心",

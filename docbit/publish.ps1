@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     发布 docbit 站点到指定目录。
 

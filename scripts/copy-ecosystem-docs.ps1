@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Copy ecosystem documentation trees into a target docs/ directory.
 

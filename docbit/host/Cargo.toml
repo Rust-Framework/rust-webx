@@ -28,6 +28,7 @@ serde_json.workspace = true
 tracing.workspace = true
 bcrypt = "0.16"
 inventory.workspace = true
+native-tls = { version = "0.2", features = ["vendored"] }
 
 [dev-dependencies]
 reqwest = { version = "0.12", features = ["json"] }
@@ -36,6 +37,3 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
 serde_json.workspace = true
 serial_test = "3"
-
-# Cross-compile: enable vendored OpenSSL for linux-gnu from Windows
-openssl-sys = { version = "0.9", features = ["vendored"] }

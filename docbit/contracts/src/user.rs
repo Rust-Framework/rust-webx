@@ -19,14 +19,14 @@ pub struct UserModel {
     pub created_at: i64,
 }
 
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct InfoRequest;
 
 /// Get API server information including version and endpoint count
 #[get("/api/info")]
 impl IRequest<String> for InfoRequest {}
 
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct ListUsersRequest;
 
 /// Returns a list of all registered users
@@ -34,7 +34,7 @@ pub struct ListUsersRequest;
 #[authorize(role = "admin")]
 impl IRequest<Vec<UserModel>> for ListUsersRequest {}
 
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct GetUserRequest {
     pub id: String,
 }
@@ -71,7 +71,7 @@ pub struct UpdateUserRequest {
 impl IRequest<UserModel> for UpdateUserRequest {}
 
 #[claims]
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct DeleteUserRequest {
     pub id: String,
 }

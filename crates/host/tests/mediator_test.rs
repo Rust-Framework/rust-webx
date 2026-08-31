@@ -90,11 +90,16 @@ inventory::submit! {
 }
 
 #[derive(Default)]
+struct FailingHelloRequest;
+
+impl IRequest<HelloResponse> for FailingHelloRequest {}
+
+#[derive(Default)]
 struct FailingHandler;
 
 #[async_trait::async_trait]
-impl IRequestHandler<HelloRequest, HelloResponse> for FailingHandler {
-    async fn handle(&mut self, _req: HelloRequest) -> LrwfResult<HelloResponse> {
+impl IRequestHandler<FailingHelloRequest, HelloResponse> for FailingHandler {
+    async fn handle(&mut self, _req: FailingHelloRequest) -> LrwfResult<HelloResponse> {
         Err(Error::Internal("handler failure".into()))
     }
 }
@@ -119,7 +124,7 @@ fn __call_failing_handler(
             .downcast::<FailingHandler>()
             .map_err(|_| Error::Internal("Handler downcast failed".into()))?;
         let req = *request
-            .downcast::<HelloRequest>()
+            .downcast::<FailingHelloRequest>()
             .map_err(|_| Error::Internal("Request downcast failed".into()))?;
         let result: HelloResponse = h.handle(req).await?;
         Ok(Box::new(result) as Box<dyn std::any::Any + Send>)
@@ -128,8 +133,8 @@ fn __call_failing_handler(
 
 inventory::submit! {
     HandlerRegistration {
-        req_type_id: std::any::TypeId::of::<HelloRequest>(),
-        req_type_name: "HelloRequest",
+        req_type_id: std::any::TypeId::of::<FailingHelloRequest>(),
+        req_type_name: "FailingHelloRequest",
         factory: __factory_failing_handler,
         call: __call_failing_handler,
     }
@@ -165,27 +170,27 @@ impl IEventHandler<TestEvent> for FailingEventHandler {
 }
 
 // --- Mediator::send tests ---
-//
-// Note: HandlerCache is process-global and keyed by request type name. With
-// both HelloHandler and FailingHandler registered for HelloRequest, the
-// last-submitted entry wins (inventory iteration order is deterministic per
-// build but not guaranteed across rebuilds). These tests therefore only assert
-// the success/failure shape, not which handler ran. The
-// `mediator_send_handler_not_registered` test uses a dedicated request type
-// with no registration to verify the not-registered error path.
 
 fn build_provider() -> Arc<rust_dix::ServiceProvider> {
     ServiceCollection::new().build().unwrap()
 }
 
 #[tokio::test]
-async fn mediator_send_success_or_failure() {
+async fn mediator_send_success() {
     let mediator = Mediator::new(build_provider());
     let result = mediator.send(HelloRequest).await;
-    match result {
-        Ok(rsp) => assert_eq!(rsp.message, "hello"),
-        Err(Error::Internal(msg)) => assert_eq!(msg, "handler failure"),
-        Err(other) => panic!("Unexpected error variant: {:?}", other),
+    let rsp = result.expect("send should succeed");
+    assert_eq!(rsp.message, "hello");
+}
+
+#[tokio::test]
+async fn mediator_send_handler_failure() {
+    let mediator = Mediator::new(build_provider());
+    let result = mediator.send(FailingHelloRequest).await;
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        Error::Internal(msg) => assert_eq!(msg, "handler failure"),
+        other => panic!("Expected Internal error, got {:?}", other),
     }
 }
 

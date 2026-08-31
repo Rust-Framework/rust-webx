@@ -1,4 +1,4 @@
-# 请求生命周期
+﻿# 请求生命周期
 
 ## 全景流程图
 
@@ -87,6 +87,14 @@ RouteDispatch → Mediator::send(request) → dispatch → HandlerCache → IReq
 ```
 
 `IPipelineBehavior` 在 `dispatch` 内部包装 Handler 调用，实现验证、缓存等横切逻辑。
+
+## DispatchRuntime（Phase 4）
+
+每个 `Host` 持有实例级 `DispatchRuntime`（`ServiceProvider` + `HandlerCache`）。HTTP 请求与 `IHostedService::start` 在 `DispatchRuntime::run()` 作用域内执行；宏生成的 `RouteDispatch` 通过 `dispatch_provider()` 解析 DI。
+
+`global_provider()` / `set_global_provider()` 已弃用，仅作手动 shim；`Host::build()` 不再设置进程级 provider。无活跃 runtime 时，`dispatch_provider()` 在 shim 未设置时会 panic 并提示使用 `host.provider()` 或 `dispatch_runtime().run()`。
+
+多 Host 集成测试：`host.dispatch_runtime().run(async { ... }).await` 或 `host.provider()`。详见 [全局状态迁移](../16-migration/global-state.md)。
 
 ## 启动与关闭生命周期
 

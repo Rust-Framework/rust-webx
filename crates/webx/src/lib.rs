@@ -25,27 +25,32 @@ pub use rust_webx_core::mediator::{IEventRequest, IMediator, IRequest};
 pub use rust_webx_core::middleware::IMiddleware;
 pub use rust_webx_core::mode::AppMode;
 pub use rust_webx_core::pagination::{PagedRequest, PagedResponse};
-pub use rust_webx_core::paths::{app_base, looks_like_app_base};
+pub use rust_webx_core::paths::{app_base, framework_root, looks_like_app_base, looks_like_framework_root};
 pub use rust_webx_core::mediator::build_pipeline_chain;
 pub use rust_webx_core::pipeline::{BoxedNextFn, BoxedPipelineFuture, IPipelineBehavior};
 pub use rust_webx_core::problem::{FieldError, ProblemDetails};
 pub use rust_webx_core::route::diagnostics::{
-    format_route_diagnostics, orphan_handlers, orphan_routes, route_snapshots,
+    duplicate_handlers, format_route_diagnostics, orphan_handlers, orphan_route_details,
+    orphan_routes, route_snapshots,
 };
+pub use rust_webx_core::dispatch_runtime::{dispatch_provider, DispatchRuntime};
 pub use rust_webx_core::request_context::RequestContext;
 pub use rust_webx_core::routing::{HttpMethod, IEndpoint, IRouter, RouteMeta};
 
 // --- DI extensions ---
 pub use rust_webx_core::route::ext::{is_mediator_active, should_scan_endpoints, IServiceCollectionExt};
+pub use rust_webx_core::route::params::try_deserialize_from_params;
+#[allow(deprecated)]
 pub use rust_webx_core::route::scan::{
     global_provider, set_global_provider, HandlerCache, HandlerEntry, HandlerRegistration,
-    HandlerRegistry, ParamMeta, ResponseData, RouteDispatch, RouteEntry,
+    HandlerRegistry, ParamMeta, RequestParamEntry, ResponseData, RouteDispatch, RouteEntry,
 };
 
 // --- HTTP layer ---
 pub use rust_webx_host::auth_jwt::{init_jwt_secret, jwt_middleware, jwt_secret, JwtAuth, JwtClaims};
 pub use rust_webx_host::authz::{
-    collect_authorizers, resource_auth_middleware, AuthorizerSet, ResourceAuthorization,
+    build_resource_policy_from_routes, collect_authorizers, resource_auth_middleware, AuthorizerSet,
+    ResourceAuthorization,
 };
 pub use rust_webx_host::compression::{compress_gzip, CompressionConfig, CompressionMiddleware};
 pub use rust_webx_host::context::{HttpContext, HttpRequest, HttpResponse};
@@ -78,8 +83,7 @@ pub use rust_webx_openapi::{generate_openapi_spec, APIUI_HTML};
 
 // --- Macros ---
 pub use rust_webx_macros::{
-    authorize, claims, delete, endpoint, from_body, from_query, from_route,
-    get, handler, post, put,
+    authorize, claims, delete, endpoint, get, handler, post, put, WebxRequestMeta,
 };
 
 // --- Re-export rust_dix (for manual registration, #[inject] auto-registration, and module blocks) ---
@@ -99,6 +103,10 @@ pub use tokio;
 // =========================================================================
 // Convenience macro: register_handlers!
 //
+// **Deprecated for HTTP handlers.** HTTP dispatch uses inventory +
+// `HandlerCache` exclusively (`#[handler]` / `#[handler(inject)]`).
+// Keep this macro only for non-HTTP Mediator use or manual DI registration.
+//
 // Generates chained .singleton() calls for handlers that implement Default.
 //
 // Usage inside register():
@@ -108,12 +116,12 @@ pub use tokio;
 //           DeleteUserRequest => () => DeleteUserHandler,
 //       )
 //   })
-//
-// Expands to:
-//   svc
-//     .singleton::<dyn IRequestHandler<HelloRequest, String>>(|_| Arc::new(HelloHandler::default()))
-//     .singleton::<dyn IRequestHandler<DeleteUserRequest, ()>>(|_| Arc::new(DeleteUserHandler::default()))
 // =========================================================================
+#[deprecated(
+    since = "0.2.0",
+    note = "HTTP handlers should use `#[handler]` / `#[handler(inject)]` (inventory). \
+            register_handlers! remains for non-HTTP Mediator scenarios only."
+)]
 #[macro_export]
 macro_rules! register_handlers {
     ($svc:ident, $($req:ty => $rsp:ty => $handler:ty),+ $(,)?) => {

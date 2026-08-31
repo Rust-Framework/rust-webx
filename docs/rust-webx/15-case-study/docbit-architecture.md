@@ -1,4 +1,4 @@
-# 架构与模块划分
+﻿# 架构与模块划分
 
 ## 源码结构
 
@@ -9,9 +9,9 @@ docbit/src/
 ├── common/
 │   ├── bootstrap.rs     # AppPaths + DbContext（唯一手动 DI）
 │   ├── paths.rs         # 数据目录解析
-│   └── mod.rs           # 拦截器、授权器（inject_attr 自动注册）
+│   └── mod.rs           # 拦截器、授权器（#[inject] 自动注册）
 ├── contracts/           # Request/Response/enum/I…Service trait
-├── handlers/            # Handler + Service 实现（inject_attr + #[handler(inject)]）
+├── handlers/            # Handler + Service 实现（#[inject] + #[handler(inject)]）
 │   ├── doc_service.rs   # DocService（impl IDocumentService）
 │   └── blog_service.rs  # BlogService（impl IBlogService）
 └── domain/              # 实体 + EF 迁移
@@ -40,7 +40,7 @@ host.run().await?;
 - `AppPaths` — docs / blog-data / wwwroot / 数据库路径
 - `Mutex<DbContext>` — rust-ef SQLite 上下文
 
-业务 Service 在 `handlers/` 通过 `inject_attr(as = dyn I…Service)` 自注册。
+业务 Service 在 `handlers/` 通过 `#[inject] (implements I…Service)` 自注册。
 
 ## startup.rs
 

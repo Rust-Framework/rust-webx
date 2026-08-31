@@ -1,4 +1,4 @@
-# 核心设计原则
+﻿# 核心设计原则
 
 ## 约定优于配置（Convention over Configuration）
 

@@ -1,4 +1,4 @@
-# JWT Bearer 认证
+﻿# JWT Bearer 认证
 
 ## 一行启用
 
@@ -50,7 +50,7 @@ println!("Roles: {:?}", claims.roles());
 
 ## 签发 Token
 
-框架提供 `jwt_secret()` 获取当前密钥：
+框架提供 `jwt_secret()` 获取当前密钥（进程级 shim，由 `add_authentication()` 在 build 时初始化；与已弃用的 `global_provider()` 无关）：
 
 ```rust
 use jsonwebtoken::{encode, EncodingKey, Header};

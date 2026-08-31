@@ -1,4 +1,7 @@
-# docbit production image — multi-stage build from workspace root:
+# OPTIONAL — not the primary deployment path for docbit.
+# Recommended: Linux binary publish via docbit/publish.sh (see docbit/PRODUCTION.md).
+# This Dockerfile is kept for reference only and is not exercised in CI.
+#
 #   docker build -f docbit/Dockerfile .
 
 FROM rust:1-bookworm AS builder
@@ -36,7 +39,8 @@ WORKDIR /app
 COPY --from=builder /build/target/release/docbit-host /app/docbit-host
 COPY docbit/appsettings.json docbit/appsettings.Production.json ./
 COPY docbit/wwwroot ./wwwroot
-RUN mkdir -p docs
+# Ecosystem docs mirror (run scripts/sync-docs.ps1 before docker build if missing)
+COPY docs ./docs
 
 ENV APP_ENV=Production
 EXPOSE 8100

@@ -15,8 +15,9 @@ pub struct CommentModel {
     pub created_at: i64,
 }
 
-#[derive(Default)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct ListCommentsRequest {
+    #[from_route]
     pub blog_id: String,
 }
 
@@ -37,7 +38,7 @@ pub struct CreateCommentRequest {
 impl IRequest<CommentModel> for CreateCommentRequest {}
 
 #[claims]
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct DeleteCommentRequest {
     pub id: String,
 }

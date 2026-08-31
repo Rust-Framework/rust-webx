@@ -2,6 +2,58 @@
 
 All notable changes to **rust-webx** are documented in this file.
 
+## [0.3.2] — 2026-08-31 — Architecture remediation Phases 1–4
+
+> **English** · **简体中文**
+
+### English
+
+Breaking and behavioral changes from the architecture remediation (Phases 1–4). Migration guide: [docs/rust-webx/16-migration/global-state.md](docs/rust-webx/16-migration/global-state.md) and [docs/ARCHITECTURE_REMEDIATION.md](docs/ARCHITECTURE_REMEDIATION.md).
+
+#### Breaking
+
+- **Orphan routes/handlers fail at startup** — `HostBuilder::build()` panics when a route lacks `#[handler]`, a handler lacks a route, or duplicate `#[handler]` registrations exist. Run `cargo run -p <host> -- --doctor` before deploy.
+- **SPA no longer serves `/api/*` unknown paths** — unmatched API routes return 404/501 from the router, not `index.html`.
+- **`global_provider()` / `set_global_provider()` deprecated** — use `host.provider()` or `dispatch_provider()` inside `DispatchRuntime` scope. `Host::build()` no longer sets process-wide provider.
+- **`register_handlers!` deprecated for HTTP** — inventory + `#[handler]` is the sole HTTP registration path; macro retained for Mediator-only scenarios.
+
+#### Added
+
+- **`DispatchRuntime`** on each `Host` — instance-scoped provider + `HandlerCache`; HTTP and `IHostedService::start` run inside `dispatch_runtime().run()`.
+- **Query binding** — GET/DELETE merges route + query params via `Deserialize`.
+- **`#[authorize(permission = "…")]`** — parsed into route metadata; Resource Auth via `use_resource_authorization()`.
+- **`#[derive(WebxRequestMeta)]`** — OpenAPI query/path/body param metadata from field attributes (`#[from_query]`, `#[from_route]`, `#[from_body]`).
+- **Route diagnostics** — `--doctor` reports orphan routes/handlers and duplicate registrations with fix hints.
+
+#### Changed
+
+- **Middleware order** — CORS → JWT → SPA → Router; `SpaMiddleware` skips `/api/*`.
+- **Stub endpoints** — without dispatch return **501** (RFC 7807), not silent 200 stubs.
+- **Docbit/dmbit** — `DbInitService` uses `dispatch_provider()`; GET DTOs use `WebxRequestMeta`.
+
+#### Documented (not changed)
+
+- **`jwt_secret()`** remains a process-wide config shim (separate from DI); see security-best-practices.md.
+
+### 简体中文
+
+架构整改 Phase 1–4 的破坏性变更与行为调整。迁移请参阅 [全局状态迁移](docs/rust-webx/16-migration/global-state.md) 与 [ARCHITECTURE_REMEDIATION.md](docs/ARCHITECTURE_REMEDIATION.md)。
+
+#### 破坏性变更
+
+- **孤儿路由/Handler 启动即 panic** — 运行 `cargo run -p <host> -- --doctor` 排查。
+- **`/api/*` 未匹配路径不再返回 SPA `index.html`**。
+- **`global_provider()` 已弃用** — 改用 `dispatch_provider()` / `host.provider()`。
+- **HTTP 不再以 `register_handlers!` 为主路径** — 使用 inventory + `#[handler]`。
+
+#### 新增
+
+- **`DispatchRuntime`**、**Query 绑定**、**`#[authorize(permission)]`**、**`WebxRequestMeta`**、**`--doctor` 路由诊断**。
+
+#### 变更
+
+- 中间件顺序、Stub 501、Docbit GET DTO OpenAPI 元数据。
+
 ## [0.3.1] — 2026-08-16 — crates.io 再发布对齐 · Re-release alignment
 
 > **English** · **简体中文**

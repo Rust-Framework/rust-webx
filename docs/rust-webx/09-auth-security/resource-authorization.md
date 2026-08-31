@@ -1,4 +1,4 @@
-# 基于资源的授权
+﻿# 基于资源的授权
 
 ## 核心概念
 
@@ -18,23 +18,31 @@ use rust_webx::authz::ResourceAuthorization;
 
 let policy = ResourceAuthorization::new()
     .allow_role("/api/admin/**", "admin")
-    .allow_role("/api/users/{id}", "user")
-    .allow_permission("/api/settings", "settings:write");
+    .allow_role("/api/users/{id}", "user");
+    // .allow_permission(...) — 需 claims 侧支持对应 permission
 ```
 
-`add_authentication()` 自动从 `#[authorize]` 编译期元数据构建策略。
+## HostBuilder 集成
 
-## 授权流程
+```rust
+Host::builder()
+    .add_authentication()
+    .use_resource_authorization()  // 从 #[authorize] 元数据构建策略
+    .build()
+```
 
-```
-jwt_middleware 设置 claims
-    ↓
-resource_auth_middleware 读取 route_pattern()
-    ↓
-比对 claims.roles() / claims.permissions()
-    ↓
-通过 → 继续  |  拒绝 → 403
-```
+`use_resource_authorization()` 在 **endpoint 层**执行策略（路由匹配后、`route_pattern()` 可用），而非 pipeline 中间件层。这避免了 `resource_auth_middleware` 在路由匹配前无法获知 pattern 的问题。
+
+当前 HTTP 应用的常见做法：
+
+- `add_authentication()` → JWT 中间件
+- `#[authorize]` / `#[authorize(role = "…")]` / `#[authorize(permission = "…")]` → endpoint 内检查
+- `.use_resource_authorization()` → 可选，从编译期元数据构建 `ResourceAuthorization`
+- `IDynamicAuthorizer` → docbit 等应用的自定义策略（如 `RoleAuthorizer`）
+
+## 手动 middleware（高级）
+
+`resource_auth_middleware` 仍可用于自定义 `IAuthorizationPolicy`，但须在路由匹配之后才能读取 `route_pattern()`。框架内置的 `.use_resource_authorization()` 已在 endpoint 层处理此场景。
 
 ## 通配符
 
@@ -46,6 +54,6 @@ resource_auth_middleware 读取 route_pattern()
 
 ## 小结
 
-资源授权将路由模式与用户身份关联，实现声明式访问控制。
+资源授权将路由模式与用户身份关联，实现声明式访问控制。通过 `.use_resource_authorization()` 可从 `#[authorize]` 元数据自动构建策略。
 
 下一节：[authorize 宏与声明式授权](authorize-macro.md)

@@ -4,14 +4,15 @@
 //! a rich OpenAPI JSON document with parameters, request bodies,
 //! response schemas, and summaries.
 
-use rust_webx_core::route::scan::RouteEntry;
+use rust_webx_core::route::scan::{ParamMeta, RequestParamEntry, RouteEntry};
 use serde_json::{json, Value as JsonValue};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 /// Generate an OpenAPI 3.0.3 specification from registered routes.
 ///
 /// Returns a `serde_json::Value` that can be serialized to JSON.
 pub fn generate_openapi_spec(title: &str, version: &str) -> JsonValue {
+    let request_params = collect_request_params();
     let mut paths = serde_json::Map::new();
     let mut tags_set = BTreeSet::new();
 
@@ -24,14 +25,15 @@ pub fn generate_openapi_spec(title: &str, version: &str) -> JsonValue {
         let mut parameters = Vec::new();
         let mut has_body = false;
 
-        for param in entry.params {
+        for param in merge_params(entry.handler_type, entry.params, &request_params) {
             if param.source == "body" {
                 has_body = true;
             } else {
+                let required = param.source == "path";
                 parameters.push(json!({
                     "name": param.name,
                     "in": param.source,
-                    "required": true,
+                    "required": required,
                     "schema": { "type": param.type_hint },
                 }));
             }
@@ -95,6 +97,38 @@ pub fn generate_openapi_spec(title: &str, version: &str) -> JsonValue {
             }
         }
     })
+}
+
+fn collect_request_params() -> HashMap<&'static str, &'static [ParamMeta]> {
+    let mut map = HashMap::new();
+    for entry in inventory::iter::<RequestParamEntry> {
+        map.insert(entry.request_type, entry.params);
+    }
+    map
+}
+
+/// Merge route-level params (path/body from endpoint macro) with struct-level metadata.
+fn merge_params(
+    request_type: &'static str,
+    route_params: &'static [ParamMeta],
+    request_params: &HashMap<&'static str, &'static [ParamMeta]>,
+) -> Vec<ParamMeta> {
+    let mut merged: Vec<ParamMeta> = route_params.to_vec();
+    let mut seen: HashMap<(&str, &str), ()> = merged
+        .iter()
+        .map(|p| ((p.name, p.source), ()))
+        .collect();
+
+    if let Some(extra) = request_params.get(request_type) {
+        for param in *extra {
+            let key = (param.name, param.source);
+            if seen.insert(key, ()).is_none() {
+                merged.push(param.clone());
+            }
+        }
+    }
+
+    merged
 }
 
 /// Build a responses object based on the response type name.

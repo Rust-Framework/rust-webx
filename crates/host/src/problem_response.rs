@@ -17,6 +17,7 @@ pub fn problem_status_title(status: u16) -> &'static str {
         415 => "Unsupported Media Type",
         422 => "Unprocessable Entity",
         429 => "Too Many Requests",
+        501 => "Not Implemented",
         500 => "Internal Server Error",
         502 => "Bad Gateway",
         503 => "Service Unavailable",

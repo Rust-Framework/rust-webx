@@ -9,7 +9,7 @@ pub struct InventoryCsvModel {
 }
 
 #[claims]
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct ExportInventoryRequest;
 
 #[get("/api/inventory/export")]

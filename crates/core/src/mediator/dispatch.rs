@@ -13,7 +13,7 @@ use crate::error::Result;
 use crate::mediator::IRequest;
 use crate::mediator::pipeline::build_chain as build_pipeline_chain;
 use crate::pipeline::BoxedNextFn;
-use crate::route::scan::HandlerCache;
+use crate::dispatch_runtime::dispatch_handler_cache;
 
 /// Dispatch a request through the handler registry, pipeline, and call bridge.
 pub async fn dispatch<T, R>(provider: &Arc<rust_dix::ServiceProvider>, req: T) -> Result<R>
@@ -23,7 +23,7 @@ where
 {
     let req_type_id = std::any::TypeId::of::<T>();
 
-    let cache = HandlerCache::get_or_init();
+    let cache = dispatch_handler_cache();
     let entry = cache.get_by_type_id(req_type_id).ok_or_else(|| {
         crate::Error::Di(format!(
             "No #[handler] registered for request type '{}'",

@@ -37,7 +37,7 @@ pub struct AuthorizeModel {
 
 // ── Role CRUD ──
 
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct ListRolesRequest;
 
 #[get("/api/roles")]
@@ -69,7 +69,7 @@ pub struct UpdateRoleRequest {
 impl IRequest<RoleModel> for UpdateRoleRequest {}
 
 #[claims]
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct DeleteRoleRequest {
     pub id: String,
 }
@@ -90,7 +90,7 @@ pub struct AssignRoleRequest {
 #[authorize(role = "admin")]
 impl IRequest<String> for AssignRoleRequest {}
 
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct RevokeRoleRequest {
     pub user_id: String,
     pub role_id: String,
@@ -102,7 +102,7 @@ impl IRequest<String> for RevokeRoleRequest {}
 
 // ── Resource CRUD (admin-maintained 通用资源) ──
 
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct ListResourcesRequest;
 
 #[get("/api/resources")]
@@ -140,7 +140,7 @@ pub struct UpdateResourceRequest {
 impl IRequest<ResourceModel> for UpdateResourceRequest {}
 
 #[claims]
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct DeleteResourceRequest {
     pub id: String,
 }
@@ -151,7 +151,7 @@ impl IRequest<String> for DeleteResourceRequest {}
 
 // ── Authorize CRUD (role ↔ resource links) ──
 
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct ListAuthorizesRequest;
 
 #[get("/api/authorizes")]
@@ -169,7 +169,7 @@ pub struct CreateAuthorizeRequest {
 #[authorize(role = "admin")]
 impl IRequest<AuthorizeModel> for CreateAuthorizeRequest {}
 
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct DeleteAuthorizeRequest {
     pub id: String,
 }

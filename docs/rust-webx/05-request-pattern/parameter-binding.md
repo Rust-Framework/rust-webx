@@ -1,13 +1,13 @@
-# 参数绑定与序列化
+﻿# 参数绑定与序列化
 
 ## 参数来源
 
-| 来源 | Request 字段要求 | 示例 |
+| 来源 | Request 字段要求 | 状态 |
 |------|----------------|------|
-| 路径参数 | 字段名与 `{param}` 一致 | `id: String` ← `{id}` |
-| JSON Body | `#[derive(Deserialize)]` | POST/PUT 请求体 |
-| Query String | 字段名与 query key 一致 | `?page=1&size=10` |
-| 通配符 | `{*name}` 捕获剩余路径 | 文档内容 API |
+| 路径参数 | 字段名与 `{param}` 一致 | ✅ 已实现 |
+| JSON Body | `#[derive(Deserialize)]` | ✅ 已实现 |
+| Query String | 字段名与 query key 一致 | ✅ 已实现（GET/DELETE，需 `Deserialize`） |
+| 通配符 | `{*name}` 捕获剩余路径 | ✅ 已实现 |
 
 ## 路径参数
 
@@ -41,6 +41,23 @@ impl IRequest<UserDto> for CreateUserRequest {}
 
 自动返回 `Error::Serialization`，映射 HTTP 400。
 
+## Query String
+
+URL 查询参数（如 `?page=1&size=10`）在 **GET/DELETE** 请求中自动绑定到 Request 字段（字段名与 query key 一致）。Request 类型需 `#[derive(Deserialize)]`；路径参数优先于同名 query 参数。
+
+```rust
+#[derive(Default, Deserialize)]
+pub struct SearchRequest {
+    pub q: String,
+    pub page: String,
+}
+
+#[get("/api/search")]
+impl IRequest<SearchResult> for SearchRequest {}
+```
+
+`?q=hello&page=2` → `q = "hello"`, `page = "2"`。
+
 ## 响应序列化
 
 Handler 返回的类型必须实现 `Serialize`：
@@ -65,23 +82,23 @@ async fn handle(&self, req: MyRequest) -> Result<Json<serde_json::Value>> {
 }
 ```
 
-## 参数绑定宏（预留）
+## 参数绑定宏与 OpenAPI
 
-以下宏当前作为**元数据**标注，完整自动绑定在后续版本实现：
+以下宏标注参数来源；query/path 绑定在 dispatch 层按字段名自动完成：
 
 ```rust
-#[derive(Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct SearchRequest {
     #[from_query]
     pub q: String,
     #[from_route]
     pub category: String,
-    #[from_body]
-    pub filters: FilterDto,
 }
 ```
 
-当前版本需手动在 Handler 中从 `IHttpContext` 读取，或依赖框架的自动字段填充（路径参数 + body 反序列化已内置）。
+`#[derive(WebxRequestMeta)]` 将字段元数据注册到 OpenAPI 生成器。也可用 `#[webx_request(query_all)]` 将未标注字段视为 query 参数（排除 `claims` 与 `#[serde(skip)]`）。
+
+`#[from_query]` / `#[from_route]` 不标注时，GET 请求的 query 绑定仍按字段名自动完成，但 OpenAPI 需 `WebxRequestMeta` 才会列出 query 参数。
 
 ## 分页
 
@@ -102,6 +119,6 @@ impl IRequest<PagedResponse<UserDto>> for ListUsersRequest {}
 
 ## 小结
 
-路径参数靠字段名匹配，Body 靠 Deserialize，响应靠 Serialize。保持 Request struct 简洁是 API 设计的关键。
+路径参数靠字段名匹配，Body 靠 Deserialize，Query 靠 Deserialize + 字段名匹配，响应靠 Serialize。
 
 下一节：[错误处理与 ProblemDetails](error-handling.md)

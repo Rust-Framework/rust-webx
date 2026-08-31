@@ -23,3 +23,10 @@ publish/
 .vscode/
 *.swp
 *.swo
+
+# Sibling ecosystem doc mirrors (copied by scripts/sync-docs.* for publish bundles).
+# Only docs/rust-webx/ is committed — canonical sources live in sibling repos.
+docs/rust-dix/
+docs/rust-ef/
+docs/rust-agent-framework/
+docs/rust-gpui-rml/

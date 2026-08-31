@@ -1,4 +1,4 @@
-# 什么是 rust-webx
+﻿# 什么是 rust-webx
 
 ## 一句话定义
 
@@ -40,7 +40,7 @@ graph TB
         Pipeline[中间件管道]
         Router[Trie 路由器]
         Mediator[IMediator]
-        DI[rust-dicore 容器]
+        DI[rust-dix 容器]
     end
 
     Contracts --> Router

@@ -32,7 +32,7 @@ pub struct DeviceFilter {
 }
 
 #[claims]
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct ListDevicesRequest;
 
 #[get("/api/devices")]
@@ -40,7 +40,7 @@ pub struct ListDevicesRequest;
 impl IRequest<Vec<DeviceModel>> for ListDevicesRequest {}
 
 #[claims]
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct ListSpecDevicesRequest {
     pub id: String,
 }
@@ -50,7 +50,7 @@ pub struct ListSpecDevicesRequest {
 impl IRequest<Vec<DeviceModel>> for ListSpecDevicesRequest {}
 
 #[claims]
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct GetDeviceRequest {
     pub id: String,
 }
@@ -130,7 +130,7 @@ pub struct UpdateDeviceRequest {
 impl IRequest<DeviceModel> for UpdateDeviceRequest {}
 
 #[claims]
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct DeleteDeviceRequest {
     pub id: String,
 }

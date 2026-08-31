@@ -51,7 +51,7 @@ impl IRequest<AuthResponse> for LoginRequest {}
 // ── Auth Me (get current user from token) ──
 
 #[claims]
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct AuthMeRequest;
 
 /// Returns the current user's info based on the JWT token claims.

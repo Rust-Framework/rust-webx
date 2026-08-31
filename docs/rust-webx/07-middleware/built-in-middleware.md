@@ -1,4 +1,4 @@
-# 内置中间件一览
+﻿# 内置中间件一览
 
 ## 框架自带中间件
 
@@ -11,7 +11,7 @@
 | SecurityHeaders | 自动 | X-Frame-Options 等 |
 | CORS | `use_cors(config)` | 跨域 |
 | JWT Auth | `add_authentication()` | Bearer Token 认证 |
-| Resource Auth | `add_authentication()` 自动 | 基于路由的授权 |
+| Resource Auth | **手动** `resource_auth_middleware` | 基于路由的授权（未在 `add_authentication()` 中自动注册） |
 | RateLimit | 配置启用 | 请求速率限制 |
 | Compression | 自动 | Gzip 压缩 |
 | SPA | `use_spa("wwwroot")` | 静态文件托管 |
@@ -36,7 +36,7 @@ Host::builder()
 Host::builder().add_authentication()
 ```
 
-自动注册 `jwt_middleware`，从 `Jwt.Secret` 配置读取密钥。
+自动注册 `jwt_middleware`，从 `Jwt.Secret` 配置读取密钥。路由级 `#[authorize]` 在 endpoint 内检查 claims；可选实现 `IDynamicAuthorizer` 扩展策略。
 
 ## SPA 托管
 
@@ -56,6 +56,6 @@ svc.add_middleware::<RateLimitMiddleware>()
 
 ## 小结
 
-大部分生产中间件通过 `HostBuilder` 方法一行启用，无需手动组装。
+大部分生产中间件通过 `HostBuilder` 方法一行启用，无需手动组装。Resource Auth 中间件需显式接入，或依赖 endpoint / `IDynamicAuthorizer` 路径。
 
 下一节：[自定义中间件](custom-middleware.md)

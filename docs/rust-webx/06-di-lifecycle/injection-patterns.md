@@ -1,9 +1,9 @@
-# 依赖注入模式
+﻿# 依赖注入模式
 
-## inject_attr 模式（推荐）
+## rust-dix inject 模式（推荐）
 
 ```rust
-#[inject]
+#[derive(Inject)]
 pub struct LoginHandler {
     auth: Arc<dyn IAuthService>,
 }
@@ -13,7 +13,7 @@ pub struct LoginHandler {
 impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler { ... }
 ```
 
-`inject_attr` 自动：
+`#[derive(Inject)]` + `#[handler(inject)]` 自动：
 
 1. 注册 Handler 为 singleton
 2. 解析字段依赖（如 `Arc<dyn IAuthService>`）
@@ -50,14 +50,14 @@ pub struct GetDocIndexHandler {
 | 层级 | 位置 | 依赖类型 | 注册方式 |
 |------|------|---------|---------|
 | 接口 trait | `contracts/` | — | 无注册 |
-| Service 实现 | `handlers/` | `Arc<AppPaths>` 等 | `inject_attr(as = dyn IDocumentService)` |
-| Handler | `handlers/` | `Arc<dyn IDocumentService>` | `inject_attr` + `#[handler(inject)]` |
+| Service 实现 | `handlers/` | `Arc<AppPaths>` 等 | `#[inject]` |
+| Handler | `handlers/` | `Arc<dyn IDocumentService>` | `#[derive(Inject)]` + `#[handler(inject)]` |
 
-新增业务能力时：**先在 contracts 写 trait + DTO → 在 handlers 写实现并加 `inject_attr` → Handler 注入 `Arc<dyn I…Service>`**，无需改 `main.rs`。
+新增业务能力时：**先在 contracts 写 trait + DTO → 在 handlers 写实现并加 `#[inject]` → Handler 注入 `Arc<dyn I…Service>`**，无需改 `main.rs`。
 
 ## 组合根：只注册框架外类型
 
-`main.rs` 仅配置 Host；`bootstrap::configure` 只注册 rust-dicore 无法自行构造的类型：
+`main.rs` 仅配置 Host；`bootstrap::configure` 只注册 rust-dix 无法自行构造的类型：
 
 ```rust
 Host::builder()
@@ -76,7 +76,7 @@ pub fn configure(mut svc: ServiceCollection) -> ServiceCollection {
 }
 ```
 
-业务 Service（`DocService`、`BlogService`）**不在此手动注册**——由 `#[inject_attr(singleton, as = dyn I…Service)]` 在 handlers 中自动收集。
+业务 Service（`DocService`、`BlogService`）**不在此手动注册**——由 `#[inject]` 在 handlers 中自动收集。
 
 ## DbContext（rust-ef）
 
@@ -106,13 +106,13 @@ GetDocIndexHandler (handlers/)
 |---------|--------|
 | `I…Service` trait 放在 `services/` 或 `handlers/` 私有模块 | trait 定义在 `contracts/` |
 | Handler 依赖 `Arc<DocService>` 具体类型 | `Arc<dyn IDocumentService>` |
-| 在 `main.rs` 逐个 `singleton::<BlogService>` | handlers 中 `inject_attr(as = dyn IBlogService)` |
+| 在 `main.rs` 逐个 `singleton::<BlogService>` | handlers 中 `#[inject]` 实现 `IBlogService` |
 | `contracts` 引用 `domain` 类型作为 Response | DTO 定义在 contracts，handlers 中映射 |
 | Handler 内 `UserRepository::new()` | DI 注入 `Arc<dyn I…Service>` |
 | Handler 间直接调用 | `IMediator::send()` |
 
 ## 小结
 
-生产项目统一使用 **`contracts` 定义接口 + `handlers` 实现 + `inject_attr` + `#[handler(inject)]`**，`main.rs` 只做 Host 与基础设施配置。
+生产项目统一使用 **`contracts` 定义接口 + `handlers` 实现 + `#[inject]` + `#[handler(inject)]`**，`main.rs` 只做 Host 与基础设施配置。
 
 下一节：[IHostedService 后台服务](hosted-services.md)

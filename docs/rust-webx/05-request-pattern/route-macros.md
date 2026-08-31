@@ -1,4 +1,4 @@
-# 路由宏详解
+﻿# 路由宏详解
 
 ## 基本用法
 
@@ -70,13 +70,13 @@ impl IRequest<UserView> for AuthMeRequest {}
 #[authorize(role = "admin")]
 impl IRequest<UserDto> for CreateUserRequest {}
 
-// 需要特定权限
+// 需要特定 permission
 #[put("/api/settings")]
 #[authorize(permission = "settings:write")]
 impl IRequest<SettingsDto> for UpdateSettingsRequest {}
 ```
 
-授权元数据在编译期收集，`add_authentication()` 启用后由 `resource_auth_middleware` 执行。
+授权元数据在编译期收集。`add_authentication()` 启用 JWT；路由级 `#[authorize]` 在 endpoint 内检查。可选 `.use_resource_authorization()` 从路由元数据构建 `ResourceAuthorization` 策略（见 [资源授权](../09-auth-security/resource-authorization.md)）。
 
 ## 常见错误
 

@@ -72,8 +72,8 @@ fn emit_endpoint(attr: TokenStream, item: TokenStream) -> TokenStream {
     let rsp_type: syn::Type =
         syn::parse_str(&rsp_type_str).unwrap_or_else(|_| syn::parse_str("()").unwrap());
 
-    // Extract required_role from #[authorize] or #[authorize(role = "...")]
-    let required_role = extract_required_role(&item_impl.attrs);
+    // Extract auth requirements from #[authorize] attributes
+    let (required_role, required_permission) = extract_auth_requirements(&item_impl.attrs);
 
     // Parameter metadata for OpenAPI
     let mut params_tokens: Vec<proc_macro2::TokenStream> = extract_path_params(&path_str)
@@ -137,6 +137,7 @@ fn emit_endpoint(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #description,
                 &[#(#params_tokens),*],
                 #required_role,
+                #required_permission,
             )
         }
     };
@@ -194,11 +195,29 @@ fn generate_dispatch_fn(
             })
             .collect();
         quote! {
-            #ty { #(#field_assignments,)* ..::std::default::Default::default() }
+            {
+                if let Some(req) = ::rust_webx::try_deserialize_from_params::<#ty>(
+                    &route_params,
+                    &_query_params,
+                ) {
+                    req
+                } else {
+                    #ty { #(#field_assignments,)* ..::std::default::Default::default() }
+                }
+            }
         }
     } else {
         quote! {
-            <#ty as ::std::default::Default>::default()
+            {
+                if let Some(req) = ::rust_webx::try_deserialize_from_params::<#ty>(
+                    &route_params,
+                    &_query_params,
+                ) {
+                    req
+                } else {
+                    <#ty as ::std::default::Default>::default()
+                }
+            }
         }
     };
 
@@ -207,10 +226,11 @@ fn generate_dispatch_fn(
         fn #fn_name(
             body_bytes: Vec<u8>,
             route_params: ::std::collections::HashMap<String, String>,
-            _query_params: ::std::collections::HashMap<String, String>,
+            query_params: ::std::collections::HashMap<String, String>,
             claims: Option<Box<dyn ::rust_webx::IClaims>>,
         ) -> ::std::pin::Pin<Box<dyn ::std::future::Future<Output = ::rust_webx::Result<::rust_webx::ResponseData>> + Send>> {
             Box::pin(async move {
+                let _query_params = query_params;
                 let mut request: #ty = #build_request;
 
                 let operator_id = claims.as_ref().map(|c| c.subject().to_string());
@@ -224,7 +244,7 @@ fn generate_dispatch_fn(
 
                 ::rust_webx::RequestContext::run(operator_id, async move {
                 // HTTP adapter: construct request, then dispatch via IMediator (same path as in-process calls).
-                let mediator = ::rust_webx::Mediator::new(::std::sync::Arc::clone(::rust_webx::global_provider()));
+                let mediator = ::rust_webx::Mediator::new(::rust_webx::dispatch_provider());
                 let result: #rsp_type = mediator.send(request).await?;
 
                 let status = if #is_unit_response { 204 } else { 200 };
@@ -381,27 +401,37 @@ fn generate_summary(type_name: &str) -> String {
     result
 }
 
-/// Extract required_role from `#[authorize]` or `#[authorize(role = "admin")]` attributes.
-fn extract_required_role(attrs: &[Attribute]) -> proc_macro2::TokenStream {
+/// Extract auth metadata from `#[authorize]`, `#[authorize(role = "...")]`,
+/// or `#[authorize(permission = "...")]`.
+fn extract_auth_requirements(attrs: &[Attribute]) -> (proc_macro2::TokenStream, proc_macro2::TokenStream) {
+    let mut role = quote! { "" };
+    let mut permission = quote! { "" };
+
     for attr in attrs {
-        if attr.path().is_ident("authorize") {
-            match &attr.meta {
-                Meta::List(list) => {
-                    // Parse `role = "admin"` from inside the parens
-                    let tokens_str = list.tokens.to_string();
-                    if let Some(role_val) = tokens_str.trim().strip_prefix("role = \"") {
-                        if let Some(end) = role_val.find('"') {
-                            let role = &role_val[..end];
-                            return quote! { #role };
-                        }
+        if !attr.path().is_ident("authorize") {
+            continue;
+        }
+        match &attr.meta {
+            Meta::List(list) => {
+                let tokens_str = list.tokens.to_string();
+                if let Some(role_val) = tokens_str.trim().strip_prefix("role = \"") {
+                    if let Some(end) = role_val.find('"') {
+                        let value = &role_val[..end];
+                        role = quote! { #value };
+                    }
+                } else if let Some(perm_val) = tokens_str.trim().strip_prefix("permission = \"") {
+                    if let Some(end) = perm_val.find('"') {
+                        let value = &perm_val[..end];
+                        permission = quote! { #value };
                     }
                 }
-                Meta::Path(_) => return quote! { "authenticated" },
-                _ => {}
             }
+            Meta::Path(_) => role = quote! { "authenticated" },
+            _ => {}
         }
     }
-    quote! { "" }
+
+    (role, permission)
 }
 
 /// Extract `///` doc comments from a list of attributes.

@@ -1,6 +1,6 @@
-# 可复用的模式提炼
+﻿# 可复用的模式提炼
 
-## 模式 1：inject_attr + #[handler(inject)]
+## 模式 1：#[inject] + #[handler(inject)]
 
 ```rust
 #[inject]
@@ -72,7 +72,7 @@ Service 实现不感知 HTTP；Handler 只做参数传递与 `Error` 映射。
 .register(common::bootstrap::configure)  // 仅 AppPaths + DbContext
 ```
 
-业务代码通过 `inject_attr` 在 handlers 自注册，开发时聚焦 `contracts` / `handlers` / `domain`。
+业务代码通过 `#[inject]` 在 handlers 自注册，开发时聚焦 `contracts` / `handlers` / `domain`。
 
 ## 模式 6：DTO 在 contracts，实体在 domain
 

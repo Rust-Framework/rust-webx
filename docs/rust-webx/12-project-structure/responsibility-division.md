@@ -1,4 +1,4 @@
-# 职责归属与边界
+﻿# 职责归属与边界
 
 ## 职责矩阵
 
@@ -35,7 +35,7 @@
 新增业务能力的标准顺序：
 
 1. `contracts/` — 定义 DTO、enum、`I…Service` trait、`IRequest` 路由
-2. `handlers/` — 实现 Service + Handler，`inject_attr(as = dyn I…Service)`
+2. `handlers/` — 实现 Service + Handler，`#[inject] (implements I…Service)`
 3. `domain/` — 如需持久化，添加实体与迁移
 4. `main.rs` — 通常无需修改
 

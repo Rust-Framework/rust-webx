@@ -124,11 +124,21 @@ jobs:
       - name: Build release
         run: cargo build --release --workspace
 
-  docker-docbit:
-    name: Docker (docbit)
+  docbit:
+    name: Docbit (build + docs check)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build docbit image
-        run: docker build -f docbit/Dockerfile .
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # Git tracks only docs/rust-webx/ (native). Sibling slugs resolve at runtime in monorepo
+      # dev or are copied into publish bundles via scripts/sync-docs.* (not committed).
+      - name: Verify native docs (rust-webx)
+        run: |
+          test -f docs/rust-webx/INDEX.md || (echo "Missing docs/rust-webx — native handbook must be committed" && exit 1)
+          test -f docs/rust-webx/INDEX.json || (echo "Missing docs/rust-webx/INDEX.json" && exit 1)
+
+      - name: Build docbit-host
+        run: cargo build -p docbit-host

@@ -1,4 +1,4 @@
-# 常见陷阱与排查
+﻿# 常见陷阱与排查
 
 ## 1. No handler registered for request
 
@@ -22,7 +22,7 @@
 
 **原因**：Handler 未实现 `Default`。
 
-**解决**：有依赖的 Handler 使用 `inject_attr` + `#[handler(inject)]`。
+**解决**：有依赖的 Handler 使用 `#[inject]` + `#[handler(inject)]`。
 
 ## 4. 类型不匹配
 

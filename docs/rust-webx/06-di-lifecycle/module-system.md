@@ -1,4 +1,4 @@
-﻿# 模块系统与 inject 宏
+# 模块系统与 inject 宏
 
 ## rust-dix 模块
 

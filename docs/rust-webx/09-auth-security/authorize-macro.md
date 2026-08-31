@@ -1,4 +1,4 @@
-﻿# authorize 宏与声明式授权
+# authorize 宏与声明式授权
 
 ## 基本用法
 

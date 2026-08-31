@@ -1,4 +1,4 @@
-﻿# JWT Bearer 认证
+# JWT Bearer 认证
 
 ## 一行启用
 

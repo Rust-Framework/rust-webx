@@ -1,4 +1,4 @@
-﻿# 自定义 Endpoint
+# 自定义 Endpoint
 
 ## IEndpoint 接口
 

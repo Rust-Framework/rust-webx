@@ -1,4 +1,4 @@
-﻿# Contracts / Handlers / Domain 分层
+# Contracts / Handlers / Domain 分层
 
 基于 rust-webx 的业务应用采用**契约驱动、面向接口**的三层结构。关注契约，不关注实现。
 

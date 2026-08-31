@@ -1,4 +1,4 @@
-﻿# ASP.NET Core 的启发
+# ASP.NET Core 的启发
 
 ## 为什么是 ASP.NET Core
 

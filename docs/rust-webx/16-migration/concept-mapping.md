@@ -1,4 +1,4 @@
-﻿# 概念对照表
+# 概念对照表
 
 ## ASP.NET Core ↔ rust-webx
 

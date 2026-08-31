@@ -1,4 +1,4 @@
-﻿# Handler 注册策略
+# Handler 注册策略
 
 ## 推荐方式：inventory + HandlerCache（HTTP 唯一路径）
 

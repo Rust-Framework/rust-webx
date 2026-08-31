@@ -19,20 +19,30 @@ copy_doc_tree() {
         echo "WARN: skip $label — source not found: $src" >&2
         return 0
     fi
+    local src_full dest_full
+    src_full="$(cd "$src" && pwd)"
+    if [[ -d "$dest" ]]; then
+        dest_full="$(cd "$dest" && pwd)"
+        if [[ "$src_full" == "$dest_full" ]]; then
+            echo "WARN: skip $label — refusing to copy a tree onto itself: $src_full" >&2
+            return 0
+        fi
+    fi
     rm -rf "$dest"
     mkdir -p "$dest"
     cp -a "$src/." "$dest/"
 
-    # serde_json rejects UTF-8 BOM; strip from INDEX.json if an editor saved one.
-    local index_path="$dest/INDEX.json"
-    if [[ -f "$index_path" ]] && [[ "$(head -c 3 "$index_path" | wc -c)" -eq 3 ]]; then
-        local bom
-        bom="$(od -An -tx1 -N3 "$index_path" | tr -d ' \n')"
-        if [[ "$bom" == "efbbbf" ]]; then
-            tail -c +4 "$index_path" > "$index_path.tmp"
-            mv "$index_path.tmp" "$index_path"
-            echo "Stripped UTF-8 BOM from $index_path"
+    # serde_json / some parsers reject UTF-8 BOM; strip from all copied .json/.md.
+    local stripped=0
+    while IFS= read -r -d '' f; do
+        if [[ "$(od -An -tx1 -N3 "$f" 2>/dev/null | tr -d ' \n')" == "efbbbf" ]]; then
+            tail -c +4 "$f" > "$f.tmp"
+            mv "$f.tmp" "$f"
+            stripped=$((stripped + 1))
         fi
+    done < <(find "$dest" -type f \( -name '*.json' -o -name '*.md' \) -print0 2>/dev/null)
+    if [[ "$stripped" -gt 0 ]]; then
+        echo "Stripped UTF-8 BOM from $stripped json/md file(s) under $dest"
     fi
 
     echo "Copied $label -> $dest"

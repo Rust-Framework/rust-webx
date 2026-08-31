@@ -48,6 +48,15 @@ function Copy-DocTree {
         return
     }
 
+    $srcFull = (Resolve-Path -LiteralPath $Source).Path
+    if (Test-Path -LiteralPath $Dest) {
+        $destFull = (Resolve-Path -LiteralPath $Dest).Path
+        if ($srcFull -eq $destFull) {
+            Write-Warning "Skip $Label — refusing to copy a tree onto itself: $srcFull"
+            return
+        }
+    }
+
     if (Test-Path -LiteralPath $Dest) {
         Remove-Item -LiteralPath $Dest -Recurse -Force
     }
@@ -55,14 +64,17 @@ function Copy-DocTree {
     New-Item -ItemType Directory -Path $Dest -Force | Out-Null
     Copy-Item -Path (Join-Path $Source '*') -Destination $Dest -Recurse -Force
 
-    # serde_json rejects UTF-8 BOM; strip from INDEX.json if an editor saved one.
-    $indexPath = Join-Path $Dest 'INDEX.json'
-    if (Test-Path -LiteralPath $indexPath) {
-        $bytes = [System.IO.File]::ReadAllBytes($indexPath)
+    # serde_json / some parsers reject UTF-8 BOM; strip from all copied .json/.md.
+    $stripped = 0
+    Get-ChildItem -LiteralPath $Dest -Recurse -Include *.json, *.md -File -ErrorAction SilentlyContinue | ForEach-Object {
+        $bytes = [System.IO.File]::ReadAllBytes($_.FullName)
         if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
-            [System.IO.File]::WriteAllBytes($indexPath, [byte[]]$bytes[3..($bytes.Length - 1)])
-            Write-Host "Stripped UTF-8 BOM from $indexPath"
+            [System.IO.File]::WriteAllBytes($_.FullName, [byte[]]$bytes[3..($bytes.Length - 1)])
+            $stripped++
         }
+    }
+    if ($stripped -gt 0) {
+        Write-Host "Stripped UTF-8 BOM from $stripped json/md file(s) under $Dest"
     }
 
     Write-Host "Copied $Label -> $Dest"

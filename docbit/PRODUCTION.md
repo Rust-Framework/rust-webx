@@ -7,14 +7,13 @@
 | 变量 | 必需 (Production) | 说明 |
 |------|-------------------|------|
 | `APP_ENV` | 是 | 设为 `Production` |
-| `DATABASE_URL` | 是 | MySQL 连接串，如 `mysql://user:pass@host:3306/docbit` |
 | `JWT_SECRET` | 是 | ≥32 字符强密钥；也可使用 `APP__Jwt__Secret` |
 | `APP__App__Urls` | 否 | 监听地址 JSON 数组，默认 `http://0.0.0.0:8100` |
 | `APP__Cors__Origins` | 建议 | 生产 CORS 白名单，勿使用 `*` |
 | `APP__RateLimit__Enabled` | 建议 | 生产启用速率限制（docbit 默认 true） |
 | `APP__Metrics__Enabled` | 建议 | 启用 `GET /metrics` Prometheus 指标 |
 
-开发模式（默认）使用 SQLite（`<app_base>/app.db`），无需 `DATABASE_URL`。
+开发与生产均使用 SQLite（`<app_base>/app.db`），无需 `DATABASE_URL` 或外部数据库服务。
 
 ## Linux 编译与发布
 
@@ -67,7 +66,7 @@ chmod +x docbit/publish.sh
 └── run.sh                   # 生产启动脚本（--production 时生成）
 ```
 
-编辑 `run.sh`，填入 `DATABASE_URL` 与 `JWT_SECRET` 后启动：
+编辑 `run.sh`，填入 `JWT_SECRET` 后启动：
 
 ```bash
 cd /opt/docbit
@@ -97,7 +96,7 @@ cd /opt/docbit
 
 ```bash
 cp docbit/.env.example docbit/.env
-# 编辑 JWT_SECRET 与 MYSQL_ROOT_PASSWORD
+# 编辑 JWT_SECRET
 docker compose -f docbit/docker-compose.yml --env-file docbit/.env up --build
 ```
 

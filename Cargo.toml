@@ -19,7 +19,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.3.3"
+version = "0.3.4"
 edition = "2021"
 license = "MIT"
 authors = ["Start"]
@@ -30,12 +30,12 @@ description = "rust-webx — A Rust WebApi framework inspired by ASP.NET Core, b
 
 [workspace.dependencies]
 # Internal crates
-rust-webx-core = { version = "0.3.3", path = "crates/core" }
-rust-webx-host = { version = "0.3.3", path = "crates/host" }
-rust-webx-macros = { version = "0.3.3", path = "crates/macros" }
-rust-webx = { version = "0.3.3", path = "crates/webx" }
-rust-webx-spa = { version = "0.3.3", path = "crates/spa" }
-rust-webx-openapi = { version = "0.3.3", path = "crates/openapi" }
+rust-webx-core = { version = "0.3.4", path = "crates/core" }
+rust-webx-host = { version = "0.3.4", path = "crates/host" }
+rust-webx-macros = { version = "0.3.4", path = "crates/macros" }
+rust-webx = { version = "0.3.4", path = "crates/webx" }
+rust-webx-spa = { version = "0.3.4", path = "crates/spa" }
+rust-webx-openapi = { version = "0.3.4", path = "crates/openapi" }
 
 # Docbit sub-crates
 docbit-contracts = { version = "0.1.0", path = "docbit/contracts" }

@@ -2,7 +2,11 @@
 # will have compiled files and executables
 target/
 output/
-.tools/
+.tools/*
+!.tools/zig-link.bat
+!.tools/zig-cc.bat
+!.tools/zig-c++.bat
+!.tools/zig-ar.bat
 publish/
 # Cargo.lock is NOT ignored because this workspace contains binary crates
 # (the lrwf-demo crate). See:

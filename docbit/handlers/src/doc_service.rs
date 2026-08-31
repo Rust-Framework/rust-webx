@@ -150,13 +150,14 @@ impl DocService {
     fn load_portfolio_item(&self, dir_slug: &str) -> Result<ExhibitionModel, String> {
         let raw = fs::read_to_string(Self::work_dir(dir_slug).join("INDEX.json"))
             .map_err(|e| e.to_string())?;
+        let raw = strip_json_preamble(&raw)?;
 
-        if let Ok(root) = serde_json::from_str::<IndexRootV2>(&raw) {
+        if let Ok(root) = serde_json::from_str::<IndexRootV2>(raw) {
             return Ok(meta_to_exhibition_model(dir_slug, &root.meta, !root.parts.is_empty()));
         }
 
         let legacy: DocIndex =
-            serde_json::from_str(&raw).map_err(|e| format!("Invalid INDEX.json: {}", e))?;
+            serde_json::from_str(raw).map_err(|e| format!("Invalid INDEX.json: {}", e))?;
         Ok(ExhibitionModel {
             id: String::new(),
             slug: dir_slug.to_string(),
@@ -323,7 +324,8 @@ impl IDocumentService for DocService {
                 continue;
             }
             let raw = fs::read_to_string(&index_path).map_err(|e| e.to_string())?;
-            let logo_name = serde_json::from_str::<IndexRootV2>(&raw)
+            let raw = strip_json_preamble(&raw).unwrap_or("");
+            let logo_name = serde_json::from_str::<IndexRootV2>(raw)
                 .ok()
                 .and_then(|r| r.meta.logo)
                 .unwrap_or_else(|| "logo.svg".to_string());
@@ -424,11 +426,28 @@ struct IndexSection {
     title: String,
 }
 
+/// Strip UTF-8 BOM / leading whitespace so editors that save with BOM still parse.
+fn strip_json_preamble(raw: &str) -> Result<&str, String> {
+    let trimmed = raw.strip_prefix('\u{FEFF}').unwrap_or(raw).trim();
+    if trimmed.is_empty() {
+        return Err("Invalid INDEX.json: file is empty".into());
+    }
+    Ok(trimmed)
+}
+
 fn parse_index_json(raw: &str) -> Result<DocIndex, String> {
+    let raw = strip_json_preamble(raw)?;
     if let Ok(root) = serde_json::from_str::<IndexRootV2>(raw) {
         return Ok(expand_index_v2(root));
     }
-    serde_json::from_str(raw).map_err(|e| format!("Invalid INDEX.json: {}", e))
+    serde_json::from_str(raw).map_err(|e| {
+        let hint = if raw.starts_with('<') {
+            " (got HTML/non-JSON — check deploy docs path or SPA fallback)"
+        } else {
+            ""
+        };
+        format!("Invalid INDEX.json: {}{}", e, hint)
+    })
 }
 
 fn expand_index_v2(root: IndexRootV2) -> DocIndex {
@@ -580,4 +599,62 @@ fn title_from_markdown(path: &Path) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SAMPLE_V2: &str = r#"{
+  "meta": {
+    "title": "Demo",
+    "docTitle": "Demo Docs",
+    "pathRules": {
+      "chapterIndex": "{chapterId}/INDEX.md",
+      "sectionFile": "{chapterId}/{sectionId}.md"
+    }
+  },
+  "parts": [
+    {
+      "title": "Part 1",
+      "chapters": [
+        {
+          "id": "01-intro",
+          "title": "Intro",
+          "sections": [{ "id": "hello", "title": "Hello" }]
+        }
+      ]
+    }
+  ]
+}"#;
+
+    #[test]
+    fn parse_index_accepts_utf8_bom() {
+        let with_bom = format!("\u{FEFF}{}", SAMPLE_V2);
+        let index = parse_index_json(&with_bom).expect("BOM should be stripped");
+        assert_eq!(index.title, "Demo Docs");
+        assert!(!index.items.is_empty());
+    }
+
+    #[test]
+    fn parse_index_rejects_empty() {
+        let err = parse_index_json("\u{FEFF}  \n").unwrap_err();
+        assert!(err.contains("empty"), "{err}");
+    }
+
+    #[test]
+    fn parse_index_hints_html() {
+        let err = parse_index_json("<!DOCTYPE html>").unwrap_err();
+        assert!(err.contains("HTML"), "{err}");
+    }
+
+    #[test]
+    fn work_dir_prefers_deploy_mirror() {
+        // app_base() in tests may vary; just ensure sibling mapping is defined.
+        assert_eq!(
+            DocService::sibling_doc_relative("rust-webx"),
+            Some("rust-webx/docs/rust-webx")
+        );
+        assert!(DocService::sibling_doc_relative("unknown").is_none());
+    }
 }

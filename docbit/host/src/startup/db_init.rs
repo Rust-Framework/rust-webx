@@ -8,7 +8,7 @@ use rust_webx::*;
 use docbit_contracts::docs::IDocumentService;
 use docbit_domain::configure_for_init;
 
-use super::admin_user;
+use super::{admin_user, exhibition_seed};
 
 async fn ensure_schema(ctx: &mut DbContext) -> Result<()> {
     match ctx.ensure_created().await {
@@ -57,6 +57,9 @@ impl IHostedService for DbInitService {
         tracing::info!("[DbInit] Tables created and seed data applied.");
 
         admin_user::ensure_admin_user(&mut ctx).await?;
+
+        // EF has_data is INSERT OR IGNORE only — refresh GitHub links on existing DBs.
+        exhibition_seed::ensure_exhibition_repo_urls(&mut ctx).await?;
 
         self.docs
             .ensure_all_indexes()

@@ -53,7 +53,7 @@ function Copy-DocTree {
     }
 
     New-Item -ItemType Directory -Path $Dest -Force | Out-Null
-    Copy-Item -LiteralPath (Join-Path $Source '*') -Destination $Dest -Recurse -Force
+    Copy-Item -Path (Join-Path $Source '*') -Destination $Dest -Recurse -Force
     Write-Host "Copied $Label -> $Dest"
 }
 

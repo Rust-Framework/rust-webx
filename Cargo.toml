@@ -19,23 +19,23 @@ members = [
 ]
 
 [workspace.package]
-version = "0.3.2"
+version = "0.3.3"
 edition = "2021"
 license = "MIT"
 authors = ["Start"]
 homepage = "https://github.com/Rust-Framework/rust-webx"
 repository = "https://github.com/Rust-Framework/rust-webx"
 documentation = "https://docs.rs/rust-webx"
-description = "rust-webx â€” A Rust WebApi framework inspired by ASP.NET Core, built on DI + Mediator pattern"
+description = "rust-webx â€?A Rust WebApi framework inspired by ASP.NET Core, built on DI + Mediator pattern"
 
 [workspace.dependencies]
 # Internal crates
-rust-webx-core = { version = "0.3.2", path = "crates/core" }
-rust-webx-host = { version = "0.3.2", path = "crates/host" }
-rust-webx-macros = { version = "0.3.2", path = "crates/macros" }
-rust-webx = { version = "0.3.2", path = "crates/webx" }
-rust-webx-spa = { version = "0.3.2", path = "crates/spa" }
-rust-webx-openapi = { version = "0.3.2", path = "crates/openapi" }
+rust-webx-core = { version = "0.3.3", path = "crates/core" }
+rust-webx-host = { version = "0.3.3", path = "crates/host" }
+rust-webx-macros = { version = "0.3.3", path = "crates/macros" }
+rust-webx = { version = "0.3.3", path = "crates/webx" }
+rust-webx-spa = { version = "0.3.3", path = "crates/spa" }
+rust-webx-openapi = { version = "0.3.3", path = "crates/openapi" }
 
 # Docbit sub-crates
 docbit-contracts = { version = "0.1.0", path = "docbit/contracts" }
@@ -47,7 +47,7 @@ dmbit-contracts = { version = "0.1.0", path = "dmbit/contracts" }
 dmbit-domain = { version = "0.1.0", path = "dmbit/domain" }
 dmbit-handlers = { version = "0.1.0", path = "dmbit/handlers" }
 
-# DI framework (crates.io â€” no local path required)
+# DI framework (crates.io â€?no local path required)
 rust-dix = "0.6"
 rust-dix-macros = "0.6"
 

@@ -2,61 +2,84 @@
 
 All notable changes to **rust-webx** are documented in this file.
 
-## [0.3.2] — 2026-08-31 — Architecture remediation Phases 1–4
+
+## [0.3.3] — 2026-08-31 — Docbit cross-compile and docs
 
 > **English** · **简体中文**
 
 ### English
 
-Breaking and behavioral changes from the architecture remediation (Phases 1–4). Migration guide: [docs/rust-webx/16-migration/global-state.md](docs/rust-webx/16-migration/global-state.md) and [docs/ARCHITECTURE_REMEDIATION.md](docs/ARCHITECTURE_REMEDIATION.md).
-
-#### Breaking
-
-- **Orphan routes/handlers fail at startup** — `HostBuilder::build()` panics when a route lacks `#[handler]`, a handler lacks a route, or duplicate `#[handler]` registrations exist. Run `cargo run -p <host> -- --doctor` before deploy.
-- **SPA no longer serves `/api/*` unknown paths** — unmatched API routes return 404/501 from the router, not `index.html`.
-- **`global_provider()` / `set_global_provider()` deprecated** — use `host.provider()` or `dispatch_provider()` inside `DispatchRuntime` scope. `Host::build()` no longer sets process-wide provider.
-- **`register_handlers!` deprecated for HTTP** — inventory + `#[handler]` is the sole HTTP registration path; macro retained for Mediator-only scenarios.
-
-#### Added
-
-- **`DispatchRuntime`** on each `Host` — instance-scoped provider + `HandlerCache`; HTTP and `IHostedService::start` run inside `dispatch_runtime().run()`.
-- **Query binding** — GET/DELETE merges route + query params via `Deserialize`.
-- **`#[authorize(permission = "…")]`** — parsed into route metadata; Resource Auth via `use_resource_authorization()`.
-- **`#[derive(WebxRequestMeta)]`** — OpenAPI query/path/body param metadata from field attributes (`#[from_query]`, `#[from_route]`, `#[from_body]`).
-- **Route diagnostics** — `--doctor` reports orphan routes/handlers and duplicate registrations with fix hints.
+Maintenance release: docbit-host cross-compile tooling, ecosystem docs publishing, and documentation polish. Published crate APIs are unchanged from 0.3.2.
 
 #### Changed
 
-- **Middleware order** — CORS → JWT → SPA → Router; `SpaMiddleware` skips `/api/*`.
-- **Stub endpoints** — without dispatch return **501** (RFC 7807), not silent 200 stubs.
-- **Docbit/dmbit** — `DbInitService` uses `dispatch_provider()`; GET DTOs use `WebxRequestMeta`.
+- **docbit-host**: use `native-tls` with vendored features instead of `openssl-sys` for Windows → linux-gnu cross builds.
+- **Docbit publish**: copy ecosystem docs from source repos; PowerShell 5.1 UTF-8 BOM on scripts; Path wildcard fix for doc copy.
+- **Docs**: standardized `INDEX.json` metadata; exhibition titles and descriptions in docs seed.
+
+### 简体中文
+
+维护版本：docbit-host 交叉编译、生态文档发布与文档润色。已发布 crate 的 API 与 0.3.2 一致。
+
+#### 变更
+
+- **docbit-host**：交叉编译改用 `native-tls` vendored。
+- **Docbit 发布脚本**与**文档 INDEX/展览**更新。
+## [0.3.2] 鈥?2026-08-31 鈥?Architecture remediation Phases 1鈥?
+
+> **English** 路 **绠€浣撲腑鏂?*
+
+### English
+
+Breaking and behavioral changes from the architecture remediation (Phases 1鈥?). Migration guide: [docs/rust-webx/16-migration/global-state.md](docs/rust-webx/16-migration/global-state.md) and [docs/ARCHITECTURE_REMEDIATION.md](docs/ARCHITECTURE_REMEDIATION.md).
+
+#### Breaking
+
+- **Orphan routes/handlers fail at startup** 鈥?`HostBuilder::build()` panics when a route lacks `#[handler]`, a handler lacks a route, or duplicate `#[handler]` registrations exist. Run `cargo run -p <host> -- --doctor` before deploy.
+- **SPA no longer serves `/api/*` unknown paths** 鈥?unmatched API routes return 404/501 from the router, not `index.html`.
+- **`global_provider()` / `set_global_provider()` deprecated** 鈥?use `host.provider()` or `dispatch_provider()` inside `DispatchRuntime` scope. `Host::build()` no longer sets process-wide provider.
+- **`register_handlers!` deprecated for HTTP** 鈥?inventory + `#[handler]` is the sole HTTP registration path; macro retained for Mediator-only scenarios.
+
+#### Added
+
+- **`DispatchRuntime`** on each `Host` 鈥?instance-scoped provider + `HandlerCache`; HTTP and `IHostedService::start` run inside `dispatch_runtime().run()`.
+- **Query binding** 鈥?GET/DELETE merges route + query params via `Deserialize`.
+- **`#[authorize(permission = "鈥?)]`** 鈥?parsed into route metadata; Resource Auth via `use_resource_authorization()`.
+- **`#[derive(WebxRequestMeta)]`** 鈥?OpenAPI query/path/body param metadata from field attributes (`#[from_query]`, `#[from_route]`, `#[from_body]`).
+- **Route diagnostics** 鈥?`--doctor` reports orphan routes/handlers and duplicate registrations with fix hints.
+
+#### Changed
+
+- **Middleware order** 鈥?CORS 鈫?JWT 鈫?SPA 鈫?Router; `SpaMiddleware` skips `/api/*`.
+- **Stub endpoints** 鈥?without dispatch return **501** (RFC 7807), not silent 200 stubs.
+- **Docbit/dmbit** 鈥?`DbInitService` uses `dispatch_provider()`; GET DTOs use `WebxRequestMeta`.
 
 #### Documented (not changed)
 
 - **`jwt_secret()`** remains a process-wide config shim (separate from DI); see security-best-practices.md.
 
-### 简体中文
+### 绠€浣撲腑鏂?
 
-架构整改 Phase 1–4 的破坏性变更与行为调整。迁移请参阅 [全局状态迁移](docs/rust-webx/16-migration/global-state.md) 与 [ARCHITECTURE_REMEDIATION.md](docs/ARCHITECTURE_REMEDIATION.md)。
+鏋舵瀯鏁存敼 Phase 1鈥? 鐨勭牬鍧忔€у彉鏇翠笌琛屼负璋冩暣銆傝縼绉昏鍙傞槄 [鍏ㄥ眬鐘舵€佽縼绉籡(docs/rust-webx/16-migration/global-state.md) 涓?[ARCHITECTURE_REMEDIATION.md](docs/ARCHITECTURE_REMEDIATION.md)銆?
 
-#### 破坏性变更
+#### 鐮村潖鎬у彉鏇?
 
-- **孤儿路由/Handler 启动即 panic** — 运行 `cargo run -p <host> -- --doctor` 排查。
-- **`/api/*` 未匹配路径不再返回 SPA `index.html`**。
-- **`global_provider()` 已弃用** — 改用 `dispatch_provider()` / `host.provider()`。
-- **HTTP 不再以 `register_handlers!` 为主路径** — 使用 inventory + `#[handler]`。
+- **瀛ゅ効璺敱/Handler 鍚姩鍗?panic** 鈥?杩愯 `cargo run -p <host> -- --doctor` 鎺掓煡銆?
+- **`/api/*` 鏈尮閰嶈矾寰勪笉鍐嶈繑鍥?SPA `index.html`**銆?
+- **`global_provider()` 宸插純鐢?* 鈥?鏀圭敤 `dispatch_provider()` / `host.provider()`銆?
+- **HTTP 涓嶅啀浠?`register_handlers!` 涓轰富璺緞** 鈥?浣跨敤 inventory + `#[handler]`銆?
 
-#### 新增
+#### 鏂板
 
-- **`DispatchRuntime`**、**Query 绑定**、**`#[authorize(permission)]`**、**`WebxRequestMeta`**、**`--doctor` 路由诊断**。
+- **`DispatchRuntime`**銆?*Query 缁戝畾**銆?*`#[authorize(permission)]`**銆?*`WebxRequestMeta`**銆?*`--doctor` 璺敱璇婃柇**銆?
 
-#### 变更
+#### 鍙樻洿
 
-- 中间件顺序、Stub 501、Docbit GET DTO OpenAPI 元数据。
+- 涓棿浠堕『搴忋€丼tub 501銆丏ocbit GET DTO OpenAPI 鍏冩暟鎹€?
 
-## [0.3.1] — 2026-08-16 — crates.io 再发布对齐 · Re-release alignment
+## [0.3.1] 鈥?2026-08-16 鈥?crates.io 鍐嶅彂甯冨榻?路 Re-release alignment
 
-> **English** · **简体中文**
+> **English** 路 **绠€浣撲腑鏂?*
 
 ### English
 
@@ -74,26 +97,26 @@ under the `Rust-Framework` organization.
 
 > Maintenance release; the runtime API is unchanged.
 
-### 简体中文
+### 绠€浣撲腑鏂?
 
-- **crates.io 再发布**：`rust-webx` / `rust-webx-core` / `rust-webx-host` / `rust-webx-macros`
-  / `rust-webx-spa` / `rust-webx-openapi` 全系重新发布到 crates.io，归入 `Rust-Framework`
-  组织统一管理；仓库元数据（`license`、`repository`、`documentation`）对齐 GitHub 仓库。
-- **自动化发布**：新增 GitHub Actions `publish.yml`，推送 `v*` tag 时按依赖顺序自动发布。
-- **文档落地页**：新增 `docs/README.md` 中英文档导航入口。
+- **crates.io 鍐嶅彂甯?*锛歚rust-webx` / `rust-webx-core` / `rust-webx-host` / `rust-webx-macros`
+  / `rust-webx-spa` / `rust-webx-openapi` 鍏ㄧ郴閲嶆柊鍙戝竷鍒?crates.io锛屽綊鍏?`Rust-Framework`
+  缁勭粐缁熶竴绠＄悊锛涗粨搴撳厓鏁版嵁锛坄license`銆乣repository`銆乣documentation`锛夊榻?GitHub 浠撳簱銆?
+- **鑷姩鍖栧彂甯?*锛氭柊澧?GitHub Actions `publish.yml`锛屾帹閫?`v*` tag 鏃舵寜渚濊禆椤哄簭鑷姩鍙戝竷銆?
+- **鏂囨。钀藉湴椤?*锛氭柊澧?`docs/README.md` 涓嫳鏂囨。瀵艰埅鍏ュ彛銆?
 
-> 本版本为发布维护迭代，不改变运行时 API。
+> 鏈増鏈负鍙戝竷缁存姢杩唬锛屼笉鏀瑰彉杩愯鏃?API銆?
 
-## [0.3.0] — 2026-07-09
+## [0.3.0] 鈥?2026-07-09
 
 ### Changed (Breaking)
 
-- **`HandlerRegistration.factory` / `HandlerEntry.factory`** signature: `fn(&dyn IServiceResolver) -> Box<dyn Any + Send>` → `fn(&dyn IServiceResolver) -> Result<Box<dyn Any + Send>>`. The `#[handler]` macro generates the new signature automatically; only manual `HandlerRegistration` constructions need updating.
+- **`HandlerRegistration.factory` / `HandlerEntry.factory`** signature: `fn(&dyn IServiceResolver) -> Box<dyn Any + Send>` 鈫?`fn(&dyn IServiceResolver) -> Result<Box<dyn Any + Send>>`. The `#[handler]` macro generates the new signature automatically; only manual `HandlerRegistration` constructions need updating.
 
 ### Fixed
 
 - **Cache stampede**: `get_or_create` / `get_or_try_create` use per-key mutex + double-check to prevent thundering herd under high concurrency.
-- **`MemoryCache` lock contention**: `get` / `exists` use read-lock-first (clone data → drop → short write lock for refresh) instead of write-lock for every read.
+- **`MemoryCache` lock contention**: `get` / `exists` use read-lock-first (clone data 鈫?drop 鈫?short write lock for refresh) instead of write-lock for every read.
 - **`MemoryCache` eviction**: FIFO via `VecDeque` replaces random `keys().next()` for predictable, fair eviction.
 - **Macro panics**: `#[handler]`-generated factory/call functions return `Result` instead of `panic!`/`expect` on downcast failure.
 - **`RequestIdMiddleware`**: propagates upstream `x-request-id` header instead of always generating a new UUID.
@@ -105,11 +128,11 @@ under the `Rust-Framework` organization.
 
 - Integration test suite (`request_path_test.rs`) covering 16 request-processing paths: GET/POST/PUT/DELETE, path params, JSON body, 400/404/405/413/422/500 status mapping, x-request-id propagation, unit-response 204.
 
-## [0.2.1] — 2026-07-08
+## [0.2.1] 鈥?2026-07-08
 
 ### Changed
 
-- **Unified dispatch**: HTTP endpoints and `Mediator::send` share `dispatch::dispatch` (HandlerCache → scope → pipeline → handler).
+- **Unified dispatch**: HTTP endpoints and `Mediator::send` share `dispatch::dispatch` (HandlerCache 鈫?scope 鈫?pipeline 鈫?handler).
 - **Handler lookup**: `HandlerRegistration` adds `req_type_id: TypeId` for reliable in-process dispatch.
 - **`add_mediator()`**: registers `Mediator` as transient (DI-injectable after host build).
 - **`HandlerRegistry`**: type alias for `HandlerCache`.
@@ -119,7 +142,7 @@ under the `Rust-Framework` organization.
 - docbit `DocService` resolves monorepo docs at `<workspace>/docs` when `<app_base>/docs` is absent.
 - docbit startup recreates SQLite schema on datatype mismatch; skips doc index when docs dir missing.
 
-## [0.2.0] — 2026-07-08
+## [0.2.0] 鈥?2026-07-08
 
 ### Changed
 
@@ -133,15 +156,15 @@ under the `Rust-Framework` organization.
 - `ScopeFactory` trait import for per-request DI scopes (`create_scope()`).
 - Mediator / host tests adapted to rust-dix 0.6 `ServiceProvider` API.
 
-### Migration — 0.1.x → 0.2.0
+### Migration 鈥?0.1.x 鈫?0.2.0
 
-1. `Cargo.toml`: `rust-webapp = "0.1"` → `rust-webx = "0.2"`.
-2. `use rust_webapp::*` → `use rust_webx::*`.
-3. `rust_dicore` → `rust_dix`; `rust-dicore` → `rust-dix`.
+1. `Cargo.toml`: `rust-webapp = "0.1"` 鈫?`rust-webx = "0.2"`.
+2. `use rust_webapp::*` 鈫?`use rust_webx::*`.
+3. `rust_dicore` 鈫?`rust_dix`; `rust-dicore` 鈫?`rust-dix`.
 4. Remove `Arc::new()` around `ServiceCollection::build()`; handle `Result` from `get()` / `get_owned()`.
 5. `rust-ef = "1.5.1"` with provider crates on crates.io (no path patch).
 
-## [0.2.0] — production readiness (docbit)
+## [0.2.0] 鈥?production readiness (docbit)
 
 ### Added
 
@@ -160,19 +183,19 @@ under the `Rust-Framework` organization.
 - **OpenAPI UI** registered only in Development mode.
 - Tests: runtime health probe, production guard panics, `APP__Jwt__Secret` precedence.
 
-### Framework production fixes (0.2.0) — continued
+### Framework production fixes (0.2.0) 鈥?continued
 
-- **Unified error format**: 401/403/429/413 统一为 RFC 7807 `application/problem+json`（`problem_response` 模块）。
-- **SIGTERM / shutdown tests** + **TLS HTTPS 集成测试**（rcgen 自签证书）。
-- **docs/rust-webx** 批量更新：`rust_dix`、`add_memory_cache`、TLS/health API。
+- **Unified error format**: 401/403/429/413 缁熶竴涓?RFC 7807 `application/problem+json`锛坄problem_response` 妯″潡锛夈€?
+- **SIGTERM / shutdown tests** + **TLS HTTPS 闆嗘垚娴嬭瘯**锛坮cgen 鑷璇佷功锛夈€?
+- **docs/rust-webx** 鎵归噺鏇存柊锛歚rust_dix`銆乣add_memory_cache`銆乀LS/health API銆?
 
 ### Framework P2 (0.2.0)
 
-- **RateLimit appsettings**：`RateLimit.Enabled/RequestsPerSecond/BurstSize/MaxTrackedIps`，build 时自动注册中间件。
-- **Rate limit LRU**：超过 `MaxTrackedIps` 时淘汰最久未刷新的 IP bucket。
-- **`GET /metrics`**：Prometheus text 格式（`Metrics.Enabled`）。
-- docbit Production 改用 appsettings 配置 RateLimit/Metrics。
-- 测试：openapi spec、spa 工具函数、metrics 集成、rate limit LRU。
+- **RateLimit appsettings**锛歚RateLimit.Enabled/RequestsPerSecond/BurstSize/MaxTrackedIps`锛宐uild 鏃惰嚜鍔ㄦ敞鍐屼腑闂翠欢銆?
+- **Rate limit LRU**锛氳秴杩?`MaxTrackedIps` 鏃舵窐姹版渶涔呮湭鍒锋柊鐨?IP bucket銆?
+- **`GET /metrics`**锛歅rometheus text 鏍煎紡锛坄Metrics.Enabled`锛夈€?
+- docbit Production 鏀圭敤 appsettings 閰嶇疆 RateLimit/Metrics銆?
+- 娴嬭瘯锛歰penapi spec銆乻pa 宸ュ叿鍑芥暟銆乵etrics 闆嗘垚銆乺ate limit LRU銆?
 
 ### Changed
 
@@ -183,6 +206,6 @@ under the `Rust-Framework` organization.
 - **OpenTelemetry export**: not built-in; use structured JSON logs (Production), `RequestTracing` middleware, and optional `GET /metrics` (Prometheus). OTLP planned for a future minor release.
 - **rust-ef insert ID**: `save_changes` does not backfill auto-increment IDs (1.5.1); docbit handlers re-query by natural keys (documented as `FIXME(upstream)`).
 
-## [0.1.0] — 2026-06
+## [0.1.0] 鈥?2026-06
 
 Initial release as `rust-webapp` (superseded by 0.2.0 rebrand).

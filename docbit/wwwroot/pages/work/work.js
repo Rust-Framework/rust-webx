@@ -4,10 +4,22 @@
 
   const { escapeHtml, categoryBadge, tagList, workLogoUrl, pageDecoHtml } = Docbit.Utils;
 
+  /** Prefer API snake_case; tolerate camelCase if a proxy renames fields. */
+  function repoUrlOf(work) {
+    return (work && (work.repo_url || work.repoUrl)) || "";
+  }
+
+  function demoUrlOf(work) {
+    return (work && (work.demo_url || work.demoUrl)) || "";
+  }
+
   async function render(slug) {
+    // /api/exhibitions/{slug} overlays INDEX.json meta.repoUrl onto repo_url
     const work = await Docbit.Api.get(`/api/exhibitions/${encodeURIComponent(slug)}`);
     const hasDocs = work.docs_slug && work.docs_slug.length > 0;
     const logo = workLogoUrl(work);
+    const repo = repoUrlOf(work);
+    const demo = demoUrlOf(work);
 
     document.getElementById("app").innerHTML = `
       <div class="page page-work">
@@ -24,8 +36,8 @@
         </div>
         <div class="btn-row">
           ${hasDocs ? `<a class="layui-btn layui-btn-normal" href="/works/${escapeHtml(work.slug)}/docs" data-nav>查看文档</a>` : ""}
-          ${work.repo_url ? `<a class="layui-btn layui-btn-primary" href="${escapeHtml(work.repo_url)}" target="_blank" rel="noopener">源码仓库</a>` : ""}
-          ${work.demo_url ? `<a class="layui-btn layui-btn-primary" href="${escapeHtml(work.demo_url)}" target="_blank" rel="noopener">在线演示</a>` : ""}
+          ${repo ? `<a class="layui-btn layui-btn-primary" href="${escapeHtml(repo)}" target="_blank" rel="noopener">源码仓库</a>` : ""}
+          ${demo ? `<a class="layui-btn layui-btn-primary" href="${escapeHtml(demo)}" target="_blank" rel="noopener">在线演示</a>` : ""}
           <a class="layui-btn layui-btn-primary" href="/" data-nav>← 返回首页</a>
         </div>
         </div>

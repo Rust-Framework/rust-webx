@@ -66,7 +66,8 @@
     const demo =
       w.demo_url ||
       (w.docs_slug || w.slug ? `/works/${encodeURIComponent(w.slug)}/docs` : null);
-    const repo = w.repo_url || "";
+    // repo_url is overlaid from INDEX.json meta.repoUrl by /api/exhibitions
+    const repo = w.repo_url || w.repoUrl || "";
     return `
     <article class="work-card-v2" data-category="${escapeHtml(w.category)}" data-slug="${escapeHtml(w.slug)}">
       <a href="/works/${escapeHtml(w.slug)}" class="work-card-v2-stretch" data-nav aria-label="${escapeHtml(w.title)}"></a>

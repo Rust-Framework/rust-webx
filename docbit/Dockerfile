@@ -39,8 +39,8 @@ WORKDIR /app
 COPY --from=builder /build/target/release/docbit-host /app/docbit-host
 COPY docbit/appsettings.json docbit/appsettings.Production.json ./
 COPY docbit/wwwroot ./wwwroot
-# Ecosystem docs mirror (run scripts/sync-docs.ps1 before docker build if missing)
-COPY docs ./docs
+# Docs: rust-webx handbook only in this context; full ecosystem needs monorepo COPY or publish bundle
+COPY docs/rust-webx ./docs/rust-webx
 
 ENV APP_ENV=Production
 EXPOSE 8100

@@ -134,7 +134,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       # Git tracks only docs/rust-webx/ (native). Sibling slugs resolve at runtime in monorepo
-      # dev or are copied into publish bundles via scripts/sync-docs.* (not committed).
+      # dev or are copied into publish bundles at publish time from source repos.
       - name: Verify native docs (rust-webx)
         run: |
           test -f docs/rust-webx/INDEX.md || (echo "Missing docs/rust-webx — native handbook must be committed" && exit 1)

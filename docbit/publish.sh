@@ -85,16 +85,12 @@ cp -a "$WWWROOT_SRC" "$DEST/wwwroot"
 echo "[4/6] copy appsettings"
 cp "$APPS_BASE" "$APPS_PROD" "$DEST/"
 
-echo "[5/6] copy docs/"
-DOCS_SRC="$WORKSPACE_ROOT/docs"
+echo "[5/6] copy docs/ (from source repos)"
+# shellcheck source=../scripts/copy-ecosystem-docs.sh
+source "$WORKSPACE_ROOT/scripts/copy-ecosystem-docs.sh"
 DOCS_DEST="$DEST/docs"
-if [[ -d "$DOCS_SRC" ]]; then
-    rm -rf "$DOCS_DEST"
-    cp -a "$DOCS_SRC" "$DOCS_DEST"
-else
-    echo "WARNING: docs/ not found at $DOCS_SRC — run scripts/sync-docs.sh first" >&2
-    mkdir -p "$DOCS_DEST"
-fi
+rm -rf "$DOCS_DEST"
+copy_ecosystem_docs "$WORKSPACE_ROOT" "$DOCS_DEST"
 
 if [[ "$PRODUCTION" -eq 1 ]]; then
     echo "[6/6] create run.sh"

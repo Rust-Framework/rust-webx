@@ -24,8 +24,8 @@ publish/
 *.swp
 *.swo
 
-# Sibling ecosystem doc mirrors (copied by scripts/sync-docs.* for publish bundles).
-# Only docs/rust-webx/ is committed — canonical sources live in sibling repos.
+# Optional local staging of sibling docs (scripts/sync-docs.*). Never commit these.
+# Publish copies directly from source repos; only docs/rust-webx/ is in git.
 docs/rust-dix/
 docs/rust-ef/
 docs/rust-agent-framework/

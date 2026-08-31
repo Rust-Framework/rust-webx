@@ -1,4 +1,4 @@
-# 生态与 Crate 全景
+﻿# 生态与 Crate 全景
 
 ## Workspace 总览
 
@@ -85,7 +85,7 @@ graph BT
 | `#[get("/path")]` 等 | 路由注册 + HTTP 方法 |
 | `#[handler]` | Handler 自动 DI 注册 |
 | `#[authorize]` | 声明式授权元数据 |
-| `#[from_body]` 等 | 参数绑定元数据（预留） |
+| `#[derive(WebxRequestMeta)]` + `#[from_query]` / `#[from_route]` / `#[from_body]` | OpenAPI 参数元数据（字段级属性，非独立宏） |
 
 ### rust-webx-spa
 
@@ -112,7 +112,7 @@ use rust_webx::*;  // 一次导入全部公开 API
 
 | 依赖 | 用途 |
 |------|------|
-| `rust-dicore` | DI 容器（ServiceCollection / ServiceProvider） |
+| `rust-dix` | DI 容器（ServiceCollection / ServiceProvider） |
 | `hyper` + `tokio` | HTTP 服务器与异步运行时 |
 | `inventory` | 编译时路由与 Handler 元数据收集 |
 | `serde` / `serde_json` | JSON 序列化 |
@@ -133,7 +133,7 @@ use rust_webx::*;  // 一次导入全部公开 API
 - 全栈单体（API + SPA + 文档系统）
 - `IHostedService` 数据初始化
 - JWT 认证与 `#[authorize]`
-- `inject_attr` 依赖注入
+- `#[inject]` 依赖注入
 - 多模块 handlers（auth、blog、docs、work 等）
 
 运行：`cargo run -p docbit`

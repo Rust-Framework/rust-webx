@@ -147,3 +147,14 @@ async fn authz_different_paths_independent() {
         .await
         .is_ok());
 }
+
+#[test]
+fn resource_policy_covers_route_with_role_or_permission() {
+    let policy = rust_webx_host::authz::ResourceAuthorization::new()
+        .allow_role("/api/admin", "admin")
+        .allow_permission("/api/settings", "settings:write");
+
+    assert!(policy.covers_route("/api/admin"));
+    assert!(policy.covers_route("/api/settings"));
+    assert!(!policy.covers_route("/api/public"));
+}

@@ -1,4 +1,4 @@
-# 第一个 CRUD API
+﻿# 第一个 CRUD API
 
 本节实现一个内存中的用户 CRUD，展示 GET/POST/PUT/DELETE 四种路由模式。
 
@@ -134,7 +134,7 @@ async fn main() {
 }
 ```
 
-或使用 `register_handlers!` 宏注册无依赖的 Handler：
+HTTP 端点应使用 `#[handler]` / `#[handler(inject)]`（inventory 自动注册）。以下 **`register_handlers!` 已弃用**，仅适用于非 HTTP 的 Mediator 场景：
 
 ```rust
 .register(|svc| {
@@ -144,6 +144,8 @@ async fn main() {
     )
 })
 ```
+
+手动 `.singleton::<dyn IRequestHandler<…>>()` 同理：HTTP `RouteDispatch` 不经过 DI 查找 Handler，请勿将其作为主路径。
 
 ## 测试 API
 

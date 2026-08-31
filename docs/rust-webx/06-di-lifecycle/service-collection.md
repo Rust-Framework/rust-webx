@@ -1,8 +1,8 @@
-# ServiceCollection 与服务注册
+﻿# ServiceCollection 与服务注册
 
 ## DI 容器
 
-rust-webx 使用 `rust-dicore` 作为 DI 容器：
+rust-webx 使用 `rust-dix` 作为 DI 容器：
 
 ```rust
 Host::builder()

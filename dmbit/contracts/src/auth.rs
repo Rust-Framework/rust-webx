@@ -28,7 +28,7 @@ pub struct LoginRequest {
 impl IRequest<AuthResponse> for LoginRequest {}
 
 #[claims]
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct AuthMeRequest;
 
 #[get("/api/auth/me")]

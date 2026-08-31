@@ -27,7 +27,7 @@ pub struct SpecModel {
 }
 
 #[claims]
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct ListSpecsRequest;
 
 #[get("/api/specs")]
@@ -35,7 +35,7 @@ pub struct ListSpecsRequest;
 impl IRequest<Vec<SpecModel>> for ListSpecsRequest {}
 
 #[claims]
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct ListProductSpecsRequest {
     pub id: String,
 }
@@ -45,7 +45,7 @@ pub struct ListProductSpecsRequest {
 impl IRequest<Vec<SpecModel>> for ListProductSpecsRequest {}
 
 #[claims]
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct GetSpecRequest {
     pub id: String,
 }
@@ -100,7 +100,7 @@ pub struct UpdateSpecRequest {
 impl IRequest<SpecModel> for UpdateSpecRequest {}
 
 #[claims]
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct DeleteSpecRequest {
     pub id: String,
 }

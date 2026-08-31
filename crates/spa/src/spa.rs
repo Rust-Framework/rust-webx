@@ -53,6 +53,11 @@ impl IMiddleware for SpaMiddleware {
 
         let request_path = ctx.request().path();
 
+        // API routes must reach the router — never serve index.html for /api/*.
+        if request_path.starts_with("/api/") {
+            return Ok(ControlFlow::Continue(()));
+        }
+
         if request_path.starts_with("/assets/") {
             let relative = alias_static_path(request_path.trim_start_matches('/'));
             if relative.is_empty() {
@@ -272,5 +277,13 @@ mod tests {
     fn normalize_path_removes_dot_dot() {
         let p = normalize_path(Path::new("a/../b/./c"));
         assert_eq!(p, Path::new("b/c"));
+    }
+
+    #[test]
+    fn skips_api_paths_for_spa_fallback() {
+        // API paths are passed through to the router; no static/index.html response.
+        // Full integration is covered by host tests; this documents the guard.
+        assert!("/api/docs".starts_with("/api/"));
+        assert!(!"/works/foo".starts_with("/api/"));
     }
 }

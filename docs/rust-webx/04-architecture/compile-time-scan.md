@@ -1,4 +1,4 @@
-# 编译时扫描机制
+﻿# 编译时扫描机制
 
 ## 为什么需要编译时扫描
 
@@ -32,12 +32,12 @@ inventory::submit! {
 ```mermaid
 graph TD
     A[Host::build] --> B[inventory::iter 遍历 RouteEntry]
-    B --> C[构建 Trie Router]
+    B --> C[构建 Trie Router + RouteDispatch]
     C --> D[inventory::iter 遍历 HandlerRegistration]
-    D --> E[注册到 ServiceCollection]
-    E --> F[collect_authorizers 收集授权元数据]
-    F --> G[生成 OpenAPI spec]
-    G --> H[构建 ServiceProvider]
+    D --> E[构建 HandlerCache]
+    E --> F[assert_route_configuration_valid]
+    F --> G[构建 ServiceProvider + set_global_provider]
+    G --> H[生成 OpenAPI spec]
 ```
 
 ## 路由收集
@@ -54,23 +54,18 @@ graph TD
 
 ## Handler 收集
 
-`#[handler]` 宏展开时记录：
+`#[handler]` / `#[handler(inject)]` 宏展开时向 inventory 提交 `HandlerRegistration`：
 
 | 字段 | 值 |
 |------|---|
 | Request Type | `HelloRequest` |
 | Response Type | `String` |
 | Handler Type | `HelloHandler` |
+| Factory | 构造 Handler（`Default` 或 DI 注入） |
 
-`Host::build()` 将其转为 DI 注册：
+HTTP 分发通过 `HandlerCache` 查找上述注册项，**不**通过 DI 查找 `dyn IRequestHandler`。
 
-```rust
-svc.singleton::<dyn IRequestHandler<HelloRequest, String>>(
-    |_| Arc::new(HelloHandler::default())
-)
-```
-
-## #[handler(inject)] 与 inject_attr
+## #[handler(inject)] 与 #[inject]
 
 当 Handler 需要 DI 注入时：
 
@@ -85,11 +80,13 @@ pub struct LoginHandler {
 impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler { ... }
 ```
 
-`inject_attr` 向 DI 容器注册构造逻辑；`#[handler(inject)]` 标记该 Handler 走注入路径而非 Default。
+`#[inject]` 向 DI 容器注册构造逻辑；`#[handler(inject)]` 标记该 Handler 走注入路径而非 Default。
 
 ## 授权元数据收集
 
-`#[authorize(role = "admin")]` 在编译期收集授权要求，`collect_authorizers()` 在 `build()` 时构建 `ResourceAuthorization` 策略。
+`#[authorize(role = "admin")]` 在编译期收集授权要求；`collect_authorizers()` 在 `build()` 时可构建 `ResourceAuthorization` 策略对象。
+
+> **注意：** `add_authentication()` 仅注册 JWT 中间件，**不会**自动挂载 `resource_auth_middleware`。路由级授权在 `StubEndpoint` 内执行；全局 Resource Auth 中间件需手动添加。详见 [资源授权](../09-auth-security/resource-authorization.md)。
 
 ## 注意事项
 
@@ -99,6 +96,6 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler { ... }
 
 ## 小结
 
-编译时扫描是 rust-webx「零配置」体验的技术基石。你写 `#[get]` + `#[handler]`，框架在 `build()` 时自动完成路由表、DI 注册与文档生成。
+编译时扫描是 rust-webx「零配置」体验的技术基石。你写 `#[get]` + `#[handler]`，框架在 `build()` 时自动完成路由表、HandlerCache 关联与文档生成；配置不一致时启动即 panic。
 
 下一章：[请求即端点](../05-request-pattern/INDEX.md)

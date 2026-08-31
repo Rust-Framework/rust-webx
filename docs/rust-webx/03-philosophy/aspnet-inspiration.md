@@ -1,4 +1,4 @@
-# ASP.NET Core 的启发
+﻿# ASP.NET Core 的启发
 
 ## 为什么是 ASP.NET Core
 
@@ -17,7 +17,7 @@ rust-webx 不是简单移植，而是**提取设计精髓并用 Rust 类型系�
 | ASP.NET Core | rust-webx | 差异说明 |
 |-------------|-------------|---------|
 | `Startup.cs` / `Program.cs` | `Host::builder()` | 构建器模式，链式配置 |
-| `IServiceCollection` | `ServiceCollection` (rust-dicore) | 同名概念 |
+| `IServiceCollection` | `ServiceCollection` (rust-dix) | 同名概念 |
 | `IRequest<T>` (MediatR) | `IRequest<T>` | 同时承载路由元数据 |
 | `IRequestHandler<T,R>` | `IRequestHandler<T,R>` | 双泛型参数一致 |
 | `[HttpGet("/path")]` | `#[get("/path")]` | 标注在 impl 块 |
@@ -85,7 +85,7 @@ ASP.NET Core 中类型不匹配是运行时错误；rust-webx 中是编译错误
 
 ### 所有权与 Arc
 
-Rust 没有 GC，DI 容器使用 `Arc<T>` 共享所有权。ASP.NET Core 的 Scoped/Singleton 语义通过 `rust-dicore` 的生命周期管理实现。
+Rust 没有 GC，DI 容器使用 `Arc<T>` 共享所有权。ASP.NET Core 的 Scoped/Singleton 语义通过 `rust-dix` 的生命周期管理实现。
 
 ## 未移植的部分
 

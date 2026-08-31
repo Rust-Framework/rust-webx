@@ -21,7 +21,7 @@ pub struct CategoryTreeNode {
     pub level: u32,
 }
 
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct ListCategoriesRequest;
 
 #[get("/api/categories")]
@@ -54,7 +54,7 @@ pub struct UpdateCategoryRequest {
 impl IRequest<CategoryModel> for UpdateCategoryRequest {}
 
 #[claims]
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct DeleteCategoryRequest {
     pub id: String,
 }

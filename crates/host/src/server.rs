@@ -20,7 +20,7 @@ use rust_webx_core::mode::AppMode;
 use rust_webx_core::routing::{HttpMethod, IEndpoint, IRouter};
 
 use crate::auth_jwt::{init_jwt_secret, jwt_middleware, JwtAuth};
-use crate::authz::collect_authorizers;
+use crate::authz::{build_resource_policy_from_routes, collect_authorizers};
 use crate::context::HttpContext;
 use crate::cors::{CorsConfig, CorsMiddleware};
 use crate::endpoint::{StaticHtmlEndpoint, StaticJsonEndpoint, StubEndpoint};
@@ -33,6 +33,7 @@ use crate::pipeline::{HandlerFn, MiddlewarePipeline};
 use crate::router::Router;
 use jsonwebtoken::{DecodingKey, Validation};
 use rust_webx_core::route::scan::RouteEntry;
+use rust_webx_core::DispatchRuntime;
 use rust_webx_openapi::{generate_openapi_spec, APIUI_HTML};
 use rust_webx_spa::SpaMiddleware;
 
@@ -57,6 +58,7 @@ fn is_weak_jwt_secret(secret: &str) -> bool {
 pub struct Host {
     #[allow(dead_code)]
     provider: Arc<ServiceProvider>,
+    dispatch_runtime: Arc<DispatchRuntime>,
     pub options: AppOptions,
     pipeline: Arc<MiddlewarePipeline>,
     /// The matchit router (retained for introspection).
@@ -82,6 +84,7 @@ pub struct HostBuilder {
     options_modifiers: Vec<Box<dyn FnOnce(&mut AppOptions) + Send>>,
     cors_config: Option<CorsConfig>,
     auth_enabled: bool,
+    resource_auth_enabled: bool,
     health_registry: Arc<HealthCheckRegistry>,
 }
 
@@ -118,6 +121,7 @@ impl HostBuilder {
             options_modifiers: Vec::new(),
             cors_config: None,
             auth_enabled: false,
+            resource_auth_enabled: false,
             health_registry: HealthCheckRegistry::new(),
         }
     }
@@ -208,6 +212,16 @@ impl HostBuilder {
     /// ```
     pub fn add_authentication(mut self) -> Self {
         self.auth_enabled = true;
+        self
+    }
+
+    /// Enable resource-based authorization using compile-time `#[authorize]` metadata.
+    ///
+    /// Builds a [`ResourceAuthorization`] policy from route inventory and enforces it
+    /// at the endpoint layer (after routing, when `route_pattern()` is available).
+    /// Requires `add_authentication()` for JWT claims.
+    pub fn use_resource_authorization(mut self) -> Self {
+        self.resource_auth_enabled = true;
         self
     }
 
@@ -329,14 +343,12 @@ impl HostBuilder {
             )
         });
 
-        // Set the global provider so #[handler] factories can resolve DI dependencies.
-        rust_webx_core::route::scan::set_global_provider(Arc::clone(&provider));
-
-        // Initialize the global handler cache from inventory registrations.
-        // Handlers registered via #[handler] are collected into HandlerCache.
-        // If a handler struct also has #[inject_attr], its factory will resolve
-        // dependencies via the global provider set above.
-        rust_webx_core::route::scan::HandlerCache::init_global();
+        // Per-host dispatch runtime (provider + handler registry).
+        let handler_cache = Arc::new(rust_webx_core::route::scan::HandlerCache::build());
+        let dispatch_runtime = Arc::new(DispatchRuntime::new(
+            Arc::clone(&provider),
+            handler_cache,
+        ));
 
         let appsettings =
             config::load_appsettings(self.mode).unwrap_or_else(|| serde_json::json!({}));
@@ -350,7 +362,7 @@ impl HostBuilder {
         let mut pipeline = MiddlewarePipeline::new();
 
         // Default security & observability middleware (zero-config safe defaults).
-        // Order: SecurityHeaders → RequestId → RateLimit → Metrics → user → CORS → SPA → Auth
+        // Order: SecurityHeaders → RequestId → RateLimit → Metrics → user → CORS → Auth → SPA
         pipeline.add_middleware(Arc::new(crate::security_headers::SecurityHeadersMiddleware::new()));
         pipeline.add_middleware(Arc::new(crate::request_id::RequestIdMiddleware::new()));
 
@@ -391,10 +403,28 @@ impl HostBuilder {
         });
         pipeline.add_middleware(Arc::new(CorsMiddleware::new(cors)));
 
+        if self.auth_enabled {
+            let secret = options.jwt.secret.clone();
+            if !secret.is_empty() {
+                let jwt_auth = Arc::new(JwtAuth::new(
+                    DecodingKey::from_secret(secret.as_bytes()),
+                    Validation::default(),
+                ));
+                pipeline.add_middleware(Arc::new(jwt_middleware(jwt_auth)));
+                init_jwt_secret(&secret);
+            } else {
+                tracing::warn!(
+                    "add_authentication() enabled but no JWT secret configured. Set Jwt.Secret in appsettings.json, JWT_SECRET, or APP__Jwt__Secret env var."
+                );
+            }
+        }
+
         // SPA 自动启用：若应用显式调用 `use_spa`，使用指定根目录；
         // 否则框架自动检测应用基准目录下的 `wwwroot/`，存在即启用 SPA。
         // 这样新应用无需在 main.rs 手写 `use_spa("wwwroot")` 样板。
         // `no_spa()` 可显式禁用此行为（含自动检测），用于纯 API 主机或测试隔离。
+        // SPA runs after JWT so auth middleware sees API requests first; SpaMiddleware
+        // skips /api/* paths so unmatched API routes return 404 from the router.
         let spa_root = if self.spa_disabled {
             None
         } else {
@@ -410,22 +440,6 @@ impl HostBuilder {
         };
         if let Some(ref spa_root) = spa_root {
             pipeline.add_middleware(Arc::new(SpaMiddleware::new(spa_root.clone())));
-        }
-
-        if self.auth_enabled {
-            let secret = options.jwt.secret.clone();
-            if !secret.is_empty() {
-                let jwt_auth = Arc::new(JwtAuth::new(
-                    DecodingKey::from_secret(secret.as_bytes()),
-                    Validation::default(),
-                ));
-                pipeline.add_middleware(Arc::new(jwt_middleware(jwt_auth)));
-                init_jwt_secret(&secret);
-            } else {
-                tracing::warn!(
-                    "add_authentication() enabled but no JWT secret configured. Set Jwt.Secret in appsettings.json, JWT_SECRET, or APP__Jwt__Secret env var."
-                );
-            }
         }
 
         // Users can register additional middleware here, e.g.:
@@ -452,6 +466,8 @@ impl HostBuilder {
         let mut router = Router::new();
         let mut route_count = 0usize;
 
+        crate::diagnostics::assert_route_configuration_valid();
+
         // Build dispatch map: handler_type →dispatch function
         #[allow(clippy::type_complexity)]
         let mut dispatch_map: std::collections::HashMap<
@@ -474,6 +490,13 @@ impl HostBuilder {
             dispatch_map.insert(dispatch.handler_type, dispatch.dispatch);
         }
 
+        let resource_policy: Option<Arc<crate::authz::ResourceAuthorization>> =
+            if self.resource_auth_enabled {
+                Some(Arc::new(build_resource_policy_from_routes()))
+            } else {
+                None
+            };
+
         for entry in inventory::iter::<RouteEntry> {
             route_count += 1;
             let stub = Arc::new(StubEndpoint {
@@ -482,6 +505,8 @@ impl HostBuilder {
                 handler_type: entry.handler_type,
                 dispatch_fn: dispatch_map.get(entry.handler_type).copied(),
                 auth_required_role: entry.required_role,
+                auth_required_permission: entry.required_permission,
+                resource_policy: resource_policy.clone(),
                 authorizers: collect_authorizers(provider.as_ref()),
             });
             router.register(entry.method, entry.path, stub);
@@ -582,6 +607,7 @@ impl HostBuilder {
 
         Host {
             provider,
+            dispatch_runtime,
             options,
             pipeline,
             router,
@@ -654,6 +680,16 @@ impl Host {
         &self.options
     }
 
+    /// Root DI container for this host instance.
+    pub fn provider(&self) -> &Arc<ServiceProvider> {
+        &self.provider
+    }
+
+    /// Instance-scoped dispatch runtime (provider + handler cache).
+    pub fn dispatch_runtime(&self) -> &Arc<DispatchRuntime> {
+        &self.dispatch_runtime
+    }
+
     /// Start the server on all URLs configured in AppOptions.app.Urls.
     ///
     /// Automatically detects http:// and https:// URLs from the array.
@@ -668,7 +704,7 @@ impl Host {
     /// { "App": { "Urls": ["http://localhost:5000", "https://localhost:5030"] } }
     /// ```
     pub async fn run(&self) -> Result<()> {
-        start_hosted_services(&self.hosted_services).await?;
+        start_hosted_services(&self.hosted_services, &self.dispatch_runtime).await?;
 
         let urls = if self.options.app.urls.is_empty() {
             vec!["http://0.0.0.0:5000".to_string()]
@@ -723,6 +759,7 @@ impl Host {
         let mut handles = Vec::new();
         let pipeline = Arc::clone(&self.pipeline);
         let router_handler = self.router_handler.clone();
+        let dispatch_runtime = Arc::clone(&self.dispatch_runtime);
         let mode = self.mode;
         let max_body_size = self.options.app.max_body_size;
         let max_connections = self.options.app.max_connections;
@@ -732,11 +769,13 @@ impl Host {
             let n = std::sync::Arc::clone(&notify);
             let p = Arc::clone(&pipeline);
             let rh = router_handler.clone();
+            let dr = Arc::clone(&dispatch_runtime);
             handles.push(tokio::spawn(serve_http(
                 addr,
                 n,
                 p,
                 rh,
+                dr,
                 mode,
                 max_body_size,
                 max_connections,
@@ -749,6 +788,7 @@ impl Host {
                 let n = std::sync::Arc::clone(&notify);
                 let p = Arc::clone(&pipeline);
                 let rh = router_handler.clone();
+                let dr = Arc::clone(&dispatch_runtime);
                 let a = tls_acceptor.clone();
                 handles.push(tokio::spawn(serve_https(
                     addr,
@@ -756,6 +796,7 @@ impl Host {
                     n,
                     p,
                     rh,
+                    dr,
                     mode,
                     max_body_size,
                     max_connections,
@@ -775,7 +816,7 @@ impl Host {
 
     /// Start the server at a single explicit address (convenience wrapper).
     pub async fn run_at(&self, addr: &str) -> Result<()> {
-        start_hosted_services(&self.hosted_services).await?;
+        start_hosted_services(&self.hosted_services, &self.dispatch_runtime).await?;
 
         let notify = Arc::clone(&self.shutdown);
         install_shutdown_handler(Arc::clone(&notify));
@@ -785,6 +826,7 @@ impl Host {
             notify,
             Arc::clone(&self.pipeline),
             self.router_handler.clone(),
+            Arc::clone(&self.dispatch_runtime),
             self.mode,
             self.options.app.max_body_size,
             self.options.app.max_connections,
@@ -868,6 +910,7 @@ async fn handle_request(
     req: Request<Incoming>,
     pipeline: Arc<MiddlewarePipeline>,
     router_handler: HandlerFn,
+    dispatch_runtime: Arc<DispatchRuntime>,
     max_body_size: usize,
 ) -> std::result::Result<hyper::Response<Full<Bytes>>, std::convert::Infallible> {
     let mut ctx = HttpContext::new(req, max_body_size).await;
@@ -875,7 +918,11 @@ async fn handle_request(
     // If HttpContext::new already set an error response (e.g. 413 Payload Too Large),
     // skip the pipeline — the response is final.
     if ctx.response().status() < 400 {
-        let result = pipeline.execute(&mut ctx, router_handler).await;
+        let result = dispatch_runtime
+            .run(async {
+                pipeline.execute(&mut ctx, router_handler).await
+            })
+            .await;
         if let Err(e) = result {
             let status = e.status_code();
             write_error_response(&mut ctx, status, &e.to_string()).await;
@@ -948,14 +995,22 @@ async fn wait_for_shutdown_signal() {
     }
 }
 
-async fn start_hosted_services(services: &[Arc<dyn IHostedService>]) -> Result<()> {
+async fn start_hosted_services(
+    services: &[Arc<dyn IHostedService>],
+    dispatch_runtime: &DispatchRuntime,
+) -> Result<()> {
     if services.is_empty() {
         return Ok(());
     }
     tracing::info!("Starting {} hosted service(s)...", services.len());
-    for svc in services {
-        svc.start().await?;
-    }
+    dispatch_runtime
+        .run(async {
+            for svc in services {
+                svc.start().await?;
+            }
+            Ok::<(), rust_webx_core::error::Error>(())
+        })
+        .await?;
     tracing::info!("All hosted services started.");
     Ok(())
 }
@@ -1022,6 +1077,7 @@ async fn serve_http(
     shutdown: std::sync::Arc<tokio::sync::Notify>,
     pipeline: Arc<MiddlewarePipeline>,
     router_handler: HandlerFn,
+    dispatch_runtime: Arc<DispatchRuntime>,
     mode: AppMode,
     max_body_size: usize,
     max_connections: usize,
@@ -1059,19 +1115,27 @@ async fn serve_http(
                 let io = TokioIo::new(stream);
                 let pipeline = Arc::clone(&pipeline);
                 let router_handler = router_handler.clone();
+                let dispatch_runtime = Arc::clone(&dispatch_runtime);
 
                 join_set.spawn(async move {
                     let _permit = permit;
                     let svc_fn = service_fn(move |req: Request<Incoming>| {
                         let pipeline = Arc::clone(&pipeline);
                         let router_handler = router_handler.clone();
+                        let dispatch_runtime = Arc::clone(&dispatch_runtime);
                         let mode = mode;
                         async move {
                             let start = Instant::now();
                             let method = req.method().to_string();
                             let path = req.uri().path().to_string();
-                            let result =
-                                handle_request(req, pipeline, router_handler, max_body_size).await;
+                            let result = handle_request(
+                                req,
+                                pipeline,
+                                router_handler,
+                                dispatch_runtime,
+                                max_body_size,
+                            )
+                            .await;
                             let elapsed = start.elapsed();
                             if mode == AppMode::Development {
                                 let status =
@@ -1114,6 +1178,7 @@ async fn serve_https(
     shutdown: std::sync::Arc<tokio::sync::Notify>,
     pipeline: Arc<MiddlewarePipeline>,
     router_handler: HandlerFn,
+    dispatch_runtime: Arc<DispatchRuntime>,
     mode: AppMode,
     max_body_size: usize,
     max_connections: usize,
@@ -1151,6 +1216,7 @@ async fn serve_https(
                 let acceptor = acceptor.clone();
                 let pipeline = Arc::clone(&pipeline);
                 let router_handler = router_handler.clone();
+                let dispatch_runtime = Arc::clone(&dispatch_runtime);
 
                 join_set.spawn(async move {
                     let _permit = permit;
@@ -1160,14 +1226,20 @@ async fn serve_https(
                             let svc_fn = service_fn(move |req: Request<Incoming>| {
                                 let pipeline = Arc::clone(&pipeline);
                                 let router_handler = router_handler.clone();
+                                let dispatch_runtime = Arc::clone(&dispatch_runtime);
                                 let mode = mode;
                                 async move {
                                     let start = Instant::now();
                                     let method = req.method().to_string();
                                     let path = req.uri().path().to_string();
-                                    let result =
-                                        handle_request(req, pipeline, router_handler, max_body_size)
-                                            .await;
+                                    let result = handle_request(
+                                        req,
+                                        pipeline,
+                                        router_handler,
+                                        dispatch_runtime,
+                                        max_body_size,
+                                    )
+                                    .await;
                                     let elapsed = start.elapsed();
                                     if mode == AppMode::Development {
                                         let status =

@@ -1,4 +1,4 @@
-{
+﻿{
   "meta": {
     "title": "Rust WebApplication Framework",
     "subtitle": "高内聚·编译时路由·DI+中介者双核心",
@@ -241,7 +241,7 @@
             {
               "id": "module-system",
               "title": "模块系统与 inject 宏",
-              "summary": "模块化注册与 rust-dicore 集成",
+              "summary": "模块化注册与 rust-dix 集成",
               "readingTime": 12,
               "difficulty": "advanced"
             }

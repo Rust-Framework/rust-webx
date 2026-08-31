@@ -1,15 +1,15 @@
-# appsettings.json ????
+﻿# appsettings.json 配置体系
 
-## ????
+## 自动加载
 
-??????????
+框架启动时自动加载：
 
 ```
-appsettings.json                    # ????
-appsettings.Development.json        # ???????Development ???
+appsettings.json                    # 基础配置
+appsettings.Development.json        # 开发环境覆盖（Development 模式）
 ```
 
-## ?????
+## 内置配置节
 
 ```json
 {
@@ -35,18 +35,18 @@ appsettings.Development.json        # ???????Development ???
 }
 ```
 
-## ????
+## 对应类型
 
-| ??? | Rust ?? |
+| 配置节 | Rust 类型 |
 |--------|----------|
 | `App` | `AppSection` |
 | `Jwt` | `JwtSection` |
 | `Cors` | `CorsSection` |
 | `Tls` | `TlsSection` |
 
-???? `AppOptions` ????
+合并后为 `AppOptions` 结构体。
 
-## ????
+## 访问配置
 
 ```rust
 Host::builder()
@@ -57,8 +57,8 @@ Host::builder()
     })
 ```
 
-## ??
+## 小结
 
-`appsettings.json` ? ASP.NET Core ????????????
+`appsettings.json` 与 ASP.NET Core 格式兼容，降低迁移成本。
 
-????[AppMode ?????](app-modes.md)
+下一节：[AppMode 与环境切换](app-modes.md)

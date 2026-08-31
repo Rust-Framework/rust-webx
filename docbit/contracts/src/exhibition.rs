@@ -28,14 +28,15 @@ pub struct ExhibitionModel {
     pub updated_at: i64,
 }
 
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct ListExhibitionsRequest;
 
 #[get("/api/exhibitions")]
 impl IRequest<Vec<ExhibitionModel>> for ListExhibitionsRequest {}
 
-#[derive(Default)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct GetExhibitionRequest {
+    #[from_route]
     pub slug: String,
 }
 
@@ -64,7 +65,7 @@ pub struct UpsertExhibitionRequest {
 impl IRequest<ExhibitionModel> for UpsertExhibitionRequest {}
 
 #[claims]
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct DeleteExhibitionRequest {
     pub slug: String,
 }

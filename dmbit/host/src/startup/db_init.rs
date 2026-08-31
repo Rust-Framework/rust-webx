@@ -38,7 +38,7 @@ impl IHostedService for DbInitService {
     async fn start(&self) -> Result<()> {
         tracing::info!("[DbInit] Starting initialization...");
 
-        let mut ctx: DbContext = global_provider()
+        let mut ctx: DbContext = dispatch_provider()
             .get_owned()
             .map_err(|e| Error::Internal(format!("DbContext resolution failed: {}", e)))?;
 

@@ -1,4 +1,4 @@
-# IRequest 与 IRequestHandler
+﻿# IRequest 与 IRequestHandler
 
 ## 核心契约
 

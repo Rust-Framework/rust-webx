@@ -106,6 +106,14 @@ impl Default for ResourceAuthorization {
     }
 }
 
+impl ResourceAuthorization {
+    /// Returns true when this policy has explicit rules for `resource_key`.
+    pub fn covers_route(&self, resource_key: &str) -> bool {
+        self.allowed_roles.contains_key(resource_key)
+            || self.required_permissions.contains_key(resource_key)
+    }
+}
+
 #[async_trait::async_trait]
 impl IAuthorizationPolicy for ResourceAuthorization {
     async fn authorize(
@@ -221,6 +229,22 @@ impl AuthorizerSet {
     pub fn is_empty(&self) -> bool {
         self.authorizers.is_empty()
     }
+}
+
+/// Build a [`ResourceAuthorization`] policy from compile-time [`RouteEntry`] metadata.
+pub fn build_resource_policy_from_routes() -> ResourceAuthorization {
+    use rust_webx_core::route::scan::RouteEntry;
+
+    let mut policy = ResourceAuthorization::new();
+    for entry in inventory::iter::<RouteEntry> {
+        if !entry.required_role.is_empty() && entry.required_role != "authenticated" {
+            policy = policy.allow_role(entry.path, entry.required_role);
+        }
+        if !entry.required_permission.is_empty() {
+            policy = policy.allow_permission(entry.path, entry.required_permission);
+        }
+    }
+    policy
 }
 
 /// Result from collecting `IDynamicAuthorizer` instances from DI.

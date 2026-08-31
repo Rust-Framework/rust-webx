@@ -1,6 +1,6 @@
-# 模块系统与 inject 宏
+﻿# 模块系统与 inject 宏
 
-## rust-dicore 模块
+## rust-dix 模块
 
 大型项目可用 `#[module]` 宏组织 DI 注册：
 
@@ -14,7 +14,7 @@ pub mod UserModule {
 }
 ```
 
-模块自动收集 `inject_attr` 标注的服务并注册到容器。
+模块自动收集 `#[inject]` 标注的服务并注册到容器。
 
 ## inject 宏
 
@@ -46,16 +46,20 @@ pub struct NotificationService {
 伞 Crate 重新导出 DI 工具：
 
 ```rust
-use rust_webx::{inject, inject_attr, module, Inject};
+use rust_webx::{inject, module, Inject};
 ```
 
 在 Handler 中：
 
 ```rust
-#[inject_attr(singleton, as = dyn IRequestHandler<...>)]
+#[derive(Inject)]
 pub struct MyHandler {
-    service: Arc<MyService>,
+    service: Arc<dyn IMyService>,
 }
+
+#[handler(inject)]
+#[async_trait]
+impl IRequestHandler<MyRequest, MyResponse> for MyHandler { ... }
 ```
 
 ## 组合根原则
@@ -64,6 +68,6 @@ pub struct MyHandler {
 
 ## 小结
 
-`inject_attr` + `#[handler(inject)]` 是 Docbit 验证的生产模式，兼顾简洁与可测试性。
+`#[inject]` + `#[handler(inject)]` 是 Docbit 验证的生产模式，兼顾简洁与可测试性。
 
 下一章：[中间件管道](../07-middleware/INDEX.md)

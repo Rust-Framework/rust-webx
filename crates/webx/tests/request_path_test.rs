@@ -385,6 +385,57 @@ async fn missing_request_id_generates_one() {
 }
 
 // ---------------------------------------------------------------------------
+// GET with query parameters
+// ---------------------------------------------------------------------------
+
+#[derive(Default, Serialize, Deserialize)]
+struct SearchRequest {
+    q: String,
+    page: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SearchResponse {
+    q: String,
+    page: String,
+}
+
+#[get("/search")]
+impl IRequest<SearchResponse> for SearchRequest {}
+
+#[derive(Default)]
+struct SearchHandler;
+
+#[handler]
+#[async_trait::async_trait]
+impl IRequestHandler<SearchRequest, SearchResponse> for SearchHandler {
+    async fn handle(&mut self, req: SearchRequest) -> Result<SearchResponse> {
+        Ok(SearchResponse {
+            q: req.q,
+            page: req.page,
+        })
+    }
+}
+
+#[tokio::test]
+async fn get_with_query_params_returns_200() {
+    let port = find_free_port();
+    spawn_host(port).await;
+
+    let resp = reqwest::get(format!(
+        "http://127.0.0.1:{}/search?q=hello&page=2",
+        port
+    ))
+    .await
+    .unwrap();
+
+    assert_eq!(resp.status().as_u16(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["q"], "hello");
+    assert_eq!(body["page"], "2");
+}
+
+// ---------------------------------------------------------------------------
 // Error status code mapping
 // ---------------------------------------------------------------------------
 

@@ -1,6 +1,7 @@
 //! Endpoint —IEndpoint implementations for dual-mode dispatch.
 
 use rust_webx_core::error::Result;
+use rust_webx_core::auth::IAuthorizationPolicy;
 use rust_webx_core::http::IHttpContext;
 use rust_webx_core::routing::IEndpoint;
 use serde_json;
@@ -69,6 +70,10 @@ pub struct StubEndpoint {
         >,
     >,
     pub auth_required_role: &'static str,
+    pub auth_required_permission: &'static str,
+    /// Optional route policy built from compile-time `#[authorize]` metadata when
+    /// `HostBuilder::use_resource_authorization()` is enabled.
+    pub resource_policy: Option<Arc<crate::authz::ResourceAuthorization>>,
     /// Dynamic authorizers (from `IDynamicAuthorizer` DI registrations).
     /// Checked after static `#[authorize]` and before handler dispatch.
     /// When `None`, no dynamic authorization checks run (pass-through).
@@ -87,15 +92,18 @@ impl IEndpoint for StubEndpoint {
             // to the handler via the dispatch function (fearless concurrency).
             let claims = ctx.claims().map(|c| c.clone_box());
 
-            // â”€â”€ Authorization check (declared on route via #[authorize]) â”€â”€
-            if !self.auth_required_role.is_empty() {
+            // ── Authorization check (declared on route via #[authorize]) ──
+            let auth_required = !self.auth_required_role.is_empty()
+                || !self.auth_required_permission.is_empty();
+            if auth_required {
                 match ctx.claims() {
                     None => {
                         write_problem(ctx, 401, "Authentication required").await;
                         return Ok(());
                     }
                     Some(claims) => {
-                        if self.auth_required_role != "authenticated"
+                        if !self.auth_required_role.is_empty()
+                            && self.auth_required_role != "authenticated"
                             && !claims
                                 .roles()
                                 .iter()
@@ -114,12 +122,56 @@ impl IEndpoint for StubEndpoint {
                             .await;
                             return Ok(());
                         }
+
+                        if !self.auth_required_permission.is_empty()
+                            && !claims
+                                .permissions()
+                                .iter()
+                                .any(|p| p.as_str() == self.auth_required_permission)
+                        {
+                            let mut ext = HashMap::new();
+                            ext.insert(
+                                "required_permission".into(),
+                                serde_json::Value::String(
+                                    self.auth_required_permission.to_string(),
+                                ),
+                            );
+                            write_forbidden(
+                                ctx,
+                                "Forbidden: insufficient permissions",
+                                ext,
+                            )
+                            .await;
+                            return Ok(());
+                        }
                     }
                 }
             }
 
-            // â”€â”€ Dynamic authorization via IDynamicAuthorizer â”€â”€
-            if !self.auth_required_role.is_empty() {
+            if auth_required {
+                if let Some(ref policy) = self.resource_policy {
+                    if let Some(claims) = ctx.claims() {
+                        let resource_key = ctx.request().route_pattern().unwrap_or(self.path);
+                        if policy.covers_route(resource_key) {
+                            let method = ctx.request().method();
+                            if let Err(err) =
+                                policy.authorize(claims, resource_key, method).await
+                            {
+                                let mut ext = HashMap::new();
+                                ext.insert(
+                                    "resource".into(),
+                                    serde_json::Value::String(resource_key.to_string()),
+                                );
+                                write_forbidden(ctx, &err.to_string(), ext).await;
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── Dynamic authorization via IDynamicAuthorizer ──
+            if auth_required {
                 if let Some(ref authorizers) = self.authorizers {
                     if !authorizers.is_empty() {
                         if let Some(claims) = ctx.claims() {
@@ -140,14 +192,16 @@ impl IEndpoint for StubEndpoint {
             return Ok(());
         }
 
-        // Fallback: stub message (when no dispatch function is registered)
-        ctx.response_mut().set_status(200);
-        ctx.response_mut()
-            .write_text(&format!(
-                "Matched route: {} {} (handler: {})",
+        // Missing dispatch — route registered but handler bridge not linked.
+        write_problem(
+            ctx,
+            501,
+            &format!(
+                "Route handler not implemented: {} {} (request type: {})",
                 self.method, self.path, self.handler_type
-            ))
-            .await?;
+            ),
+        )
+        .await;
         Ok(())
     }
 }

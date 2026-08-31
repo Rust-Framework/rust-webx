@@ -43,24 +43,27 @@ pub trait IDocumentService: Send + Sync {
     fn sync_portfolio_assets(&self, wwwroot: &Path) -> std::result::Result<(), String>;
 }
 
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct ListDocWorksRequest;
 
 #[get("/api/docs")]
 impl IRequest<Vec<String>> for ListDocWorksRequest {}
 
-#[derive(Default)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct GetDocIndexRequest {
+    #[from_route]
     pub work: String,
 }
 
 #[get("/api/docs/{work}/index")]
 impl IRequest<DocIndex> for GetDocIndexRequest {}
 
-#[derive(Default)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct GetDocContentRequest {
+    #[from_route]
     pub work: String,
     /// Document path with `/` encoded as `:` (e.g. `01-introduction:hello-world.md`)
+    #[from_route]
     pub path: String,
 }
 

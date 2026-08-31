@@ -1,4 +1,4 @@
-# IHostedService 后台服务
+﻿# IHostedService 后台服务
 
 ## 接口定义
 
@@ -39,7 +39,7 @@ graph LR
 ## Docbit 实例
 
 ```rust
-#[inject_attr(singleton, as = dyn IHostedService)]
+#[inject]
 pub struct DbInitService {
     ctx: Arc<Mutex<DbContext>>,
     docs: Arc<DocService>,
@@ -66,8 +66,8 @@ impl IHostedService for DbInitService {
 ## 注册
 
 ```rust
-// 通过 inject_attr 自动注册
-#[inject_attr(singleton, as = dyn IHostedService)]
+// 通过 #[inject] 自动注册
+#[inject]
 pub struct DbInitService { ... }
 
 // 或手动

@@ -1,4 +1,4 @@
-# 从 Axum / Actix 迁移
+﻿# 从 Axum / Actix 迁移
 
 ## 思维模型转变
 
@@ -66,7 +66,7 @@ struct AppState {
 
 ```rust
 // 通过 DI 容器管理，无需 AppState
-#[inject_attr(singleton)]
+#[inject]
 pub struct GetUserHandler {
     db: Arc<DbPool>,
 }

@@ -234,10 +234,12 @@ chmod +x docbit/publish.sh
 
 Set `DATABASE_URL` and `JWT_SECRET` before starting, or edit the generated `run.sh` / `run.cmd`.
 
-### Docker
+### Docker (optional)
+
+Primary deployment is **Linux binary + static assets** via `docbit/publish.sh` (see [docbit/PRODUCTION.md](docbit/PRODUCTION.md)). Docker files are reference-only and not maintained in CI:
 
 ```bash
-# standalone image
+# standalone image (verify locally before use)
 docker build -f docbit/Dockerfile .
 
 # full local stack (docbit + MySQL)

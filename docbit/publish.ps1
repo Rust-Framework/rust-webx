@@ -8,7 +8,7 @@
       2. 复制 docbit-host.exe 到目标目录
       3. 复制 wwwroot/ 静态资源到目标目录
       4. 复制 appsettings.json 与 appsettings.Production.json
-      5. 创建 docs/ 空目录（应用启动时按需写入）
+      5. 复制 docs/ 生态文档（需先运行 scripts/sync-docs.ps1）
     生产环境使用 MySQL，开发期 SQLite 数据库文件 (docbit.db*) 不发布。
     blog-data 已废弃，博客内容已迁移到数据库。
 
@@ -51,7 +51,7 @@
         appsettings.json
         appsettings.Production.json
         wwwroot\          (admin / assets / pages / index.html ...)
-        docs\             (空目录，运行期写入)
+        docs\             (五项目文档镜像，sync-docs.ps1 同步)
         run.cmd           (-Production 时生成，设置 APP_ENV=Production 启动)
 #>
 
@@ -176,12 +176,21 @@ Write-Host "[4/6] 复制配置文件 (appsettings.json + Production)" -Foregroun
 Copy-Item -Path $AppsettingsBase -Destination $Destination -Force
 Copy-Item -Path $AppsettingsProd -Destination $Destination -Force
 
-# ---------- 5. 创建运行期数据目录 ----------
-Write-Host "[5/6] 创建运行期数据目录 (docs/)" -ForegroundColor Green
+# ---------- 5. 复制生态文档 ----------
+Write-Host "[5/6] 复制 docs/ 生态文档" -ForegroundColor Green
+$DocsSrc = Join-Path $WorkspaceRoot 'docs'
 $DocsDest = Join-Path $Destination 'docs'
 
-if (-not (Test-Path $DocsDest)) {
-    New-Item -Path $DocsDest -ItemType Directory -Force | Out-Null
+if (Test-Path $DocsSrc) {
+    if (Test-Path $DocsDest) {
+        Remove-Item -Path $DocsDest -Recurse -Force
+    }
+    Copy-Item -Path $DocsSrc -Destination $DocsDest -Recurse -Force
+} else {
+    Write-Warning "docs/ not found at $DocsSrc — run scripts/sync-docs.ps1 first"
+    if (-not (Test-Path $DocsDest)) {
+        New-Item -Path $DocsDest -ItemType Directory -Force | Out-Null
+    }
 }
 
 # ---------- 6. 生成生产启动脚本 ----------

@@ -233,10 +233,12 @@ chmod +x docbit/publish.sh
 
 启动前设置 `DATABASE_URL` 与 `JWT_SECRET`，或编辑生成的 `run.sh` / `run.cmd`。
 
-### Docker
+### Docker（可选）
+
+主部署方式为 **`docbit/publish.sh` 裸机 Linux 发布**（见 [docbit/PRODUCTION.md](docbit/PRODUCTION.md)）。Docker 文件仅作参考，不在 CI 中维护：
 
 ```bash
-# 独立镜像
+# 独立镜像（使用前请本地验证）
 docker build -f docbit/Dockerfile .
 
 # 完整本地栈（docbit + MySQL）
@@ -287,7 +289,7 @@ docker compose -f docbit/docker-compose.yml --env-file docbit/.env up --build
 
 - **rust-webx 开发者手册** — 位于 [`docs/rust-webx/`](docs/rust-webx/INDEX.md) 的渐进式披露书籍（16 章，中文）：入门、快速上手、架构、DI 与生命周期、中间件、中介者与事件、认证与安全、配置、生产、项目结构、扩展、最佳实践、案例研究与迁移指南。
 - **rust-ef 参考** — 位于 [`docs/rust-ef/`](docs/rust-ef/INDEX.md) 的 ORM 手册，`docbit` 示例使用。
-- `docbit` 参考应用也把这些文档作为实时网站提供（`GET /api/docs/rust-webx/...`）。
+- `docbit` 参考应用也把这些文档作为实时网站提供（`GET /api/docs/rust-webx/...`）。Monorepo 开发时 `DocService` 按 slug 实时解析 sibling 仓库文档，无需 `sync-docs`；standalone 发布前运行 `scripts/sync-docs.*` 将文档打进 bundle。可通过 `RUST_FRAMEWORK_ROOT` 显式指定 monorepo 根目录。
 
 ## 许可证
 

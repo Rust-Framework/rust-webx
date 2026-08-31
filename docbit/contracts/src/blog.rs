@@ -52,28 +52,29 @@ pub struct BlogCategoryCount {
 
 // ── HTTP requests ──
 
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct ListBlogPostsRequest;
 
 #[get("/api/blog")]
 impl IRequest<Vec<BlogPostSummary>> for ListBlogPostsRequest {}
 
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct ListBlogCategoriesRequest;
 
 #[get("/api/blog/categories")]
 impl IRequest<Vec<BlogCategoryCount>> for ListBlogCategoriesRequest {}
 
 #[claims]
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct ListMyBlogPostsRequest;
 
 #[get("/api/blog/my")]
 #[authorize]
 impl IRequest<Vec<BlogPostSummary>> for ListMyBlogPostsRequest {}
 
-#[derive(Default)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct GetBlogPostRequest {
+    #[from_route]
     pub slug: String,
 }
 
@@ -114,7 +115,7 @@ pub struct UpdateBlogPostRequest {
 impl IRequest<BlogPostModel> for UpdateBlogPostRequest {}
 
 #[claims]
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct DeleteBlogPostRequest {
     pub slug: String,
 }

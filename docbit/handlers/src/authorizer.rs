@@ -34,8 +34,8 @@ impl IDynamicAuthorizer for RoleAuthorizer {
             return Ok(());
         }
 
-        Err(Error::Http(format!(
-            "Forbidden: admin role required for '{}'",
+        Err(Error::Forbidden(format!(
+            "admin role required for '{}'",
             route_pattern
         )))
     }

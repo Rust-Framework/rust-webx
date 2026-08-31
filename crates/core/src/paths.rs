@@ -67,3 +67,36 @@ pub fn app_base() -> PathBuf {
     // 4. 回退 cwd
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
+
+/// Returns true when `dir` looks like the Rust-Framework monorepo root
+/// (contains `rust-webx` and at least one other ecosystem crate).
+pub fn looks_like_framework_root(dir: &Path) -> bool {
+    dir.join("rust-webx").is_dir()
+        && (dir.join("rust-ef").is_dir()
+            || dir.join("rust-dix").is_dir()
+            || dir.join("rust-agent-framework").is_dir()
+            || dir.join("rust-gpui-rml").is_dir())
+}
+
+/// Resolve the Rust-Framework monorepo root for live sibling doc paths.
+///
+/// Priority:
+/// 1. `RUST_FRAMEWORK_ROOT` environment variable
+/// 2. Walk up from [`app_base`] looking for [`looks_like_framework_root`]
+pub fn framework_root() -> Option<PathBuf> {
+    if let Ok(root) = std::env::var("RUST_FRAMEWORK_ROOT") {
+        let path = PathBuf::from(&root);
+        if path.is_dir() {
+            return Some(path);
+        }
+    }
+
+    let mut dir = app_base();
+    for _ in 0..8 {
+        if looks_like_framework_root(&dir) {
+            return Some(dir);
+        }
+        dir = dir.parent()?.to_path_buf();
+    }
+    None
+}

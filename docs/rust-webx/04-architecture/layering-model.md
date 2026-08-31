@@ -1,4 +1,4 @@
-# 分层模型与依赖方向
+﻿# 分层模型与依赖方向
 
 ## 应用内部分层
 
@@ -48,14 +48,18 @@ impl IRequest<AuthResponse> for LoginRequest {}
 
 ```rust
 // handlers/auth.rs
-#[inject_attr(singleton, as = dyn IAuthService)]
+#[inject]
 pub struct AuthService { ... }
 impl IAuthService for AuthService { ... }
 
-#[inject_attr(singleton, as = dyn IRequestHandler<LoginRequest, AuthResponse>)]
+#[derive(Inject)]
 pub struct LoginHandler {
     auth: Arc<dyn IAuthService>,
 }
+
+#[handler(inject)]
+#[async_trait]
+impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler { ... }
 ```
 
 - 薄 Handler：参数传递、`Error` 映射
@@ -85,7 +89,7 @@ pub struct UserEntity {
 **拥有**：Host 配置、`bootstrap` 基础设施注册、`IHostedService`
 
 - 唯一允许手动注册 `DbContext`、`AppPaths` 等框架外类型的地方
-- 业务 Handler / Service 由 `inject_attr` 自动收集，**不在 main 手动注册**
+- 业务 Handler / Service 由 `#[inject]` 自动收集，**不在 main 手动注册**
 
 ### appsettings.json
 

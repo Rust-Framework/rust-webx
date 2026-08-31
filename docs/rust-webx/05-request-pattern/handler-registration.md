@@ -1,12 +1,24 @@
-# Handler 注册策略
+﻿# Handler 注册策略
 
-## 三种注册方式
+## 推荐方式：inventory + HandlerCache（HTTP 唯一路径）
+
+HTTP 请求分发使用 **编译时 inventory 收集**，不通过 DI 查找 `dyn IRequestHandler`：
+
+| 宏 | 收集内容 |
+|----|---------|
+| `#[get]` / `#[post]` 等 | `RouteEntry` — 路由表项 |
+| `#[handler]` / `#[handler(inject)]` | `HandlerRegistration` — Handler 工厂 |
+| endpoint 宏生成 | `RouteDispatch` — HTTP → Mediator 桥接 |
+
+`HostBuilder::build()` 将三者关联；配置不一致时 **启动 panic**（orphan route/handler）。
+
+## 三种 Handler 声明方式
 
 | 方式 | 适用场景 | 依赖注入 |
 |------|---------|---------|
-| `#[handler]` | Handler 实现 Default | 无依赖 |
-| `#[handler(inject)]` + `inject_attr` | Handler 有 DI 依赖 | 自动注入 |
-| 手动 `singleton` 注册 | 复杂构造逻辑 | 手动控制 |
+| `#[handler]` | Handler 实现 `Default` | 无依赖 |
+| `#[handler(inject)]` + `#[derive(Inject)]` | Handler 有 DI 依赖 | rust-dix 自动注入 |
+| 手动 `singleton` 注册 | 非 HTTP Mediator 场景 | 手动控制 |
 
 ## 方式一：#[handler] 零配置
 
@@ -23,72 +35,53 @@ impl IRequestHandler<HelloRequest, String> for HelloHandler { ... }
 - Handler struct 实现 `Default`
 - 无构造函数参数
 
-## 方式二：register_handlers! 批量注册
+## 方式二：register_handlers!（已弃用，非 HTTP 主路径）
+
+> **Deprecated：** HTTP 请使用 `#[handler]` / `#[handler(inject)]`。此宏仅保留给非 HTTP Mediator 或手动 DI 注册。
 
 ```rust
 Host::builder()
     .register(|svc| {
-        register_handlers!(svc,
-            HelloRequest => String => HelloHandler,
-            ListUsersRequest => Vec<UserDto> => ListUsersHandler,
-            DeleteUserRequest => () => DeleteUserHandler,
-        )
+        register_handlers!(svc, [HelloHandler, OtherHandler])
     })
 ```
 
-等价于多条 `.singleton::<dyn IRequestHandler<...>>()` 调用。
+此方式向 DI 注册 `dyn IRequestHandler<…>`，**HTTP RouteDispatch 不使用此查找**。保留用于显式 Mediator 调用或非 HTTP 场景。
 
-## 方式三：手动注册（有依赖）
-
-```rust
-Host::builder()
-    .register(move |svc| {
-        let repo = Arc::new(UserRepository::new());
-        svc.singleton::<dyn IRequestHandler<GetUserRequest, UserDto>>(
-            move |_| Arc::new(GetUserHandler { repo: Arc::clone(&repo) })
-        );
-    })
-```
-
-## 方式四：inject_attr + #[handler(inject)]
-
-Docbit 推荐的生产模式：
+## 方式三：#[derive(Inject)] + #[handler(inject)]（推荐）
 
 ```rust
-#[inject]
-pub struct LoginHandler {
-    ctx: Arc<Mutex<DbContext>>,
+#[derive(Inject)]
+struct BlogHandler {
+    blog: Arc<dyn IBlogService>,
 }
 
 #[handler(inject)]
 #[async_trait]
-impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler { ... }
+impl IRequestHandler<GetBlogRequest, BlogModel> for BlogHandler { ... }
 ```
 
-- `inject_attr` 声明如何构造 Handler（自动解析 `ctx` 等依赖）
-- `#[handler(inject)]` 标记走注入路径
-- 无需在 `main.rs` 中逐个手动注册
+- `#[derive(Inject)]` 生成 rust-dix 构造器
+- `#[handler(inject)]` 标记走注入路径而非 `Default`
+- Handler 依赖通过 DI 解析，注册仍走 inventory
 
-## 选择指南
+## 诊断
+
+```bash
+cargo run -p my-host -- --doctor
+```
+
+输出路由表、orphan 路由/Handler。build 阶段也会 fail-fast。
+
+## 决策流程
 
 ```mermaid
-graph TD
-    A[新 Handler] --> B{有外部依赖?}
-    B -->|否| C[#[derive Default] + #[handler]]
-    B -->|是| D{使用 rust-dicore inject?}
-    D -->|是| E[inject_attr + #[handler inject]]
-    D -->|否| F[手动 singleton 注册]
+flowchart TD
+    A[新增 Handler] --> B{有 DI 依赖?}
+    B -->|否| C["#[handler] + Default"]
+    B -->|是| D["#[derive(Inject)] + #[handler(inject)]"]
+    C --> E[确保 contracts 有对应路由宏]
+    D --> E
 ```
 
-## 排查：No handler registered
-
-1. 检查是否使用了 `#[handler]` 或手动注册
-2. 检查注册类型是否为 `dyn IRequestHandler<T, R>`
-3. 检查 Handler 模块是否被 `mod handlers;` 引用（inventory 链接）
-4. 检查 `IRequest<T>` 与 `IRequestHandler<T, R>` 类型是否一致
-
-## 小结
-
-简单 Handler 用 `#[handler]` 零配置；生产项目推荐 `inject_attr` 模式，保持 `main.rs` 简洁。
-
-下一节：[参数绑定与序列化](parameter-binding.md)
+简单 Handler 用 `#[handler]`；生产项目推荐 `#[derive(Inject)]` + `#[handler(inject)]`，保持 `main.rs` 简洁。

@@ -209,7 +209,7 @@ impl IRequestHandler<UpdateBlogPostRequest, BlogPostModel> for UpdateBlogPostHan
             .ok_or_else(|| Error::NotFound(format!("Blog post not found: {}", slug)))?;
 
         if !is_admin(&roles) && blog.author_id != uid {
-            return Err(Error::Http("Forbidden: not the author".into()));
+            return Err(Error::Forbidden("not the author".into()));
         }
 
         let blog_id = blog.id.clone();
@@ -250,7 +250,7 @@ impl IRequestHandler<DeleteBlogPostRequest, String> for DeleteBlogPostHandler {
             .ok_or_else(|| Error::NotFound(format!("Blog post not found: {}", slug)))?;
 
         if !is_admin(&roles) && blog.author_id != uid {
-            return Err(Error::Http("Forbidden: not the author".into()));
+            return Err(Error::Forbidden("not the author".into()));
         }
 
         blog.is_deleted = true;

@@ -1,4 +1,4 @@
-# AI 友好开发模式
+﻿# AI 友好开发模式
 
 ## 为什么 rust-webx 适合 AI 辅助开发
 
@@ -57,10 +57,10 @@ handlers/blog/
 ```
 使用 rust-webx 框架，遵循以下约定：
 - contracts/：Request、Response DTO、enum、I…Service trait（仅依赖框架，禁止引用 domain）
-- handlers/：IRequestHandler 实现 + I…Service 实现（inject_attr 自动注册）
+- handlers/：IRequestHandler 实现 + I…Service 实现（#[inject] 自动注册）
 - domain/：实体与迁移（可引用 contracts 枚举）
 - 使用 #[get]/#[post] 标注 impl IRequest<T>
-- Handler 注入 Arc<dyn I…Service>，使用 inject_attr + #[handler(inject)]
+- Handler 注入 Arc<dyn I…Service>，使用 #[inject] + #[handler(inject)]
 - 错误使用 Error::NotFound / Error::Validation
 - 返回 Result<T>
 

@@ -21,7 +21,7 @@ pub struct ProductModel {
 }
 
 #[claims]
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct ListProductsRequest;
 
 #[get("/api/products")]
@@ -29,7 +29,7 @@ pub struct ListProductsRequest;
 impl IRequest<Vec<ProductModel>> for ListProductsRequest {}
 
 #[claims]
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct GetProductRequest {
     pub id: String,
 }
@@ -76,7 +76,7 @@ pub struct UpdateProductRequest {
 impl IRequest<ProductModel> for UpdateProductRequest {}
 
 #[claims]
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub struct DeleteProductRequest {
     pub id: String,
 }

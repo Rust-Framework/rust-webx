@@ -9,7 +9,7 @@
 mod claims;
 mod endpoint;
 mod handler;
-mod param;
+mod request_meta;
 
 use proc_macro::TokenStream;
 
@@ -94,25 +94,19 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 // ---------------------------------------------------------------------------
-// Parameter binding
+// Parameter binding (OpenAPI metadata via WebxRequestMeta derive helpers)
 // ---------------------------------------------------------------------------
+//
+// `from_query`, `from_route`, and `from_body` are helper attributes for
+// `#[derive(WebxRequestMeta)]` — not standalone attribute macros (avoids
+// rustc conflicts on struct fields).
 
-/// Marks a field or parameter as deserialized from the JSON request body.
-#[proc_macro_attribute]
-pub fn from_body(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    param::from_attribute_impl("Body", item)
-}
-
-/// Marks a field or parameter as extracted from the route path.
-#[proc_macro_attribute]
-pub fn from_route(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    param::from_attribute_impl("Route", item)
-}
-
-/// Marks a field or parameter as extracted from the query string.
-#[proc_macro_attribute]
-pub fn from_query(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    param::from_attribute_impl("Query", item)
+/// Registers OpenAPI parameter metadata from `#[from_query]` / `#[from_route]` / `#[from_body]` fields.
+///
+/// Add `#[webx_request(query_all)]` to treat all non-skipped fields as query parameters.
+#[proc_macro_derive(WebxRequestMeta, attributes(from_query, from_route, from_body, webx_request))]
+pub fn webx_request_meta(input: TokenStream) -> TokenStream {
+    request_meta::derive_request_meta(input)
 }
 
 // ---------------------------------------------------------------------------

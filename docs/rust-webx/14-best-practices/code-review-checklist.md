@@ -1,4 +1,4 @@
-# 代码审查清单
+﻿# 代码审查清单
 
 ## 路由与契约
 
@@ -12,7 +12,7 @@
 ## Handler
 
 - [ ] 注册为 `dyn IRequestHandler<T, R>`
-- [ ] 有依赖时使用 `inject_attr` + `#[handler(inject)]`，无依赖使用 `#[handler]`
+- [ ] 有依赖时使用 `#[inject]` + `#[handler(inject)]`，无依赖使用 `#[handler]`
 - [ ] Handler 内无 HTTP 直接操作（设置 header/status）
 - [ ] 业务错误使用正确的 `Error` 变体
 - [ ] Handler 不超过 80 行（过长则下沉到 Service 实现）
@@ -22,7 +22,7 @@
 
 - [ ] `contracts/` 仅依赖框架，无 `use crate::domain::*`
 - [ ] `I…Service` trait 定义在 `contracts/`
-- [ ] Service 实现在 `handlers/`，带 `inject_attr(as = dyn I…Service)`
+- [ ] Service 实现在 `handlers/`，带 `#[inject] (implements I…Service)`
 - [ ] 无独立 `services/` 目录（或仅为迁移中的临时结构）
 - [ ] `domain/` 不依赖框架类型，可引用 `contracts` 枚举/model
 - [ ] `main.rs` 不手动注册业务 Service

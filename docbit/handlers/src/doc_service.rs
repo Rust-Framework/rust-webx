@@ -1,7 +1,9 @@
-//! Documentation filesystem service — scans `docs/` and serves INDEX.json + markdown.
+//! Documentation filesystem service — scans ecosystem docs and serves INDEX.json + markdown.
 //!
-//! 实现合约层的 `IDocumentService`。无需任何外部路径注入 ——
-//! docs 目录按 docbit 业务约定写死为 `<app_base>/docs`。
+//! 实现合约层的 `IDocumentService`。docs 目录按优先级解析：
+//! 1. `<app_base>/docs/{work}` — 发布 bundle
+//! 2. `<workspace>/docs/{work}` — rust-webx 镜像（可选 sync-docs）
+//! 3. `<framework_root>/{sibling}/docs/...` — monorepo  sibling 实时路径
 //!
 //! `list_portfolio` / `get_portfolio` 从文件系统 INDEX.json 读取元数据并
 //! 返回 `ExhibitionModel`；DB 专属字段（id、category_id、created_at 等）
@@ -19,31 +21,77 @@ use serde::Deserialize;
 
 use docbit_contracts::docs::{DocContent, DocIndex, DocIndexItem, IDocumentService};
 use docbit_contracts::exhibition::ExhibitionModel;
-use rust_webx::{app_base, inject, Inject};
+use rust_webx::{app_base, framework_root, inject, Inject};
+
+/// Ecosystem documentation slugs served by docbit.
+const WORK_SLUGS: &[&str] = &[
+    "rust-dix",
+    "rust-ef",
+    "rust-webx",
+    "rust-agent-framework",
+    "rust-gpui-rml",
+];
 
 // `#[derive(Inject)]` 生成 `__rdi_construct_DocService` 构造器。
 #[derive(Inject)]
 pub struct DocService;
 
 impl DocService {
-    /// 文档数据目录：优先 `<app_base>/docs`（部署布局）；
-    /// monorepo 开发时回退到 `<workspace>/docs`（`app_base` 为 `docbit/` 等 member crate）。
-    fn root() -> PathBuf {
-        let app_docs = app_base().join("docs");
-        if app_docs.is_dir() {
-            return app_docs;
+    /// Relative doc path inside the Rust-Framework monorepo for a work slug.
+    fn sibling_doc_relative(work: &str) -> Option<&'static str> {
+        match work {
+            "rust-dix" => Some("rust-dix/docs/rust-dix"),
+            "rust-ef" => Some("rust-ef/docs/rust-ef"),
+            "rust-webx" => Some("rust-webx/docs/rust-webx"),
+            "rust-agent-framework" => Some("rust-agent-framework/docs"),
+            "rust-gpui-rml" => Some("rust-gpui-rml/docs"),
+            _ => None,
         }
-        if let Some(parent) = app_base().parent() {
-            let workspace_docs = parent.join("docs");
-            if workspace_docs.is_dir() {
-                return workspace_docs;
-            }
-        }
-        app_docs
     }
 
+    /// Workspace-level docs mirror (`rust-webx/docs/`).
+    fn workspace_docs_root() -> Option<PathBuf> {
+        let app = app_base();
+        let mut candidates = vec![app.join("docs")];
+        if let Some(parent) = app.parent() {
+            candidates.push(parent.join("docs"));
+            if let Some(grandparent) = parent.parent() {
+                candidates.push(grandparent.join("docs"));
+            }
+        }
+        candidates.into_iter().find(|path| path.is_dir())
+    }
+
+    /// Legacy aggregate docs root (first existing parent docs directory).
+    fn root() -> PathBuf {
+        Self::workspace_docs_root()
+            .unwrap_or_else(|| app_base().join("docs"))
+    }
+
+    /// Resolve the directory for one work slug (deploy mirror → workspace mirror → live sibling).
     fn work_dir(work: &str) -> PathBuf {
-        Self::root().join(work)
+        let deploy = app_base().join("docs").join(work);
+        if deploy.is_dir() {
+            return deploy;
+        }
+
+        if let Some(mirror_root) = Self::workspace_docs_root() {
+            let mirrored = mirror_root.join(work);
+            if mirrored.is_dir() {
+                return mirrored;
+            }
+        }
+
+        if let Some(framework) = framework_root() {
+            if let Some(rel) = Self::sibling_doc_relative(work) {
+                let live = framework.join(rel);
+                if live.is_dir() {
+                    return live;
+                }
+            }
+        }
+
+        deploy
     }
 
     fn write_index(&self, work: &str, index: &DocIndex) -> Result<(), String> {
@@ -161,16 +209,24 @@ impl DocService {
 #[inject]
 impl IDocumentService for DocService {
     fn list_works(&self) -> Result<Vec<String>, String> {
-        if !Self::root().is_dir() {
-            return Ok(vec![]);
-        }
-        let mut works = Vec::new();
-        for entry in fs::read_dir(Self::root()).map_err(|e| e.to_string())? {
-            let entry = entry.map_err(|e| e.to_string())?;
-            if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
-                works.push(entry.file_name().to_string_lossy().to_string());
+        let mut works: Vec<String> = WORK_SLUGS
+            .iter()
+            .filter(|slug| Self::work_dir(slug).is_dir())
+            .map(|slug| (*slug).to_string())
+            .collect();
+
+        if let Some(root) = Self::workspace_docs_root() {
+            for entry in fs::read_dir(&root).map_err(|e| e.to_string())? {
+                let entry = entry.map_err(|e| e.to_string())?;
+                if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if !works.iter().any(|w| w == &name) {
+                        works.push(name);
+                    }
+                }
             }
         }
+
         works.sort();
         Ok(works)
     }
@@ -211,28 +267,27 @@ impl IDocumentService for DocService {
     }
 
     fn ensure_all_indexes(&self) -> Result<(), String> {
-        let root = Self::root();
-        if !root.is_dir() {
-            tracing::warn!(
-                "[DocService] Docs directory not found ({}); skipping index generation",
-                root.display()
-            );
-            return Ok(());
-        }
-        for entry in fs::read_dir(&root).map_err(|e| e.to_string())? {
-            let entry = entry.map_err(|e| e.to_string())?;
-            if !entry.file_type().map_err(|e| e.to_string())?.is_dir() {
+        let mut any = false;
+        for slug in WORK_SLUGS {
+            let dir = Self::work_dir(slug);
+            if !dir.is_dir() {
                 continue;
             }
-            let work = entry.file_name().to_string_lossy().to_string();
-            let index_path = entry.path().join("INDEX.json");
+            any = true;
+            let index_path = dir.join("INDEX.json");
             if index_path.exists() {
-                tracing::info!("[DocService] Using existing INDEX.json for '{}'", work);
+                tracing::info!("[DocService] Using existing INDEX.json for '{}'", slug);
             } else {
-                let generated = self.build_index(&work)?;
-                self.write_index(&work, &generated)?;
-                tracing::info!("[DocService] Generated INDEX.json for '{}'", work);
+                let generated = self.build_index(slug)?;
+                self.write_index(slug, &generated)?;
+                tracing::info!("[DocService] Generated INDEX.json for '{}'", slug);
             }
+        }
+
+        if !any {
+            tracing::warn!(
+                "[DocService] No documentation directories found (checked deploy mirror, workspace docs/, and monorepo siblings); skipping index generation"
+            );
         }
         Ok(())
     }

@@ -66,29 +66,38 @@ echo "=== docbit publish ==="
 echo "Destination: $DEST"
 
 if [[ "$SKIP_BUILD" -eq 0 ]]; then
-    echo "[1/5] cargo build --release -p docbit-host"
+    echo "[1/6] cargo build --release -p docbit-host"
     (cd "$WORKSPACE_ROOT" && cargo build --release -p docbit-host)
 else
-    echo "[1/5] skip build"
+    echo "[1/6] skip build"
 fi
 
 [[ -f "$EXE" ]] || { echo "binary not found: $EXE" >&2; exit 1; }
 
-echo "[2/5] copy docbit-host"
+echo "[2/6] copy docbit-host"
 cp "$EXE" "$DEST/docbit-host"
 chmod +x "$DEST/docbit-host"
 
-echo "[3/5] sync wwwroot/"
+echo "[3/6] sync wwwroot/"
 rm -rf "$DEST/wwwroot"
 cp -a "$WWWROOT_SRC" "$DEST/wwwroot"
 
-echo "[4/5] copy appsettings"
+echo "[4/6] copy appsettings"
 cp "$APPS_BASE" "$APPS_PROD" "$DEST/"
 
-echo "[5/5] create docs/"
-mkdir -p "$DEST/docs"
+echo "[5/6] copy docs/"
+DOCS_SRC="$WORKSPACE_ROOT/docs"
+DOCS_DEST="$DEST/docs"
+if [[ -d "$DOCS_SRC" ]]; then
+    rm -rf "$DOCS_DEST"
+    cp -a "$DOCS_SRC" "$DOCS_DEST"
+else
+    echo "WARNING: docs/ not found at $DOCS_SRC — run scripts/sync-docs.sh first" >&2
+    mkdir -p "$DOCS_DEST"
+fi
 
 if [[ "$PRODUCTION" -eq 1 ]]; then
+    echo "[6/6] create run.sh"
     cat > "$DEST/run.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -100,6 +109,8 @@ exec ./docbit-host
 EOF
     chmod +x "$DEST/run.sh"
     echo "Created run.sh (set DATABASE_URL and JWT_SECRET before starting)"
+else
+    echo "[6/6] skip run.sh (-Production not set)"
 fi
 
 echo "=== done ==="

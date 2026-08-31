@@ -116,7 +116,7 @@ impl IRequestHandler<DeleteCommentRequest, String> for DeleteCommentHandler {
         let uid = claims.subject().to_string();
 
         if !claims.has_role("admin") && comment.user_id != uid {
-            return Err(Error::Http("Forbidden: can only delete your own comments".into()));
+            return Err(Error::Forbidden("can only delete your own comments".into()));
         }
 
         comment.is_deleted = true;

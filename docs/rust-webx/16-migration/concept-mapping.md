@@ -1,4 +1,4 @@
-# 概念对照表
+﻿# 概念对照表
 
 ## ASP.NET Core ↔ rust-webx
 
@@ -54,7 +54,7 @@
 
 | 需求 | ASP.NET Core | Axum | rust-webx |
 |------|-------------|------|-------------|
-| DI | 内置 | 手动/第三方 | rust-dicore |
+| DI | 内置 | 手动/第三方 | rust-dix |
 | ORM | EF Core | sqlx/sea-orm | 用户自选 |
 | 认证 | Identity | 手动 | JWT 内置 |
 | 文档 | Swagger | utoipa | OpenAPI 内置 |

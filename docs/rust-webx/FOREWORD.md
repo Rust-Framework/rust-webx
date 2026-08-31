@@ -1,4 +1,4 @@
-# 前言
+﻿# 前言
 
 ## 为什么写这本书
 
@@ -38,6 +38,8 @@ Rust 在系统编程领域已经证明了自身的价值，但在 Web 后端开�
 
 ## 致谢
 
-`rust-webx` 站在 Rust 生态的肩膀上：`hyper` 提供 HTTP 底座，`rust-dicore` 提供 DI 容器，`inventory` 实现编译时路由收集。感谢所有开源贡献者。
+`rust-webx` 站在 Rust 生态的肩膀上：`hyper` 提供 HTTP 底座，`rust-dix` 提供 DI 容器，`inventory` 实现编译时路由收集。感谢所有开源贡献者。
+
+**迁移提示：** 若你使用过已弃用的 `global_provider()`，请参阅 [全局状态迁移](16-migration/global-state.md)。
 
 现在，让我们从第一章开始。

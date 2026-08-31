@@ -132,10 +132,31 @@ Write-Host ""
 if (-not $SkipBuild) {
     if ($Linux) {
         $tools = Join-Path $WorkspaceRoot '.tools'
-        $env:CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER = Join-Path $tools 'zig-link.bat'
-        $env:CC_x86_64_unknown_linux_gnu = Join-Path $tools 'zig-cc.bat'
-        $env:CXX_x86_64_unknown_linux_gnu = Join-Path $tools 'zig-c++.bat'
-        $env:AR_x86_64_unknown_linux_gnu = Join-Path $tools 'zig-ar.bat'
+        $zigCc = (Join-Path $tools 'zig-cc.bat') -replace '\\', '/'
+        $zigCxx = (Join-Path $tools 'zig-c++.bat') -replace '\\', '/'
+        $zigAr = (Join-Path $tools 'zig-ar.bat') -replace '\\', '/'
+        $zigLink = (Join-Path $tools 'zig-link.bat') -replace '\\', '/'
+        # Absolute paths: relative `.tools/...` breaks when cc-rs runs with cwd = crate source.
+        $cargoConfigDir = Join-Path $WorkspaceRoot '.cargo'
+        if (-not (Test-Path $cargoConfigDir)) {
+            New-Item -Path $cargoConfigDir -ItemType Directory -Force | Out-Null
+        }
+        $cargoConfigPath = Join-Path $cargoConfigDir 'config.toml'
+        $cargoConfigBackup = Join-Path $cargoConfigDir 'config.toml.publish-bak'
+        if (Test-Path $cargoConfigPath) {
+            Copy-Item -Path $cargoConfigPath -Destination $cargoConfigBackup -Force
+        }
+        $cfg = @(
+            '[target.x86_64-unknown-linux-gnu]',
+            "linker = `"$zigLink`"",
+            'rustflags = ["-C", "link-arg=-target", "-C", "link-arg=x86_64-linux-gnu"]',
+            '',
+            '[env]',
+            "CC_x86_64_unknown_linux_gnu = { value = `"$zigCc`", force = true }",
+            "CXX_x86_64_unknown_linux_gnu = { value = `"$zigCxx`", force = true }",
+            "AR_x86_64_unknown_linux_gnu = { value = `"$zigAr`", force = true }"
+        ) -join "`n"
+        [System.IO.File]::WriteAllText($cargoConfigPath, $cfg + "`n", [System.Text.UTF8Encoding]::new($false))
         Write-Host "[1/6] cargo build --release -p docbit-host --target x86_64-unknown-linux-gnu" -ForegroundColor Green
     } else {
         Write-Host "[1/6] cargo build --release -p docbit-host" -ForegroundColor Green
@@ -153,6 +174,15 @@ if (-not $SkipBuild) {
     }
     finally {
         Pop-Location
+        if ($Linux) {
+            $cargoConfigPath = Join-Path $WorkspaceRoot '.cargo\config.toml'
+            $cargoConfigBackup = Join-Path $WorkspaceRoot '.cargo\config.toml.publish-bak'
+            if (Test-Path $cargoConfigBackup) {
+                Move-Item -Path $cargoConfigBackup -Destination $cargoConfigPath -Force
+            } elseif (Test-Path $cargoConfigPath) {
+                Remove-Item -Path $cargoConfigPath -Force
+            }
+        }
     }
 } else {
     Write-Host "[1/6] 跳过编译 (-SkipBuild)" -ForegroundColor DarkGray
@@ -227,7 +257,15 @@ if ($Production) {
             'set -euo pipefail',
             'cd "$(dirname "$0")"',
             'export APP_ENV=Production',
+            '# Required (min 32 chars). Prefer exporting in the shell/systemd unit:',
             '# export JWT_SECRET=your-strong-secret-min-32-chars',
+            '# Optional overrides for www.lusida.net:',
+            '# export APP__App__Urls=''["http://0.0.0.0:8100"]''',
+            '# export APP__Cors__Origins=''["https://www.lusida.net","https://lusida.net"]''',
+            'if [[ -z "${JWT_SECRET:-}" && -z "${APP__Jwt__Secret:-}" ]]; then',
+            '  echo "ERROR: set JWT_SECRET or APP__Jwt__Secret (>=32 chars) before starting." >&2',
+            '  exit 1',
+            'fi',
             'exec ./docbit-host'
         ) -join "`n"
         [System.IO.File]::WriteAllText($runShPath, $runShContent, [System.Text.UTF8Encoding]::new($false))
@@ -241,6 +279,11 @@ if ($Production) {
             'rem 框架据此加载 appsettings.Production.json overlay；数据库为同目录 app.db（SQLite）',
             'set APP_ENV=Production',
             'rem set JWT_SECRET=your-strong-secret-min-32-chars',
+            'if not defined JWT_SECRET if not defined APP__Jwt__Secret (',
+            '  echo ERROR: set JWT_SECRET or APP__Jwt__Secret ^(^=32 chars^) before starting.',
+            '  pause',
+            '  exit /b 1',
+            ')',
             '"%~dp0docbit-host.exe"',
             'pause'
         ) -join "`r`n"

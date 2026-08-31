@@ -99,7 +99,15 @@ if [[ "$PRODUCTION" -eq 1 ]]; then
 set -euo pipefail
 cd "$(dirname "$0")"
 export APP_ENV=Production
+# Required (min 32 chars). Prefer exporting in the shell/systemd unit:
 # export JWT_SECRET=your-strong-secret-min-32-chars
+# Optional overrides for www.lusida.net:
+# export APP__App__Urls='["http://0.0.0.0:8100"]'
+# export APP__Cors__Origins='["https://www.lusida.net","https://lusida.net"]'
+if [[ -z "${JWT_SECRET:-}" && -z "${APP__Jwt__Secret:-}" ]]; then
+  echo "ERROR: set JWT_SECRET or APP__Jwt__Secret (>=32 chars) before starting." >&2
+  exit 1
+fi
 exec ./docbit-host
 EOF
     chmod +x "$DEST/run.sh"

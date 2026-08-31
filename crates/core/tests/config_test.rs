@@ -140,6 +140,21 @@ fn config_cors_section_defaults() {
 }
 
 #[test]
+fn config_cors_binds_pascal_case_origins() {
+    let loaded = serde_json::json!({
+        "Cors": {
+            "Origins": ["https://www.lusida.net"],
+            "Methods": ["GET", "POST", "OPTIONS"],
+            "Headers": ["Content-Type", "Authorization"]
+        }
+    });
+    let opts: rust_webx_core::config::AppOptions = config::bind_root(&loaded);
+    assert_eq!(opts.cors.origins, vec!["https://www.lusida.net".to_string()]);
+    assert!(!opts.cors.origins.iter().any(|o| o == "*"));
+    assert!(opts.cors.methods.contains(&"OPTIONS".to_string()));
+}
+
+#[test]
 fn config_bind_empty_json_returns_default() {
     let json = serde_json::json!({});
     let config: TestConfig = config::bind_root(&json);

@@ -18,15 +18,15 @@ docs/
 **不在 git 中提交**（见根 `.gitignore`）：
 
 - `docs/rust-dix/`、`docs/rust-ef/`、`docs/rust-agent-framework/`、`docs/rust-gpui-rml/`
-- 这些是 **复制** 镜像（`scripts/sync-docs.ps1` / `sync-docs.sh`），**不是符号链接**（Windows 与 standalone clone 不支持 git symlink）。
+- 这些是**可选**本地 staging（`scripts/sync-docs.*`），日常开发**不要**复制 sibling 文档到此目录。
 
 ## 文档解析（DocService）
 
 | 场景 | 行为 |
 |------|------|
 | **Monorepo 开发** | 实时读取 sibling 仓库（如 `../rust-ef/docs/rust-ef`），可通过 `RUST_FRAMEWORK_ROOT` 指定根目录 |
-| **GitHub / standalone clone** | 仅 `docs/rust-webx/` 可用；其他 slug 需 sibling checkout 或 publish 前 sync |
-| **生产 publish bundle** | 运行 `sync-docs` 后 `publish.sh` 将整个 `docs/` 树复制进部署目录（不提交） |
+| **GitHub / standalone clone** | 仅 `docs/rust-webx/` 可用；其他 slug 需 sibling checkout 或发布 bundle |
+| **生产 publish bundle** | `docbit/publish.*` 在打包时从源仓库复制到 `<app_base>/docs/{slug}/` |
 
 优先级：`{app_base}/docs/{slug}` → `rust-webx/docs/{slug}` → `{framework_root}/{sibling}/docs/...`
 
@@ -38,4 +38,4 @@ docs/
 ## 维护
 
 - 编辑 **`docs/rust-webx/`** 下的 Markdown；Docbit 启动时会自动确保 `INDEX.json` 存在。
-- 更新 sibling 手册：在上游仓库改，或在发布前运行 `scripts/sync-docs.*` 生成本地镜像（勿 commit 镜像目录）。
+- 更新 sibling 手册：在上游仓库修改；发布时由 `docbit/publish.*` 从源仓库复制进 bundle。**不要**将 sibling 镜像 commit 到 `rust-webx/docs/`。

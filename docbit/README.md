@@ -9,9 +9,6 @@ Docbit 是 rust-webx 的参考应用：作品集 SPA + 博客 + 五项目完整�
 cd D:\Github\Rust-Framework\rust-webx
 
 # monorepo 开发无需 sync — DocService 会读取 sibling 仓库实时文档
-# 仅 standalone 发布 bundle 前需要：
-# .\scripts\sync-docs.ps1        # Windows
-# ./scripts/sync-docs.sh       # Linux/macOS
 
 # 启动开发服务器（SQLite，http://localhost:5000）
 cargo run -p docbit-host
@@ -34,15 +31,15 @@ cargo run -p docbit-host -- --doctor
 
 文档源文件各仓库 `docs/` 为 **source of truth**。
 
-**Monorepo 开发（推荐）**：`DocService` 按 slug 实时解析 sibling 仓库文档，无需 `sync-docs`：
+**Monorepo 开发（推荐）**：`DocService` 按 slug 实时解析 sibling 仓库文档，**无需**将 sibling 文档复制到 `rust-webx/docs/`：
 
 1. `<app_base>/docs/{slug}/` — 发布 bundle（若存在）
-2. `rust-webx/docs/{slug}/` — 可选镜像
+2. `rust-webx/docs/{slug}/` — 仅 `rust-webx` 手册在 git 中；可选本地 staging
 3. `{framework_root}/{repo}/docs/...` — sibling 实时路径（如 `rust-ef/docs/rust-ef`）
 
 可通过 `RUST_FRAMEWORK_ROOT` 显式指定 monorepo 根目录。
 
-**Standalone 发布**：运行 `scripts/sync-docs.*` 将文档**复制**进 bundle 的 `docs/`（非 symlink；镜像目录不提交 git）。
+**Standalone 发布**：`docbit/publish.*` 在打包时**直接从源仓库**复制文档到 bundle 的 `docs/`（无需事先 sync 到 `rust-webx/docs/`）。
 
 **Git**：仅 `docs/rust-webx/` 纳入版本控制；sibling 手册 canonical 源在各生态仓库。
 
@@ -57,7 +54,7 @@ docbit/
 └── wwwroot/     # SPA（pages/docs/ 文档阅读器）
 ```
 
-`DocService` 按 slug 解析文档根（deploy → workspace 镜像 → sibling 实时路径），API：
+`DocService` 按 slug 解析文档根（deploy → workspace 手册 → sibling 实时路径），API：
 
 - `GET /api/docs/{work}/index` — 侧边栏目录
 - `GET /api/docs/{work}/content/{path}` — Markdown 正文
@@ -66,16 +63,7 @@ docbit/
 
 主部署方式为 **Linux 可执行文件 + 静态资源**，不使用 Docker。
 
-### 1. 同步文档（standalone bundle 才需要）
-
-```bash
-./scripts/sync-docs.sh        # Linux/macOS — 发布前复制 docs 进 bundle
-# .\scripts\sync-docs.ps1     # Windows
-```
-
-Monorepo 开发可跳过此步。
-
-### 2. 编译
+### 1. 编译
 
 在 Linux 上原生编译：
 
@@ -91,7 +79,9 @@ cargo build --release -p docbit-host --target x86_64-unknown-linux-gnu
 # 静态链接可选：x86_64-unknown-linux-musl（需 musl 工具链）
 ```
 
-### 3. 打包部署目录
+### 2. 打包部署目录
+
+发布脚本会从 monorepo 源仓库复制五项目文档到 bundle（需完整 checkout 或设置 `RUST_FRAMEWORK_ROOT`）：
 
 ```bash
 chmod +x docbit/publish.sh
@@ -104,6 +94,15 @@ Windows 开发机发布：
 
 ```powershell
 .\docbit\publish.ps1 -Destination D:\deploy\docbit -Production
+```
+
+### 可选：本地 staging
+
+若需将文档镜像到 `rust-webx/docs/` 做本地预览（非日常开发必需）：
+
+```bash
+./scripts/sync-docs.sh        # Linux/macOS
+# .\scripts\sync-docs.ps1     # Windows
 ```
 
 详见 [PRODUCTION.md](PRODUCTION.md)。Docker 为可选参考，非主路径。

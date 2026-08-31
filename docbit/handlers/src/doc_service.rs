@@ -2,7 +2,7 @@
 //!
 //! 实现合约层的 `IDocumentService`。docs 目录按优先级解析：
 //! 1. `<app_base>/docs/{work}` — 发布 bundle
-//! 2. `<workspace>/docs/{work}` — rust-webx 镜像（可选 sync-docs）
+//! 2. `<workspace>/docs/{work}` — rust-webx 手册（git 仅提交 rust-webx/；可选本地 staging）
 //! 3. `<framework_root>/{sibling}/docs/...` — monorepo  sibling 实时路径
 //!
 //! `list_portfolio` / `get_portfolio` 从文件系统 INDEX.json 读取元数据并

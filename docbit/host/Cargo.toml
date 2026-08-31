@@ -36,3 +36,6 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
 serde_json.workspace = true
 serial_test = "3"
+
+# Cross-compile: enable vendored OpenSSL for linux-gnu from Windows
+openssl-sys = { version = "0.9", features = ["vendored"] }

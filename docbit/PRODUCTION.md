@@ -18,16 +18,23 @@
 
 ## Linux 编译与发布
 
-### 同步生态文档（standalone 发布才需要）
+### 生态文档
 
-Monorepo 开发时 `DocService` 会实时解析 sibling 仓库文档，**无需** `sync-docs`。仅打包 standalone 部署目录（无 sibling 仓库）时才需同步：
+Monorepo 开发时 `DocService` 会实时解析 sibling 仓库文档，**无需**将 sibling 文档复制到 `rust-webx/docs/`。
 
-```bash
-cd rust-webx
-./scripts/sync-docs.sh   # 将五项目 docs **复制**到 rust-webx/docs/ 并打进 bundle（不提交 git）
-```
+**发布时**，`docbit/publish.sh` 直接从源仓库复制五项目文档到 bundle 的 `docs/`：
 
-Git 仓库**只提交** `docs/rust-webx/`；`docs/rust-ef/` 等 sibling 镜像在 `.gitignore` 中，由 `sync-docs` 在发布前本地生成。可通过 `RUST_FRAMEWORK_ROOT` 显式指定 monorepo 根目录（开发/测试用）。
+| 源 | bundle 目标 |
+|----|-------------|
+| `{framework}/rust-dix/docs/rust-dix` | `docs/rust-dix` |
+| `{framework}/rust-ef/docs/rust-ef` | `docs/rust-ef` |
+| `{framework}/rust-agent-framework/docs` | `docs/rust-agent-framework` |
+| `{framework}/rust-gpui-rml/docs` | `docs/rust-gpui-rml` |
+| `{workspace}/docs/rust-webx` | `docs/rust-webx` |
+
+`{framework}` 由 `RUST_FRAMEWORK_ROOT` 或 rust-webx 父目录解析（与 `framework_root()` 一致）。
+
+Git 仓库**只提交** `docs/rust-webx/`；sibling 手册 canonical 源在各生态仓库，**不要** commit 到 `rust-webx/docs/`。
 
 ### 编译 release 二进制
 
@@ -56,7 +63,7 @@ chmod +x docbit/publish.sh
 ├── appsettings.json
 ├── appsettings.Production.json
 ├── wwwroot/                 # SPA 静态资源
-├── docs/                    # 五项目文档镜像（standalone 发布；monorepo 开发可跳过 sync）
+├── docs/                    # 五项目文档（publish 时从源仓库复制）
 └── run.sh                   # 生产启动脚本（--production 时生成）
 ```
 
@@ -70,9 +77,15 @@ cd /opt/docbit
 ### Windows 开发机打包
 
 ```powershell
-# standalone 发布才需要 sync；monorepo 开发可跳过
-.\scripts\sync-docs.ps1
 .\docbit\publish.ps1 -Destination D:\deploy\docbit -Production
+```
+
+发布脚本会自动从 monorepo 源仓库复制文档，无需事先运行 `sync-docs`。
+
+### 可选：本地 staging
+
+```powershell
+.\scripts\sync-docs.ps1   # 将文档镜像到 rust-webx/docs/ 供本地预览（非发布必需）
 ```
 
 ## Docker（可选，非主路径）

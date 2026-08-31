@@ -8,7 +8,7 @@
       2. 复制 docbit-host.exe 到目标目录
       3. 复制 wwwroot/ 静态资源到目标目录
       4. 复制 appsettings.json 与 appsettings.Production.json
-      5. 复制 docs/ 生态文档（需先运行 scripts/sync-docs.ps1）
+      5. 从 monorepo 源仓库复制 docs/ 生态文档到 bundle
     生产环境使用 MySQL，开发期 SQLite 数据库文件 (docbit.db*) 不发布。
     blog-data 已废弃，博客内容已迁移到数据库。
 
@@ -51,7 +51,7 @@
         appsettings.json
         appsettings.Production.json
         wwwroot\          (admin / assets / pages / index.html ...)
-        docs\             (五项目文档镜像，sync-docs.ps1 同步)
+        docs\             (五项目文档，publish 时从源仓库复制)
         run.cmd           (-Production 时生成，设置 APP_ENV=Production 启动)
 #>
 
@@ -176,22 +176,19 @@ Write-Host "[4/6] 复制配置文件 (appsettings.json + Production)" -Foregroun
 Copy-Item -Path $AppsettingsBase -Destination $Destination -Force
 Copy-Item -Path $AppsettingsProd -Destination $Destination -Force
 
-# ---------- 5. 复制生态文档 ----------
-Write-Host "[5/6] 复制 docs/ 生态文档" -ForegroundColor Green
-$DocsSrc = Join-Path $WorkspaceRoot 'docs'
-$DocsDest = Join-Path $Destination 'docs'
-
-if (Test-Path $DocsSrc) {
-    if (Test-Path $DocsDest) {
-        Remove-Item -Path $DocsDest -Recurse -Force
-    }
-    Copy-Item -Path $DocsSrc -Destination $DocsDest -Recurse -Force
-} else {
-    Write-Warning "docs/ not found at $DocsSrc — run scripts/sync-docs.ps1 first"
-    if (-not (Test-Path $DocsDest)) {
-        New-Item -Path $DocsDest -ItemType Directory -Force | Out-Null
-    }
+# ---------- 5. 复制生态文档（直接从源仓库） ----------
+Write-Host "[5/6] 复制 docs/ 生态文档（源仓库 -> bundle）" -ForegroundColor Green
+$CopyDocsScript = Join-Path $WorkspaceRoot 'scripts\copy-ecosystem-docs.ps1'
+if (-not (Test-Path $CopyDocsScript)) {
+    throw "未找到共享复制脚本: $CopyDocsScript"
 }
+. $CopyDocsScript
+
+$DocsDest = Join-Path $Destination 'docs'
+if (Test-Path $DocsDest) {
+    Remove-Item -Path $DocsDest -Recurse -Force
+}
+Copy-EcosystemDocs -DocsDest $DocsDest -WorkspaceRoot $WorkspaceRoot
 
 # ---------- 6. 生成生产启动脚本 ----------
 if ($Production) {

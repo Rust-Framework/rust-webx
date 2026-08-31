@@ -131,6 +131,11 @@ Write-Host ""
 # ---------- 1. 编译 ----------
 if (-not $SkipBuild) {
     if ($Linux) {
+        $tools = Join-Path $WorkspaceRoot '.tools'
+        $env:CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER = Join-Path $tools 'zig-link.bat'
+        $env:CC_x86_64_unknown_linux_gnu = Join-Path $tools 'zig-cc.bat'
+        $env:CXX_x86_64_unknown_linux_gnu = Join-Path $tools 'zig-c++.bat'
+        $env:AR_x86_64_unknown_linux_gnu = Join-Path $tools 'zig-ar.bat'
         Write-Host "[1/6] cargo build --release -p docbit-host --target x86_64-unknown-linux-gnu" -ForegroundColor Green
     } else {
         Write-Host "[1/6] cargo build --release -p docbit-host" -ForegroundColor Green

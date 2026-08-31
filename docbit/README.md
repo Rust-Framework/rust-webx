@@ -117,7 +117,7 @@ Windows 开发机发布：
 展览（五项目作品）数据在 **首次创建数据库** 时由 EF seed 写入。若你之前已运行过 docbit，升级后看不到新作品入口，请删除本地 SQLite 文件后重启：
 
 ```bash
-# 默认位于运行目录下的 docbit.db（或 appsettings 中配置的路径）
-rm docbit.db docbit.db-shm docbit.db-wal
+# 默认位于运行目录下的 app.db（及 -shm / -wal 伴随文件）
+rm app.db app.db-shm app.db-wal
 cargo run -p docbit-host
 ```

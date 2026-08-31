@@ -9,7 +9,7 @@
       3. 复制 wwwroot/ 静态资源到目标目录
       4. 复制 appsettings.json 与 appsettings.Production.json
       5. 从 monorepo 源仓库复制 docs/ 生态文档到 bundle
-    生产环境使用 MySQL，开发期 SQLite 数据库文件 (docbit.db*) 不发布。
+    开发与生产均使用 SQLite（`<app_base>/app.db`）；运行时数据库文件不发布。
     blog-data 已废弃，博客内容已迁移到数据库。
 
 .PARAMETER Destination
@@ -28,9 +28,13 @@
     仅在跨仓库移动脚本时需要显式指定。
 
 .PARAMETER Production
-    生成生产模式启动脚本 run.cmd（设置 APP_ENV=Production 与 DATABASE_URL 后启动 exe）。
-    生产环境通过该脚本启动，框架据此自动加载 appsettings.Production.json overlay，
-    并通过 DATABASE_URL 环境变量连接 MySQL。未指定此开关时，默认按 Development 启动（SQLite）。
+    生成生产模式启动脚本 run.cmd（设置 APP_ENV=Production 后启动 exe）。
+    生产环境通过该脚本启动，框架据此自动加载 appsettings.Production.json overlay。
+    未指定此开关时，默认按 Development 启动。
+
+.PARAMETER Linux
+    交叉编译 Linux ELF（x86_64-unknown-linux-gnu）并发布 docbit-host（无 .exe 后缀）。
+    生成 run.sh 而非 run.cmd（需 -Production）。
 
 .EXAMPLE
     .\publish.ps1 -Destination D:\deploy\docbit
@@ -66,6 +70,8 @@ param(
 
     [switch]$Production,
 
+    [switch]$Linux,
+
     [string]$WorkspaceRoot
 )
 
@@ -77,8 +83,15 @@ if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
     $WorkspaceRoot = Resolve-Path (Join-Path $ScriptDir '..') | Select-Object -ExpandProperty Path
 }
 $DocbitDir   = $ScriptDir
-$TargetDir   = Join-Path $WorkspaceRoot 'target\release'
-$ExePath     = Join-Path $TargetDir 'docbit-host.exe'
+if ($Linux) {
+    $TargetDir = Join-Path $WorkspaceRoot 'target\x86_64-unknown-linux-gnu\release'
+    $ExePath   = Join-Path $TargetDir 'docbit-host'
+    $ExeName   = 'docbit-host'
+} else {
+    $TargetDir = Join-Path $WorkspaceRoot 'target\release'
+    $ExePath   = Join-Path $TargetDir 'docbit-host.exe'
+    $ExeName   = 'docbit-host.exe'
+}
 $WwwrootSrc  = Join-Path $DocbitDir 'wwwroot'
 $AppsettingsBase   = Join-Path $DocbitDir 'appsettings.json'
 $AppsettingsProd   = Join-Path $DocbitDir 'appsettings.Production.json'
@@ -112,14 +125,23 @@ Write-Host "Destination   : $Destination"
 Write-Host "SkipBuild     : $SkipBuild"
 Write-Host "Clean         : $Clean"
 Write-Host "Production    : $Production"
+Write-Host "Linux         : $Linux"
 Write-Host ""
 
 # ---------- 1. 编译 ----------
 if (-not $SkipBuild) {
-    Write-Host "[1/6] cargo build --release -p docbit-host" -ForegroundColor Green
+    if ($Linux) {
+        Write-Host "[1/6] cargo build --release -p docbit-host --target x86_64-unknown-linux-gnu" -ForegroundColor Green
+    } else {
+        Write-Host "[1/6] cargo build --release -p docbit-host" -ForegroundColor Green
+    }
     Push-Location $WorkspaceRoot
     try {
-        & cargo build --release -p docbit-host
+        if ($Linux) {
+            & cargo build --release -p docbit-host --target x86_64-unknown-linux-gnu
+        } else {
+            & cargo build --release -p docbit-host
+        }
         if ($LASTEXITCODE -ne 0) {
             throw "cargo build 失败，退出码 $LASTEXITCODE"
         }
@@ -136,8 +158,8 @@ if (-not (Test-Path $ExePath)) {
 }
 
 # ---------- 2. 复制可执行文件 ----------
-Write-Host "[2/6] 复制 docbit-host.exe" -ForegroundColor Green
-Copy-Item -Path $ExePath -Destination $Destination -Force
+Write-Host "[2/6] 复制 $ExeName" -ForegroundColor Green
+Copy-Item -Path $ExePath -Destination (Join-Path $Destination $ExeName) -Force
 
 # ---------- 3. 复制 wwwroot ----------
 Write-Host "[3/6] 同步 wwwroot/" -ForegroundColor Green
@@ -192,20 +214,33 @@ Copy-EcosystemDocs -DocsDest $DocsDest -WorkspaceRoot $WorkspaceRoot
 
 # ---------- 6. 生成生产启动脚本 ----------
 if ($Production) {
-    Write-Host "[6/6] 生成生产启动脚本 run.cmd (APP_ENV=Production + DATABASE_URL)" -ForegroundColor Green
-    $runCmdPath = Join-Path $Destination 'run.cmd'
-    # 用 %~dp0 引用脚本所在目录，确保从任意位置启动都能定位 exe
-    # DATABASE_URL 需部署时填入真实 MySQL 连接串（mysql://user:pwd@host:port/db）
-    $runCmdContent = @(
-        '@echo off',
-        'rem 自动生成：设置 APP_ENV=Production 与 DATABASE_URL 后启动 docbit-host.exe',
-        'rem 框架据此加载 appsettings.Production.json overlay，并通过 DATABASE_URL 连接 MySQL',
-        'set APP_ENV=Production',
-        'rem set DATABASE_URL=mysql://user:password@host:port/docbit',
-        '"%~dp0docbit-host.exe"',
-        'pause'
-    ) -join "`r`n"
-    [System.IO.File]::WriteAllText($runCmdPath, $runCmdContent, [System.Text.Encoding]::Default)
+    if ($Linux) {
+        Write-Host "[6/6] 生成生产启动脚本 run.sh (APP_ENV=Production)" -ForegroundColor Green
+        $runShPath = Join-Path $Destination 'run.sh'
+        $runShContent = @(
+            '#!/usr/bin/env bash',
+            'set -euo pipefail',
+            'cd "$(dirname "$0")"',
+            'export APP_ENV=Production',
+            '# export JWT_SECRET=your-strong-secret-min-32-chars',
+            'exec ./docbit-host'
+        ) -join "`n"
+        [System.IO.File]::WriteAllText($runShPath, $runShContent, [System.Text.UTF8Encoding]::new($false))
+    } else {
+        Write-Host "[6/6] 生成生产启动脚本 run.cmd (APP_ENV=Production)" -ForegroundColor Green
+        $runCmdPath = Join-Path $Destination 'run.cmd'
+        # 用 %~dp0 引用脚本所在目录，确保从任意位置启动都能定位 exe
+        $runCmdContent = @(
+            '@echo off',
+            'rem 自动生成：设置 APP_ENV=Production 后启动 docbit-host.exe',
+            'rem 框架据此加载 appsettings.Production.json overlay；数据库为同目录 app.db（SQLite）',
+            'set APP_ENV=Production',
+            'rem set JWT_SECRET=your-strong-secret-min-32-chars',
+            '"%~dp0docbit-host.exe"',
+            'pause'
+        ) -join "`r`n"
+        [System.IO.File]::WriteAllText($runCmdPath, $runCmdContent, [System.Text.Encoding]::Default)
+    }
 } else {
     Write-Host "[6/6] 跳过生产启动脚本 (-Production 未指定)" -ForegroundColor DarkGray
 }
@@ -213,7 +248,7 @@ if ($Production) {
 # ---------- 摘要 ----------
 Write-Host ""
 Write-Host "=== 发布完成 ===" -ForegroundColor Cyan
-$ExeItem = Get-Item (Join-Path $Destination 'docbit-host.exe')
+$ExeItem = Get-Item (Join-Path $Destination $ExeName)
 $WwwrootSize = (Get-ChildItem -Path $WwwrootDest -Recurse -File | Measure-Object -Property Length -Sum).Sum
 Write-Host ("exe      : {0} ({1:N0} bytes)" -f $ExeItem.Name, $ExeItem.Length)
 Write-Host ("wwwroot  : {0:N0} bytes" -f $WwwrootSize)
@@ -226,12 +261,24 @@ Get-ChildItem -Path $Destination | ForEach-Object {
 Write-Host ""
 Write-Host "运行方式:" -ForegroundColor Yellow
 if ($Production) {
-    Write-Host "  生产模式: 双击 run.cmd（或命令行执行 run.cmd）" -ForegroundColor Green
-    Write-Host "    => 框架读 APP_ENV=Production，合并 appsettings.Production.json，通过 DATABASE_URL 连 MySQL"
-    Write-Host "    => 部署前需在 run.cmd 中填入真实的 DATABASE_URL（mysql://user:pwd@host:port/db）" -ForegroundColor Yellow
+    if ($Linux) {
+        Write-Host "  生产模式: chmod +x run.sh docbit-host && ./run.sh" -ForegroundColor Green
+        Write-Host "    => 框架读 APP_ENV=Production，合并 appsettings.Production.json，SQLite 数据库为 app.db"
+        Write-Host "    => 部署前请在 run.sh 或环境中设置 JWT_SECRET（≥32 字符）" -ForegroundColor Yellow
+    } else {
+        Write-Host "  生产模式: 双击 run.cmd（或命令行执行 run.cmd）" -ForegroundColor Green
+        Write-Host "    => 框架读 APP_ENV=Production，合并 appsettings.Production.json，SQLite 数据库为 app.db"
+        Write-Host "    => 部署前请在 run.cmd 或环境中设置 JWT_SECRET（≥32 字符）" -ForegroundColor Yellow
+    }
 } else {
-    Write-Host "  开发模式: cd `"$Destination`" && .\docbit-host.exe"
-    Write-Host "    => APP_ENV 未设置，默认 Development，使用 SQLite"
-    Write-Host "  切换生产: 设置 APP_ENV=Production 与 DATABASE_URL 后再启动 exe，或带 -Production 重新发布生成 run.cmd" -ForegroundColor DarkGray
+    if ($Linux) {
+        Write-Host "  开发模式: cd `"$Destination`" && chmod +x docbit-host && ./docbit-host"
+        Write-Host "    => APP_ENV 未设置，默认 Development，SQLite 数据库为 app.db"
+        Write-Host "  切换生产: 带 -Production -Linux 重新发布生成 run.sh" -ForegroundColor DarkGray
+    } else {
+        Write-Host "  开发模式: cd `"$Destination`" && .\docbit-host.exe"
+        Write-Host "    => APP_ENV 未设置，默认 Development，SQLite 数据库为 app.db"
+        Write-Host "  切换生产: 设置 APP_ENV=Production 后再启动 exe，或带 -Production 重新发布生成 run.cmd" -ForegroundColor DarkGray
+    }
 }
 Write-Host ""

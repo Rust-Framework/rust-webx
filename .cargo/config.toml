@@ -1,0 +1,8 @@
+[target.x86_64-unknown-linux-gnu]
+linker = ".tools/zig-link.bat"
+rustflags = ["-C", "link-arg=-target", "-C", "link-arg=x86_64-linux-gnu"]
+
+[env]
+CC_x86_64_unknown_linux_gnu = { value = ".tools/zig-cc.bat", force = true }
+CXX_x86_64_unknown_linux_gnu = { value = ".tools/zig-c++.bat", force = true }
+AR_x86_64_unknown_linux_gnu = { value = ".tools/zig-ar.bat", force = true }

@@ -3,6 +3,29 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [0.3.4] — 2026-08-31 — Docbit SQLite-only and rustls
+
+> **English** · **简体中文**
+
+### English
+
+Maintenance release focused on simpler docbit production packaging and OpenSSL-free TLS on Unix.
+
+#### Changed
+
+- **docbit**: SQLite-only runtime (MySQL path removed from production docs, compose, and host wiring).
+- **rust-webx-host / docbit**: `reqwest` uses `rustls-tls` (no OpenSSL on Unix); `testing` feature not enabled for docbit production builds.
+- **Docbit publish**: `publish.ps1 -Linux` cross-compiles `docbit-host` for `x86_64-unknown-linux-gnu` (Zig linker wrappers under `.tools/`).
+
+### 简体中文
+
+维护版本：docbit 仅 SQLite 部署，以及 Unix 上免 OpenSSL 的 TLS。
+
+#### 变更
+
+- **docbit**：生产环境仅 SQLite（移除 MySQL 相关说明与编排）。
+- **rust-webx-host / docbit**：`reqwest` 使用 `rustls-tls`；生产构建不启用 `testing`。
+- **Docbit 发布**：`publish.ps1 -Linux` 支持交叉编译。
 ## [0.3.3] — 2026-08-31 — Docbit cross-compile and docs
 
 > **English** · **简体中文**

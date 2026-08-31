@@ -99,12 +99,11 @@ if [[ "$PRODUCTION" -eq 1 ]]; then
 set -euo pipefail
 cd "$(dirname "$0")"
 export APP_ENV=Production
-# export DATABASE_URL=mysql://user:password@host:3306/docbit
 # export JWT_SECRET=your-strong-secret-min-32-chars
 exec ./docbit-host
 EOF
     chmod +x "$DEST/run.sh"
-    echo "Created run.sh (set DATABASE_URL and JWT_SECRET before starting)"
+    echo "Created run.sh (set JWT_SECRET before starting)"
 else
     echo "[6/6] skip run.sh (-Production not set)"
 fi

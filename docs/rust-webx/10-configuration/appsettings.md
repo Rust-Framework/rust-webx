@@ -1,4 +1,4 @@
-﻿# appsettings.json 配置体系
+# appsettings.json 配置体系
 
 ## 自动加载
 

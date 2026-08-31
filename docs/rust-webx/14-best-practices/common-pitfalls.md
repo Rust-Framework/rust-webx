@@ -1,4 +1,4 @@
-﻿# 常见陷阱与排查
+# 常见陷阱与排查
 
 ## 1. No handler registered for request
 

@@ -1,4 +1,4 @@
-﻿# 从 ASP.NET Core 迁移
+# 从 ASP.NET Core 迁移
 
 ## 迁移路线图
 

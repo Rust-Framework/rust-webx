@@ -1,4 +1,4 @@
-﻿# ServiceCollection 与服务注册
+# ServiceCollection 与服务注册
 
 ## DI 容器
 

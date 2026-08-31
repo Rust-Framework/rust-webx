@@ -1,4 +1,4 @@
-﻿# IMediator 请求调度
+# IMediator 请求调度
 
 ## 接口
 

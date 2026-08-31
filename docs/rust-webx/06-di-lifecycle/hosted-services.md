@@ -1,4 +1,4 @@
-﻿# IHostedService 后台服务
+# IHostedService 后台服务
 
 ## 接口定义
 

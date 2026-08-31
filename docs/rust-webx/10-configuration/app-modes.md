@@ -1,4 +1,4 @@
-﻿# AppMode 与环境切换
+# AppMode 与环境切换
 
 ## 模式
 

@@ -96,7 +96,7 @@ fn default_icp() -> String {
     "粤ICP备2023105607号-1".into()
 }
 fn default_site_url() -> String {
-    "lusida.net".into()
+    "www.lusida.net".into()
 }
 fn default_site_label() -> String {
     "技术分享".into()

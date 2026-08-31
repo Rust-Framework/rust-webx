@@ -6,14 +6,22 @@
 
 | 变量 | 必需 (Production) | 说明 |
 |------|-------------------|------|
-| `APP_ENV` | 是 | 设为 `Production` |
-| `JWT_SECRET` | 是 | ≥32 字符强密钥；也可使用 `APP__Jwt__Secret` |
-| `APP__App__Urls` | 否 | 监听地址 JSON 数组，默认 `http://0.0.0.0:8100` |
-| `APP__Cors__Origins` | 建议 | 生产 CORS 白名单，勿使用 `*` |
-| `APP__RateLimit__Enabled` | 建议 | 生产启用速率限制（docbit 默认 true） |
+| `APP_ENV` | 是 | 设为 `Production`（未设置时默认 Development，会合并错误的 overlay / 放行弱 JWT） |
+| `JWT_SECRET` | 是 | ≥32 字符强密钥；也可使用 `APP__Jwt__Secret`（文件内为空，禁止占位符） |
+| `APP__App__Urls` | 否 | 监听地址 JSON 数组，默认 `http://0.0.0.0:8100`（TLS 由前置 Nginx 终结） |
+| `APP__Cors__Origins` | 否 | 覆盖 CORS；默认含 `https://www.lusida.net` 与 `https://lusida.net`（勿用 `*`） |
+| `APP__RateLimit__Enabled` | 建议 | 生产启用速率限制（docbit 默认 true；`TrustProxy` 默认 true） |
 | `APP__Metrics__Enabled` | 建议 | 启用 `GET /metrics` Prometheus 指标 |
 
 开发与生产均使用 SQLite（`<app_base>/app.db`），无需 `DATABASE_URL` 或外部数据库服务。
+
+### www.lusida.net 部署要点
+
+1. **工作目录**：必须从发布目录启动（`run.sh` 会 `cd` 到脚本所在目录），以便找到同级 `appsettings.json` / `appsettings.Production.json`（Linux 区分大小写）。
+2. **模式**：`APP_ENV=Production` → 合并 `appsettings.Production.json`；缺省为 Development，会保留开发期 CORS `*` 与弱 JWT，生产 fail-fast 会 panic。
+3. **JWT**：启动前设置 `export JWT_SECRET='…'`（≥32 字符），或 `APP__Jwt__Secret`。
+4. **绑定**：应用监听 `0.0.0.0:8100`（HTTP）；Nginx/Caddy 将 `https://www.lusida.net` 反代到该端口。
+5. **CORS**：Production overlay 已包含 `https://www.lusida.net` 与 apex；若前端域变更用 `APP__Cors__Origins` 覆盖。
 
 ## Linux 编译与发布
 
@@ -66,12 +74,16 @@ chmod +x docbit/publish.sh
 └── run.sh                   # 生产启动脚本（--production 时生成）
 ```
 
-编辑 `run.sh`，填入 `JWT_SECRET` 后启动：
+编辑 `run.sh`（或导出环境变量）填入 `JWT_SECRET` 后启动：
 
 ```bash
 cd /opt/docbit
+export JWT_SECRET='replace-with-strong-secret-min-32-chars'
+chmod +x run.sh docbit-host
 ./run.sh
 ```
+
+`run.sh` 在缺少 `JWT_SECRET` / `APP__Jwt__Secret` 时会直接退出，避免带着空密钥启动。
 
 ### Windows 开发机打包
 

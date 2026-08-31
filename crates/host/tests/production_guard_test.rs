@@ -23,9 +23,16 @@ fn production_build_rejects_weak_jwt_when_auth_enabled() {
 #[test]
 #[should_panic(expected = "Production forbids CORS origin '*'")]
 fn production_build_rejects_wildcard_cors() {
+    // Explicit "*" — do not rely on missing appsettings (cwd may discover
+    // docbit Production overlay with concrete origins after Cors PascalCase bind fix).
     Host::builder()
         .mode(AppMode::Production)
         .no_spa()
+        .configure(|app| {
+            app.useOptions(|o| {
+                o.cors.origins = vec!["*".into()];
+            });
+        })
         .build();
 }
 

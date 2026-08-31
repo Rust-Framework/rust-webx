@@ -9,7 +9,12 @@ if /I "!A!"=="--target=x86_64-unknown-linux-gnu" (
   shift
   goto loop
 )
-set "ARGS=!ARGS! !A!"
+if /I "!A!"=="--target" (
+  shift
+  if not "%~1"=="" shift
+  goto loop
+)
+set ARGS=!ARGS! "!A!"
 shift
 goto loop
 :run

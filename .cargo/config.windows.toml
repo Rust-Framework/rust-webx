@@ -1,6 +1,11 @@
 # Windows host only: copy to .cargo/config.toml for local Linux cross-builds, or let
-# docbit/publish.ps1 -Linux set CARGO_TARGET_*_LINKER / CC / CXX / AR env vars.
-# Do NOT commit config.toml — it breaks Linux CI (native linux-gnu builds).
+# docbit/publish.ps1 -Linux generate an absolute-path config.toml for the build.
+# Do NOT commit .cargo/config.toml — it breaks Linux CI / WSL native linux-gnu builds
+# (Zig .bat wrappers are Windows-only).
+#
+# Zig wrappers strip cc-rs `--target` / `--target=...` flags (see .tools/zig-cc.bat).
+# Relative `.tools/zig-cc.bat` paths fail when build-script cwd is a crates.io source
+# dir — publish.ps1 therefore writes absolute paths into config.toml for -Linux builds.
 
 [target.x86_64-unknown-linux-gnu]
 linker = ".tools/zig-link.bat"

@@ -75,7 +75,11 @@ pub struct JwtSection {
 }
 
 /// CORS (Cross-Origin Resource Sharing) section.
+///
+/// JSON keys use PascalCase (`Origins`, `Methods`, …) to match appsettings
+/// and ASP.NET Core conventions — same as `App` / `Jwt` / `RateLimit`.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct CorsSection {
     /// Allowed origins. Default: ["*"].
     #[serde(default = "default_origins")]
@@ -400,5 +404,62 @@ mod tests {
             config["Jwt"]["Secret"],
             "from-app-override-secret-32chars-minimum"
         );
+    }
+
+    #[test]
+    fn cors_section_binds_pascal_case_from_appsettings() {
+        // Regression: without rename_all=PascalCase, Origins fell back to ["*"]
+        // and Production fail-fast panicked even when Production overlay set explicit origins.
+        let json = serde_json::json!({
+            "Cors": {
+                "Origins": ["https://www.lusida.net", "https://lusida.net"],
+                "Methods": ["GET", "POST"],
+                "Headers": ["Content-Type", "Authorization"],
+                "AllowCredentials": true,
+                "MaxAge": 3600
+            }
+        });
+        let opts: AppOptions = bind_root(&json);
+        assert_eq!(
+            opts.cors.origins,
+            vec![
+                "https://www.lusida.net".to_string(),
+                "https://lusida.net".to_string()
+            ]
+        );
+        assert_eq!(opts.cors.methods, vec!["GET".to_string(), "POST".to_string()]);
+        assert!(opts.cors.allow_credentials);
+        assert_eq!(opts.cors.max_age, 3600);
+        assert!(!opts.cors.origins.iter().any(|o| o == "*"));
+    }
+
+    #[test]
+    fn production_overlay_merge_keeps_explicit_cors_origins() {
+        let mut base = serde_json::json!({
+            "App": { "Urls": ["http://localhost:5000"] },
+            "Cors": { "Origins": ["*"] },
+            "Jwt": { "Secret": "docbit-dev-secret-change-in-production" }
+        });
+        let overlay = serde_json::json!({
+            "App": { "Urls": ["http://0.0.0.0:8100"] },
+            "Cors": {
+                "Origins": [
+                    "https://www.lusida.net",
+                    "https://lusida.net"
+                ]
+            },
+            "Jwt": { "Secret": "" }
+        });
+        merge_json(&mut base, overlay);
+        let opts: AppOptions = bind_root(&base);
+        assert_eq!(opts.app.urls, vec!["http://0.0.0.0:8100".to_string()]);
+        assert_eq!(
+            opts.cors.origins,
+            vec![
+                "https://www.lusida.net".to_string(),
+                "https://lusida.net".to_string()
+            ]
+        );
+        assert!(opts.jwt.secret.is_empty());
     }
 }

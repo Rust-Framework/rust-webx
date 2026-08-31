@@ -3,6 +3,26 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [0.3.5] — 2026-08-31 — Cors appsettings bind + docbit Production
+
+> **English** · **简体中文**
+
+### English
+
+#### Fixed
+
+- **CorsSection**: bind PascalCase `Origins` / `Methods` / `Headers` from `appsettings*.json` (previously ignored → default `*`, Production fail-fast panic).
+- **docbit Production**: CORS whitelist for `https://www.lusida.net` (+ apex); `TrustProxy` for reverse proxy; SiteUrl `www.lusida.net`.
+- **run.sh**: require `JWT_SECRET` / `APP__Jwt__Secret` before start; document lusida.net overrides.
+
+### 简体中文
+
+#### 修复
+
+- **CorsSection**：正确绑定 appsettings 中的 PascalCase CORS 字段（此前回退为 `*`，生产启动直接 panic）。
+- **docbit 生产配置**：CORS 含 `www.lusida.net`；反代 `TrustProxy`；站点 URL。
+- **run.sh**：启动前校验 JWT 环境变量。
+
 ## [0.3.4] — 2026-08-31 — Docbit SQLite-only and rustls
 
 > **English** · **简体中文**

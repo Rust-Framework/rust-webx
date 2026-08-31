@@ -153,7 +153,11 @@ impl DocService {
         let raw = strip_json_preamble(&raw)?;
 
         if let Ok(root) = serde_json::from_str::<IndexRootV2>(raw) {
-            return Ok(meta_to_exhibition_model(dir_slug, &root.meta, !root.parts.is_empty()));
+            let mut model =
+                meta_to_exhibition_model(dir_slug, &root.meta, !root.parts.is_empty());
+            let logo_name = root.meta.logo.as_deref().unwrap_or("logo.svg");
+            model.logo_url = self.logo_public_url(dir_slug, logo_name);
+            return Ok(model);
         }
 
         let legacy: DocIndex =

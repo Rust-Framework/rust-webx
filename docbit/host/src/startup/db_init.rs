@@ -62,7 +62,7 @@ impl IHostedService for DbInitService {
             .ensure_all_indexes()
             .map_err(|e| Error::Internal(format!("Doc index generation failed: {}", e)))?;
 
-        // EF has_data is INSERT OR IGNORE only — refresh repo_url from INDEX.json on existing DBs.
+        // EF has_data is INSERT OR IGNORE only — sync INDEX.json metadata into DB on every boot.
         exhibition_seed::ensure_exhibition_repo_urls(&mut ctx, self.docs.as_ref()).await?;
 
         let wwwroot = rust_webx::app_base().join("wwwroot");

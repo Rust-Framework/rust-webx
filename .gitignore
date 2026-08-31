@@ -17,6 +17,7 @@ publish/
 *.db-wal
 
 # IDE / AI agent helpers (do not publish)
+.cursor/
 .trae/
 .agents/
 .idea/

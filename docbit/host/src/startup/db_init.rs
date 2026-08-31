@@ -58,12 +58,12 @@ impl IHostedService for DbInitService {
 
         admin_user::ensure_admin_user(&mut ctx).await?;
 
-        // EF has_data is INSERT OR IGNORE only — refresh GitHub links on existing DBs.
-        exhibition_seed::ensure_exhibition_repo_urls(&mut ctx).await?;
-
         self.docs
             .ensure_all_indexes()
             .map_err(|e| Error::Internal(format!("Doc index generation failed: {}", e)))?;
+
+        // EF has_data is INSERT OR IGNORE only — refresh repo_url from INDEX.json on existing DBs.
+        exhibition_seed::ensure_exhibition_repo_urls(&mut ctx, self.docs.as_ref()).await?;
 
         let wwwroot = rust_webx::app_base().join("wwwroot");
         self.docs

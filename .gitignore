@@ -35,3 +35,6 @@ docs/rust-dix/
 docs/rust-ef/
 docs/rust-agent-framework/
 docs/rust-gpui-rml/
+
+# Local cargo config (Windows zig cross); see .cargo/config.windows.toml
+.cargo/config.toml

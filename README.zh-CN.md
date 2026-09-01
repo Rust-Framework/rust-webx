@@ -97,7 +97,7 @@ rust-webx **不是** 全栈 UI 框架（可搭配任意前端）、**不是** OR
 
 ```
 rust-webx/
-├── Cargo.toml                 # workspace 根 (v0.3.0)
+├── Cargo.toml                 # workspace 根 (v0.3.6)
 ├── crates/
 │   ├── core/                  # rust-webx-core  — trait 与配置
 │   ├── host/                  # rust-webx-host  — Host 构建器、中间件管道
@@ -192,7 +192,7 @@ JSON: RFC 7807 application/problem+json (4xx / 5xx)
 
 | 应用 | 说明 | 开发地址 |
 |------|------|----------|
-| [`docbit`](docbit/) | 作品集 + 博客 + RBAC + 完整文档站（`docs/`）。使用 `rust-ef`（开发用 SQLite，生产用 MySQL）。 | <http://localhost:5000> |
+| [`docbit`](docbit/) | 作品集 + 博客 + RBAC + 完整文档站（`docs/`）。使用 `rust-ef`（开发与生产均为 SQLite）。 | <http://localhost:5000> |
 | [`dmbit`](dmbit/) | 数据中心机房的设备与库存管理（设备/产品/规格/库存管理）。基于 SQLite。 | <http://localhost:5100> |
 
 本地运行参考应用：
@@ -241,8 +241,8 @@ chmod +x docbit/publish.sh
 # 独立镜像（使用前请本地验证）
 docker build -f docbit/Dockerfile .
 
-# 完整本地栈（docbit + MySQL）
-cp docbit/.env.example docbit/.env     # 编辑 JWT_SECRET 与 MYSQL_ROOT_PASSWORD
+# 本地栈（docbit + SQLite volume）
+cp docbit/.env.example docbit/.env     # 编辑 JWT_SECRET
 docker compose -f docbit/docker-compose.yml --env-file docbit/.env up --build
 # → http://localhost:8100
 ```
@@ -267,7 +267,7 @@ docker compose -f docbit/docker-compose.yml --env-file docbit/.env up --build
 - `RUST_WEBX_APP_BASE` — 应用基础目录。
 - `JWT_SECRET` — JWT 签名密钥（≥32 字符；需 `APP_ENV=Production`）。
 - `APP__Jwt__Secret` — 覆盖 `JWT_SECRET`。
-- `DATABASE_URL` — 数据库连接串（docbit 生产，如 `mysql://user:pass@host:3306/docbit`）。
+- `DATABASE_URL` — 可选数据库覆盖（docbit 默认使用可执行文件旁的 SQLite `app.db`）。
 - `APP__*` — 覆盖 `appsettings.json` 任意键的内联 JSON（如 `APP__App__Urls`、`APP__Cors__Origins`）。
 
 完整变量参考见 `docs/rust-webx/` 下的配置章节。

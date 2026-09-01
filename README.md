@@ -98,7 +98,7 @@ The framework is split into a small set of focused crates, re-exported through t
 
 ```
 rust-webx/
-├── Cargo.toml                 # workspace root (v0.3.0)
+├── Cargo.toml                 # workspace root (v0.3.6)
 ├── crates/
 │   ├── core/                  # rust-webx-core  — traits, configuration
 │   ├── host/                  # rust-webx-host  — Host builder, middleware
@@ -193,7 +193,7 @@ Two full reference applications ship in this repository, demonstrating the frame
 
 | Application | Description | Dev URL |
 |-------------|-------------|---------|
-| [`docbit`](docbit/) | Portfolio + blog + RBAC + a full docs site (`docs/`). Uses `rust-ef` (SQLite in dev, MySQL in production). | <http://localhost:5000> |
+| [`docbit`](docbit/) | Portfolio + blog + RBAC + a full docs site (`docs/`). Uses `rust-ef` (SQLite in dev and production). | <http://localhost:5000> |
 | [`dmbit`](dmbit/) | Device & inventory management for a data-center rig (device/product/spec/stock management). SQLite-based. | <http://localhost:5100> |
 
 Run the reference apps in development:
@@ -242,8 +242,8 @@ Primary deployment is **Linux binary + static assets** via `docbit/publish.sh` (
 # standalone image (verify locally before use)
 docker build -f docbit/Dockerfile .
 
-# full local stack (docbit + MySQL)
-cp docbit/.env.example docbit/.env     # edit JWT_SECRET and MYSQL_ROOT_PASSWORD
+# local stack (docbit + SQLite volume)
+cp docbit/.env.example docbit/.env     # edit JWT_SECRET
 docker compose -f docbit/docker-compose.yml --env-file docbit/.env up --build
 # → http://localhost:8100
 ```
@@ -268,7 +268,7 @@ docker compose -f docbit/docker-compose.yml --env-file docbit/.env up --build
 - `RUST_WEBX_APP_BASE` — application base directory.
 - `JWT_SECRET` — JWT signing secret (≥32 chars; requires `APP_ENV=Production`).
 - `APP__Jwt__Secret` — overrides `JWT_SECRET`.
-- `DATABASE_URL` — database connection string (docbit production, e.g. `mysql://user:pass@host:3306/docbit`).
+- `DATABASE_URL` — optional DB override (docbit defaults to SQLite `app.db` beside the binary).
 - `APP__*` — inline JSON override of any `appsettings.json` key (e.g. `APP__App__Urls`, `APP__Cors__Origins`).
 
 See the configuration chapter under `docs/rust-webx/` for the full variable reference.

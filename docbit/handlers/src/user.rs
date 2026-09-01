@@ -86,8 +86,7 @@ impl IRequestHandler<CreateUserRequest, UserModel> for CreateUserHandler {
         let user_id = new_id();
 
         let user = req.to_entity(user_id.clone(), now);
-        let users = self.ctx.set::<User>();
-        users.add(user);
+        self.ctx.add(user);
 
         let role_user = RoleUser {
             id: new_id(),
@@ -95,8 +94,7 @@ impl IRequestHandler<CreateUserRequest, UserModel> for CreateUserHandler {
             role_id: seed_ids::ROLE_USER.to_string(),
             created_at: now,
         };
-        let role_users = self.ctx.set::<RoleUser>();
-        role_users.add(role_user);
+        self.ctx.add(role_user);
 
         save_changes(&mut self.ctx).await?;
 
@@ -135,8 +133,7 @@ impl IRequestHandler<UpdateUserRequest, UserModel> for UpdateUserHandler {
 
         req.apply_to(&mut user, now_secs());
 
-        let set = self.ctx.set::<User>();
-        set.update(user);
+        self.ctx.update(user);
 
         save_changes(&mut self.ctx).await?;
 
@@ -171,8 +168,7 @@ impl IRequestHandler<DeleteUserRequest, String> for DeleteUserHandler {
         user.updated_id = operator_id();
         user.updated_at = now_secs();
 
-        let set = self.ctx.set::<User>();
-        set.update(user);
+        self.ctx.update(user);
 
         save_changes(&mut self.ctx).await?;
 

@@ -139,8 +139,7 @@ impl IRequestHandler<RegisterRequest, AuthResponse> for RegisterHandler {
             is_deleted: false,
             roles: HasMany::new(),
         };
-        let users = self.ctx.set::<User>();
-        users.add(user);
+        self.ctx.add(user);
 
         let role_user = RoleUser {
             id: new_id(),
@@ -148,8 +147,7 @@ impl IRequestHandler<RegisterRequest, AuthResponse> for RegisterHandler {
             role_id: seed_ids::ROLE_USER.to_string(),
             created_at: now,
         };
-        let role_users = self.ctx.set::<RoleUser>();
-        role_users.add(role_user);
+        self.ctx.add(role_user);
 
         save_changes(&mut self.ctx).await?;
 
@@ -234,8 +232,7 @@ impl IRequestHandler<ForgotPasswordRequest, ForgotPasswordResponse> for ForgotPa
             expires_at: expires,
             used: 0,
         };
-        let set = self.ctx.set::<PasswordResetToken>();
-        set.add(token_record);
+        self.ctx.add(token_record);
 
         save_changes(&mut self.ctx).await?;
 
@@ -284,11 +281,9 @@ impl IRequestHandler<ResetPasswordRequest, ResetPasswordResponse> for ResetPassw
         user.updated_at = now_secs();
         record.used = 1;
 
-        let users = self.ctx.set::<User>();
-        users.update(user);
+        self.ctx.update(user);
 
-        let tokens = self.ctx.set::<PasswordResetToken>();
-        tokens.update(record);
+        self.ctx.update(record);
 
         save_changes(&mut self.ctx).await?;
 

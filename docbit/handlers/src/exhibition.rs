@@ -88,8 +88,7 @@ impl IRequestHandler<UpsertExhibitionRequest, ExhibitionModel> for UpsertExhibit
             let id = ex.id.clone();
             req.apply_to(&mut ex, now);
 
-            let set = self.ctx.set::<Exhibition>();
-            set.update(ex);
+            self.ctx.update(ex);
 
             save_changes(&mut self.ctx).await?;
 
@@ -98,8 +97,7 @@ impl IRequestHandler<UpsertExhibitionRequest, ExhibitionModel> for UpsertExhibit
             let id = new_id();
             let entity = req.to_entity(id.clone(), now);
 
-            let set = self.ctx.set::<Exhibition>();
-            set.add(entity);
+            self.ctx.add(entity);
 
             save_changes(&mut self.ctx).await?;
 
@@ -136,12 +134,11 @@ impl IRequestHandler<DeleteExhibitionRequest, String> for DeleteExhibitionHandle
             return Err(Error::NotFound(format!("Exhibition not found: {}", slug)));
         }
 
-        let set = self.ctx.set::<Exhibition>();
         for mut item in items {
             item.is_deleted = true;
             item.updated_id = operator_id();
             item.updated_at = now;
-            set.update(item);
+            self.ctx.update(item);
         }
 
         save_changes(&mut self.ctx).await?;

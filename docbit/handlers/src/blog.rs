@@ -173,8 +173,7 @@ impl IRequestHandler<CreateBlogPostRequest, BlogPostModel> for CreateBlogPostHan
         let id = new_id();
 
         let entity = req.to_entity(id.clone(), now);
-        let set = self.ctx.set::<Blog>();
-        set.add(entity);
+        self.ctx.add(entity);
 
         save_changes(&mut self.ctx).await?;
 
@@ -215,8 +214,7 @@ impl IRequestHandler<UpdateBlogPostRequest, BlogPostModel> for UpdateBlogPostHan
         let blog_id = blog.id.clone();
         req.apply_to(&mut blog, now_secs());
 
-        let set = self.ctx.set::<Blog>();
-        set.update(blog);
+        self.ctx.update(blog);
 
         save_changes(&mut self.ctx).await?;
 
@@ -257,8 +255,7 @@ impl IRequestHandler<DeleteBlogPostRequest, String> for DeleteBlogPostHandler {
         blog.updated_id = operator_id();
         blog.updated_at = now_secs();
 
-        let set = self.ctx.set::<Blog>();
-        set.update(blog);
+        self.ctx.update(blog);
 
         save_changes(&mut self.ctx).await?;
 

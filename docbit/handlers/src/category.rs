@@ -118,8 +118,7 @@ impl IRequestHandler<CreateCategoryRequest, CategoryModel> for CreateCategoryHan
 
         let entity = req.to_entity(id, now);
 
-        let set = self.ctx.set::<Category>();
-        set.add(entity.clone());
+        self.ctx.add(entity.clone());
 
         save_changes(&mut self.ctx).await?;
 
@@ -145,8 +144,7 @@ impl IRequestHandler<UpdateCategoryRequest, CategoryModel> for UpdateCategoryHan
 
         req.apply_to(&mut cat, now_secs());
 
-        let set = self.ctx.set::<Category>();
-        set.update(cat.clone());
+        self.ctx.update(cat.clone());
 
         save_changes(&mut self.ctx).await?;
 
@@ -173,8 +171,7 @@ impl IRequestHandler<DeleteCategoryRequest, String> for DeleteCategoryHandler {
         cat.updated_id = operator_id();
         cat.updated_at = now_secs();
 
-        let set = self.ctx.set::<Category>();
-        set.update(cat);
+        self.ctx.update(cat);
 
         save_changes(&mut self.ctx).await?;
 

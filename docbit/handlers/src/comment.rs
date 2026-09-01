@@ -84,8 +84,7 @@ impl IRequestHandler<CreateCommentRequest, CommentModel> for CreateCommentHandle
         comment.user_name = user_name.clone();
         comment.content = content;
 
-        let set = self.ctx.set::<Comment>();
-        set.add(comment.clone());
+        self.ctx.add(comment.clone());
 
         save_changes(&mut self.ctx).await?;
 
@@ -123,8 +122,7 @@ impl IRequestHandler<DeleteCommentRequest, String> for DeleteCommentHandler {
         comment.updated_id = operator_id();
         comment.updated_at = now_secs();
 
-        let set = self.ctx.set::<Comment>();
-        set.update(comment);
+        self.ctx.update(comment);
 
         save_changes(&mut self.ctx).await?;
 

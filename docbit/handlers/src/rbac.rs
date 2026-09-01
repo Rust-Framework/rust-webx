@@ -63,8 +63,7 @@ impl IRequestHandler<CreateRoleRequest, RoleModel> for CreateRoleHandler {
 
         let entity = req.to_entity(id, now);
 
-        let set = self.ctx.set::<Role>();
-        set.add(entity.clone());
+        self.ctx.add(entity.clone());
 
         save_changes(&mut self.ctx).await?;
 
@@ -89,8 +88,7 @@ impl IRequestHandler<UpdateRoleRequest, RoleModel> for UpdateRoleHandler {
 
         req.apply_to(&mut role, now_secs());
 
-        let set = self.ctx.set::<Role>();
-        set.update(role.clone());
+        self.ctx.update(role.clone());
 
         save_changes(&mut self.ctx).await?;
 
@@ -117,8 +115,7 @@ impl IRequestHandler<DeleteRoleRequest, String> for DeleteRoleHandler {
         role.updated_id = operator_id();
         role.updated_at = now_secs();
 
-        let set = self.ctx.set::<Role>();
-        set.update(role);
+        self.ctx.update(role);
 
         save_changes(&mut self.ctx).await?;
 
@@ -169,8 +166,7 @@ impl IRequestHandler<AssignRoleRequest, String> for AssignRoleHandler {
             created_at: now,
         };
 
-        let set = self.ctx.set::<RoleUser>();
-        set.add(entity);
+        self.ctx.add(entity);
 
         save_changes(&mut self.ctx).await?;
 
@@ -248,8 +244,7 @@ impl IRequestHandler<CreateResourceRequest, ResourceModel> for CreateResourceHan
 
         let entity = req.to_entity(id, now);
 
-        let set = self.ctx.set::<Resource>();
-        set.add(entity.clone());
+        self.ctx.add(entity.clone());
 
         save_changes(&mut self.ctx).await?;
 
@@ -274,8 +269,7 @@ impl IRequestHandler<UpdateResourceRequest, ResourceModel> for UpdateResourceHan
 
         req.apply_to(&mut res, now_secs());
 
-        let set = self.ctx.set::<Resource>();
-        set.update(res.clone());
+        self.ctx.update(res.clone());
 
         save_changes(&mut self.ctx).await?;
 
@@ -302,8 +296,7 @@ impl IRequestHandler<DeleteResourceRequest, String> for DeleteResourceHandler {
         res.updated_id = operator_id();
         res.updated_at = now_secs();
 
-        let set = self.ctx.set::<Resource>();
-        set.update(res);
+        self.ctx.update(res);
 
         save_changes(&mut self.ctx).await?;
 
@@ -370,8 +363,7 @@ impl IRequestHandler<CreateAuthorizeRequest, AuthorizeModel> for CreateAuthorize
 
         let entity = req.to_entity(id, now);
 
-        let set = self.ctx.set::<Authorize>();
-        set.add(entity.clone());
+        self.ctx.add(entity.clone());
 
         save_changes(&mut self.ctx).await?;
 

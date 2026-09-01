@@ -38,3 +38,9 @@ docs/rust-gpui-rml/
 
 # Local cargo config (Windows zig cross); see .cargo/config.windows.toml
 .cargo/config.toml
+
+# Local secrets / env files
+.env
+.env.*
+!.env.example
+

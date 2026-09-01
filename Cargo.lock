@@ -1677,7 +1677,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1956,9 +1956,9 @@ dependencies = [
 
 [[package]]
 name = "rust-dix"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d99f2307f54ceedc3c8f9c44a74dfbaee96735397ae096a9c5899141575661d"
+checksum = "e551498587849de60258a757309c7debb8fc509f92c0777e013b925c682cb701"
 dependencies = [
  "futures",
  "inventory",
@@ -1968,9 +1968,9 @@ dependencies = [
 
 [[package]]
 name = "rust-dix-macros"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe4b4860178b798f832ee5cd1b7f16e8c647e144b6d36c57f59fced763812a26"
+checksum = "14370f4c9b1e95d089563a832876760992575d3251bff933f98164454f0ee0c6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1979,9 +1979,9 @@ dependencies = [
 
 [[package]]
 name = "rust-ef"
-version = "1.5.1"
+version = "1.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bdbb9616dc1e5e09c8a856b003a0e5fcbe8764eafc76d83c3306b315b0d99bdf"
+checksum = "07691738e6c4035a7754af7f9822b1aff8272a8a2a9666c8642037ac77865d27"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1996,9 +1996,9 @@ dependencies = [
 
 [[package]]
 name = "rust-ef-macros"
-version = "1.5.1"
+version = "1.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3db0afbdfb9005a721347e853b316e830ed22e553ddfca8e8267c36cf61c6b6f"
+checksum = "36d3460322d1c46b8c1f807489473ce404eda703e5f0ed7c9747ace657a1475a"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2007,9 +2007,9 @@ dependencies = [
 
 [[package]]
 name = "rust-ef-sqlite"
-version = "1.5.1"
+version = "1.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2b546a2d2170261b4c358d600c2078b3c8c93a66ea65cd9917340e67e2e4e43"
+checksum = "957b179b1f8e282e4b021f35d66c3920b8ddd51e8aea16b32c466607b058cf51"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2024,7 +2024,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "async-trait",
  "hyper",
@@ -2045,7 +2045,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-core"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "async-trait",
  "inventory",
@@ -2059,7 +2059,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-host"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "async-trait",
  "compact_str",
@@ -2094,7 +2094,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-macros"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2103,7 +2103,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-openapi"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "inventory",
  "rust-webx-core",
@@ -2112,7 +2112,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-spa"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "async-trait",
  "rust-webx-core",

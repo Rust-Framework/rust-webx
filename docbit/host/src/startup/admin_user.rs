@@ -50,11 +50,8 @@ pub async fn ensure_admin_user(ctx: &mut DbContext) -> Result<()> {
         created_at: now,
     };
 
-    let users = ctx.set::<User>();
-    users.add(user);
-
-    let role_users = ctx.set::<docbit_domain::entities::RoleUser>();
-    role_users.add(role_user);
+    ctx.add(user);
+    ctx.add(role_user);
 
     save_changes(ctx).await?;
 

@@ -128,8 +128,7 @@ pub async fn ensure_exhibition_repo_urls(
         if let Some(mut ex) = existing {
             if apply_index_fields(&mut ex, item, repo) {
                 ex.updated_at = now;
-                let set = ctx.set::<Exhibition>();
-                set.update(ex);
+                ctx.update(ex);
                 updated += 1;
             }
         } else if let Some(template) = exhibition_seed_rows()
@@ -140,8 +139,7 @@ pub async fn ensure_exhibition_repo_urls(
             row.created_at = now;
             row.updated_at = now;
             apply_index_fields(&mut row, item, repo);
-            let set = ctx.set::<Exhibition>();
-            set.add(row);
+            ctx.add(row);
             inserted += 1;
         }
     }
@@ -162,8 +160,7 @@ pub async fn ensure_exhibition_repo_urls(
             if ex.repo_url != next {
                 ex.repo_url = next;
                 ex.updated_at = now;
-                let set = ctx.set::<Exhibition>();
-                set.update(ex);
+                ctx.update(ex);
                 updated += 1;
             }
         } else if let Some(template) = exhibition_seed_rows()
@@ -174,8 +171,7 @@ pub async fn ensure_exhibition_repo_urls(
             row.created_at = now;
             row.updated_at = now;
             row.repo_url = Some((*repo_url).to_string());
-            let set = ctx.set::<Exhibition>();
-            set.add(row);
+            ctx.add(row);
             inserted += 1;
         }
     }

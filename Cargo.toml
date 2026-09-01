@@ -52,9 +52,9 @@ rust-dix = "0.7"
 rust-dix-macros = "0.7"
 
 # rust-ef ORM (rust-dix 0.7 integration via add_dbcontext + owned resolution)
-rust-ef = "1.8.2"
-rust-ef-sqlite = "1.8.2"
-rust-ef-mysql = "1.8.2"
+rust-ef = "1.8.3"
+rust-ef-sqlite = "1.8.3"
+rust-ef-mysql = "1.8.3"
 
 # External dependencies
 async-trait = "0.1"

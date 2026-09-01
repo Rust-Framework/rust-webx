@@ -18,7 +18,7 @@
 
 ### 框架版本
 
-- rust-ef **1.8.2**、rust-dix **0.7**、rust-webx **0.3.6**（框架无 ORM 依赖）
+- rust-ef **1.8.3**、rust-dix **0.7**、rust-webx **0.3.6**（框架无 ORM 依赖）
 - docbit 4-crate：`contracts` / `domain` / `handlers` / `host`（无独立 persistence 层）
 
 ### 仍有意保留的模式

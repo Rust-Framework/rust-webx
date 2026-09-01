@@ -16,13 +16,13 @@
 //! ### 写操作
 //!
 //! ```ignore
-//! let set = self.ctx.set::<User>();
-//! set.add(entity);
+//! self.ctx.add(entity);
 //!
 //! crate::db::save_changes(&mut self.ctx).await?;
 //! ```
 //!
-//! - 禁止链式 `self.ctx.set::<T>().add(...)`
+//! - Mutations go through `DbContext::add` / `update` / `attach`（rust-ef 1.8+）；不要对 `DbSet` 调用这些方法
+//! - 禁止链式 `self.ctx.set::<T>().add(...)`（`set` 仅用于查询）
 //!
 //! Post-save reload: `ef_require_by_id!`（crate 根宏）
 //!

@@ -3,6 +3,22 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [0.3.6] — 2026-09-01 — rust-dix 0.7 / rust-ef 1.8.2
+
+> **English** · **简体中文**
+
+### English
+
+#### Changed
+
+- **DI / ORM**: `rust-dix 0.7` + `rust-ef 1.8.2` (single ServiceProvider graph; inject diagnostics; built-in `ScopeFactory`).
+
+### 简体中文
+
+#### 变更
+
+- **DI / ORM**：升级到 `rust-dix 0.7` 与 `rust-ef 1.8.2`。
+
 ## [0.3.5] — 2026-08-31 — Cors appsettings bind + docbit Production
 
 > **English** · **简体中文**

@@ -3,6 +3,24 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [0.3.7] — 2026-09-01 — rust-ef 1.8.3 + docbit DbContext
+
+> **English** · **简体中文**
+
+### English
+
+#### Fixed
+
+- **docbit**: migrate host seed / handler writes to `DbContext` add/update mutations required by rust-ef 1.8.
+- **deps**: bump workspace `rust-ef` / `rust-ef-sqlite` / `rust-ef-mysql` to **1.8.3** (String FK `EntityType` fix).
+
+### 简体中文
+
+#### 修复
+
+- **docbit**：主机种子与 handler 写入改为 rust-ef 1.8 所需的 `DbContext` add/update。
+- **依赖**：工作区 `rust-ef` 系列升级到 **1.8.3**。
+
 ## [0.3.6] — 2026-09-01 — rust-dix 0.7 / rust-ef 1.8.2
 
 > **English** · **简体中文**

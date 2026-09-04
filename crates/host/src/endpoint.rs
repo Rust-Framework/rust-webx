@@ -1,7 +1,7 @@
 //! Endpoint —IEndpoint implementations for dual-mode dispatch.
 
-use rust_webx_core::error::Result;
 use rust_webx_core::auth::IAuthorizationPolicy;
+use rust_webx_core::error::Result;
 use rust_webx_core::http::IHttpContext;
 use rust_webx_core::routing::IEndpoint;
 use serde_json;
@@ -66,7 +66,10 @@ pub struct StubEndpoint {
             std::collections::HashMap<String, String>,
             Option<Box<dyn rust_webx_core::auth::IClaims>>,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<rust_webx_core::route::scan::ResponseData>> + Send>,
+            Box<
+                dyn std::future::Future<Output = Result<rust_webx_core::route::scan::ResponseData>>
+                    + Send,
+            >,
         >,
     >,
     pub auth_required_role: &'static str,
@@ -93,8 +96,8 @@ impl IEndpoint for StubEndpoint {
             let claims = ctx.claims().map(|c| c.clone_box());
 
             // ── Authorization check (declared on route via #[authorize]) ──
-            let auth_required = !self.auth_required_role.is_empty()
-                || !self.auth_required_permission.is_empty();
+            let auth_required =
+                !self.auth_required_role.is_empty() || !self.auth_required_permission.is_empty();
             if auth_required {
                 match ctx.claims() {
                     None => {
@@ -114,12 +117,7 @@ impl IEndpoint for StubEndpoint {
                                 "required_role".into(),
                                 serde_json::Value::String(self.auth_required_role.to_string()),
                             );
-                            write_forbidden(
-                                ctx,
-                                "Forbidden: insufficient permissions",
-                                ext,
-                            )
-                            .await;
+                            write_forbidden(ctx, "Forbidden: insufficient permissions", ext).await;
                             return Ok(());
                         }
 
@@ -136,12 +134,7 @@ impl IEndpoint for StubEndpoint {
                                     self.auth_required_permission.to_string(),
                                 ),
                             );
-                            write_forbidden(
-                                ctx,
-                                "Forbidden: insufficient permissions",
-                                ext,
-                            )
-                            .await;
+                            write_forbidden(ctx, "Forbidden: insufficient permissions", ext).await;
                             return Ok(());
                         }
                     }
@@ -154,9 +147,7 @@ impl IEndpoint for StubEndpoint {
                         let resource_key = ctx.request().route_pattern().unwrap_or(self.path);
                         if policy.covers_route(resource_key) {
                             let method = ctx.request().method();
-                            if let Err(err) =
-                                policy.authorize(claims, resource_key, method).await
-                            {
+                            if let Err(err) = policy.authorize(claims, resource_key, method).await {
                                 let mut ext = HashMap::new();
                                 ext.insert(
                                     "resource".into(),

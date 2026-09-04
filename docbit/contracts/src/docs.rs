@@ -62,10 +62,11 @@ impl IRequest<DocIndex> for GetDocIndexRequest {}
 pub struct GetDocContentRequest {
     #[from_route]
     pub work: String,
-    /// Document path with `/` encoded as `:` (e.g. `01-introduction:hello-world.md`)
+    /// Remaining document path (slashes allowed via `{*path}`).
+    /// Legacy colon encoding (`01-introduction:hello.md`) is still accepted.
     #[from_route]
     pub path: String,
 }
 
-#[get("/api/docs/{work}/content/{path}")]
+#[get("/api/docs/{work}/content/{*path}")]
 impl IRequest<DocContent> for GetDocContentRequest {}

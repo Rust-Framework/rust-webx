@@ -86,10 +86,7 @@ impl HttpContext {
 
         if payload_too_large {
             resp.set_status(413);
-            let problem = build_problem(
-                413,
-                "Request body exceeds maximum allowed size",
-            );
+            let problem = build_problem(413, "Request body exceeds maximum allowed size");
             resp.body = Some(problem_to_bytes(&problem));
             resp.headers.insert(
                 "content-type".to_string(),

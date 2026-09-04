@@ -45,10 +45,11 @@ pub struct DeleteExhibitionHandler {
 #[async_trait]
 impl IRequestHandler<ListExhibitionsRequest, Vec<ExhibitionModel>> for ListExhibitionsHandler {
     async fn handle(&mut self, _: ListExhibitionsRequest) -> Result<Vec<ExhibitionModel>> {
-        let items = linq!(self.ctx.set::<Exhibition>(); include e.category; order_by e.sort_order asc)
-            .to_list()
-            .await
-            .map_ef()?;
+        let items =
+            linq!(self.ctx.set::<Exhibition>(); include e.category; order_by e.sort_order asc)
+                .to_list()
+                .await
+                .map_ef()?;
 
         Ok(items.into_iter().map(ExhibitionModel::from).collect())
     }
@@ -61,11 +62,12 @@ impl IRequestHandler<GetExhibitionRequest, ExhibitionModel> for GetExhibitionHan
         let slug = req.slug.clone();
         let q = slug.clone();
 
-        let item = linq!(self.ctx.set::<Exhibition>(), |e: Exhibition| e.slug == q; include e.category)
-            .first_or_default()
-            .await
-            .map_ef()?
-            .ok_or_else(|| Error::NotFound(format!("Exhibition not found: {}", slug)))?;
+        let item =
+            linq!(self.ctx.set::<Exhibition>(), |e: Exhibition| e.slug == q; include e.category)
+                .first_or_default()
+                .await
+                .map_ef()?
+                .ok_or_else(|| Error::NotFound(format!("Exhibition not found: {}", slug)))?;
 
         Ok(ExhibitionModel::from(item))
     }

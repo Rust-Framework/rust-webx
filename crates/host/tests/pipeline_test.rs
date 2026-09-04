@@ -306,7 +306,10 @@ async fn pipeline_short_circuit_via_control_flow_break() {
     assert!(result.is_ok(), "Break is not an error");
 
     let (status, _headers, body) = ctx.into_response_parts();
-    assert_eq!(status, 204, "Break should preserve the response set by middleware");
+    assert_eq!(
+        status, 204,
+        "Break should preserve the response set by middleware"
+    );
     assert!(body.is_none(), "final handler should be skipped on Break");
 }
 
@@ -341,7 +344,9 @@ async fn pipeline_break_runs_after_hooks_on_executed_middleware() {
     let after_ran = Arc::new(AtomicBool::new(false));
 
     let mut pipeline = MiddlewarePipeline::new();
-    pipeline.add_middleware(Arc::new(ContinueThenAfter { after_ran: Arc::clone(&after_ran) }));
+    pipeline.add_middleware(Arc::new(ContinueThenAfter {
+        after_ran: Arc::clone(&after_ran),
+    }));
     pipeline.add_middleware(Arc::new(BreakMiddleware));
 
     let mut ctx = test_utils::TestHttpContext::new("GET", "/test");
@@ -357,5 +362,8 @@ async fn pipeline_break_runs_after_hooks_on_executed_middleware() {
 
     // The first middleware's after hook should still run even though
     // the second middleware short-circuited.
-    assert!(after_ran.load(Ordering::SeqCst), "after hooks on executed middleware should run");
+    assert!(
+        after_ran.load(Ordering::SeqCst),
+        "after hooks on executed middleware should run"
+    );
 }

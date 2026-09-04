@@ -26,9 +26,3 @@
     opacity: 0.45;
     transition: opacity 0.12s ease;
 }
-
-    padding: 0.45rem 0.65rem 0.2rem;
-    font-size: 0.8rem;
-    color: var(--text-bright);
-    font-weight: 600;
-}

@@ -27,7 +27,10 @@ pub fn canonical_exhibition_repo_urls() -> &'static [(&'static str, &'static str
             "rust-agent-framework",
             "https://github.com/Rust-Framework/rust-agent-framework",
         ),
-        ("rust-gpui-rml", "https://github.com/Rust-Framework/rust-gpui-rml"),
+        (
+            "rust-gpui-rml",
+            "https://github.com/Rust-Framework/rust-gpui-rml",
+        ),
     ]
 }
 
@@ -358,4 +361,3 @@ pub fn register(ctx: &mut DbContext) {
         },
     ]);
 }
-

@@ -9,11 +9,11 @@ use std::sync::Arc;
 
 use rust_dix::ScopeFactory;
 
-use crate::error::Result;
-use crate::mediator::IRequest;
-use crate::mediator::pipeline::build_chain as build_pipeline_chain;
-use crate::pipeline::BoxedNextFn;
 use crate::dispatch_runtime::dispatch_handler_cache;
+use crate::error::Result;
+use crate::mediator::pipeline::build_chain as build_pipeline_chain;
+use crate::mediator::IRequest;
+use crate::pipeline::BoxedNextFn;
 
 /// Dispatch a request through the handler registry, pipeline, and call bridge.
 pub async fn dispatch<T, R>(provider: &Arc<rust_dix::ServiceProvider>, req: T) -> Result<R>

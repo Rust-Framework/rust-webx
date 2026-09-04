@@ -181,9 +181,7 @@ impl IRequestHandler<DeleteUserRequest, String> for DeleteUserHandler {
 #[async_trait]
 impl IRequestHandler<InfoRequest, String> for InfoHandler {
     async fn handle(&mut self, _: InfoRequest) -> Result<String> {
-        let count = linq!(self.ctx.set::<User>(); count)
-            .await
-            .map_ef()?;
+        let count = linq!(self.ctx.set::<User>(); count).await.map_ef()?;
 
         Ok(format!("Total users: {}", count))
     }

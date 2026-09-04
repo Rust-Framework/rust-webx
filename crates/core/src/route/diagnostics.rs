@@ -65,14 +65,12 @@ pub fn orphan_handlers() -> Vec<&'static str> {
 
 /// Request types with more than one `#[handler]` registration (last wins at runtime).
 pub fn duplicate_handlers() -> Vec<(&'static str, usize)> {
-    let mut counts: std::collections::HashMap<&'static str, usize> = std::collections::HashMap::new();
+    let mut counts: std::collections::HashMap<&'static str, usize> =
+        std::collections::HashMap::new();
     for reg in inventory::iter::<HandlerRegistration>() {
         *counts.entry(reg.req_type_name).or_default() += 1;
     }
-    let mut dupes: Vec<_> = counts
-        .into_iter()
-        .filter(|(_, count)| *count > 1)
-        .collect();
+    let mut dupes: Vec<_> = counts.into_iter().filter(|(_, count)| *count > 1).collect();
     dupes.sort_by_key(|(name, _)| *name);
     dupes
 }
@@ -115,11 +113,7 @@ pub fn format_route_diagnostics() -> String {
 
     let missing_routes = orphan_handlers();
     if !missing_routes.is_empty() {
-        let _ = writeln!(
-            out,
-            "\nHandlers without route ({}):",
-            missing_routes.len()
-        );
+        let _ = writeln!(out, "\nHandlers without route ({}):", missing_routes.len());
         let _ = writeln!(
             out,
             "  Fix: add #[get]/#[post]/... impl IRequest<R> for the request type, or remove the orphan #[handler]"
@@ -146,7 +140,10 @@ pub fn format_route_diagnostics() -> String {
     }
 
     if orphan_route_rows.is_empty() && missing_routes.is_empty() && dupes.is_empty() {
-        let _ = writeln!(out, "\nRoute table OK — every route has a handler and every handler has a route.");
+        let _ = writeln!(
+            out,
+            "\nRoute table OK — every route has a handler and every handler has a route."
+        );
     } else {
         let _ = writeln!(
             out,

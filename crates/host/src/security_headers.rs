@@ -35,7 +35,10 @@ impl IMiddleware for SecurityHeadersMiddleware {
         resp.set_header("x-frame-options", "DENY");
 
         // Force HTTPS for 1 year (HSTS)
-        resp.set_header("strict-transport-security", "max-age=31536000; includeSubDomains");
+        resp.set_header(
+            "strict-transport-security",
+            "max-age=31536000; includeSubDomains",
+        );
 
         // Referrer policy
         resp.set_header("referrer-policy", "strict-origin-when-cross-origin");

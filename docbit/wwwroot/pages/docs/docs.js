@@ -24,7 +24,9 @@
   function setActiveNav(docPath) {
     document.querySelectorAll(".doc-nav a").forEach((a) => {
       const href = a.getAttribute("href") || "";
-      const path = href.includes("/docs/") ? decodeURIComponent(href.split("/docs/")[1]) : "";
+      const path = href.includes("/docs/")
+        ? decodeURIComponent(href.split("/docs/").slice(1).join("/docs/"))
+        : "";
       a.classList.toggle("active", path === docPath);
     });
   }
@@ -50,24 +52,32 @@
     }
   }
 
-  async function loadArticle(docsSlug, docPath) {
+    async function loadArticle(docsSlug, docPath) {
     const article = document.getElementById("doc-article");
     if (!article) return;
 
     article.classList.add("is-swapping");
-    let content = { content: "# 暂无文档\n\n请在 `docs/` 目录添加 Markdown 文件。" };
-    if (docPath) {
-      content = await Docbit.Api.get(Docbit.Api.docContentUrl(docsSlug, docPath));
+    try {
+      let content = { content: "# 暂无文档\n\n请在 `docs/` 目录添加 Markdown 文件。" };
+      if (docPath) {
+        content = await Docbit.Api.get(Docbit.Api.docContentUrl(docsSlug, docPath));
+      }
+      article.innerHTML = renderMd(content.content);
+      enhance(article, { workSlug: cached.workSlug, docPath });
+      setActiveNav(docPath);
+      updateToc(article);
+      if (cached.work?.title) {
+        document.title = cached.work.title + " — 文档";
+      }
+    } catch (err) {
+      article.innerHTML = `<div class="error-box"><strong>无法加载文档</strong><p>${escapeHtml(
+        err.message || String(err)
+      )}</p><p class="meta">${escapeHtml(docPath || "")}</p></div>`;
+      setActiveNav(docPath);
+      updateToc(article);
     }
-    article.innerHTML = renderMd(content.content);
-    enhance(article);
-    setActiveNav(docPath);
-    updateToc(article);
     article.classList.remove("is-swapping");
-
-    if (cached.work?.title) {
-      document.title = cached.work.title + " — 文档";
-    }
+    Docbit.Shell?.scrollMain?.(0);
   }
 
   async function navigateTo(workSlug, docPath) {
@@ -105,15 +115,26 @@
       window.history.replaceState(
         null,
         "",
-        `/works/${encodeURIComponent(workSlug)}/docs/${encodeURIComponent(targetPath)}`
+        `/works/${encodeURIComponent(workSlug)}/docs/${Docbit.Api.encodeDocPath(targetPath)}`
       );
       docPath = targetPath;
     }
 
     let content = { content: "# 暂无文档\n\n请在 `docs/` 目录添加 Markdown 文件。" };
+    let contentError = null;
     if (docPath) {
-      content = await Docbit.Api.get(Docbit.Api.docContentUrl(docsSlug, docPath));
+      try {
+        content = await Docbit.Api.get(Docbit.Api.docContentUrl(docsSlug, docPath));
+      } catch (err) {
+        contentError = err.message || String(err);
+      }
     }
+
+    const articleHtml = contentError
+      ? `<div class="error-box"><strong>无法加载文档</strong><p>${escapeHtml(contentError)}</p><p class="meta">${escapeHtml(
+          docPath || ""
+        )}</p></div>`
+      : renderMd(content.content);
 
     const navHtml = renderDocNav(index.items, workSlug, docPath);
 
@@ -131,12 +152,12 @@
           <a href="/works/${escapeHtml(workSlug)}" data-nav>${escapeHtml(work.title)}</a>
           <span class="sep">/</span>
           <span class="current">文档</span>`,
-        content: `<article class="markdown-body shell-article" id="doc-article">${renderMd(content.content)}</article>`,
+        content: `<article class="markdown-body shell-article" id="doc-article">${articleHtml}</article>`,
       })
     );
 
     const article = document.getElementById("doc-article");
-    enhance(article);
+    enhance(article, { workSlug, docPath });
     updateToc(article);
     Docbit.UI.renderForm();
     document.title = work.title + " — 文档";
@@ -166,7 +187,8 @@
       .map((item) => {
         if (item.path) {
           const active = item.path === activePath ? " active" : "";
-          return `<li class="nav-leaf"><a href="/works/${escapeHtml(workSlug)}/docs/${escapeHtml(item.path)}" class="${active.trim()}" data-nav>${escapeHtml(item.title)}</a></li>`;
+          const href = `/works/${escapeHtml(workSlug)}/docs/${Docbit.Api.encodeDocPath(item.path)}`;
+          return `<li class="nav-leaf"><a href="${href}" class="${active.trim()}" data-nav>${escapeHtml(item.title)}</a></li>`;
         }
         if (item.children) {
           const sectionClass = depth === 0 ? "nav-part" : depth === 1 ? "nav-chapter" : "nav-group";

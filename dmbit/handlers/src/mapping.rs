@@ -61,7 +61,7 @@ pub fn normalize_comp_kind(raw: &str) -> Result<String> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "accelerator" | "gpu" | "npu" | "加速卡" | "卡" => Ok("accelerator".into()),
         "disk" | "hdd" | "ssd" | "硬盘" | "盘" => Ok("disk".into()),
-        other if other.is_empty() => Err(Error::Validation("部件类型不能为空".into())),
+        "" => Err(Error::Validation("部件类型不能为空".into())),
         _ => Err(Error::Validation(format!(
             "部件类型无效: {raw}（支持：加速卡/硬盘，或 accelerator/disk）"
         ))),
@@ -127,9 +127,7 @@ pub fn parse_capacity_label_to_gb(raw: &str) -> Result<i64> {
         .unwrap_or(t.len());
     let (num_part, unit_part) = t.split_at(split);
     let num: f64 = num_part.trim().parse().map_err(|_| {
-        Error::Validation(format!(
-            "容量数值无效「{t}」（示例：8TB / 960GB / 8000）"
-        ))
+        Error::Validation(format!("容量数值无效「{t}」（示例：8TB / 960GB / 8000）"))
     })?;
     if !num.is_finite() || num <= 0.0 {
         return Err(Error::Validation(format!("容量必须为正数「{t}」")));
@@ -152,9 +150,7 @@ pub fn parse_capacity_label_to_gb(raw: &str) -> Result<i64> {
     };
     let gb = gb_f.round();
     if (gb_f - gb).abs() > 1e-6 {
-        return Err(Error::Validation(format!(
-            "容量必须能换算为整数 GB「{t}」"
-        )));
+        return Err(Error::Validation(format!("容量必须能换算为整数 GB「{t}」")));
     }
     let gb = gb as i64;
     if gb <= 0 {
@@ -342,7 +338,10 @@ pub async fn load_components_for_specs(
         return Ok(map);
     }
     let id_set: HashSet<&str> = spec_ids.iter().map(|s| s.as_str()).collect();
-    let all = linq!(ctx.set::<SpecComponent>();).to_list().await.map_ef()?;
+    let all = linq!(ctx.set::<SpecComponent>();)
+        .to_list()
+        .await
+        .map_ef()?;
     for c in all {
         if !id_set.contains(c.spec_id.as_str()) {
             continue;
@@ -386,16 +385,17 @@ pub async fn replace_spec_components(
     components: &[ComponentModel],
 ) -> Result<i32> {
     let sid = spec_id.to_string();
-    let existing = linq!(ctx.set::<SpecComponent>(), |c: SpecComponent| c.spec_id == sid)
-        .to_list()
-        .await
-        .map_ef()?;
+    let existing = linq!(ctx.set::<SpecComponent>(), |c: SpecComponent| c.spec_id
+        == sid)
+    .to_list()
+    .await
+    .map_ef()?;
     // Soft-delete old records (ORM does not support physical remove on DbSet)
     for mut old in existing {
         old.is_deleted = true;
         old.updated_at = now_secs();
         old.updated_id = operator_id();
-        ctx.set::<SpecComponent>().update(old);
+        ctx.update(old);
     }
 
     let now = now_secs();
@@ -454,7 +454,7 @@ pub async fn replace_spec_components(
             is_deleted: false,
             spec: BelongsTo::new(),
         };
-        ctx.set::<SpecComponent>().add(entity);
+        ctx.add(entity);
         written += 1;
     }
     Ok(written)

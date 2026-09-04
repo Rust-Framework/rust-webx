@@ -43,17 +43,9 @@ impl From<Blog> for BlogPostModel {
             content: e.content,
             tags: serde_json::from_str(&e.tags).unwrap_or_default(),
             category_id: e.category_id,
-            category_name: e
-                .category
-                .get()
-                .map(|c| c.name.clone())
-                .unwrap_or_default(),
+            category_name: e.category.get().map(|c| c.name.clone()).unwrap_or_default(),
             author_id: e.author_id,
-            author_name: e
-                .author
-                .get()
-                .map(|a| a.name.clone())
-                .unwrap_or_default(),
+            author_name: e.author.get().map(|a| a.name.clone()).unwrap_or_default(),
             published_at: e.published_at,
             created_at: e.created_at,
             updated_at: e.updated_at,
@@ -70,17 +62,9 @@ impl From<Blog> for BlogPostSummary {
             summary: e.summary,
             tags: serde_json::from_str(&e.tags).unwrap_or_default(),
             category_id: e.category_id,
-            category_name: e
-                .category
-                .get()
-                .map(|c| c.name.clone())
-                .unwrap_or_default(),
+            category_name: e.category.get().map(|c| c.name.clone()).unwrap_or_default(),
             author_id: e.author_id,
-            author_name: e
-                .author
-                .get()
-                .map(|a| a.name.clone())
-                .unwrap_or_default(),
+            author_name: e.author.get().map(|a| a.name.clone()).unwrap_or_default(),
             published_at: e.published_at,
         }
     }
@@ -123,16 +107,8 @@ impl From<Exhibition> for ExhibitionModel {
             subtitle: e.subtitle,
             description: e.description,
             category_id: e.category_id,
-            category_name: e
-                .category
-                .get()
-                .map(|c| c.name.clone())
-                .unwrap_or_default(),
-            category: e
-                .category
-                .get()
-                .map(|c| c.slug.clone())
-                .unwrap_or_default(),
+            category_name: e.category.get().map(|c| c.name.clone()).unwrap_or_default(),
+            category: e.category.get().map(|c| c.slug.clone()).unwrap_or_default(),
             tags: serde_json::from_str(&e.tags).unwrap_or_default(),
             repo_url: e.repo_url,
             demo_url: e.demo_url,

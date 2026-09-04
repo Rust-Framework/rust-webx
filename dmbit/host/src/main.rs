@@ -7,8 +7,5 @@ async fn main() {
         return;
     }
 
-    dmbit_host::build_host()
-        .run()
-        .await
-        .expect("Server failed");
+    dmbit_host::build_host().run().await.expect("Server failed");
 }

@@ -44,7 +44,16 @@
     if (parts[0] === "about") return { page: "about", pageKey: "about" };
     if (parts[0] === "works" && parts[1]) {
       if (parts[2] === "docs") {
-        const docPath = parts.slice(3).join("/");
+        const docPath = parts
+          .slice(3)
+          .map((p) => {
+            try {
+              return decodeURIComponent(p);
+            } catch (_) {
+              return p;
+            }
+          })
+          .join("/");
         return { page: "docs", pageKey: "docs", slug: parts[1], docPath: docPath || null };
       }
       return { page: "work", pageKey: "work", slug: parts[1] };
@@ -79,7 +88,9 @@
   }
 
   function showLoading() {
-    document.getElementById("app").innerHTML =
+    const app = document.getElementById("app");
+    if (app?.querySelector("[data-ssr]")) return;
+    app.innerHTML =
       '<div class="loading-state"><div class="spinner"></div><span>加载中…</span></div>';
   }
 
@@ -119,6 +130,7 @@
     if (!softDocs) {
       showLoading();
       window.scrollTo(0, 0);
+      Docbit.Shell?.scrollMain?.(0);
     }
 
     const app = document.getElementById("app");
@@ -206,14 +218,20 @@
   function initBackToTop() {
     const btn = document.getElementById("back-to-top");
     if (!btn) return;
-    window.addEventListener(
-      "scroll",
-      () => {
-        btn.hidden = window.scrollY < 400;
-      },
-      { passive: true }
-    );
+
+    function scrollY() {
+      const main = document.querySelector("body.layout-shell .content-main");
+      return main ? main.scrollTop : window.scrollY;
+    }
+
+    function update() {
+      btn.hidden = scrollY() < 400;
+    }
+
+    window.addEventListener("scroll", update, { passive: true });
+    document.addEventListener("scroll", update, { passive: true, capture: true });
     btn.addEventListener("click", () => {
+      if (Docbit.Shell?.scrollMain?.({ top: 0, behavior: "smooth" })) return;
       window.scrollTo({ top: 0, behavior: "smooth" });
     });
   }

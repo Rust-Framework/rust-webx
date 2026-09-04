@@ -10,17 +10,21 @@ body {
 /* Shell grid: neutralize layui layout classes when used inside content-shell */
 .content-shell .layui-side,
 .content-shell .content-sidebar {
-    position: sticky !important;
     left: auto !important;
-    top: var(--header-h) !important;
-    bottom: auto !important;
-    width: auto !important;
+    right: auto !important;
     z-index: auto !important;
+}
+
+@media (min-width: 769px) {
+    .content-shell .layui-side,
+    .content-shell .content-sidebar {
+        width: auto !important;
+    }
 }
 
 .content-shell .layui-body,
 .content-shell .content-main {
-    position: static !important;
+    position: relative !important;
     left: auto !important;
     right: auto !important;
     top: auto !important;

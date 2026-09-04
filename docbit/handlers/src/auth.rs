@@ -118,12 +118,15 @@ pub struct ResetPasswordHandler {
 #[async_trait]
 impl IRequestHandler<RegisterRequest, AuthResponse> for RegisterHandler {
     async fn handle(&mut self, req: RegisterRequest) -> Result<AuthResponse> {
-        if load_user_by_email(&mut self.ctx, &req.email).await?.is_some() {
+        if load_user_by_email(&mut self.ctx, &req.email)
+            .await?
+            .is_some()
+        {
             return Err(Error::Http("Email already registered".into()));
         }
 
-        let hashed = hash(&req.password, DEFAULT_COST)
-            .map_err(|e| Error::Http(format!("Hash: {}", e)))?;
+        let hashed =
+            hash(&req.password, DEFAULT_COST).map_err(|e| Error::Http(format!("Hash: {}", e)))?;
         let now = now_secs();
         let user_id = new_id();
 
@@ -193,8 +196,7 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
 #[async_trait]
 impl IRequestHandler<AuthMeRequest, UserView> for AuthMeHandler {
     async fn handle(&mut self, _req: AuthMeRequest) -> Result<UserView> {
-        let uid = operator_id()
-            .ok_or_else(|| Error::Http("Not authenticated".into()))?;
+        let uid = operator_id().ok_or_else(|| Error::Http("Not authenticated".into()))?;
 
         let user = load_user_by_id(&mut self.ctx, &uid)
             .await?
@@ -256,11 +258,14 @@ impl IRequestHandler<ResetPasswordRequest, ResetPasswordResponse> for ResetPassw
         }
 
         let q = req.token.clone();
-        let mut record = linq!(self.ctx.set::<PasswordResetToken>(), |t: PasswordResetToken| t.token == q)
-            .first_or_default()
-            .await
-            .map_ef()?
-            .ok_or_else(|| Error::Http("Invalid or expired reset token".into()))?;
+        let mut record = linq!(
+            self.ctx.set::<PasswordResetToken>(),
+            |t: PasswordResetToken| t.token == q
+        )
+        .first_or_default()
+        .await
+        .map_ef()?
+        .ok_or_else(|| Error::Http("Invalid or expired reset token".into()))?;
 
         if record.used != 0 {
             return Err(Error::Http("Reset token already used".into()));
@@ -269,8 +274,8 @@ impl IRequestHandler<ResetPasswordRequest, ResetPasswordResponse> for ResetPassw
             return Err(Error::Http("Reset token expired".into()));
         }
 
-        let hashed = hash(&req.password, DEFAULT_COST)
-            .map_err(|e| Error::Http(format!("Hash: {}", e)))?;
+        let hashed =
+            hash(&req.password, DEFAULT_COST).map_err(|e| Error::Http(format!("Hash: {}", e)))?;
 
         let user_id = record.user_id.clone();
         let mut user = load_user_by_id(&mut self.ctx, &user_id)

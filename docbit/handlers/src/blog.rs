@@ -82,12 +82,11 @@ impl IRequestHandler<ListBlogPostsRequest, Vec<BlogPostSummary>> for ListBlogPos
 
 #[handler(inject)]
 #[async_trait]
-impl IRequestHandler<ListBlogCategoriesRequest, Vec<BlogCategoryCount>> for ListBlogCategoriesHandler {
+impl IRequestHandler<ListBlogCategoriesRequest, Vec<BlogCategoryCount>>
+    for ListBlogCategoriesHandler
+{
     async fn handle(&mut self, _: ListBlogCategoriesRequest) -> Result<Vec<BlogCategoryCount>> {
-        let blogs = linq!(self.ctx.set::<Blog>();)
-            .to_list()
-            .await
-            .map_ef()?;
+        let blogs = linq!(self.ctx.set::<Blog>();).to_list().await.map_ef()?;
 
         let mut counts: HashMap<String, usize> = HashMap::new();
         for b in &blogs {
@@ -121,8 +120,7 @@ impl IRequestHandler<ListBlogCategoriesRequest, Vec<BlogCategoryCount>> for List
 #[async_trait]
 impl IRequestHandler<ListMyBlogPostsRequest, Vec<BlogPostSummary>> for ListMyBlogPostsHandler {
     async fn handle(&mut self, _req: ListMyBlogPostsRequest) -> Result<Vec<BlogPostSummary>> {
-        let uid = operator_id()
-            .ok_or_else(|| Error::Http("Not authenticated".into()))?;
+        let uid = operator_id().ok_or_else(|| Error::Http("Not authenticated".into()))?;
         let q = uid.clone();
 
         let blogs = linq!(self.ctx.set::<Blog>(), |b: Blog| b.author_id == q; include b.category; include b.author; order_by b.published_at desc)
@@ -155,8 +153,7 @@ impl IRequestHandler<GetBlogPostRequest, BlogPostModel> for GetBlogPostHandler {
 #[async_trait]
 impl IRequestHandler<CreateBlogPostRequest, BlogPostModel> for CreateBlogPostHandler {
     async fn handle(&mut self, req: CreateBlogPostRequest) -> Result<BlogPostModel> {
-        let uid = operator_id()
-            .ok_or_else(|| Error::Http("Not authenticated".into()))?;
+        let uid = operator_id().ok_or_else(|| Error::Http("Not authenticated".into()))?;
 
         let slug = req.slug.clone();
         let q = slug.clone();
@@ -195,8 +192,7 @@ impl IRequestHandler<CreateBlogPostRequest, BlogPostModel> for CreateBlogPostHan
 #[async_trait]
 impl IRequestHandler<UpdateBlogPostRequest, BlogPostModel> for UpdateBlogPostHandler {
     async fn handle(&mut self, req: UpdateBlogPostRequest) -> Result<BlogPostModel> {
-        let uid = operator_id()
-            .ok_or_else(|| Error::Http("Not authenticated".into()))?;
+        let uid = operator_id().ok_or_else(|| Error::Http("Not authenticated".into()))?;
         let roles = roles_from_claims(req.claims.as_deref());
 
         let slug = req.slug.clone();
@@ -235,8 +231,7 @@ impl IRequestHandler<UpdateBlogPostRequest, BlogPostModel> for UpdateBlogPostHan
 #[async_trait]
 impl IRequestHandler<DeleteBlogPostRequest, String> for DeleteBlogPostHandler {
     async fn handle(&mut self, req: DeleteBlogPostRequest) -> Result<String> {
-        let uid = operator_id()
-            .ok_or_else(|| Error::Http("Not authenticated".into()))?;
+        let uid = operator_id().ok_or_else(|| Error::Http("Not authenticated".into()))?;
         let roles = roles_from_claims(req.claims.as_deref());
 
         let slug = req.slug.clone();

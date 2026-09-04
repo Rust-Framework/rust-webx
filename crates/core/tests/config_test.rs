@@ -149,7 +149,10 @@ fn config_cors_binds_pascal_case_origins() {
         }
     });
     let opts: rust_webx_core::config::AppOptions = config::bind_root(&loaded);
-    assert_eq!(opts.cors.origins, vec!["https://www.lusida.net".to_string()]);
+    assert_eq!(
+        opts.cors.origins,
+        vec!["https://www.lusida.net".to_string()]
+    );
     assert!(!opts.cors.origins.iter().any(|o| o == "*"));
     assert!(opts.cors.methods.contains(&"OPTIONS".to_string()));
 }
@@ -186,9 +189,6 @@ fn config_app_jwt_secret_overrides_jwt_secret_env() {
     std::env::remove_var("APP__Jwt__Secret");
     if let Some(json) = result {
         let opts: rust_webx_core::config::AppOptions = config::bind_root(&json);
-        assert_eq!(
-            opts.jwt.secret,
-            "from-app-override-secret-32chars-minimum"
-        );
+        assert_eq!(opts.jwt.secret, "from-app-override-secret-32chars-minimum");
     }
 }

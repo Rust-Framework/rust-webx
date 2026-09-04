@@ -63,9 +63,9 @@ impl DocService {
     }
 
     /// Legacy aggregate docs root (first existing parent docs directory).
+    #[allow(dead_code)]
     fn root() -> PathBuf {
-        Self::workspace_docs_root()
-            .unwrap_or_else(|| app_base().join("docs"))
+        Self::workspace_docs_root().unwrap_or_else(|| app_base().join("docs"))
     }
 
     /// Resolve the directory for one work slug (deploy mirror → workspace mirror → live sibling).
@@ -153,8 +153,7 @@ impl DocService {
         let raw = strip_json_preamble(&raw)?;
 
         if let Ok(root) = serde_json::from_str::<IndexRootV2>(raw) {
-            let mut model =
-                meta_to_exhibition_model(dir_slug, &root.meta, !root.parts.is_empty());
+            let mut model = meta_to_exhibition_model(dir_slug, &root.meta, !root.parts.is_empty());
             let logo_name = root.meta.logo.as_deref().unwrap_or("logo.svg");
             model.logo_url = self.logo_public_url(dir_slug, logo_name);
             return Ok(model);
@@ -192,14 +191,15 @@ impl DocService {
         if !path.is_file() {
             return None;
         }
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("svg");
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("svg");
         Some(format!("/assets/works/{}.{}", dir_slug, ext))
     }
 
-    fn resolve_logo_file(&self, dir_slug: &str, logo_name: &str) -> Result<Option<PathBuf>, String> {
+    fn resolve_logo_file(
+        &self,
+        dir_slug: &str,
+        logo_name: &str,
+    ) -> Result<Option<PathBuf>, String> {
         let path = Self::work_dir(dir_slug).join(logo_name);
         if path.is_file() {
             Ok(Some(path))
@@ -248,7 +248,41 @@ impl IDocumentService for DocService {
             return Ok(generated);
         }
         let raw = fs::read_to_string(&index_path).map_err(|e| e.to_string())?;
-        parse_index_json(&raw)
+        let mut index = parse_index_json(&raw)?;
+        let before = count_doc_leaves(&index.items);
+
+        // INDEX.json may list planned sections whose .md files are not written yet.
+        // Drop missing leaves so nav / sitemap never point at 404 content URLs.
+        let removed = filter_existing_doc_paths(&dir, &mut index.items);
+        if removed > 0 {
+            tracing::warn!(
+                "[DocService] '{}' INDEX references {} missing markdown file(s); omitted from nav",
+                work,
+                removed
+            );
+        }
+
+        // If INDEX is mostly aspirational (e.g. rust-dix), rebuild nav from disk
+        // so users still see every real document with stable paths.
+        if before > 0 && removed * 2 >= before {
+            tracing::warn!(
+                "[DocService] '{}' INDEX mostly stale ({}/{} missing); using filesystem nav",
+                work,
+                removed,
+                before
+            );
+            let scanned = self.build_index(work)?;
+            index.items = scanned.items;
+            // Keep human title from INDEX.json when present.
+        } else {
+            // Keep INDEX structure, but surface orphan .md files that INDEX omitted.
+            let scanned = self.scan_dir(&dir, &dir)?;
+            merge_orphan_docs(&mut index.items, &scanned);
+        }
+
+        // Final safety pass — never emit a leaf that cannot be served.
+        let _ = filter_existing_doc_paths(&dir, &mut index.items);
+        Ok(index)
     }
 
     fn content(&self, work: &str, path: &str) -> Result<DocContent, String> {
@@ -256,17 +290,22 @@ impl IDocumentService for DocService {
         if !dir.is_dir() {
             return Err(format!("Documentation not found for work '{}'", work));
         }
-        let normalized = path.trim_start_matches('/');
-        let file_path = dir.join(normalized);
-        if !file_path.starts_with(&dir) {
+        let normalized = path.trim_start_matches(['/', '\\']).replace('\\', "/");
+        if normalized.is_empty()
+            || normalized
+                .split('/')
+                .any(|s| s.is_empty() || s == "." || s == "..")
+        {
             return Err("Invalid document path".into());
         }
+        let file_path = dir.join(&normalized);
+        // Avoid Path::starts_with quirks on Windows; reject traversal via segment check above.
         if !file_path.is_file() {
             return Err(format!("Document not found: {}", normalized));
         }
         let content = fs::read_to_string(&file_path).map_err(|e| e.to_string())?;
         Ok(DocContent {
-            path: normalized.replace('\\', "/"),
+            path: normalized,
             content,
         })
     }
@@ -531,6 +570,91 @@ fn apply_path_rule(rule: &str, chapter_id: &str, section_id: &str) -> String {
         .replace("{sectionId}", section_id)
 }
 
+/// Remove nav leaves whose markdown file is absent under `dir`.
+/// Returns how many leaf paths were dropped. Empty parent groups are pruned.
+fn filter_existing_doc_paths(dir: &Path, items: &mut Vec<DocIndexItem>) -> usize {
+    let mut removed = 0;
+    items.retain_mut(|item| {
+        if let Some(ref path) = item.path {
+            let file = dir.join(path);
+            if file.is_file() {
+                return true;
+            }
+            removed += 1;
+            return false;
+        }
+        if let Some(ref mut children) = item.children {
+            removed += filter_existing_doc_paths(dir, children);
+            return !children.is_empty();
+        }
+        false
+    });
+    removed
+}
+
+fn count_doc_leaves(items: &[DocIndexItem]) -> usize {
+    let mut n = 0;
+    for item in items {
+        if item.path.is_some() {
+            n += 1;
+        }
+        if let Some(ref children) = item.children {
+            n += count_doc_leaves(children);
+        }
+    }
+    n
+}
+
+fn collect_doc_paths(items: &[DocIndexItem], out: &mut std::collections::HashSet<String>) {
+    for item in items {
+        if let Some(ref path) = item.path {
+            out.insert(path.replace('\\', "/"));
+        }
+        if let Some(ref children) = item.children {
+            collect_doc_paths(children, out);
+        }
+    }
+}
+
+/// Append on-disk markdown files that INDEX.json did not list.
+fn merge_orphan_docs(items: &mut Vec<DocIndexItem>, scanned: &[DocIndexItem]) {
+    let mut known = std::collections::HashSet::new();
+    collect_doc_paths(items, &mut known);
+
+    let mut orphans = Vec::new();
+    collect_orphan_leaves(scanned, &known, &mut orphans);
+    if orphans.is_empty() {
+        return;
+    }
+    items.push(DocIndexItem {
+        title: "其他文档".into(),
+        path: None,
+        children: Some(orphans),
+    });
+}
+
+fn collect_orphan_leaves(
+    scanned: &[DocIndexItem],
+    known: &std::collections::HashSet<String>,
+    out: &mut Vec<DocIndexItem>,
+) {
+    for item in scanned {
+        if let Some(ref path) = item.path {
+            let key = path.replace('\\', "/");
+            if !known.contains(&key) {
+                out.push(DocIndexItem {
+                    title: item.title.clone(),
+                    path: Some(key),
+                    children: None,
+                });
+            }
+        }
+        if let Some(ref children) = item.children {
+            collect_orphan_leaves(children, known, out);
+        }
+    }
+}
+
 fn meta_to_exhibition_model(dir_slug: &str, meta: &IndexMeta, has_docs: bool) -> ExhibitionModel {
     let slug = meta
         .slug
@@ -660,5 +784,90 @@ mod tests {
             Some("rust-webx/docs/rust-webx")
         );
         assert!(DocService::sibling_doc_relative("unknown").is_none());
+    }
+
+    #[test]
+    fn filter_existing_doc_paths_drops_missing_leaves() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        fs::write(dir.join("keep.md"), "# keep").unwrap();
+        fs::create_dir_all(dir.join("ch")).unwrap();
+        fs::write(dir.join("ch/exists.md"), "# ok").unwrap();
+
+        let mut items = vec![
+            DocIndexItem {
+                title: "Keep".into(),
+                path: Some("keep.md".into()),
+                children: None,
+            },
+            DocIndexItem {
+                title: "Missing".into(),
+                path: Some("gone.md".into()),
+                children: None,
+            },
+            DocIndexItem {
+                title: "Chapter".into(),
+                path: None,
+                children: Some(vec![
+                    DocIndexItem {
+                        title: "Exists".into(),
+                        path: Some("ch/exists.md".into()),
+                        children: None,
+                    },
+                    DocIndexItem {
+                        title: "Absent".into(),
+                        path: Some("ch/absent.md".into()),
+                        children: None,
+                    },
+                ]),
+            },
+            DocIndexItem {
+                title: "Empty after prune".into(),
+                path: None,
+                children: Some(vec![DocIndexItem {
+                    title: "OnlyMissing".into(),
+                    path: Some("nowhere.md".into()),
+                    children: None,
+                }]),
+            },
+        ];
+
+        let removed = filter_existing_doc_paths(dir, &mut items);
+        assert_eq!(removed, 3);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].path.as_deref(), Some("keep.md"));
+        assert_eq!(items[1].children.as_ref().unwrap().len(), 1);
+        assert_eq!(
+            items[1].children.as_ref().unwrap()[0].path.as_deref(),
+            Some("ch/exists.md")
+        );
+    }
+
+    #[test]
+    fn merge_orphan_docs_appends_unknown_files() {
+        let mut items = vec![DocIndexItem {
+            title: "Keep".into(),
+            path: Some("keep.md".into()),
+            children: None,
+        }];
+        let scanned = vec![
+            DocIndexItem {
+                title: "Keep".into(),
+                path: Some("keep.md".into()),
+                children: None,
+            },
+            DocIndexItem {
+                title: "Extra".into(),
+                path: Some("extra.md".into()),
+                children: None,
+            },
+        ];
+        merge_orphan_docs(&mut items, &scanned);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[1].title, "其他文档");
+        assert_eq!(
+            items[1].children.as_ref().unwrap()[0].path.as_deref(),
+            Some("extra.md")
+        );
     }
 }

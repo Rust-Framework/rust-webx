@@ -62,6 +62,15 @@
     initShellSidebar();
   }
 
+  function scrollMain(opts) {
+    const main = document.querySelector(".content-main");
+    if (!main) return false;
+    const top = typeof opts === "number" ? opts : opts?.top ?? 0;
+    const behavior = typeof opts === "object" && opts?.behavior ? opts.behavior : "auto";
+    main.scrollTo({ top, behavior });
+    return true;
+  }
+
   function initShellSidebar() {
     const sidebar = document.querySelector(".content-sidebar");
     const overlay = document.getElementById("sidebar-overlay");
@@ -85,5 +94,5 @@
   }
 
   window.Docbit = window.Docbit || {};
-  Docbit.Shell = { topbar, layout, mount, initShellSidebar };
+  Docbit.Shell = { topbar, layout, mount, scrollMain, initShellSidebar };
 })();

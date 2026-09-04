@@ -27,7 +27,9 @@ static GLOBAL_PROVIDER: RwLock<Option<Arc<rust_dix::ServiceProvider>>> = RwLock:
     note = "Use Host::provider() or dispatch_provider() within an active DispatchRuntime"
 )]
 pub fn set_global_provider(provider: Arc<rust_dix::ServiceProvider>) {
-    let mut guard = GLOBAL_PROVIDER.write().expect("global provider lock poisoned");
+    let mut guard = GLOBAL_PROVIDER
+        .write()
+        .expect("global provider lock poisoned");
     if guard.is_some() {
         tracing::warn!(
             "Replacing deprecated global ServiceProvider. \
@@ -136,9 +138,8 @@ pub struct HandlerRegistration {
     pub req_type_name: &'static str,
     /// Constructs a fresh owned handler, boxed as `Box<dyn Any + Send>`.
     /// Called per-request with the per-request scope as resolver.
-    pub factory: fn(
-        &dyn rust_dix::IServiceResolver,
-    ) -> crate::error::Result<Box<dyn std::any::Any + Send>>,
+    pub factory:
+        fn(&dyn rust_dix::IServiceResolver) -> crate::error::Result<Box<dyn std::any::Any + Send>>,
     /// Type-erased call bridge: receives the owned handler and the boxed request,
     /// invokes `handle(&mut self, req)`, and returns the boxed response.
     #[allow(clippy::type_complexity)]
@@ -146,7 +147,10 @@ pub struct HandlerRegistration {
         handler: Box<dyn std::any::Any + Send>,
         request: Box<dyn std::any::Any + Send>,
     ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = crate::error::Result<Box<dyn std::any::Any + Send>>> + Send>,
+        Box<
+            dyn std::future::Future<Output = crate::error::Result<Box<dyn std::any::Any + Send>>>
+                + Send,
+        >,
     >,
 }
 
@@ -278,9 +282,7 @@ pub type HandlerRegistry = HandlerCache;
 #[derive(Clone)]
 pub struct HandlerEntry {
     /// Per-request factory: receives the scoped resolver, returns an owned handler.
-    pub factory: fn(
-        &dyn rust_dix::IServiceResolver,
-    ) -> crate::error::Result<Box<dyn Any + Send>>,
+    pub factory: fn(&dyn rust_dix::IServiceResolver) -> crate::error::Result<Box<dyn Any + Send>>,
     /// Type-erased call bridge: invokes `handle(&mut self, req)` on the owned handler.
     #[allow(clippy::type_complexity)]
     pub call: fn(

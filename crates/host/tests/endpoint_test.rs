@@ -5,9 +5,9 @@
 mod test_utils;
 
 use rust_webx_core::auth::{IClaims, IDynamicAuthorizer};
-use rust_webx_core::route::scan::ResponseData;
 use rust_webx_core::error::{Error, Result as LrwfResult};
 use rust_webx_core::http::{IClaimsExt, IHttpContext};
+use rust_webx_core::route::scan::ResponseData;
 use rust_webx_core::routing::IEndpoint;
 use rust_webx_host::authz::AuthorizerSet;
 use rust_webx_host::endpoint::StubEndpoint;
@@ -252,9 +252,7 @@ async fn endpoint_auth_with_authenticated_role_allows_any_valid_jwt() {
 
 #[tokio::test]
 async fn endpoint_dynamic_authorizer_denies_access() {
-    let authorizers = Arc::new(AuthorizerSet::new(vec![
-        Arc::new(DenyAllAuthorizer),
-    ]));
+    let authorizers = Arc::new(AuthorizerSet::new(vec![Arc::new(DenyAllAuthorizer)]));
     let endpoint = StubEndpoint {
         method: "GET",
         path: "/secret",
@@ -282,9 +280,7 @@ async fn endpoint_dynamic_authorizer_denies_access() {
 
 #[tokio::test]
 async fn endpoint_dynamic_authorizer_allows_access() {
-    let authorizers = Arc::new(AuthorizerSet::new(vec![
-        Arc::new(AllowAllAuthorizer),
-    ]));
+    let authorizers = Arc::new(AuthorizerSet::new(vec![Arc::new(AllowAllAuthorizer)]));
     let endpoint = StubEndpoint {
         method: "GET",
         path: "/allowed",

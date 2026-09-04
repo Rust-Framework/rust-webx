@@ -20,7 +20,7 @@
 
 use std::sync::Arc;
 
-use rust_dix::{ServiceCollection, ServiceProvider, ScopeFactory};
+use rust_dix::{ScopeFactory, ServiceCollection, ServiceProvider};
 use rust_ef::db_context::DbContext;
 use rust_ef::di::DbContextServiceCollectionExt as _;
 use rust_ef_sqlite::DbContextOptionsBuilderExt as _;
@@ -31,9 +31,7 @@ fn build_provider() -> Arc<ServiceProvider> {
     let collection = ServiceCollection::new().add_dbcontext(|opts| {
         opts.use_sqlite_in_memory();
     });
-    collection
-        .build()
-        .expect("Failed to build ServiceProvider")
+    collection.build().expect("Failed to build ServiceProvider")
 }
 
 fn assert_true(label: &str, cond: bool) {
@@ -96,8 +94,12 @@ async fn main() {
     println!("── get_owned::<DbContext>() — owned resolution ──");
     // get_owned 绕过 scope 缓存，每次调用工厂产生全新 owned 实例。
     // 这是 handler `#[inject(owned)] ctx: DbContext` 的解析路径。
-    let _owned1: DbContext = scope1.get_owned().expect("owned DbContext resolution failed");
-    let _owned2: DbContext = scope1.get_owned().expect("owned DbContext resolution failed");
+    let _owned1: DbContext = scope1
+        .get_owned()
+        .expect("owned DbContext resolution failed");
+    let _owned2: DbContext = scope1
+        .get_owned()
+        .expect("owned DbContext resolution failed");
     assert_true(
         "get_owned returns owned DbContext (no panic, no Arc<Mutex>)",
         true,

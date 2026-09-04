@@ -328,12 +328,9 @@ async fn multiple_path_params_parsed_correctly() {
     let port = find_free_port();
     spawn_host(port).await;
 
-    let resp = reqwest::get(format!(
-        "http://127.0.0.1:{}/users/10/posts/20",
-        port
-    ))
-    .await
-    .unwrap();
+    let resp = reqwest::get(format!("http://127.0.0.1:{}/users/10/posts/20", port))
+        .await
+        .unwrap();
 
     assert_eq!(resp.status().as_u16(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
@@ -422,12 +419,9 @@ async fn get_with_query_params_returns_200() {
     let port = find_free_port();
     spawn_host(port).await;
 
-    let resp = reqwest::get(format!(
-        "http://127.0.0.1:{}/search?q=hello&page=2",
-        port
-    ))
-    .await
-    .unwrap();
+    let resp = reqwest::get(format!("http://127.0.0.1:{}/search?q=hello&page=2", port))
+        .await
+        .unwrap();
 
     assert_eq!(resp.status().as_u16(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
@@ -483,7 +477,10 @@ async fn error_unauthorized_maps_to_401() {
     assert_eq!(resp.status().as_u16(), 401);
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["status"], 401);
-    assert!(body["detail"].as_str().unwrap().contains("custom unauthorized"));
+    assert!(body["detail"]
+        .as_str()
+        .unwrap()
+        .contains("custom unauthorized"));
 }
 
 #[tokio::test]
@@ -540,7 +537,12 @@ async fn unknown_route_returns_404_problem_json() {
         .unwrap();
 
     assert_eq!(resp.status().as_u16(), 404);
-    let ct = resp.headers().get("content-type").unwrap().to_str().unwrap();
+    let ct = resp
+        .headers()
+        .get("content-type")
+        .unwrap()
+        .to_str()
+        .unwrap();
     assert!(ct.contains("application/problem+json"));
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["status"], 404);
@@ -561,6 +563,11 @@ async fn json_response_has_correct_content_type() {
         .unwrap();
 
     assert_eq!(resp.status().as_u16(), 200);
-    let ct = resp.headers().get("content-type").unwrap().to_str().unwrap();
+    let ct = resp
+        .headers()
+        .get("content-type")
+        .unwrap()
+        .to_str()
+        .unwrap();
     assert!(ct.contains("application/json"));
 }

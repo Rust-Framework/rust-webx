@@ -16,9 +16,7 @@ use dmbit_contracts::site::SiteConfig;
 use dmbit_domain::entities::{Device, Product, Spec, SpecComponent};
 
 use crate::db::EfResultExt;
-use crate::mapping::{
-    component_to_model, format_capacity_label, parts_summary, spec_to_model,
-};
+use crate::mapping::{component_to_model, format_capacity_label, parts_summary, spec_to_model};
 
 #[derive(Inject)]
 pub struct GetDashboardHandler {
@@ -62,13 +60,13 @@ fn push_part_total(
 #[async_trait]
 impl IRequestHandler<GetDashboardRequest, DashboardModel> for GetDashboardHandler {
     async fn handle(&mut self, _: GetDashboardRequest) -> Result<DashboardModel> {
-        let products = linq!(self.ctx.set::<Product>();)
+        let products = linq!(self.ctx.set::<Product>();).to_list().await.map_ef()?;
+        let specs = linq!(self.ctx.set::<Spec>();).to_list().await.map_ef()?;
+        let devices = linq!(self.ctx.set::<Device>();).to_list().await.map_ef()?;
+        let comps = linq!(self.ctx.set::<SpecComponent>();)
             .to_list()
             .await
             .map_ef()?;
-        let specs = linq!(self.ctx.set::<Spec>();).to_list().await.map_ef()?;
-        let devices = linq!(self.ctx.set::<Device>();).to_list().await.map_ef()?;
-        let comps = linq!(self.ctx.set::<SpecComponent>();).to_list().await.map_ef()?;
 
         // Index: spec_id → (spec, product)
         let spec_product: HashMap<String, (&Spec, &Product)> = specs
@@ -152,7 +150,7 @@ impl IRequestHandler<GetDashboardRequest, DashboardModel> for GetDashboardHandle
                     spec_models.push(spec_to_model(s, &p.name, scomps, 0));
                 }
             }
-            spec_models.sort_by(|a, b| a.sort_order.cmp(&b.sort_order));
+            spec_models.sort_by_key(|a| a.sort_order);
             product_models.push(dmbit_contracts::product::ProductModel {
                 id: p.id.clone(),
                 name: p.name.clone(),
@@ -201,15 +199,24 @@ impl IRequestHandler<GetDashboardRequest, DashboardModel> for GetDashboardHandle
                     for c in scomps {
                         if c.kind == "disk" {
                             push_part_total(
-                                &mut disk_map, "disk", &c.model, c.capacity_gb,
-                                c.qty_per_unit, "块",
+                                &mut disk_map,
+                                "disk",
+                                &c.model,
+                                c.capacity_gb,
+                                c.qty_per_unit,
+                                "块",
                             );
-                            storage_capacity_gb = storage_capacity_gb
-                                .saturating_add(i64::from(c.qty_per_unit).saturating_mul(c.capacity_gb));
+                            storage_capacity_gb = storage_capacity_gb.saturating_add(
+                                i64::from(c.qty_per_unit).saturating_mul(c.capacity_gb),
+                            );
                         } else {
                             push_part_total(
-                                &mut accel_map, "accelerator", &c.model, 0,
-                                c.qty_per_unit, "张",
+                                &mut accel_map,
+                                "accelerator",
+                                &c.model,
+                                0,
+                                c.qty_per_unit,
+                                "张",
                             );
                         }
                     }
@@ -237,15 +244,23 @@ impl IRequestHandler<GetDashboardRequest, DashboardModel> for GetDashboardHandle
                         let per_spec = i64::from(pq).saturating_mul(i64::from(c.qty_per_unit));
                         if c.kind == "disk" {
                             push_part_total(
-                                &mut disk_map, "disk", &c.model, c.capacity_gb,
-                                (pq * c.qty_per_unit) as i32, "块",
+                                &mut disk_map,
+                                "disk",
+                                &c.model,
+                                c.capacity_gb,
+                                pq * c.qty_per_unit,
+                                "块",
                             );
                             storage_capacity_gb = storage_capacity_gb
                                 .saturating_add(per_spec.saturating_mul(c.capacity_gb));
                         } else {
                             push_part_total(
-                                &mut accel_map, "accelerator", &c.model, 0,
-                                (pq * c.qty_per_unit) as i32, "张",
+                                &mut accel_map,
+                                "accelerator",
+                                &c.model,
+                                0,
+                                pq * c.qty_per_unit,
+                                "张",
                             );
                         }
                     }
@@ -253,11 +268,7 @@ impl IRequestHandler<GetDashboardRequest, DashboardModel> for GetDashboardHandle
             }
         }
 
-        devices_rows.sort_by(|a, b| {
-            a.sort_order
-                .cmp(&b.sort_order)
-                .then(a.brand.cmp(&b.brand))
-        });
+        devices_rows.sort_by(|a, b| a.sort_order.cmp(&b.sort_order).then(a.brand.cmp(&b.brand)));
 
         let mut accelerator_totals: Vec<PartTotal> = accel_map.into_values().collect();
         accelerator_totals.sort_by(|a, b| b.count.cmp(&a.count).then(a.label.cmp(&b.label)));
@@ -288,10 +299,22 @@ impl IRequestHandler<GetDashboardRequest, DashboardModel> for GetDashboardHandle
                 pending_quantity: pending,
                 delivered_quantity: delivered,
                 status_buckets: vec![
-                    StatusBucket { status: "运行中".into(), quantity: running },
-                    StatusBucket { status: "联调中".into(), quantity: commissioning },
-                    StatusBucket { status: "待上架".into(), quantity: pending },
-                    StatusBucket { status: "已交付".into(), quantity: delivered },
+                    StatusBucket {
+                        status: "运行中".into(),
+                        quantity: running,
+                    },
+                    StatusBucket {
+                        status: "联调中".into(),
+                        quantity: commissioning,
+                    },
+                    StatusBucket {
+                        status: "待上架".into(),
+                        quantity: pending,
+                    },
+                    StatusBucket {
+                        status: "已交付".into(),
+                        quantity: delivered,
+                    },
                 ],
             },
             accelerator_totals,

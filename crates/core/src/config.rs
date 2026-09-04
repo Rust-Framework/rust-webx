@@ -317,16 +317,27 @@ pub fn bind_config<T: for<'de> Deserialize<'de> + Default>(
 ) -> T {
     if section.is_empty() || section == "." {
         serde_json::from_value(config.clone()).unwrap_or_else(|e| {
-            tracing::warn!("[Config] Failed to bind root config to {}: {}, using defaults", std::any::type_name::<T>(), e);
+            tracing::warn!(
+                "[Config] Failed to bind root config to {}: {}, using defaults",
+                std::any::type_name::<T>(),
+                e
+            );
             T::default()
         })
     } else {
         config
             .get(section)
-            .map(|v| serde_json::from_value(v.clone()).unwrap_or_else(|e| {
-                tracing::warn!("[Config] Failed to bind section '{}' to {}: {}, using defaults", section, std::any::type_name::<T>(), e);
-                T::default()
-            }))
+            .map(|v| {
+                serde_json::from_value(v.clone()).unwrap_or_else(|e| {
+                    tracing::warn!(
+                        "[Config] Failed to bind section '{}' to {}: {}, using defaults",
+                        section,
+                        std::any::type_name::<T>(),
+                        e
+                    );
+                    T::default()
+                })
+            })
             .unwrap_or_default()
     }
 }
@@ -334,7 +345,11 @@ pub fn bind_config<T: for<'de> Deserialize<'de> + Default>(
 /// Bind the entire config JSON to a type (for root-level deserialization).
 pub fn bind_root<T: for<'de> Deserialize<'de> + Default>(config: &serde_json::Value) -> T {
     serde_json::from_value(config.clone()).unwrap_or_else(|e| {
-        tracing::warn!("[Config] Failed to bind root config to {}: {}, using defaults", std::any::type_name::<T>(), e);
+        tracing::warn!(
+            "[Config] Failed to bind root config to {}: {}, using defaults",
+            std::any::type_name::<T>(),
+            e
+        );
         T::default()
     })
 }
@@ -427,7 +442,10 @@ mod tests {
                 "https://lusida.net".to_string()
             ]
         );
-        assert_eq!(opts.cors.methods, vec!["GET".to_string(), "POST".to_string()]);
+        assert_eq!(
+            opts.cors.methods,
+            vec!["GET".to_string(), "POST".to_string()]
+        );
         assert!(opts.cors.allow_credentials);
         assert_eq!(opts.cors.max_age, 3600);
         assert!(!opts.cors.origins.iter().any(|o| o == "*"));

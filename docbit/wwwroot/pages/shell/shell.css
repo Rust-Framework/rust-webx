@@ -1,4 +1,24 @@
-/* Shared full-width reading shell — docs & blog */
+/* Shared full-width reading shell — docs & blog
+   Viewport-locked: body does not scroll; sidebar / main / TOC scroll in-column. */
+
+body.layout-shell {
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden;
+}
+
+html:has(body.layout-shell) {
+    height: 100%;
+    overflow: hidden;
+}
+
+body.layout-shell .site-header {
+    flex-shrink: 0;
+}
+
+body.layout-shell .site-footer {
+    display: none;
+}
 
 body.layout-shell .header-inner {
     max-width: none;
@@ -6,18 +26,25 @@ body.layout-shell .header-inner {
 }
 
 body.layout-shell #app {
+    flex: 1 1 auto;
+    min-height: 0;
     max-width: none;
     padding: 0;
     margin: 0;
-    min-height: calc(100vh - var(--header-h) - 3.5rem);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
 }
 
 .content-shell {
     display: grid;
     grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
     grid-template-areas: "sidebar main";
-    min-height: calc(100vh - var(--header-h));
+    flex: 1 1 auto;
+    min-height: 0;
+    height: 100%;
     width: 100%;
+    overflow: hidden;
     background: var(--bg);
 }
 
@@ -28,9 +55,9 @@ body.layout-shell #app {
 
 .content-sidebar {
     grid-area: sidebar;
-    position: sticky;
-    top: var(--header-h);
-    height: calc(100vh - var(--header-h));
+    position: relative;
+    min-height: 0;
+    height: 100%;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -48,8 +75,10 @@ body.layout-shell #app {
 }
 
 .content-sidebar-body {
-    flex: 1;
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
+    overscroll-behavior: contain;
     padding: 0.25rem 0.65rem 1.5rem;
     scrollbar-width: thin;
 }
@@ -58,6 +87,11 @@ body.layout-shell #app {
     grid-area: main;
     position: relative;
     min-width: 0;
+    min-height: 0;
+    height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
     padding: 0 clamp(1.25rem, 3vw, 2.5rem) 3rem;
 }
 
@@ -68,7 +102,7 @@ body.layout-shell #app {
 
 .shell-topbar {
     position: sticky;
-    top: var(--header-h);
+    top: 0;
     z-index: 5;
     display: flex;
     align-items: center;
@@ -241,10 +275,12 @@ body.layout-shell #app {
 
 .content-toc-panel {
     grid-area: toc;
-    position: sticky;
-    top: var(--header-h);
-    height: calc(100vh - var(--header-h));
+    position: relative;
+    min-height: 0;
+    height: 100%;
+    overflow-x: hidden;
     overflow-y: auto;
+    overscroll-behavior: contain;
     padding: 1.25rem 1rem 2rem;
     border-left: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
     background: var(--bg);
@@ -335,11 +371,12 @@ body.layout-shell #app {
     }
 
     .content-sidebar {
-        grid-area: sidebar;
-        position: fixed;
+        grid-area: unset;
+        position: fixed !important;
         top: var(--header-h);
         left: 0;
         bottom: 0;
+        height: auto;
         width: min(88vw, var(--sidebar-w));
         z-index: 200;
         transform: translateX(-100%);

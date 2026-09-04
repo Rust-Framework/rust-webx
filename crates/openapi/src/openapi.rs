@@ -114,10 +114,8 @@ fn merge_params(
     request_params: &HashMap<&'static str, &'static [ParamMeta]>,
 ) -> Vec<ParamMeta> {
     let mut merged: Vec<ParamMeta> = route_params.to_vec();
-    let mut seen: HashMap<(&str, &str), ()> = merged
-        .iter()
-        .map(|p| ((p.name, p.source), ()))
-        .collect();
+    let mut seen: HashMap<(&str, &str), ()> =
+        merged.iter().map(|p| ((p.name, p.source), ())).collect();
 
     if let Some(extra) = request_params.get(request_type) {
         for param in *extra {

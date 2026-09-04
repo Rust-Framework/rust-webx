@@ -29,13 +29,9 @@ pub struct ListTrackingHandler {
 
 #[handler(inject)]
 #[async_trait]
-impl IRequestHandler<GetTrackingSummaryRequest, TrackingSummary>
-    for GetTrackingSummaryHandler
-{
+impl IRequestHandler<GetTrackingSummaryRequest, TrackingSummary> for GetTrackingSummaryHandler {
     async fn handle(&mut self, _: GetTrackingSummaryRequest) -> Result<TrackingSummary> {
-        let total: i64 = linq!(self.ctx.set::<Tracking>(); count)
-            .await
-            .map_ef()?;
+        let total: i64 = linq!(self.ctx.set::<Tracking>(); count).await.map_ef()?;
 
         let all = self
             .ctx
@@ -52,9 +48,10 @@ impl IRequestHandler<GetTrackingSummaryRequest, TrackingSummary>
             .len() as i64;
 
         let today_start = today_start_secs();
-        let today: i64 = linq!(self.ctx.set::<Tracking>(), |t: Tracking| t.visited_at >= today_start; count)
-            .await
-            .map_ef()?;
+        let today: i64 =
+            linq!(self.ctx.set::<Tracking>(), |t: Tracking| t.visited_at >= today_start; count)
+                .await
+                .map_ef()?;
 
         Ok(TrackingSummary {
             total_visits: total,

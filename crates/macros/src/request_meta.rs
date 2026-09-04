@@ -25,12 +25,9 @@ pub fn derive_request_meta(input: TokenStream) -> TokenStream {
             }
         },
         _ => {
-            return syn::Error::new_spanned(
-                &input.ident,
-                "WebxRequestMeta only supports structs",
-            )
-            .to_compile_error()
-            .into();
+            return syn::Error::new_spanned(&input.ident, "WebxRequestMeta only supports structs")
+                .to_compile_error()
+                .into();
         }
     };
 

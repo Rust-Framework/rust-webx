@@ -6,7 +6,11 @@ use std::sync::Arc;
 use rust_webx_core::app::IHost;
 
 fn find_free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+    TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
 }
 
 #[tokio::test]

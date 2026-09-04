@@ -104,7 +104,10 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Registers OpenAPI parameter metadata from `#[from_query]` / `#[from_route]` / `#[from_body]` fields.
 ///
 /// Add `#[webx_request(query_all)]` to treat all non-skipped fields as query parameters.
-#[proc_macro_derive(WebxRequestMeta, attributes(from_query, from_route, from_body, webx_request))]
+#[proc_macro_derive(
+    WebxRequestMeta,
+    attributes(from_query, from_route, from_body, webx_request)
+)]
 pub fn webx_request_meta(input: TokenStream) -> TokenStream {
     request_meta::derive_request_meta(input)
 }

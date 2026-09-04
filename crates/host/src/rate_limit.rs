@@ -113,7 +113,11 @@ impl RateLimitMiddleware {
         Self::new_with_max_ips(requests_per_second, burst_size, 10_000)
     }
 
-    pub fn new_with_max_ips(requests_per_second: f64, burst_size: u32, max_tracked_ips: usize) -> Self {
+    pub fn new_with_max_ips(
+        requests_per_second: f64,
+        burst_size: u32,
+        max_tracked_ips: usize,
+    ) -> Self {
         Self {
             limiter: RateLimiter::new(requests_per_second, burst_size, max_tracked_ips),
             trust_proxy: false,
@@ -122,11 +126,7 @@ impl RateLimitMiddleware {
 
     pub fn from_config(cfg: &RateLimitSection) -> Self {
         Self {
-            limiter: RateLimiter::new(
-                cfg.requests_per_second,
-                cfg.burst_size,
-                cfg.max_tracked_ips,
-            ),
+            limiter: RateLimiter::new(cfg.requests_per_second, cfg.burst_size, cfg.max_tracked_ips),
             trust_proxy: cfg.trust_proxy,
         }
     }

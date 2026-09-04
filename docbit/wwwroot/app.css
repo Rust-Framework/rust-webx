@@ -1081,14 +1081,8 @@ a.user-dropdown-item:hover {
     max-width: none;
 }
 
+/* TOC panel geometry lives in pages/shell/shell.css (.content-toc-panel) */
 .docs-toc-panel {
-    position: sticky;
-    top: var(--header-h);
-    height: calc(100vh - var(--header-h));
-    overflow-y: auto;
-    padding: 1.25rem 1rem 2rem;
-    border-left: 1px solid var(--border);
-    background: var(--bg);
     scrollbar-width: thin;
 }
 

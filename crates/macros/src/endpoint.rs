@@ -366,6 +366,9 @@ fn extract_type_name(ty: &Type) -> String {
 }
 
 /// Extract path parameter names from a route pattern like "/users/{id}".
+///
+/// Wildcard segments `{*rest}` yield the field name `rest` (asterisk stripped),
+/// matching matchit's param key and the docs convention.
 fn extract_path_params(path: &str) -> Vec<String> {
     let mut params = Vec::new();
     let bytes = path.as_bytes();
@@ -378,8 +381,10 @@ fn extract_path_params(path: &str) -> Vec<String> {
                 i += 1;
             }
             if i < bytes.len() {
-                let name = &path[start..i];
-                params.push(name.to_string());
+                let name = path[start..i].trim_start_matches('*');
+                if !name.is_empty() {
+                    params.push(name.to_string());
+                }
             }
         }
         i = i.saturating_add(1);
@@ -403,7 +408,9 @@ fn generate_summary(type_name: &str) -> String {
 
 /// Extract auth metadata from `#[authorize]`, `#[authorize(role = "...")]`,
 /// or `#[authorize(permission = "...")]`.
-fn extract_auth_requirements(attrs: &[Attribute]) -> (proc_macro2::TokenStream, proc_macro2::TokenStream) {
+fn extract_auth_requirements(
+    attrs: &[Attribute],
+) -> (proc_macro2::TokenStream, proc_macro2::TokenStream) {
     let mut role = quote! { "" };
     let mut permission = quote! { "" };
 

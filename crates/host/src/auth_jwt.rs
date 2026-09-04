@@ -167,9 +167,12 @@ impl IAuthenticationHandler for JwtAuth {
         }
 
         let token_data = decode::<RawClaims>(&token, &self.decoding_key, &self.validation)
-            .map_err(|e| rust_webx_core::error::Error::Unauthorized(format!(
-                "invalid or expired token: {}", e
-            )))?;
+            .map_err(|e| {
+                rust_webx_core::error::Error::Unauthorized(format!(
+                    "invalid or expired token: {}",
+                    e
+                ))
+            })?;
 
         let claims: JwtClaims = token_data.claims.into();
         Ok(Some(Box::new(claims)))

@@ -109,10 +109,7 @@ async fn auth_invalid_token_returns_err() {
         .with_header("authorization", "Bearer invalid-token-data");
 
     let result = auth.authenticate(&mut ctx).await;
-    assert!(
-        result.is_err(),
-        "Invalid token should return Err"
-    );
+    assert!(result.is_err(), "Invalid token should return Err");
 }
 
 #[tokio::test]
@@ -145,10 +142,7 @@ async fn auth_expired_token_returns_err() {
         .with_header("authorization", &format!("Bearer {}", token));
 
     let result = auth.authenticate(&mut ctx).await;
-    assert!(
-        result.is_err(),
-        "Expired token should return Err"
-    );
+    assert!(result.is_err(), "Expired token should return Err");
 }
 
 #[tokio::test]

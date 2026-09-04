@@ -149,8 +149,7 @@ impl IRequestHandler<ChangePasswordRequest, ChangePasswordResponse> for ChangePa
         user.updated_at = now_secs();
         user.updated_id = Some(uid);
 
-        let users = self.ctx.set::<User>();
-        users.update(user);
+        self.ctx.update(user);
         crate::db::save_changes(&mut self.ctx).await?;
 
         Ok(ChangePasswordResponse {

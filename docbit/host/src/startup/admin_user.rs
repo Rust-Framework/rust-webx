@@ -1,9 +1,9 @@
 //! Default admin user bootstrap.
 
 use bcrypt::{hash, DEFAULT_COST};
+use docbit_handlers::db::{save_changes, EfResultExt};
 use rust_ef::{db_context::DbContext, prelude::*};
 use rust_webx::*;
-use docbit_handlers::db::{save_changes, EfResultExt};
 
 use docbit_domain::entities::User;
 use docbit_domain::{new_id, seed_ids};

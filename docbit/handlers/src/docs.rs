@@ -50,11 +50,10 @@ impl IRequestHandler<GetDocIndexRequest, DocIndex> for GetDocIndexHandler {
 #[async_trait]
 impl IRequestHandler<GetDocContentRequest, DocContent> for GetDocContentHandler {
     async fn handle(&mut self, req: GetDocContentRequest) -> Result<DocContent> {
+        // `{*path}` captures real slashes; legacy clients used `:` as `/`.
         let path = percent_decode(&req.path).replace(':', "/");
 
-        self.docs
-            .content(&req.work, &path)
-            .map_err(Error::NotFound)
+        self.docs.content(&req.work, &path).map_err(Error::NotFound)
     }
 }
 

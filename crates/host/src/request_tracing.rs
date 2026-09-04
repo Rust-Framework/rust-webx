@@ -32,7 +32,10 @@ impl Default for RequestTracing {
 impl IMiddleware for RequestTracing {
     async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
         // Propagate existing request ID from upstream, or generate a new one.
-        let tid = ctx.request().header("x-request-id").map(|s| s.to_string())
+        let tid = ctx
+            .request()
+            .header("x-request-id")
+            .map(|s| s.to_string())
             .unwrap_or_else(next_trace_id);
         ctx.response_mut().set_header("x-trace-id", &tid);
         Ok(ControlFlow::Continue(()))

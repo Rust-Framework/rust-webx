@@ -6,8 +6,7 @@ use crate::entities::{Role, RoleUser, User};
 use crate::ids::seed as id;
 
 /// bcrypt hash for `admin123` (cost 4, same as docbit seed).
-const ADMIN_PASSWORD_HASH: &str =
-    "$2b$04$0Txv1I1N9PmPg4I9fkbZUuFVeDWIDtmlD6CEjiwxAuLzSNMHVQ/3W";
+const ADMIN_PASSWORD_HASH: &str = "$2b$04$0Txv1I1N9PmPg4I9fkbZUuFVeDWIDtmlD6CEjiwxAuLzSNMHVQ/3W";
 
 pub fn register(ctx: &mut DbContext) {
     let now = 0i64;

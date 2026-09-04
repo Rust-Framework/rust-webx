@@ -27,9 +27,9 @@ use crate::endpoint::{StaticHtmlEndpoint, StaticJsonEndpoint, StubEndpoint};
 use crate::health::{HealthCheckEndpoint, HealthCheckRegistry, HealthStatus};
 use crate::memory_cache::MemoryCache;
 use crate::metrics::{HttpMetrics, MetricsEndpoint, MetricsMiddleware};
+use crate::pipeline::{HandlerFn, MiddlewarePipeline};
 use crate::problem_response::{build_problem, write_problem_response};
 use crate::rate_limit::RateLimitMiddleware;
-use crate::pipeline::{HandlerFn, MiddlewarePipeline};
 use crate::router::Router;
 use jsonwebtoken::{DecodingKey, Validation};
 use rust_webx_core::route::scan::RouteEntry;
@@ -345,10 +345,7 @@ impl HostBuilder {
 
         // Per-host dispatch runtime (provider + handler registry).
         let handler_cache = Arc::new(rust_webx_core::route::scan::HandlerCache::build());
-        let dispatch_runtime = Arc::new(DispatchRuntime::new(
-            Arc::clone(&provider),
-            handler_cache,
-        ));
+        let dispatch_runtime = Arc::new(DispatchRuntime::new(Arc::clone(&provider), handler_cache));
 
         let appsettings =
             config::load_appsettings(self.mode).unwrap_or_else(|| serde_json::json!({}));
@@ -363,7 +360,9 @@ impl HostBuilder {
 
         // Default security & observability middleware (zero-config safe defaults).
         // Order: SecurityHeaders → RequestId → RateLimit → Metrics → user → CORS → Auth → SPA
-        pipeline.add_middleware(Arc::new(crate::security_headers::SecurityHeadersMiddleware::new()));
+        pipeline.add_middleware(Arc::new(
+            crate::security_headers::SecurityHeadersMiddleware::new(),
+        ));
         pipeline.add_middleware(Arc::new(crate::request_id::RequestIdMiddleware::new()));
 
         if options.rate_limit.enabled {
@@ -380,9 +379,7 @@ impl HostBuilder {
 
         if options.metrics.enabled {
             tracing::info!("[Host] Metrics enabled at GET /metrics");
-            pipeline.add_middleware(Arc::new(MetricsMiddleware::new(Arc::clone(
-                &http_metrics,
-            ))));
+            pipeline.add_middleware(Arc::new(MetricsMiddleware::new(Arc::clone(&http_metrics))));
         }
 
         let middlewares: Vec<Arc<dyn IMiddleware>> = provider.get_all::<dyn IMiddleware>();
@@ -449,7 +446,9 @@ impl HostBuilder {
         let pipeline = Arc::new(pipeline);
 
         // Security: fail fast in production when auth is enabled but JWT secret is missing or weak
-        if self.mode == AppMode::Production && self.auth_enabled && is_weak_jwt_secret(&options.jwt.secret)
+        if self.mode == AppMode::Production
+            && self.auth_enabled
+            && is_weak_jwt_secret(&options.jwt.secret)
         {
             panic!(
                 "Production requires a strong JWT secret. Set APP__Jwt__Secret or JWT_SECRET env var (min 32 chars, not a placeholder)."
@@ -480,7 +479,9 @@ impl HostBuilder {
             ) -> std::pin::Pin<
                 Box<
                     dyn std::future::Future<
-                            Output = rust_webx_core::error::Result<rust_webx_core::route::scan::ResponseData>,
+                            Output = rust_webx_core::error::Result<
+                                rust_webx_core::route::scan::ResponseData,
+                            >,
                         > + Send,
                 >,
             >,
@@ -536,8 +537,8 @@ impl HostBuilder {
         router.register(HttpMethod::Get, "/healthz", health_endpoint);
 
         // /health/live: liveness (process alive → pass, no probe queries)
-        let live_body = serde_json::to_vec(&serde_json::json!({"status":"pass"}))
-            .unwrap_or_default();
+        let live_body =
+            serde_json::to_vec(&serde_json::json!({"status":"pass"})).unwrap_or_default();
         router.register(
             HttpMethod::Get,
             "/health/live",
@@ -919,9 +920,7 @@ async fn handle_request(
     // skip the pipeline — the response is final.
     if ctx.response().status() < 400 {
         let result = dispatch_runtime
-            .run(async {
-                pipeline.execute(&mut ctx, router_handler).await
-            })
+            .run(async { pipeline.execute(&mut ctx, router_handler).await })
             .await;
         if let Err(e) = result {
             let status = e.status_code();
@@ -1028,11 +1027,7 @@ async fn stop_hosted_services(services: &[Arc<dyn IHostedService>]) {
     tracing::info!("All hosted services stopped.");
 }
 
-async fn drain_connections(
-    join_set: &mut JoinSet<()>,
-    label: &str,
-    mode: AppMode,
-) {
+async fn drain_connections(join_set: &mut JoinSet<()>, label: &str, mode: AppMode) {
     let timeout_secs = if mode == AppMode::Development { 5 } else { 30 };
     let drain_future = async {
         while let Some(result) = join_set.join_next().await {
@@ -1072,6 +1067,7 @@ fn parse_url(url: &str) -> Result<(&str, String)> {
 }
 
 /// Serve plain HTTP on the given address.
+#[allow(clippy::too_many_arguments)]
 async fn serve_http(
     addr: String,
     shutdown: std::sync::Arc<tokio::sync::Notify>,

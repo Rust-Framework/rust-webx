@@ -43,6 +43,7 @@ pub mod doc_service;
 pub mod docs;
 pub mod exhibition;
 pub mod rbac;
+pub mod seo;
 pub mod site;
 pub mod tracking;
 pub mod user;

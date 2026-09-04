@@ -56,8 +56,14 @@
     return raw;
   }
 
-  function enhance(container) {
+  function enhance(container, opts) {
     if (!container) return;
+    const workSlug = opts && opts.workSlug;
+    const docPath = (opts && opts.docPath) || "";
+    const currentDir = docPath.includes("/")
+      ? docPath.slice(0, docPath.lastIndexOf("/") + 1)
+      : "";
+
     container.querySelectorAll("pre code").forEach((block) => {
       const pre = block.parentElement;
       if (pre.querySelector(".code-copy-btn")) return;
@@ -78,9 +84,33 @@
       });
       pre.appendChild(btn);
     });
-    container.querySelectorAll("a[href^='/']").forEach((a) => {
+
+    container.querySelectorAll("a[href]").forEach((a) => {
       if (a.getAttribute("target") === "_blank") return;
-      a.setAttribute("data-nav", "");
+      let href = a.getAttribute("href") || "";
+      if (!href || href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("javascript:")) {
+        return;
+      }
+      if (/^https?:\/\//i.test(href)) return;
+
+      if (workSlug && /\.md($|[?#])/i.test(href) && !href.startsWith("/")) {
+        try {
+          const base = "https://docs.local/" + currentDir;
+          const resolved = new URL(href, base);
+          const rel = decodeURIComponent(resolved.pathname.replace(/^\//, ""));
+          const hash = resolved.hash || "";
+          a.setAttribute(
+            "href",
+            `/works/${encodeURIComponent(workSlug)}/docs/${Docbit.Api.encodeDocPath(rel)}${hash}`
+          );
+          a.setAttribute("data-nav", "");
+          return;
+        } catch (_) {}
+      }
+
+      if (href.startsWith("/")) {
+        a.setAttribute("data-nav", "");
+      }
     });
   }
 
@@ -108,6 +138,7 @@
     const ids = Array.from(links).map((a) => a.getAttribute("href").slice(1));
     const headings = ids.map((id) => document.getElementById(id)).filter(Boolean);
     if (!headings.length) return;
+    const root = document.querySelector(".content-main") || null;
     const observer = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
@@ -119,7 +150,7 @@
           }
         });
       },
-      { rootMargin: "-80px 0px -70% 0px", threshold: 0 }
+      { root, rootMargin: "-80px 0px -70% 0px", threshold: 0 }
     );
     headings.forEach((h) => observer.observe(h));
   }

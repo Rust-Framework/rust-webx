@@ -147,7 +147,10 @@ async fn integration_health_returns_pass_with_no_probes() {
     );
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["status"], "pass");
-    assert!(body.get("checks").is_none(), "empty registry should omit checks");
+    assert!(
+        body.get("checks").is_none(),
+        "empty registry should omit checks"
+    );
 }
 
 #[tokio::test]
@@ -396,12 +399,7 @@ async fn integration_rate_limit_returns_429_when_exceeded() {
         .await
         .unwrap();
     assert_eq!(r3.status().as_u16(), 429);
-    let ct = r3
-        .headers()
-        .get("content-type")
-        .unwrap()
-        .to_str()
-        .unwrap();
+    let ct = r3.headers().get("content-type").unwrap().to_str().unwrap();
     assert!(ct.contains("application/problem+json"));
     let body: serde_json::Value = r3.json().await.unwrap();
     assert_eq!(body["status"], 429);
@@ -483,10 +481,7 @@ async fn integration_compression_gzips_large_response() {
     .await;
 
     // Disable reqwest's auto-decompression so we can verify content-encoding header.
-    let client = reqwest::Client::builder()
-        .no_gzip()
-        .build()
-        .unwrap();
+    let client = reqwest::Client::builder().no_gzip().build().unwrap();
 
     let resp = client
         .get(format!("http://127.0.0.1:{}/api/openapi.json", port))

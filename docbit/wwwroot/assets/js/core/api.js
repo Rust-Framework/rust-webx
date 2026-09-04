@@ -59,10 +59,27 @@
   }
 
   function docContentUrl(docsSlug, docPath) {
-    const apiPath = docPath.replace(/\//g, ":");
+    // Encode nested paths as a single segment with `:` so both:
+    // - legacy `/content/{path}` and
+    // - new `/content/{*path}` (colon still decoded to `/`)
+    // match correctly. Slash URLs 404 on servers that only have `{path}`.
+    const apiPath = String(docPath || "")
+      .replace(/\\/g, "/")
+      .replace(/^\/+/, "")
+      .replace(/\//g, ":");
     return `/api/docs/${encodeURIComponent(docsSlug)}/content/${apiPath}`;
   }
 
+  /** Encode a docs path for use in SPA URLs: `/works/{slug}/docs/{path...}` */
+  function encodeDocPath(docPath) {
+    return String(docPath || "")
+      .replace(/\\/g, "/")
+      .split("/")
+      .filter(Boolean)
+      .map(encodeURIComponent)
+      .join("/");
+  }
+
   window.Docbit = window.Docbit || {};
-  Docbit.Api = { get, post, put, del, docContentUrl };
+  Docbit.Api = { get, post, put, del, docContentUrl, encodeDocPath };
 })();

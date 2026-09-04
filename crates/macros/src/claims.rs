@@ -93,7 +93,9 @@ pub fn claims_impl(_attr: TokenStream, item: TokenStream) -> TokenStream {
         let nested: syn::Result<syn::MetaList> = attr.meta.require_list().cloned();
         match nested {
             Ok(list) => list
-                .parse_args_with(syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated)
+                .parse_args_with(
+                    syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated,
+                )
                 .map(|paths| {
                     paths
                         .iter()

@@ -47,7 +47,7 @@ impl IRequestHandler<ListCommentsRequest, Vec<CommentModel>> for ListCommentsHan
             .await
             .map_ef()?;
 
-        rows.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        rows.sort_by_key(|a| a.created_at);
         Ok(rows.into_iter().map(CommentModel::from).collect())
     }
 }
@@ -88,7 +88,11 @@ impl IRequestHandler<CreateCommentRequest, CommentModel> for CreateCommentHandle
 
         save_changes(&mut self.ctx).await?;
 
-        tracing::info!("[Comment] Created by {} on blog {}", user_name, comment.blog_id);
+        tracing::info!(
+            "[Comment] Created by {} on blog {}",
+            user_name,
+            comment.blog_id
+        );
         Ok(comment.to_model())
     }
 }

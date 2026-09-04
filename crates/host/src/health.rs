@@ -155,8 +155,7 @@ impl IEndpoint for HealthCheckEndpoint {
     async fn handle(&self, ctx: &mut dyn IHttpContext) -> Result<()> {
         let overall = self.registry.overall_status();
         let body = build_health_response(&self.registry);
-        ctx.response_mut()
-            .set_status(health_http_status(overall));
+        ctx.response_mut().set_status(health_http_status(overall));
         ctx.response_mut()
             .set_header("content-type", "application/health+json");
         ctx.response_mut().write_bytes(body).await

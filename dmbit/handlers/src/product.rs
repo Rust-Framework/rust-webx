@@ -12,8 +12,8 @@ use dmbit_domain::new_id;
 use crate::db::{save_changes, EfResultExt};
 use crate::mapping::{
     assert_product_code_available, load_components_for_specs, load_device_counts,
-    normalize_category, optional_text, require_text, spec_to_model,
-    MAX_PRODUCT_CODE, MAX_PRODUCT_NAME, MAX_PRODUCT_REMARK,
+    normalize_category, optional_text, require_text, spec_to_model, MAX_PRODUCT_CODE,
+    MAX_PRODUCT_NAME, MAX_PRODUCT_REMARK,
 };
 use crate::util::{now_secs, operator_id, parse_id};
 
@@ -88,10 +88,7 @@ pub struct DeleteProductHandler {
 #[async_trait]
 impl IRequestHandler<ListProductsRequest, Vec<ProductModel>> for ListProductsHandler {
     async fn handle(&mut self, _: ListProductsRequest) -> Result<Vec<ProductModel>> {
-        let mut products = linq!(self.ctx.set::<Product>();)
-            .to_list()
-            .await
-            .map_ef()?;
+        let mut products = linq!(self.ctx.set::<Product>();).to_list().await.map_ef()?;
         products.sort_by(|a, b| a.sort_order.cmp(&b.sort_order).then(a.name.cmp(&b.name)));
 
         let all_specs = linq!(self.ctx.set::<Spec>();).to_list().await.map_ef()?;
@@ -110,7 +107,7 @@ impl IRequestHandler<ListProductsRequest, Vec<ProductModel>> for ListProductsHan
                     spec_to_model(s, &p.name, comps, dc)
                 })
                 .collect();
-            specs.sort_by(|a, b| a.sort_order.cmp(&b.sort_order));
+            specs.sort_by_key(|a| a.sort_order);
             result.push(product_to_model(p, specs));
         }
         Ok(result)
@@ -122,12 +119,8 @@ impl IRequestHandler<ListProductsRequest, Vec<ProductModel>> for ListProductsHan
 impl IRequestHandler<GetProductRequest, ProductModel> for GetProductHandler {
     async fn handle(&mut self, req: GetProductRequest) -> Result<ProductModel> {
         let id = parse_id(&req.id)?;
-        let p = crate::ef_require_by_id!(
-            self.ctx,
-            Product,
-            id,
-            Error::NotFound("产品不存在".into())
-        );
+        let p =
+            crate::ef_require_by_id!(self.ctx, Product, id, Error::NotFound("产品不存在".into()));
 
         let pid = p.id.clone();
         let specs = linq!(self.ctx.set::<Spec>(), |s: Spec| s.product_id == pid)
@@ -146,7 +139,7 @@ impl IRequestHandler<GetProductRequest, ProductModel> for GetProductHandler {
                 spec_to_model(&s, &p.name, comps, dc)
             })
             .collect();
-        spec_models.sort_by(|a, b| a.sort_order.cmp(&b.sort_order));
+        spec_models.sort_by_key(|a| a.sort_order);
 
         Ok(product_to_model(p, spec_models))
     }
@@ -179,7 +172,7 @@ impl IRequestHandler<CreateProductRequest, ProductModel> for CreateProductHandle
             specs: HasMany::new(),
         };
 
-        self.ctx.set::<Product>().add(entity.clone());
+        self.ctx.add(entity.clone());
         save_changes(&mut self.ctx).await?;
 
         Ok(product_to_model(entity, Vec::new()))
@@ -191,12 +184,8 @@ impl IRequestHandler<CreateProductRequest, ProductModel> for CreateProductHandle
 impl IRequestHandler<UpdateProductRequest, ProductModel> for UpdateProductHandler {
     async fn handle(&mut self, req: UpdateProductRequest) -> Result<ProductModel> {
         let id = parse_id(&req.id)?;
-        let mut p = crate::ef_require_by_id!(
-            self.ctx,
-            Product,
-            id,
-            Error::NotFound("产品不存在".into())
-        );
+        let mut p =
+            crate::ef_require_by_id!(self.ctx, Product, id, Error::NotFound("产品不存在".into()));
 
         if let Some(name) = req.name {
             p.name = require_text("产品名称", &name, MAX_PRODUCT_NAME)?;
@@ -218,7 +207,7 @@ impl IRequestHandler<UpdateProductRequest, ProductModel> for UpdateProductHandle
         p.updated_at = now_secs();
         p.updated_id = operator_id();
 
-        self.ctx.set::<Product>().update(p.clone());
+        self.ctx.update(p.clone());
         save_changes(&mut self.ctx).await?;
 
         // Load specs for response
@@ -238,7 +227,7 @@ impl IRequestHandler<UpdateProductRequest, ProductModel> for UpdateProductHandle
                 spec_to_model(&s, &p.name, comps, dc)
             })
             .collect();
-        spec_models.sort_by(|a, b| a.sort_order.cmp(&b.sort_order));
+        spec_models.sort_by_key(|a| a.sort_order);
 
         Ok(product_to_model(p, spec_models))
     }
@@ -249,12 +238,8 @@ impl IRequestHandler<UpdateProductRequest, ProductModel> for UpdateProductHandle
 impl IRequestHandler<DeleteProductRequest, String> for DeleteProductHandler {
     async fn handle(&mut self, req: DeleteProductRequest) -> Result<String> {
         let id = parse_id(&req.id)?;
-        let mut p = crate::ef_require_by_id!(
-            self.ctx,
-            Product,
-            id,
-            Error::NotFound("产品不存在".into())
-        );
+        let mut p =
+            crate::ef_require_by_id!(self.ctx, Product, id, Error::NotFound("产品不存在".into()));
 
         let now = now_secs();
         let op = operator_id();
@@ -264,45 +249,44 @@ impl IRequestHandler<DeleteProductRequest, String> for DeleteProductHandler {
 
         let pid = p.id.clone();
         // Cascade: delete specs → components + mark devices as 已淘汰
-        let child_specs =
-            linq!(self.ctx.set::<Spec>(), |s: Spec| s.product_id == pid)
-                .to_list()
-                .await
-                .map_ef()?;
+        let child_specs = linq!(self.ctx.set::<Spec>(), |s: Spec| s.product_id == pid)
+            .to_list()
+            .await
+            .map_ef()?;
         for mut s in child_specs {
             let sid = s.id.clone();
             // Physical delete components
             let sid2 = sid.clone();
-            let comps =
-                linq!(self.ctx.set::<SpecComponent>(), |c: SpecComponent| c.spec_id == sid2)
-                    .to_list()
-                    .await
-                    .map_ef()?;
+            let comps = linq!(self.ctx.set::<SpecComponent>(), |c: SpecComponent| c
+                .spec_id
+                == sid2)
+            .to_list()
+            .await
+            .map_ef()?;
             for mut c in comps {
                 c.is_deleted = true;
                 c.updated_at = now;
                 c.updated_id = op.clone();
-                self.ctx.set::<SpecComponent>().update(c);
+                self.ctx.update(c);
             }
             // Mark devices as 已淘汰
-            let devs =
-                linq!(self.ctx.set::<Device>(), |d: Device| d.spec_id == sid)
-                    .to_list()
-                    .await
-                    .map_ef()?;
+            let devs = linq!(self.ctx.set::<Device>(), |d: Device| d.spec_id == sid)
+                .to_list()
+                .await
+                .map_ef()?;
             for mut d in devs {
                 d.status = "已淘汰".into();
                 d.updated_at = now;
                 d.updated_id = op.clone();
-                self.ctx.set::<Device>().update(d);
+                self.ctx.update(d);
             }
             s.is_deleted = true;
             s.updated_at = now;
             s.updated_id = op.clone();
-            self.ctx.set::<Spec>().update(s);
+            self.ctx.update(s);
         }
 
-        self.ctx.set::<Product>().update(p);
+        self.ctx.update(p);
         save_changes(&mut self.ctx).await?;
 
         Ok(format!("已删除产品 {}", id))

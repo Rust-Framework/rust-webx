@@ -20,8 +20,8 @@
 use rust_dix::ServiceCollection;
 use rust_webx_core::error::{Error, Result as LrwfResult};
 use rust_webx_core::handler::{IEventHandler, IRequestHandler};
-use rust_webx_core::mediator::{IEventRequest, IMediator, IRequest};
 use rust_webx_core::mediator::Mediator;
+use rust_webx_core::mediator::{IEventRequest, IMediator, IRequest};
 use rust_webx_core::route::scan::HandlerRegistration;
 use std::sync::{Arc, Mutex};
 
@@ -63,10 +63,7 @@ fn __call_hello_handler(
     handler: Box<dyn std::any::Any + Send>,
     request: Box<dyn std::any::Any + Send>,
 ) -> std::pin::Pin<
-    Box<
-        dyn std::future::Future<Output = LrwfResult<Box<dyn std::any::Any + Send>>>
-            + Send,
-    >,
+    Box<dyn std::future::Future<Output = LrwfResult<Box<dyn std::any::Any + Send>>> + Send>,
 > {
     Box::pin(async move {
         let mut h = *handler
@@ -114,10 +111,7 @@ fn __call_failing_handler(
     handler: Box<dyn std::any::Any + Send>,
     request: Box<dyn std::any::Any + Send>,
 ) -> std::pin::Pin<
-    Box<
-        dyn std::future::Future<Output = LrwfResult<Box<dyn std::any::Any + Send>>>
-            + Send,
-    >,
+    Box<dyn std::future::Future<Output = LrwfResult<Box<dyn std::any::Any + Send>>> + Send>,
 > {
     Box::pin(async move {
         let mut h = *handler
@@ -219,13 +213,13 @@ async fn mediator_publish_single_handler() {
     let counter_clone = Arc::clone(&counter);
 
     let provider = ServiceCollection::new()
-            .singleton::<dyn IEventHandler<TestEvent>>(move |_| {
-                Arc::new(CountingEventHandler {
-                    counter: Arc::clone(&counter_clone),
-                })
+        .singleton::<dyn IEventHandler<TestEvent>>(move |_| {
+            Arc::new(CountingEventHandler {
+                counter: Arc::clone(&counter_clone),
             })
-            .build()
-            .unwrap();
+        })
+        .build()
+        .unwrap();
     let mediator = Mediator::new(provider);
     mediator
         .publish(TestEvent {
@@ -246,18 +240,18 @@ async fn mediator_publish_multiple_handlers() {
     let c2 = Arc::clone(&counter);
 
     let provider = ServiceCollection::new()
-            .singleton::<dyn IEventHandler<TestEvent>>(move |_| {
-                Arc::new(CountingEventHandler {
-                    counter: Arc::clone(&c1),
-                })
+        .singleton::<dyn IEventHandler<TestEvent>>(move |_| {
+            Arc::new(CountingEventHandler {
+                counter: Arc::clone(&c1),
             })
-            .singleton::<dyn IEventHandler<TestEvent>>(move |_| {
-                Arc::new(CountingEventHandler {
-                    counter: Arc::clone(&c2),
-                })
+        })
+        .singleton::<dyn IEventHandler<TestEvent>>(move |_| {
+            Arc::new(CountingEventHandler {
+                counter: Arc::clone(&c2),
             })
-            .build()
-            .unwrap();
+        })
+        .build()
+        .unwrap();
     let mediator = Mediator::new(provider);
     mediator
         .publish(TestEvent {
@@ -275,9 +269,9 @@ async fn mediator_publish_multiple_handlers() {
 #[tokio::test]
 async fn mediator_publish_handler_returns_error() {
     let provider = ServiceCollection::new()
-            .singleton::<dyn IEventHandler<TestEvent>>(|_| Arc::new(FailingEventHandler))
-            .build()
-            .unwrap();
+        .singleton::<dyn IEventHandler<TestEvent>>(|_| Arc::new(FailingEventHandler))
+        .build()
+        .unwrap();
     let mediator = Mediator::new(provider);
     let result = mediator
         .publish(TestEvent {
@@ -366,10 +360,7 @@ fn __call_scope_probe_handler(
     handler: Box<dyn std::any::Any + Send>,
     _request: Box<dyn std::any::Any + Send>,
 ) -> std::pin::Pin<
-    Box<
-        dyn std::future::Future<Output = LrwfResult<Box<dyn std::any::Any + Send>>>
-            + Send,
-    >,
+    Box<dyn std::future::Future<Output = LrwfResult<Box<dyn std::any::Any + Send>>> + Send>,
 > {
     Box::pin(async move {
         let h = *handler
@@ -397,21 +388,33 @@ async fn mediator_send_uses_per_call_scope_for_scoped_services() {
     SCOPED_COUNTER.store(0, Ordering::SeqCst);
 
     let provider = ServiceCollection::new()
-            .scoped::<ScopedService>(|_| {
-                let id = SCOPED_COUNTER.fetch_add(1, Ordering::SeqCst) + 1;
-                Arc::new(ScopedService { instance_id: id })
-            })
-            .build()
-            .unwrap();
+        .scoped::<ScopedService>(|_| {
+            let id = SCOPED_COUNTER.fetch_add(1, Ordering::SeqCst) + 1;
+            Arc::new(ScopedService { instance_id: id })
+        })
+        .build()
+        .unwrap();
     let mediator = Mediator::new(provider);
 
-    let r1 = mediator.send(ScopeProbeRequest).await.expect("send #1 failed");
-    let r2 = mediator.send(ScopeProbeRequest).await.expect("send #2 failed");
+    let r1 = mediator
+        .send(ScopeProbeRequest)
+        .await
+        .expect("send #1 failed");
+    let r2 = mediator
+        .send(ScopeProbeRequest)
+        .await
+        .expect("send #2 failed");
 
     // Within a single send, both resolutions must return the same instance
     // (Scoped caching within the per-call scope).
-    assert_eq!(r1.within_call, "same", "first send: scope not caching scoped service");
-    assert_eq!(r2.within_call, "same", "second send: scope not caching scoped service");
+    assert_eq!(
+        r1.within_call, "same",
+        "first send: scope not caching scoped service"
+    );
+    assert_eq!(
+        r2.within_call, "same",
+        "second send: scope not caching scoped service"
+    );
 
     // Across sends, a new scope means a fresh scoped instance.
     assert_eq!(r1.first_id, 1, "first send should observe instance #1");
@@ -459,10 +462,7 @@ fn __call_behavior_probe_handler(
     handler: Box<dyn std::any::Any + Send>,
     request: Box<dyn std::any::Any + Send>,
 ) -> std::pin::Pin<
-    Box<
-        dyn std::future::Future<Output = LrwfResult<Box<dyn std::any::Any + Send>>>
-            + Send,
-    >,
+    Box<dyn std::future::Future<Output = LrwfResult<Box<dyn std::any::Any + Send>>> + Send>,
 > {
     Box::pin(async move {
         let mut h = *handler
@@ -527,11 +527,11 @@ async fn mediator_send_pipeline_behavior_executes_before_handler() {
     });
 
     let provider = ServiceCollection::new()
-            .singleton::<dyn IPipelineBehavior>(move |_| {
-                Arc::clone(&behavior) as Arc<dyn IPipelineBehavior>
-            })
-            .build()
-            .unwrap();
+        .singleton::<dyn IPipelineBehavior>(move |_| {
+            Arc::clone(&behavior) as Arc<dyn IPipelineBehavior>
+        })
+        .build()
+        .unwrap();
     let mediator = Mediator::new(provider);
 
     let rsp = mediator
@@ -539,7 +539,11 @@ async fn mediator_send_pipeline_behavior_executes_before_handler() {
         .await
         .expect("send failed");
 
-    assert_eq!(behavior_called.load(Ordering::SeqCst), 1, "behavior should be called once");
+    assert_eq!(
+        behavior_called.load(Ordering::SeqCst),
+        1,
+        "behavior should be called once"
+    );
     assert_eq!(rsp.source, "handler", "response should come from handler");
     assert_eq!(rsp.message, "from-handler");
 }
@@ -547,11 +551,11 @@ async fn mediator_send_pipeline_behavior_executes_before_handler() {
 #[tokio::test]
 async fn mediator_send_pipeline_behavior_can_short_circuit() {
     let provider = ServiceCollection::new()
-            .singleton::<dyn IPipelineBehavior>(|_| {
-                Arc::new(ShortCircuitBehavior) as Arc<dyn IPipelineBehavior>
-            })
-            .build()
-            .unwrap();
+        .singleton::<dyn IPipelineBehavior>(|_| {
+            Arc::new(ShortCircuitBehavior) as Arc<dyn IPipelineBehavior>
+        })
+        .build()
+        .unwrap();
     let mediator = Mediator::new(provider);
 
     let rsp = mediator
@@ -559,7 +563,10 @@ async fn mediator_send_pipeline_behavior_can_short_circuit() {
         .await
         .expect("send failed");
 
-    assert_eq!(rsp.source, "behavior", "response should come from behavior (short-circuit)");
+    assert_eq!(
+        rsp.source, "behavior",
+        "response should come from behavior (short-circuit)"
+    );
     assert_eq!(rsp.message, "short-circuited");
 }
 

@@ -21,3 +21,4 @@ inventory.workspace = true
 
 [dev-dependencies]
 rust-ef-sqlite.workspace = true
+tempfile = "3"

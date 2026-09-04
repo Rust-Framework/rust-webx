@@ -169,6 +169,23 @@ async fn router_wildcard_match() {
 }
 
 #[tokio::test]
+async fn router_docs_content_wildcard_captures_nested_path() {
+    let mut router = Router::new();
+    router.register(
+        HttpMethod::Get,
+        "/api/docs/{work}/content/{*path}",
+        Arc::new(TestEndpoint { label: "doc" }),
+    );
+
+    let mut ctx =
+        test_utils::TestHttpContext::new("GET", "/api/docs/rust-dix/content/06-testing/a.md");
+    let (_endpoint, params, pattern) = router.match_route(&mut ctx).await.unwrap().unwrap();
+    assert_eq!(pattern, "/api/docs/{work}/content/{*path}");
+    assert_eq!(params.get("work").unwrap(), "rust-dix");
+    assert_eq!(params.get("path").unwrap(), "06-testing/a.md");
+}
+
+#[tokio::test]
 async fn router_static_over_dynamic() {
     let mut router = Router::new();
     router.register(

@@ -17,17 +17,14 @@ pub fn assert_route_configuration_valid() {
 
     let mut missing_dispatch: Vec<(&'static str, &'static str, &'static str)> = Vec::new();
     let cache = rust_webx_core::route::scan::HandlerCache::build();
-    let dispatch_types: std::collections::HashSet<&'static str> = inventory::iter::<RouteDispatch>()
-        .map(|d| d.handler_type)
-        .collect();
+    let dispatch_types: std::collections::HashSet<&'static str> =
+        inventory::iter::<RouteDispatch>()
+            .map(|d| d.handler_type)
+            .collect();
 
     for entry in inventory::iter::<RouteEntry> {
         if cache.get(entry.handler_type).is_some() && !dispatch_types.contains(entry.handler_type) {
-            missing_dispatch.push((
-                entry.method.as_str(),
-                entry.path,
-                entry.handler_type,
-            ));
+            missing_dispatch.push((entry.method.as_str(), entry.path, entry.handler_type));
         }
     }
 

@@ -173,7 +173,11 @@ impl IMiddleware for ResourceAuthMiddleware {
         // Get claims from context (set by authentication middleware)
         // IHttpContext extends IClaimsExt, so claims() is available directly.
         match ctx.claims() {
-            Some(claims) => self.policy.authorize(claims, &route_pattern, &method).await.map(|_| ControlFlow::Continue(())),
+            Some(claims) => self
+                .policy
+                .authorize(claims, &route_pattern, &method)
+                .await
+                .map(|_| ControlFlow::Continue(())),
             None => Err(rust_webx_core::error::Error::Unauthorized(
                 "no authentication claims found".to_string(),
             )),
@@ -249,9 +253,7 @@ pub fn build_resource_policy_from_routes() -> ResourceAuthorization {
 
 /// Result from collecting `IDynamicAuthorizer` instances from DI.
 /// `None` means no authorizers are registered (pass-through mode).
-pub fn collect_authorizers(
-    provider: &rust_dix::ServiceProvider,
-) -> Option<Arc<AuthorizerSet>> {
+pub fn collect_authorizers(provider: &rust_dix::ServiceProvider) -> Option<Arc<AuthorizerSet>> {
     let authorizers: Vec<Arc<dyn IDynamicAuthorizer>> = provider.get_all();
     if authorizers.is_empty() {
         None

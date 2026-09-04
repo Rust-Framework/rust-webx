@@ -9,15 +9,12 @@ use dmbit_domain::new_id;
 
 use crate::db::{save_changes, EfResultExt};
 use crate::mapping::{
-    assert_device_asset_code_available, device_to_model, normalize_status,
-    optional_text, require_text, MAX_ASSET_CODE, MAX_LOCATION, MAX_SERIAL_NO,
+    assert_device_asset_code_available, device_to_model, normalize_status, optional_text,
+    require_text, MAX_ASSET_CODE, MAX_LOCATION, MAX_SERIAL_NO,
 };
 use crate::util::{now_secs, operator_id, parse_id};
 
-async fn spec_and_product(
-    ctx: &mut DbContext,
-    spec_id: &str,
-) -> Result<(Spec, String)> {
+async fn spec_and_product(ctx: &mut DbContext, spec_id: &str) -> Result<(Spec, String)> {
     let s = linq!(ctx.set::<Spec>(), |s: Spec| s.id == spec_id)
         .first_or_default()
         .await
@@ -75,12 +72,18 @@ pub struct DeleteDeviceHandler {
 }
 
 /// Load spec+product names into a cache map.
-async fn spec_name_map(ctx: &mut DbContext) -> Result<std::collections::HashMap<String, (String, String)>> {
+async fn spec_name_map(
+    ctx: &mut DbContext,
+) -> Result<std::collections::HashMap<String, (String, String)>> {
     let specs = linq!(ctx.set::<Spec>();).to_list().await.map_ef()?;
     let products = linq!(ctx.set::<Product>();).to_list().await.map_ef()?;
     let mut map = std::collections::HashMap::new();
     for s in specs {
-        let pname = products.iter().find(|p| p.id == s.product_id).map(|p| p.name.as_str()).unwrap_or("");
+        let pname = products
+            .iter()
+            .find(|p| p.id == s.product_id)
+            .map(|p| p.name.as_str())
+            .unwrap_or("");
         map.insert(s.id, (s.code, pname.to_string()));
     }
     Ok(map)
@@ -92,7 +95,11 @@ impl IRequestHandler<ListDevicesRequest, Vec<DeviceModel>> for ListDevicesHandle
     async fn handle(&mut self, _: ListDevicesRequest) -> Result<Vec<DeviceModel>> {
         let names = spec_name_map(&mut self.ctx).await?;
         let mut devices = linq!(self.ctx.set::<Device>();).to_list().await.map_ef()?;
-        devices.sort_by(|a, b| a.sort_order.cmp(&b.sort_order).then(a.asset_code.cmp(&b.asset_code)));
+        devices.sort_by(|a, b| {
+            a.sort_order
+                .cmp(&b.sort_order)
+                .then(a.asset_code.cmp(&b.asset_code))
+        });
 
         Ok(devices
             .into_iter()
@@ -111,12 +118,15 @@ impl IRequestHandler<ListSpecDevicesRequest, Vec<DeviceModel>> for ListSpecDevic
         let spec_id = parse_id(&req.id)?;
         let (spec, product_name) = spec_and_product(&mut self.ctx, &spec_id).await?;
 
-        let mut devices =
-            linq!(self.ctx.set::<Device>(), |d: Device| d.spec_id == spec_id)
-                .to_list()
-                .await
-                .map_ef()?;
-        devices.sort_by(|a, b| a.sort_order.cmp(&b.sort_order).then(a.asset_code.cmp(&b.asset_code)));
+        let mut devices = linq!(self.ctx.set::<Device>(), |d: Device| d.spec_id == spec_id)
+            .to_list()
+            .await
+            .map_ef()?;
+        devices.sort_by(|a, b| {
+            a.sort_order
+                .cmp(&b.sort_order)
+                .then(a.asset_code.cmp(&b.asset_code))
+        });
 
         Ok(devices
             .into_iter()
@@ -130,12 +140,8 @@ impl IRequestHandler<ListSpecDevicesRequest, Vec<DeviceModel>> for ListSpecDevic
 impl IRequestHandler<GetDeviceRequest, DeviceModel> for GetDeviceHandler {
     async fn handle(&mut self, req: GetDeviceRequest) -> Result<DeviceModel> {
         let id = parse_id(&req.id)?;
-        let d = crate::ef_require_by_id!(
-            self.ctx,
-            Device,
-            id,
-            Error::NotFound("设备不存在".into())
-        );
+        let d =
+            crate::ef_require_by_id!(self.ctx, Device, id, Error::NotFound("设备不存在".into()));
         let (spec, product_name) = spec_and_product(&mut self.ctx, &d.spec_id).await?;
         Ok(device_to_model(&d, &spec.code, &product_name))
     }
@@ -172,7 +178,7 @@ impl IRequestHandler<CreateDeviceRequest, DeviceModel> for CreateDeviceHandler {
             spec: BelongsTo::new(),
         };
 
-        self.ctx.set::<Device>().add(entity.clone());
+        self.ctx.add(entity.clone());
         save_changes(&mut self.ctx).await?;
 
         Ok(device_to_model(&entity, &spec.code, &product_name))
@@ -229,7 +235,7 @@ impl IRequestHandler<GenerateDevicesRequest, GenerateDevicesResult> for Generate
                 is_deleted: false,
                 spec: BelongsTo::new(),
             };
-            self.ctx.set::<Device>().add(entity);
+            self.ctx.add(entity);
             created += 1;
         }
 
@@ -247,12 +253,8 @@ impl IRequestHandler<GenerateDevicesRequest, GenerateDevicesResult> for Generate
 impl IRequestHandler<UpdateDeviceRequest, DeviceModel> for UpdateDeviceHandler {
     async fn handle(&mut self, req: UpdateDeviceRequest) -> Result<DeviceModel> {
         let id = parse_id(&req.id)?;
-        let mut d = crate::ef_require_by_id!(
-            self.ctx,
-            Device,
-            id,
-            Error::NotFound("设备不存在".into())
-        );
+        let mut d =
+            crate::ef_require_by_id!(self.ctx, Device, id, Error::NotFound("设备不存在".into()));
 
         if let Some(spec_id) = req.spec_id {
             let spec_id = parse_id(&spec_id)?;
@@ -280,7 +282,7 @@ impl IRequestHandler<UpdateDeviceRequest, DeviceModel> for UpdateDeviceHandler {
         d.updated_at = now_secs();
         d.updated_id = operator_id();
 
-        self.ctx.set::<Device>().update(d.clone());
+        self.ctx.update(d.clone());
         save_changes(&mut self.ctx).await?;
 
         let (spec, product_name) = spec_and_product(&mut self.ctx, &d.spec_id).await?;
@@ -293,18 +295,14 @@ impl IRequestHandler<UpdateDeviceRequest, DeviceModel> for UpdateDeviceHandler {
 impl IRequestHandler<DeleteDeviceRequest, String> for DeleteDeviceHandler {
     async fn handle(&mut self, req: DeleteDeviceRequest) -> Result<String> {
         let id = parse_id(&req.id)?;
-        let mut d = crate::ef_require_by_id!(
-            self.ctx,
-            Device,
-            id,
-            Error::NotFound("设备不存在".into())
-        );
+        let mut d =
+            crate::ef_require_by_id!(self.ctx, Device, id, Error::NotFound("设备不存在".into()));
 
         d.is_deleted = true;
         d.updated_at = now_secs();
         d.updated_id = operator_id();
 
-        self.ctx.set::<Device>().update(d);
+        self.ctx.update(d);
         save_changes(&mut self.ctx).await?;
 
         Ok(format!("已删除设备 {}", id))

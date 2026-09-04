@@ -42,9 +42,7 @@ impl DispatchRuntime {
     where
         F: Future<Output = R>,
     {
-        ACTIVE_RUNTIME
-            .scope(Some(Arc::new(self.clone())), f)
-            .await
+        ACTIVE_RUNTIME.scope(Some(Arc::new(self.clone())), f).await
     }
 }
 
@@ -54,12 +52,10 @@ impl DispatchRuntime {
 /// by `Host`). Falls back to the deprecated process-wide shim when
 /// [`set_global_provider`](crate::route::scan::set_global_provider) was called manually.
 pub fn dispatch_provider() -> Arc<rust_dix::ServiceProvider> {
-    if let Ok(runtime_provider) = ACTIVE_RUNTIME.try_with(|rt| {
-        rt.as_ref().map(|r| Arc::clone(&r.provider))
-    }) {
-        if let Some(provider) = runtime_provider {
-            return provider;
-        }
+    if let Ok(Some(provider)) =
+        ACTIVE_RUNTIME.try_with(|rt| rt.as_ref().map(|r| Arc::clone(&r.provider)))
+    {
+        return provider;
     }
 
     if let Some(provider) = try_global_provider() {
@@ -82,12 +78,10 @@ pub fn dispatch_provider() -> Arc<rust_dix::ServiceProvider> {
 /// Prefers the active [`DispatchRuntime`]; falls back to a lazy-built process-wide
 /// registry (inventory is process-wide; contents are identical per host).
 pub fn dispatch_handler_cache() -> Arc<HandlerCache> {
-    if let Ok(runtime_cache) = ACTIVE_RUNTIME.try_with(|rt| {
-        rt.as_ref().map(|r| Arc::clone(&r.handler_cache))
-    }) {
-        if let Some(cache) = runtime_cache {
-            return cache;
-        }
+    if let Ok(Some(cache)) =
+        ACTIVE_RUNTIME.try_with(|rt| rt.as_ref().map(|r| Arc::clone(&r.handler_cache)))
+    {
+        return cache;
     }
 
     #[allow(deprecated)]

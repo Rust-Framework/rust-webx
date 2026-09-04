@@ -15,30 +15,34 @@ pub use rust_webx_core::config::{
     bind_config, bind_root, load_appsettings, AppOptions, AppSection, CorsSection, IAppOptions,
     JwtSection, MetricsSection, RateLimitSection, TlsSection,
 };
+pub use rust_webx_core::dispatch_runtime::{dispatch_provider, DispatchRuntime};
 pub use rust_webx_core::error::{Error, Result};
 pub use rust_webx_core::handler::{IClaimsCarrier, IEventHandler, IHostedService, IRequestHandler};
 pub use rust_webx_core::http::{
     read_json_body, write_json_response, FromHttpContext, HttpStatus, IClaimsExt, IHttpContext,
     IHttpRequest, IHttpResponse, Json,
 };
+pub use rust_webx_core::mediator::build_pipeline_chain;
 pub use rust_webx_core::mediator::{IEventRequest, IMediator, IRequest};
 pub use rust_webx_core::middleware::IMiddleware;
 pub use rust_webx_core::mode::AppMode;
 pub use rust_webx_core::pagination::{PagedRequest, PagedResponse};
-pub use rust_webx_core::paths::{app_base, framework_root, looks_like_app_base, looks_like_framework_root};
-pub use rust_webx_core::mediator::build_pipeline_chain;
+pub use rust_webx_core::paths::{
+    app_base, framework_root, looks_like_app_base, looks_like_framework_root,
+};
 pub use rust_webx_core::pipeline::{BoxedNextFn, BoxedPipelineFuture, IPipelineBehavior};
 pub use rust_webx_core::problem::{FieldError, ProblemDetails};
+pub use rust_webx_core::request_context::RequestContext;
 pub use rust_webx_core::route::diagnostics::{
     duplicate_handlers, format_route_diagnostics, orphan_handlers, orphan_route_details,
     orphan_routes, route_snapshots,
 };
-pub use rust_webx_core::dispatch_runtime::{dispatch_provider, DispatchRuntime};
-pub use rust_webx_core::request_context::RequestContext;
 pub use rust_webx_core::routing::{HttpMethod, IEndpoint, IRouter, RouteMeta};
 
 // --- DI extensions ---
-pub use rust_webx_core::route::ext::{is_mediator_active, should_scan_endpoints, IServiceCollectionExt};
+pub use rust_webx_core::route::ext::{
+    is_mediator_active, should_scan_endpoints, IServiceCollectionExt,
+};
 pub use rust_webx_core::route::params::try_deserialize_from_params;
 #[allow(deprecated)]
 pub use rust_webx_core::route::scan::{
@@ -47,18 +51,23 @@ pub use rust_webx_core::route::scan::{
 };
 
 // --- HTTP layer ---
-pub use rust_webx_host::auth_jwt::{init_jwt_secret, jwt_middleware, jwt_secret, JwtAuth, JwtClaims};
+pub use rust_webx_host::auth_jwt::{
+    init_jwt_secret, jwt_middleware, jwt_secret, JwtAuth, JwtClaims,
+};
 pub use rust_webx_host::authz::{
-    build_resource_policy_from_routes, collect_authorizers, resource_auth_middleware, AuthorizerSet,
-    ResourceAuthorization,
+    build_resource_policy_from_routes, collect_authorizers, resource_auth_middleware,
+    AuthorizerSet, ResourceAuthorization,
 };
 pub use rust_webx_host::compression::{compress_gzip, CompressionConfig, CompressionMiddleware};
 pub use rust_webx_host::context::{HttpContext, HttpRequest, HttpResponse};
 pub use rust_webx_host::cors::{CorsConfig, CorsMiddleware};
+pub use rust_webx_host::diagnostics::log_startup_diagnostics;
 pub use rust_webx_host::endpoint::{
     ControllerEndpoint, RequestEndpoint, StaticHtmlEndpoint, StaticJsonEndpoint,
 };
-pub use rust_webx_host::health::{HealthCheckEntry, HealthCheckFn, HealthCheckRegistry, HealthStatus};
+pub use rust_webx_host::health::{
+    HealthCheckEntry, HealthCheckFn, HealthCheckRegistry, HealthStatus,
+};
 pub use rust_webx_host::memory_cache::MemoryCache;
 pub use rust_webx_host::pipeline::{HandlerFn, MiddlewarePipeline};
 pub use rust_webx_host::rate_limit::{RateLimitMiddleware, RateLimiter};
@@ -66,11 +75,12 @@ pub use rust_webx_host::request_id::RequestIdMiddleware;
 pub use rust_webx_host::request_tracing::RequestTracing;
 pub use rust_webx_host::router::Router;
 pub use rust_webx_host::security_headers::SecurityHeadersMiddleware;
-pub use rust_webx_host::diagnostics::log_startup_diagnostics;
 pub use rust_webx_host::server::{Host, HostAppBuilder, HostBuilder, Server, ServerHandle};
-pub use rust_webx_host::timing::TimingMiddleware;
 #[cfg(feature = "testing")]
-pub use rust_webx_host::testing::{free_port, spawn, spawn_with_health, wait_until_ready, TestServer};
+pub use rust_webx_host::testing::{
+    free_port, spawn, spawn_with_health, wait_until_ready, TestServer,
+};
+pub use rust_webx_host::timing::TimingMiddleware;
 
 // --- Mediator ---
 pub use rust_webx_core::mediator::Mediator;

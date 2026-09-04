@@ -10,8 +10,8 @@ use dmbit_domain::new_id;
 use crate::db::{save_changes, EfResultExt};
 use crate::mapping::{
     assert_spec_code_available, load_components_for_specs, load_device_counts,
-    replace_spec_components, require_non_negative, require_text,
-    spec_to_model, MAX_BRAND, MAX_SPEC_CODE, MAX_UNIT,
+    replace_spec_components, require_non_negative, require_text, spec_to_model, MAX_BRAND,
+    MAX_SPEC_CODE, MAX_UNIT,
 };
 use crate::util::{now_secs, operator_id, parse_id};
 
@@ -25,14 +25,10 @@ async fn product_name(ctx: &mut DbContext, product_id: &str) -> Result<String> {
     Ok(p.name)
 }
 
-async fn spec_model(
-    ctx: &mut DbContext,
-    s: &Spec,
-    name: &str,
-) -> Result<SpecModel> {
-    let cmap = load_components_for_specs(ctx, &[s.id.clone()]).await?;
+async fn spec_model(ctx: &mut DbContext, s: &Spec, name: &str) -> Result<SpecModel> {
+    let cmap = load_components_for_specs(ctx, std::slice::from_ref(&s.id)).await?;
     let comps = cmap.get(&s.id).cloned().unwrap_or_default();
-    let dmap = load_device_counts(ctx, &[s.id.clone()]).await?;
+    let dmap = load_device_counts(ctx, std::slice::from_ref(&s.id)).await?;
     let dc = dmap.get(&s.id).copied().unwrap_or(0);
     Ok(spec_to_model(s, name, comps, dc))
 }
@@ -77,12 +73,9 @@ pub struct DeleteSpecHandler {
 #[async_trait]
 impl IRequestHandler<ListSpecsRequest, Vec<SpecModel>> for ListSpecsHandler {
     async fn handle(&mut self, _: ListSpecsRequest) -> Result<Vec<SpecModel>> {
-        let products = linq!(self.ctx.set::<Product>();)
-            .to_list()
-            .await
-            .map_ef()?;
+        let products = linq!(self.ctx.set::<Product>();).to_list().await.map_ef()?;
         let mut specs = linq!(self.ctx.set::<Spec>();).to_list().await.map_ef()?;
-        specs.sort_by(|a, b| a.sort_order.cmp(&b.sort_order).then(a.id.cmp(&b.id)));
+        specs.sort_by_key(|a| (a.sort_order, a.id.clone()));
         let ids: Vec<String> = specs.iter().map(|s| s.id.clone()).collect();
         let cmap = load_components_for_specs(&mut self.ctx, &ids).await?;
         let dmap = load_device_counts(&mut self.ctx, &ids).await?;
@@ -114,7 +107,7 @@ impl IRequestHandler<ListProductSpecsRequest, Vec<SpecModel>> for ListProductSpe
             .to_list()
             .await
             .map_ef()?;
-        specs.sort_by(|a, b| a.sort_order.cmp(&b.sort_order));
+        specs.sort_by_key(|a| a.sort_order);
         let ids: Vec<String> = specs.iter().map(|s| s.id.clone()).collect();
         let cmap = load_components_for_specs(&mut self.ctx, &ids).await?;
         let dmap = load_device_counts(&mut self.ctx, &ids).await?;
@@ -135,12 +128,7 @@ impl IRequestHandler<ListProductSpecsRequest, Vec<SpecModel>> for ListProductSpe
 impl IRequestHandler<GetSpecRequest, SpecModel> for GetSpecHandler {
     async fn handle(&mut self, req: GetSpecRequest) -> Result<SpecModel> {
         let id = parse_id(&req.id)?;
-        let s = crate::ef_require_by_id!(
-            self.ctx,
-            Spec,
-            id,
-            Error::NotFound("规格不存在".into())
-        );
+        let s = crate::ef_require_by_id!(self.ctx, Spec, id, Error::NotFound("规格不存在".into()));
         let name = product_name(&mut self.ctx, &s.product_id).await?;
         spec_model(&mut self.ctx, &s, &name).await
     }
@@ -181,7 +169,7 @@ impl IRequestHandler<CreateSpecRequest, SpecModel> for CreateSpecHandler {
             devices: HasMany::new(),
         };
 
-        self.ctx.set::<Spec>().add(entity.clone());
+        self.ctx.add(entity.clone());
         replace_spec_components(&mut self.ctx, &id, &req.components).await?;
         save_changes(&mut self.ctx).await?;
 
@@ -194,12 +182,8 @@ impl IRequestHandler<CreateSpecRequest, SpecModel> for CreateSpecHandler {
 impl IRequestHandler<UpdateSpecRequest, SpecModel> for UpdateSpecHandler {
     async fn handle(&mut self, req: UpdateSpecRequest) -> Result<SpecModel> {
         let id = parse_id(&req.id)?;
-        let mut s = crate::ef_require_by_id!(
-            self.ctx,
-            Spec,
-            id,
-            Error::NotFound("规格不存在".into())
-        );
+        let mut s =
+            crate::ef_require_by_id!(self.ctx, Spec, id, Error::NotFound("规格不存在".into()));
 
         if let Some(product_id) = req.product_id {
             let product_id = parse_id(&product_id)?;
@@ -232,7 +216,7 @@ impl IRequestHandler<UpdateSpecRequest, SpecModel> for UpdateSpecHandler {
 
         let name = product_name(&mut self.ctx, &s.product_id).await?;
 
-        self.ctx.set::<Spec>().update(s.clone());
+        self.ctx.update(s.clone());
 
         if let Some(components) = req.components {
             replace_spec_components(&mut self.ctx, &id, &components).await?;
@@ -248,12 +232,8 @@ impl IRequestHandler<UpdateSpecRequest, SpecModel> for UpdateSpecHandler {
 impl IRequestHandler<DeleteSpecRequest, String> for DeleteSpecHandler {
     async fn handle(&mut self, req: DeleteSpecRequest) -> Result<String> {
         let id = parse_id(&req.id)?;
-        let mut s = crate::ef_require_by_id!(
-            self.ctx,
-            Spec,
-            id,
-            Error::NotFound("规格不存在".into())
-        );
+        let mut s =
+            crate::ef_require_by_id!(self.ctx, Spec, id, Error::NotFound("规格不存在".into()));
 
         let now = now_secs();
         let op = operator_id();
@@ -264,32 +244,32 @@ impl IRequestHandler<DeleteSpecRequest, String> for DeleteSpecHandler {
         // Physical delete components
         let sid = s.id.clone();
         let sid2 = sid.clone();
-        let comps =
-            linq!(self.ctx.set::<SpecComponent>(), |c: SpecComponent| c.spec_id == sid2)
-                .to_list()
-                .await
-                .map_ef()?;
+        let comps = linq!(self.ctx.set::<SpecComponent>(), |c: SpecComponent| c
+            .spec_id
+            == sid2)
+        .to_list()
+        .await
+        .map_ef()?;
         for mut c in comps {
             c.is_deleted = true;
             c.updated_at = now;
             c.updated_id = op.clone();
-            self.ctx.set::<SpecComponent>().update(c);
+            self.ctx.update(c);
         }
 
         // Mark devices as "已淘汰" instead of cascade delete
-        let devices =
-            linq!(self.ctx.set::<Device>(), |d: Device| d.spec_id == sid)
-                .to_list()
-                .await
-                .map_ef()?;
+        let devices = linq!(self.ctx.set::<Device>(), |d: Device| d.spec_id == sid)
+            .to_list()
+            .await
+            .map_ef()?;
         for mut d in devices {
             d.status = "已淘汰".into();
             d.updated_at = now;
             d.updated_id = op.clone();
-            self.ctx.set::<Device>().update(d);
+            self.ctx.update(d);
         }
 
-        self.ctx.set::<Spec>().update(s);
+        self.ctx.update(s);
         save_changes(&mut self.ctx).await?;
 
         Ok(format!("已删除规格 {}", id))

@@ -45,10 +45,7 @@ pub struct DeleteRoleHandler {
 #[async_trait]
 impl IRequestHandler<ListRolesRequest, Vec<RoleModel>> for ListRolesHandler {
     async fn handle(&mut self, _: ListRolesRequest) -> Result<Vec<RoleModel>> {
-        let roles = linq!(self.ctx.set::<Role>();)
-            .to_list()
-            .await
-            .map_ef()?;
+        let roles = linq!(self.ctx.set::<Role>();).to_list().await.map_ef()?;
 
         Ok(roles.into_iter().map(RoleModel::from).collect())
     }
@@ -146,10 +143,12 @@ impl IRequestHandler<AssignRoleRequest, String> for AssignRoleHandler {
         let exists_uid = user_id.clone();
         let exists_rid = role_id.clone();
 
-        let exists = linq!(self.ctx.set::<RoleUser>(), |r: RoleUser| r.user_id == exists_uid && r.role_id == exists_rid)
-            .first_or_default()
-            .await
-            .map_ef()?;
+        let exists = linq!(self.ctx.set::<RoleUser>(), |r: RoleUser| r.user_id
+            == exists_uid
+            && r.role_id == exists_rid)
+        .first_or_default()
+        .await
+        .map_ef()?;
 
         if exists.is_some() {
             return Ok(format!(
@@ -183,10 +182,11 @@ impl IRequestHandler<RevokeRoleRequest, String> for RevokeRoleHandler {
         let uid_q = uid.clone();
         let rid_q = rid.clone();
 
-        let affected = linq!(self.ctx.set::<RoleUser>(), |r: RoleUser| r.user_id == uid_q && r.role_id == rid_q)
-            .execute_delete()
-            .await
-            .map_ef()?;
+        let affected = linq!(self.ctx.set::<RoleUser>(), |r: RoleUser| r.user_id == uid_q
+            && r.role_id == rid_q)
+        .execute_delete()
+        .await
+        .map_ef()?;
 
         if affected > 0 {
             Ok(format!("Revoked role {} from user {}", rid, uid))
@@ -349,10 +349,12 @@ impl IRequestHandler<CreateAuthorizeRequest, AuthorizeModel> for CreateAuthorize
         let exists_role = role_id.clone();
         let exists_resource = resource_id.clone();
 
-        let exists = linq!(self.ctx.set::<Authorize>(), |a: Authorize| a.role_id == exists_role && a.resource_id == exists_resource)
-            .first_or_default()
-            .await
-            .map_ef()?;
+        let exists = linq!(self.ctx.set::<Authorize>(), |a: Authorize| a.role_id
+            == exists_role
+            && a.resource_id == exists_resource)
+        .first_or_default()
+        .await
+        .map_ef()?;
 
         if let Some(existing) = exists {
             return Ok(existing.to_model());

@@ -14,7 +14,7 @@ fn unique_suffix() -> u128 {
         .as_nanos()
 }
 
-/// Isolated app directory with appsettings + empty docs/.
+/// Isolated app directory with appsettings + sample docs/.
 fn setup_app_dir() -> tempfile::TempDir {
     INIT.call_once(|| {
         let _ = tracing_subscriber::fmt::try_init();
@@ -35,8 +35,14 @@ fn setup_app_dir() -> tempfile::TempDir {
             "BrandName": "Test",
             "Tagline": "E2E",
             "Author": "Test",
-            "Bio": "Test",
-            "Links": { "Github": "https://example.com", "Docs": "/docs" }
+            "Bio": "Test bio for SEO",
+            "Links": { "Github": "https://example.com", "Docs": "/docs" },
+            "Footer": {
+                "SiteUrl": "www.example.test",
+                "SiteLabel": "Test",
+                "Copyright": "© test",
+                "Icp": ""
+            }
         }
     });
     std::fs::write(
@@ -44,7 +50,54 @@ fn setup_app_dir() -> tempfile::TempDir {
         serde_json::to_string_pretty(&appsettings).unwrap(),
     )
     .unwrap();
-    std::fs::create_dir_all(dir.path().join("docs")).unwrap();
+    let docs = dir.path().join("docs").join("demo-work");
+    std::fs::create_dir_all(docs.join("ch")).unwrap();
+    std::fs::write(
+        docs.join("INDEX.json"),
+        r#"{
+  "meta": {
+    "title": "Demo Work",
+    "subtitle": "Demo",
+    "docTitle": "Demo Docs",
+    "description": "Demo portfolio work",
+    "category": "tool",
+    "tags": ["demo"],
+    "featured": true,
+    "sortOrder": 1,
+    "foreword": "FOREWORD.md",
+    "pathRules": {
+      "chapterIndex": "{chapterId}/INDEX.md",
+      "sectionFile": "{chapterId}/{sectionId}.md"
+    }
+  },
+  "parts": [{
+    "title": "Part",
+    "chapters": [{
+      "id": "ch",
+      "title": "Chapter",
+      "sections": [
+        { "id": "exists", "title": "Exists" },
+        { "id": "missing", "title": "Missing" }
+      ]
+    }]
+  }]
+}"#,
+    )
+    .unwrap();
+    std::fs::write(docs.join("FOREWORD.md"), "# Foreword\n\nHello docs.\n").unwrap();
+    std::fs::write(docs.join("ch").join("INDEX.md"), "# Chapter\n").unwrap();
+    std::fs::write(
+        docs.join("ch").join("exists.md"),
+        "# Exists Page\n\nBody.\n",
+    )
+    .unwrap();
+    // ch/missing.md intentionally absent — index filter must omit it.
+    std::fs::create_dir_all(dir.path().join("wwwroot")).unwrap();
+    std::fs::write(
+        dir.path().join("wwwroot").join("index.html"),
+        r#"<!doctype html><html><head><title>Shell</title></head><body><main id="app"><div class="loading-state"></div></main></body></html>"#,
+    )
+    .unwrap();
     std::env::set_var("RUST_WEBX_APP_BASE", dir.path());
     dir
 }
@@ -83,10 +136,7 @@ async fn admin_token(client: &reqwest::Client, base: &str) -> String {
         .await
         .unwrap();
     assert_eq!(login.status().as_u16(), 200);
-    login
-        .json::<serde_json::Value>()
-        .await
-        .unwrap()["token"]
+    login.json::<serde_json::Value>().await.unwrap()["token"]
         .as_str()
         .expect("token present")
         .to_string()
@@ -245,7 +295,10 @@ async fn e2e_admin_blog_crud() {
         .await
         .unwrap();
     assert_eq!(get.status().as_u16(), 200);
-    assert_eq!(get.json::<serde_json::Value>().await.unwrap()["title"], "E2E Post");
+    assert_eq!(
+        get.json::<serde_json::Value>().await.unwrap()["title"],
+        "E2E Post"
+    );
 
     let update = client
         .put(format!("{}/api/blog/{}", base, slug))
@@ -329,10 +382,7 @@ async fn register_user_token(client: &reqwest::Client, base: &str) -> (String, S
         .await
         .unwrap();
     assert_eq!(reg.status().as_u16(), 200);
-    let token = reg
-        .json::<serde_json::Value>()
-        .await
-        .unwrap()["token"]
+    let token = reg.json::<serde_json::Value>().await.unwrap()["token"]
         .as_str()
         .expect("token")
         .to_string();
@@ -441,6 +491,96 @@ async fn e2e_admin_category_crud() {
         .await
         .unwrap();
     assert_eq!(delete.status().as_u16(), 200);
+
+    fx.teardown().await;
+}
+
+#[tokio::test]
+#[serial]
+async fn e2e_docs_content_accepts_slash_path_and_filters_missing() {
+    let fx = spawn_docbit().await;
+    let base = fx.base();
+
+    let index = reqwest::get(format!("{base}/api/docs/demo-work/index"))
+        .await
+        .unwrap();
+    assert_eq!(index.status().as_u16(), 200);
+    let body: serde_json::Value = index.json().await.unwrap();
+    let json = body.to_string();
+    assert!(json.contains("exists.md"), "{json}");
+    assert!(
+        !json.contains("missing.md"),
+        "missing leaf must be filtered: {json}"
+    );
+
+    let content = reqwest::get(format!("{base}/api/docs/demo-work/content/ch/exists.md"))
+        .await
+        .unwrap();
+    assert_eq!(content.status().as_u16(), 200);
+    let doc: serde_json::Value = content.json().await.unwrap();
+    assert!(doc["content"].as_str().unwrap().contains("Exists Page"));
+
+    // Legacy colon encoding still works.
+    let legacy = reqwest::get(format!("{base}/api/docs/demo-work/content/ch:exists.md"))
+        .await
+        .unwrap();
+    assert_eq!(legacy.status().as_u16(), 200);
+
+    fx.teardown().await;
+}
+
+#[tokio::test]
+#[serial]
+async fn e2e_seo_robots_sitemap_and_ssr_shell() {
+    let fx = spawn_docbit().await;
+    let base = fx.base();
+    let client = reqwest::Client::new();
+
+    let robots = client
+        .get(format!("{base}/robots.txt"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(robots.status().as_u16(), 200);
+    let robots_body = robots.text().await.unwrap();
+    assert!(robots_body.contains("Sitemap:"));
+    assert!(robots_body.contains("Disallow: /api/"));
+
+    let sitemap = client
+        .get(format!("{base}/sitemap.xml"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(sitemap.status().as_u16(), 200);
+    let sm = sitemap.text().await.unwrap();
+    assert!(sm.contains("<urlset"));
+    assert!(sm.contains("/works/demo-work"));
+
+    let home = client
+        .get(format!("{base}/"))
+        .header("Accept", "text/html")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(home.status().as_u16(), 200);
+    let html = home.text().await.unwrap();
+    assert!(
+        html.contains(r#"meta name="description""#) || html.contains("meta name=\"description\"")
+    );
+    assert!(html.contains("og:title") || html.contains("property=\"og:title\""));
+    assert!(html.contains("data-ssr=\"1\""));
+    assert!(html.contains("Demo Work") || html.contains("精选作品") || html.contains("Test"));
+
+    let work = client
+        .get(format!("{base}/works/demo-work"))
+        .header("Accept", "text/html")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(work.status().as_u16(), 200);
+    let work_html = work.text().await.unwrap();
+    assert!(work_html.contains("Demo Work"));
+    assert!(work_html.contains("canonical"));
 
     fx.teardown().await;
 }

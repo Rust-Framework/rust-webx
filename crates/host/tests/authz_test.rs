@@ -46,7 +46,8 @@ impl IClaims for MockClaims {
 
 #[tokio::test]
 async fn authz_user_with_allowed_role_is_authorized() {
-    let policy = rust_webx_host::authz::ResourceAuthorization::new().allow_role("/api/admin", "admin");
+    let policy =
+        rust_webx_host::authz::ResourceAuthorization::new().allow_role("/api/admin", "admin");
 
     let claims = MockClaims::new("user-1", &["admin"], &[]);
     let result = policy.authorize(&claims, "/api/admin", "GET").await;
@@ -58,7 +59,8 @@ async fn authz_user_with_allowed_role_is_authorized() {
 
 #[tokio::test]
 async fn authz_user_without_role_is_denied() {
-    let policy = rust_webx_host::authz::ResourceAuthorization::new().allow_role("/api/admin", "admin");
+    let policy =
+        rust_webx_host::authz::ResourceAuthorization::new().allow_role("/api/admin", "admin");
 
     let claims = MockClaims::new("user-2", &["user"], &[]);
     let result = policy.authorize(&claims, "/api/admin", "GET").await;

@@ -8,8 +8,8 @@ use docbit_contracts::{
     comment::CreateCommentRequest,
     exhibition::UpsertExhibitionRequest,
     rbac::{
-        CreateAuthorizeRequest, CreateResourceRequest, CreateRoleRequest,
-        UpdateResourceRequest, UpdateRoleRequest,
+        CreateAuthorizeRequest, CreateResourceRequest, CreateRoleRequest, UpdateResourceRequest,
+        UpdateRoleRequest,
     },
     user::{CreateUserRequest, UpdateUserRequest},
 };

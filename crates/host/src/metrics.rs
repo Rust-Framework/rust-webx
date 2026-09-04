@@ -72,10 +72,7 @@ impl MetricsMiddleware {
 
 #[async_trait::async_trait]
 impl IMiddleware for MetricsMiddleware {
-    async fn invoke(
-        &self,
-        _ctx: &mut dyn IHttpContext,
-    ) -> Result<std::ops::ControlFlow<()>> {
+    async fn invoke(&self, _ctx: &mut dyn IHttpContext) -> Result<std::ops::ControlFlow<()>> {
         Ok(std::ops::ControlFlow::Continue(()))
     }
 

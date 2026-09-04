@@ -77,18 +77,14 @@ fn health_http_status_maps_fail_to_503() {
 fn build_health_response_empty_registry() {
     let registry = HealthCheckRegistry::new();
     let body: serde_json::Value =
-        serde_json::from_slice(&rust_webx_host::health::build_health_response(&registry))
-            .unwrap();
+        serde_json::from_slice(&rust_webx_host::health::build_health_response(&registry)).unwrap();
     assert_eq!(body["status"], "pass");
 }
 
 #[test]
 fn registry_snapshot_includes_warn_detail() {
     let registry = HealthCheckRegistry::new();
-    registry.register(
-        "queue",
-        Arc::new(|| HealthStatus::warn("latency 500ms")),
-    );
+    registry.register("queue", Arc::new(|| HealthStatus::warn("latency 500ms")));
 
     let snap = registry.snapshot();
     assert_eq!(snap.len(), 1);

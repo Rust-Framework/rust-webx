@@ -204,6 +204,64 @@ pub struct TlsSection {
     pub key_path: String,
 }
 
+/// `multipart/form-data` upload settings.
+///
+/// These are deliberately separate from `App.MaxBodySize`: a JSON endpoint
+/// should stay tightly bounded while an upload endpoint legitimately accepts
+/// far more. A request is measured against `MaxRequestSize` when it declares
+/// `Content-Type: multipart/form-data`, and against `App.MaxBodySize`
+/// otherwise.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FormSection {
+    /// Largest accepted multipart request body, in bytes. Default: 256 MiB.
+    #[serde(default = "default_max_request_size", rename = "MaxRequestSize")]
+    pub max_request_size: usize,
+    /// Largest accepted individual file part, in bytes. Default: 128 MiB.
+    #[serde(default = "default_max_file_size", rename = "MaxFileSize")]
+    pub max_file_size: u64,
+    /// Largest accepted individual text field, in bytes. Default: 1 MiB.
+    #[serde(default = "default_max_field_size", rename = "MaxFieldSize")]
+    pub max_field_size: usize,
+    /// Bytes buffered in memory per file before spooling to disk. Default: 1 MiB.
+    ///
+    /// Set to `0` to spool every upload, or very high to keep everything in
+    /// memory.
+    #[serde(default = "default_memory_threshold", rename = "MemoryThreshold")]
+    pub memory_threshold: usize,
+    /// Directory for spooled uploads. Default: `webx-uploads` under the system
+    /// temporary directory.
+    #[serde(default, rename = "TempDir")]
+    pub temp_dir: Option<String>,
+}
+
+impl Default for FormSection {
+    fn default() -> Self {
+        Self {
+            max_request_size: default_max_request_size(),
+            max_file_size: default_max_file_size(),
+            max_field_size: default_max_field_size(),
+            memory_threshold: default_memory_threshold(),
+            temp_dir: None,
+        }
+    }
+}
+
+fn default_max_request_size() -> usize {
+    256 * 1024 * 1024
+}
+
+fn default_max_file_size() -> u64 {
+    128 * 1024 * 1024
+}
+
+fn default_max_field_size() -> usize {
+    1024 * 1024
+}
+
+fn default_memory_threshold() -> usize {
+    1024 * 1024
+}
+
 /// Standard application options loaded from appsettings.json.
 ///
 /// Bound automatically by the framework.  Access via `host.options()`
@@ -228,6 +286,9 @@ pub struct AppOptions {
     /// Prometheus-style metrics endpoint settings.
     #[serde(default, rename = "Metrics")]
     pub metrics: MetricsSection,
+    /// `multipart/form-data` upload settings.
+    #[serde(default, rename = "Form")]
+    pub form: FormSection,
 }
 
 // ---------------------------------------------------------------------------

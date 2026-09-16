@@ -49,8 +49,10 @@ impl IMiddleware for SecurityHeadersMiddleware {
             "camera=(), microphone=(), geolocation=()",
         );
 
-        // Cache control for API responses (overridable by static-file middleware)
-        resp.set_header("cache-control", "no-store");
+        // `cache-control` is intentionally not set here: the correct default
+        // depends on what the response turns out to be. `finalize_response`
+        // applies `no-store` to ordinary responses and a revalidating policy to
+        // file responses, and never overrides a value the application set.
 
         Ok(ControlFlow::Continue(()))
     }

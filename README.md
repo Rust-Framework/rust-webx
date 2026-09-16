@@ -64,6 +64,7 @@ rust-webx is **not** a full-stack UI framework (pair it with any frontend), **no
 - **Zero-config handler registration** — the `#[handler]` attribute macro registers a handler with the DI container automatically.
 - **Authentication & authorization** — JWT Bearer auth + route-pattern-based resource authorization (`#[authorize]`, `#[claims]`).
 - **Production capabilities out of the box** — graceful shutdown, live health checks, security headers, request IDs, CORS, TLS, rate limiting, compression, OpenAPI + SPA hosting.
+- **File upload & download** — typed `FormFile` binding for `multipart/form-data` (streamed, spooled to disk, size-limited) and ASP.NET Core-shaped file responses (`file` / `file_stream` / `file_seekable_stream`) with `Content-Disposition`, `ETag`, `Last-Modified` and `Range`.
 - **ORM-agnostic** — the framework does not depend on `rust-ef`; the `docbit` reference app wires it in with minimal glue.
 
 ## Architecture
@@ -98,7 +99,7 @@ The framework is split into a small set of focused crates, re-exported through t
 
 ```
 rust-webx/
-├── Cargo.toml                 # workspace root (v0.3.7)
+├── Cargo.toml                 # workspace root (v0.4.0)
 ├── crates/
 │   ├── core/                  # rust-webx-core  — traits, configuration
 │   ├── host/                  # rust-webx-host  — Host builder, middleware
@@ -260,6 +261,8 @@ docker compose -f docbit/docker-compose.yml --env-file docbit/.env up --build
 | CORS `*` production fail-fast | ✅ |
 | OpenAPI UI | Development mode only |
 | Rate limiting / compression | app-layer opt-in (`use_middleware`) |
+| File uploads (streamed, disk-spooled, size-limited) | ✅ |
+| File downloads (`File(...)`-style, streamed, `Content-Disposition`, `ETag`, `Range`, `304`, `HEAD`) | ✅ |
 | TLS | ✅ via `App.Urls` + `Tls.CertPath/KeyPath` |
 
 ## Environment Variables

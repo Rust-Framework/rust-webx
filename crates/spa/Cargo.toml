@@ -14,4 +14,3 @@ categories = ["web-programming"]
 [dependencies]
 rust-webx-core.workspace = true
 async-trait.workspace = true
-tokio.workspace = true

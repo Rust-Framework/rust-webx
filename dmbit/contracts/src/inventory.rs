@@ -3,10 +3,8 @@
 use rust_webx::*;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InventoryCsvModel {
-    pub csv: String,
-}
+/// Filename offered to the browser when exporting the inventory.
+pub const INVENTORY_EXPORT_FILE_NAME: &str = "智算机房规格清单.csv";
 
 #[claims]
 #[derive(Default, Deserialize)]
@@ -14,12 +12,14 @@ pub struct ExportInventoryRequest;
 
 #[get("/api/inventory/export")]
 #[authorize(role = "admin")]
-impl IRequest<InventoryCsvModel> for ExportInventoryRequest {}
+impl IRequest<ResponseData> for ExportInventoryRequest {}
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Deserialize)]
 pub struct ImportInventoryRequest {
-    pub csv: String,
+    /// The uploaded CSV. Streamed and spooled by the framework — never
+    /// string-encoded into a JSON field.
+    pub file: FormFile,
     /// 为 true 时：对已存在的产品编码/台账走更新覆盖；为 false 时若有冲突则只返回冲突清单不落库。
     #[serde(default)]
     pub confirm_update: bool,

@@ -32,6 +32,35 @@ jobs:
             echo "::error::CRATES_IO_TOKEN / CARGO_REGISTRY_TOKEN secret is not set."
             exit 1
           fi
+
+          # crates.io serves a sparse index; a dependent can only be packaged
+          # once its dependency is visible there. Publication is asynchronous,
+          # so poll instead of sleeping a fixed amount and hoping.
+          index_path() {
+            local name="$1" len=${#1}
+            case "$len" in
+              1) echo "1/$name" ;;
+              2) echo "2/$name" ;;
+              3) echo "3/${name:0:1}/$name" ;;
+              *) echo "${name:0:2}/${name:2:2}/$name" ;;
+            esac
+          }
+
+          wait_for_index() {
+            local name="$1" version="$2" url
+            url="https://index.crates.io/$(index_path "$name")"
+            for attempt in $(seq 1 60); do
+              if curl -fsS "$url" 2>/dev/null | grep -q "\"vers\":\"${version}\""; then
+                echo "  ✓ ${name} ${version} is visible in the index"
+                return 0
+              fi
+              echo "  … waiting for ${name} ${version} in the index (attempt ${attempt}/60)"
+              sleep 5
+            done
+            echo "::error::${name} ${version} never appeared in the index"
+            return 1
+          }
+
           # Publish order: dependencies must appear before their dependents.
           CRATES="rust-webx-macros rust-webx-core rust-webx-spa rust-webx-openapi rust-webx-host rust-webx"
           metadata="$(cargo metadata --no-deps --format-version 1)"
@@ -42,7 +71,17 @@ jobs:
               echo "::warning::skip $name (version $version != tag $TAG_VERSION)"
               continue
             fi
+
+            # Re-running the workflow for an existing version is a no-op, not a
+            # failure: a partial publish can be resumed by re-running the job.
+            if curl -fsS "https://index.crates.io/$(index_path "$name")" 2>/dev/null \
+                 | grep -q "\"vers\":\"${version}\""; then
+              echo "::notice::$name $version is already published — skipping"
+              continue
+            fi
+
             echo "::group::Publishing $name@$version"
             cargo publish -p "$name" --token "${CARGO_REGISTRY_TOKEN}"
             echo "::endgroup::"
+            wait_for_index "$name" "$version"
           done

@@ -55,6 +55,7 @@
 - [路由宏详解](05-request-pattern/route-macros.md)
 - [Handler 注册策略](05-request-pattern/handler-registration.md)
 - [参数绑定与序列化](05-request-pattern/parameter-binding.md)
+- [文件上传与下载](05-request-pattern/file-upload-download.md)
 - [错误处理与 ProblemDetails](05-request-pattern/error-handling.md)
 
 ### [第六章 DI 与生命周期](06-di-lifecycle/INDEX.md)
@@ -99,6 +100,7 @@
 - [CORS、TLS 与健康检查](11-production/cors-tls-health.md)
 - [缓存与速率限制](11-production/caching-rate-limit.md)
 - [OpenAPI 与 SPA 托管](11-production/openapi-spa.md)
+- [文件服务的生产部署](11-production/file-serving.md)
 - [优雅关闭与可观测性](11-production/graceful-shutdown.md)
 
 ---

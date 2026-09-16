@@ -7,6 +7,7 @@
 | [CORS、TLS 与健康检查](cors-tls-health.md) | 网络层能力 |
 | [缓存与速率限制](caching-rate-limit.md) | 性能与防护 |
 | [OpenAPI 与 SPA 托管](openapi-spa.md) | 文档与前端 |
+| [文件服务的生产部署](file-serving.md) | 缓存、断点续传、反代与 fd |
 | [优雅关闭与可观测性](graceful-shutdown.md) | 运维能力 |
 
 ## 下一步

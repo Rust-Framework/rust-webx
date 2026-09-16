@@ -1,7 +1,7 @@
 //! In-process memory cache —matches ASP.NET Core's `MemoryCache`.
 //!
 //! Implements [`IDistributedCache`] and provides typed access
-//! via [`DistributedCacheExtensions`].
+//! via [`DistributedCacheExtensions`](rust_webx_core::DistributedCacheExtensions).
 
 use rust_webx_core::cache::options::DistributedCacheEntryOptions;
 use rust_webx_core::cache::trait_def::{CacheError, IDistributedCache, Result};

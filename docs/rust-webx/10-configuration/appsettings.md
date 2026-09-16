@@ -31,6 +31,13 @@ appsettings.Development.json        # 开发环境覆盖（Development 模式）
   "Tls": {
     "CertPath": "",
     "KeyPath": ""
+  },
+  "Form": {
+    "MaxRequestSize": 268435456,
+    "MaxFileSize": 134217728,
+    "MaxFieldSize": 1048576,
+    "MemoryThreshold": 1048576,
+    "TempDir": "uploads-tmp"
   }
 }
 ```
@@ -43,8 +50,13 @@ appsettings.Development.json        # 开发环境覆盖（Development 模式）
 | `Jwt` | `JwtSection` |
 | `Cors` | `CorsSection` |
 | `Tls` | `TlsSection` |
+| `Form` | `FormSection` |
 
 合并后为 `AppOptions` 结构体。
+
+> `App.MaxBodySize` 只约束非 multipart 请求；声明 `Content-Type: multipart/form-data`
+> 的请求按 `Form` 节度量，因为上传端点天然需要比 JSON 端点大得多的上限。
+> 详见[文件上传与下载](../05-request-pattern/file-upload-download.md)。
 
 ## 访问配置
 

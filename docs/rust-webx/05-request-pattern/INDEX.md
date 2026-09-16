@@ -10,6 +10,7 @@
 | [路由宏详解](route-macros.md) | get/post/put/delete/authorize |
 | [Handler 注册策略](handler-registration.md) | handler 宏、手动注册、inject |
 | [参数绑定与序列化](parameter-binding.md) | 路径参数、Body、Query |
+| [文件上传与下载](file-upload-download.md) | multipart 表单、FormFile、文件响应与 Range |
 | [错误处理与 ProblemDetails](error-handling.md) | Error 变体与 RFC 7807 |
 
 ## 下一步

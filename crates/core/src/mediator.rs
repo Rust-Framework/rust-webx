@@ -11,16 +11,25 @@ use crate::error::Result;
 
 /// Marker trait for a request (command or query) carrying a structured response `TResponse`.
 ///
+/// The HTTP adapter serializes `TResponse` as JSON, so it must implement
+/// [`serde::Serialize`] — unless it is [`crate::route::scan::ResponseData`],
+/// the raw-response envelope used for file downloads and other responses that
+/// control their own status, headers and body. That is why this trait itself
+/// only requires `Send`: the `Serialize` bound is enforced where the value is
+/// actually serialized.
+///
 /// - `TResponse: Serialize` → framework writes JSON and sets status 200
 /// - `TResponse = ()`        → framework writes no body and sets status 204
+/// - `TResponse = ResponseData` → the handler builds the whole response
 ///
 /// ```ignore
 /// impl IRequest<UserModel> for GetUserRequest {}
 /// impl IRequest<()> for DeleteUserRequest {}
+/// impl IRequest<ResponseData> for DownloadFileRequest {}
 /// ```
 pub trait IRequest<TResponse>: Send + 'static
 where
-    TResponse: serde::Serialize + Send + 'static,
+    TResponse: Send + 'static,
 {
 }
 
@@ -43,7 +52,7 @@ pub trait IMediator: Send + Sync {
     async fn send<T, R>(&self, req: T) -> Result<R>
     where
         T: IRequest<R> + Send + 'static,
-        R: serde::Serialize + Send + 'static;
+        R: Send + 'static;
 
     /// Publish an event to all registered handlers.
     async fn publish<T: IEventRequest>(&self, event: T) -> Result<()>;

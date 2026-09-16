@@ -48,18 +48,11 @@ impl IClaims for MockClaims {
 // â”€â”€ Mock dispatch function â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 fn mock_dispatch_ok(
-    _body: Vec<u8>,
-    _route_params: HashMap<String, String>,
-    _query_params: HashMap<String, String>,
-    _claims: Option<Box<dyn IClaims>>,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = LrwfResult<ResponseData>> + Send>> {
-    Box::pin(async move {
-        Ok(ResponseData {
-            status: 200,
-            content_type: "application/json".to_string(),
-            body: serde_json::to_vec(&serde_json::json!({"ok":true})).unwrap(),
-        })
-    })
+    _ctx: &mut dyn IHttpContext,
+) -> std::pin::Pin<
+    Box<dyn std::future::Future<Output = LrwfResult<ResponseData>> + Send + '_>,
+> {
+    Box::pin(async move { ResponseData::json(&serde_json::json!({"ok": true})) })
 }
 
 // â”€â”€ Mock dynamic authorizers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

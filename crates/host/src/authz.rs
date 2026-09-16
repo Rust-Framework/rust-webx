@@ -235,7 +235,8 @@ impl AuthorizerSet {
     }
 }
 
-/// Build a [`ResourceAuthorization`] policy from compile-time [`RouteEntry`] metadata.
+/// Build a [`ResourceAuthorization`] policy from compile-time
+/// [`RouteEntry`](rust_webx_core::route::scan::RouteEntry) metadata.
 pub fn build_resource_policy_from_routes() -> ResourceAuthorization {
     use rust_webx_core::route::scan::RouteEntry;
 

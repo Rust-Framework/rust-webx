@@ -8,6 +8,9 @@
 | JSON Body | `#[derive(Deserialize)]` | ✅ 已实现 |
 | Query String | 字段名与 query key 一致 | ✅ 已实现（GET/DELETE，需 `Deserialize`） |
 | 通配符 | `{*name}` 捕获剩余路径 | ✅ 已实现 |
+| multipart 表单 | 字段类型为 `FormFile` | ✅ 已实现，见[文件上传与下载](file-upload-download.md) |
+
+绑定方式由请求的 `Content-Type` 决定：声明 `multipart/form-data` 时按表单绑定，其余情况按 JSON Body 或路径/Query 绑定。
 
 ## 路径参数
 

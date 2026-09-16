@@ -101,12 +101,15 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
 // `#[derive(WebxRequestMeta)]` — not standalone attribute macros (avoids
 // rustc conflicts on struct fields).
 
-/// Registers OpenAPI parameter metadata from `#[from_query]` / `#[from_route]` / `#[from_body]` fields.
+/// Registers OpenAPI parameter metadata from `#[from_query]` / `#[from_route]` / `#[from_body]` / `#[from_form]` fields.
+///
+/// `FormFile` fields are recognised automatically and reported as
+/// `multipart/form-data` binary parts.
 ///
 /// Add `#[webx_request(query_all)]` to treat all non-skipped fields as query parameters.
 #[proc_macro_derive(
     WebxRequestMeta,
-    attributes(from_query, from_route, from_body, webx_request)
+    attributes(from_query, from_route, from_body, from_form, webx_request)
 )]
 pub fn webx_request_meta(input: TokenStream) -> TokenStream {
     request_meta::derive_request_meta(input)

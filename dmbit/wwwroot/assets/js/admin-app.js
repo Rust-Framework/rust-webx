@@ -106,15 +106,13 @@ function partsSummary(spec) {
   return formatComponents(spec && spec.components);
 }
 
-function downloadCsv(csv, filename) {
-  const BOM = '\uFEFF';
-  const text = typeof csv === 'string' ? csv : String(csv || '');
-  const withBom = text.startsWith(BOM) ? text : BOM + text;
-  const blob = new Blob([withBom], { type: 'text/csv;charset=utf-8' });
+// Save a blob that the server produced. The server owns the media type and,
+// via Content-Disposition, the filename.
+function saveBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = filename;
+  a.download = filename || 'download';
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -340,10 +338,9 @@ function App() {
   async function exportInventory() {
     setExporting(true);
     try {
-      const data = await window.DmbitApi.get('/api/inventory/export');
-      const csv = data && data.csv != null ? data.csv : '';
-      if (!csv) { message.error('导出内容为空'); return; }
-      downloadCsv(csv, '智算机房规格清单.csv');
+      const { blob, filename } = await window.DmbitApi.download('/api/inventory/export');
+      if (!blob || blob.size === 0) { message.error('导出内容为空'); return; }
+      saveBlob(blob, filename || '智算机房规格清单.csv');
       message.success('已导出');
     } catch (ex) {
       if (ex.status === 401) {
@@ -357,14 +354,16 @@ function App() {
     }
   }
 
-  async function postImport(csv, confirmUpdate) {
-    return window.DmbitApi.post('/api/inventory/import', {
-      csv,
-      confirm_update: !!confirmUpdate,
-    });
+  // The CSV is uploaded as a real multipart/form-data part, streamed and spooled
+  // by the framework rather than string-encoded into a JSON field.
+  function postImport(file, confirmUpdate) {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('confirm_update', confirmUpdate ? 'true' : 'false');
+    return window.DmbitApi.postForm('/api/inventory/import', fd);
   }
 
-  function askImportConfirm(csv, result) {
+  function askImportConfirm(file, result) {
     const codes = (result.conflict_product_codes || []).join('、') || '（无）';
     const specs = (result.conflict_goods_labels || []).join('、') || '（无）';
     Modal.confirm({
@@ -382,7 +381,7 @@ function App() {
       onOk: async () => {
         setImporting(true);
         try {
-          const again = await postImport(csv, true);
+          const again = await postImport(file, true);
           message.success((again && again.message) || '导入完成');
           await load();
         } catch (ex) {
@@ -402,10 +401,9 @@ function App() {
     if (!file) return;
     setImporting(true);
     try {
-      const csv = await file.text();
-      const result = await postImport(csv, false);
+      const result = await postImport(file, false);
       if (result && result.needs_confirm) {
-        askImportConfirm(csv, result);
+        askImportConfirm(file, result);
         return;
       }
       message.success((result && result.message) || '导入完成');

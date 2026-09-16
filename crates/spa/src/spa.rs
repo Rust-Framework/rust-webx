@@ -2,19 +2,31 @@
 //!
 //! Serves files from a configured root directory.
 //! For SPA routing, non-file requests fall back to index.html.
+//!
+//! Files are handed to the host as [`FileBody`] values, so they are streamed
+//! rather than read into memory, and every response carries an `ETag` and
+//! `Last-Modified` and honours `Range` requests. That means a 2 GB video in
+//! `wwwroot` is served with a bounded memory footprint and can be seeked.
 
 use rust_webx_core::error::Result;
-use rust_webx_core::http::{HttpStatus, IHttpContext};
+use rust_webx_core::http::{FileBody, HttpStatus, IHttpContext};
 use rust_webx_core::middleware::IMiddleware;
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 
+/// How long fingerprints-addressed files may be cached.
+///
+/// Files under `/assets/` are treated as content-addressed and cached for a
+/// year; everything else must revalidate with the `ETag` the host sends.
+const IMMUTABLE_CACHE: &str = "public, max-age=31536000, immutable";
+const REVALIDATE_CACHE: &str = "public, max-age=0, must-revalidate";
+
 /// SPA static file middleware.
 ///
 /// - Matches `/{filename}` against local filesystem
-/// - Serves files with auto-detected MIME types
+/// - Serves files with MIME types inferred by the host
 /// - Falls back to `index.html` for unknown paths (SPA routing)
-/// - Only handles GET requests; non-GET passes through silently
+/// - Handles GET and HEAD; other methods pass through silently
 pub struct SpaMiddleware {
     root: PathBuf,
     index: String,
@@ -26,7 +38,7 @@ impl SpaMiddleware {
     /// The `root` path is resolved relative to the current working directory.
     /// If the directory doesn't exist at that path, the middleware searches
     /// upward through ancestor directories and their immediate subdirectories,
-    /// matching the strategy used by [`config::load_appsettings`].
+    /// matching the strategy used by `config::load_appsettings`.
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self {
             root: resolve_spa_root(root.into()),
@@ -47,7 +59,7 @@ impl SpaMiddleware {
 impl IMiddleware for SpaMiddleware {
     async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
         let method = ctx.request().method().to_uppercase();
-        if method != "GET" {
+        if method != "GET" && method != "HEAD" {
             return Ok(ControlFlow::Continue(()));
         }
 
@@ -60,56 +72,46 @@ impl IMiddleware for SpaMiddleware {
 
         if request_path.starts_with("/assets/") {
             let relative = alias_static_path(request_path.trim_start_matches('/'));
-            if relative.is_empty() {
+            if relative.is_empty() || relative.contains("..") {
                 ctx.response_mut().set_status(HttpStatus::NOT_FOUND);
                 return Ok(ControlFlow::Continue(()));
             }
             let candidate = self.root.join(&relative);
-            if relative.contains("..") || !candidate.is_file() {
-                ctx.response_mut().set_status(HttpStatus::NOT_FOUND);
-                return Ok(ControlFlow::Continue(()));
+            if candidate.is_file() {
+                return serve_file(ctx, &candidate, IMMUTABLE_CACHE).await;
             }
-            match tokio::fs::read(&candidate).await {
-                Ok(data) => {
-                    ctx.response_mut().set_status(HttpStatus::OK);
-                    ctx.response_mut()
-                        .set_header("content-type", mime_type(&candidate));
-                    ctx.response_mut().write_bytes(data).await?;
-                }
-                Err(_) => {
-                    ctx.response_mut().set_status(HttpStatus::NOT_FOUND);
-                }
-            }
+            ctx.response_mut().set_status(HttpStatus::NOT_FOUND);
             return Ok(ControlFlow::Continue(()));
         }
 
         let file_path = self.resolve_file(request_path);
-
-        match tokio::fs::read(&file_path).await {
-            Ok(data) => {
-                ctx.response_mut().set_status(HttpStatus::OK);
-                ctx.response_mut()
-                    .set_header("content-type", mime_type(&file_path));
-                ctx.response_mut().write_bytes(data).await?;
-            }
-            Err(_) => {
-                // File not found — try fallback to index.html for SPA routing
-                let index_path = self.root.join(&self.index);
-                match tokio::fs::read(&index_path).await {
-                    Ok(data) => {
-                        ctx.response_mut().set_status(HttpStatus::OK);
-                        ctx.response_mut().set_header("content-type", "text/html");
-                        ctx.response_mut().write_bytes(data).await?;
-                    }
-                    Err(_) => {
-                        // Neither file nor index.html exists — pass through
-                    }
-                }
-            }
+        if file_path.is_file() {
+            return serve_file(ctx, &file_path, REVALIDATE_CACHE).await;
         }
 
+        // File not found — fall back to index.html for SPA routing.
+        let index_path = self.root.join(&self.index);
+        if index_path.is_file() {
+            return serve_file(ctx, &index_path, REVALIDATE_CACHE).await;
+        }
+
+        // Neither the file nor index.html exists — let the router decide.
         Ok(ControlFlow::Continue(()))
     }
+}
+
+/// Hand a file to the host for streaming.
+async fn serve_file(
+    ctx: &mut dyn IHttpContext,
+    path: &Path,
+    cache_control: &str,
+) -> Result<ControlFlow<()>> {
+    ctx.response_mut().set_status(HttpStatus::OK);
+    ctx.response_mut().set_header("cache-control", cache_control);
+    ctx.response_mut()
+        .write_body(FileBody::path(path).into())
+        .await?;
+    Ok(ControlFlow::Continue(()))
 }
 
 impl SpaMiddleware {
@@ -208,31 +210,6 @@ fn normalize_path(path: &Path) -> PathBuf {
     result
 }
 
-/// Detect MIME type from file extension.
-fn mime_type(path: &Path) -> &'static str {
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    match ext {
-        "html" | "htm" => "text/html",
-        "js" | "mjs" => "application/javascript",
-        "css" => "text/css",
-        "json" => "application/json",
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "svg" => "image/svg+xml",
-        "ico" => "image/x-icon",
-        "wasm" => "application/wasm",
-        "woff" => "font/woff",
-        "woff2" => "font/woff2",
-        "ttf" => "font/ttf",
-        "eot" => "application/vnd.ms-fontobject",
-        "txt" => "text/plain",
-        "xml" => "application/xml",
-        "pdf" => "application/pdf",
-        "zip" => "application/zip",
-        _ => "application/octet-stream",
-    }
-}
-
 /// Resolve a SPA root path by first checking the application base directory
 /// (as resolved by `rust_webx_core::paths::app_base`), then as-is.
 ///
@@ -257,20 +234,13 @@ fn resolve_spa_root(root: PathBuf) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{alias_static_path, mime_type, normalize_path};
+    use super::{alias_static_path, normalize_path};
     use std::path::Path;
 
     #[test]
     fn alias_static_path_strips_vditor_dist_segment() {
         let out = alias_static_path("assets/vendor/vditor-dist/dist/js/foo.js");
         assert_eq!(out, "assets/vendor/vditor-dist/js/foo.js");
-    }
-
-    #[test]
-    fn mime_type_maps_common_extensions() {
-        assert_eq!(mime_type(Path::new("a.js")), "application/javascript");
-        assert_eq!(mime_type(Path::new("a.css")), "text/css");
-        assert_eq!(mime_type(Path::new("a.wasm")), "application/wasm");
     }
 
     #[test]

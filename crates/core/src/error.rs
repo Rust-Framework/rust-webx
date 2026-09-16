@@ -43,6 +43,14 @@ pub enum Error {
     /// Optimistic concurrency or state conflict.
     #[error("{0}")]
     Conflict(String),
+
+    /// Request body (or one uploaded file) exceeded the configured limit.
+    #[error("{0}")]
+    PayloadTooLarge(String),
+
+    /// Request content type is not supported by the target endpoint.
+    #[error("{0}")]
+    UnsupportedMediaType(String),
 }
 
 impl Error {
@@ -64,6 +72,8 @@ impl Error {
             Error::Validation(_) => 400,
             Error::NotFound(_) => 404,
             Error::Conflict(_) => 409,
+            Error::PayloadTooLarge(_) => 413,
+            Error::UnsupportedMediaType(_) => 415,
         }
     }
 }

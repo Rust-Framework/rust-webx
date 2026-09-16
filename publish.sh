@@ -36,10 +36,18 @@ while [ $# -gt 0 ]; do
 done
 
 # ── Bump version if requested ──
+#
+# Two places have to move together: `[workspace.package] version`, and the
+# `rust-webx*` entries in `[workspace.dependencies]`. The latter are path
+# dependencies that also carry a version for crates.io, so leaving them behind
+# would publish crates pinning the previous release.
 bump_version() {
     if [ -n "$NEW_VERSION" ]; then
         echo "  → Bumping workspace version to $NEW_VERSION"
-        sed -i "s/^version = \".*\"/version = \"$NEW_VERSION\"/" Cargo.toml
+        sed -i -E \
+            -e "s/^version = \".*\"/version = \"$NEW_VERSION\"/" \
+            -e "s/^(rust-webx[a-z-]* = \{ version = )\"[^\"]*\"/\1\"$NEW_VERSION\"/" \
+            Cargo.toml
     fi
 }
 

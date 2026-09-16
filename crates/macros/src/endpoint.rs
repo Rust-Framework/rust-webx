@@ -104,6 +104,7 @@ fn emit_endpoint(attr: TokenStream, item: TokenStream) -> TokenStream {
     let path_params: Vec<String> = extract_path_params(&path_str);
 
     // Generate dispatch function
+    let is_raw_response = is_response_data(&rsp_type_str);
     let dispatch_fn = generate_dispatch_fn(
         self_ty,
         &rsp_type,
@@ -111,6 +112,7 @@ fn emit_endpoint(attr: TokenStream, item: TokenStream) -> TokenStream {
         &path_params,
         is_body_method,
         rsp_type_str == "()",
+        is_raw_response,
     );
 
     let dispatch_fn_name = format_ident!("__lrwf_dispatch_{}", req_type_name.replace("::", "_"));
@@ -147,10 +149,16 @@ fn emit_endpoint(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 /// Generate the dispatch function that runs the full request lifecycle.
 ///
-/// Looks up the `HandlerRegistration` (collected via `#[handler]`) by request
-/// type name, calls its factory with a per-request scope to obtain an owned
-/// handler (Scoped dependencies like `DbContext` are resolved via `get_owned`),
-/// then invokes `handle(&mut self, req)` through the call bridge.
+/// The function receives the live [`IHttpContext`], so it can:
+///
+/// * bind a `multipart/form-data` body — including uploaded files — through
+///   `bind_form_request`, which streams the body rather than buffering it;
+/// * fall back to JSON body or route/query parameter binding;
+/// * forward authentication claims to the handler.
+///
+/// When the response type is `ResponseData` the handler's value is used as the
+/// response verbatim, which is how an endpoint streams a file or sets custom
+/// headers. Otherwise the value is serialized as JSON.
 fn generate_dispatch_fn(
     ty: &Type,
     rsp_type: &syn::Type,
@@ -158,10 +166,11 @@ fn generate_dispatch_fn(
     path_params: &[String],
     is_body: bool,
     is_unit_response: bool,
+    is_raw_response: bool,
 ) -> proc_macro2::TokenStream {
     let fn_name = format_ident!("__lrwf_dispatch_{}", type_name.replace("::", "_"));
 
-    // Generate request construction code
+    // Generate request construction code for the non-multipart path.
     let build_request = if is_body && !path_params.is_empty() {
         let overrides: Vec<proc_macro2::TokenStream> = path_params
             .iter()
@@ -221,18 +230,51 @@ fn generate_dispatch_fn(
         }
     };
 
+    let response_expr = if is_raw_response {
+        quote! { ::std::result::Result::Ok(result) }
+    } else if is_unit_response {
+        quote! { ::std::result::Result::Ok(::rust_webx::ResponseData::no_content()) }
+    } else {
+        quote! { ::rust_webx::ResponseData::json(&result) }
+    };
+
     quote! {
         #[allow(clippy::needless_update)]
-        fn #fn_name(
-            body_bytes: Vec<u8>,
-            route_params: ::std::collections::HashMap<String, String>,
-            query_params: ::std::collections::HashMap<String, String>,
-            claims: Option<Box<dyn ::rust_webx::IClaims>>,
-        ) -> ::std::pin::Pin<Box<dyn ::std::future::Future<Output = ::rust_webx::Result<::rust_webx::ResponseData>> + Send>> {
+        fn #fn_name<'__webx_dispatch>(
+            ctx: &'__webx_dispatch mut dyn ::rust_webx::IHttpContext,
+        ) -> ::std::pin::Pin<
+            Box<
+                dyn ::std::future::Future<
+                        Output = ::rust_webx::Result<::rust_webx::ResponseData>,
+                    > + Send
+                    + '__webx_dispatch,
+            >,
+        > {
             Box::pin(async move {
-                let _query_params = query_params;
-                let mut request: #ty = #build_request;
+                // A multipart body must be bound before anything else touches it,
+                // because binding consumes the live request stream.
+                let bound: ::std::option::Option<#ty> =
+                    ::rust_webx::bind_form_request::<#ty>(&mut *ctx).await?;
 
+                let mut request: #ty = match bound {
+                    ::std::option::Option::Some(request) => request,
+                    ::std::option::Option::None => {
+                        #[allow(unused_variables)]
+                        let route_params = ctx.request().route_params().clone();
+                        #[allow(unused_variables)]
+                        let _query_params = ctx.request().query().clone();
+                        #[allow(unused_variables)]
+                        let body_bytes: Vec<u8> = if #is_body {
+                            ctx.request_mut().body_bytes().await?
+                        } else {
+                            Vec::new()
+                        };
+                        #build_request
+                    }
+                };
+
+                let claims: ::std::option::Option<Box<dyn ::rust_webx::IClaims>> =
+                    ctx.claims().map(|c| c.clone_box());
                 let operator_id = claims.as_ref().map(|c| c.subject().to_string());
 
                 // Inject claims into the request *before* dispatch (no-op if the
@@ -243,26 +285,28 @@ fn generate_dispatch_fn(
                 }
 
                 ::rust_webx::RequestContext::run(operator_id, async move {
-                // HTTP adapter: construct request, then dispatch via IMediator (same path as in-process calls).
-                let mediator = ::rust_webx::Mediator::new(::rust_webx::dispatch_provider());
-                let result: #rsp_type = mediator.send(request).await?;
-
-                let status = if #is_unit_response { 204 } else { 200 };
-                let json_bytes = if #is_unit_response {
-                    Vec::new()
-                } else {
-                    ::serde_json::to_vec(&result)
-                        .map_err(|e| ::rust_webx::Error::Internal(format!("response serialization failed: {}", e)))?
-                };
-                Ok(::rust_webx::ResponseData {
-                    status,
-                    content_type: "application/json".to_string(),
-                    body: json_bytes,
+                    // HTTP adapter: construct request, then dispatch via IMediator
+                    // (same path as in-process calls).
+                    let mediator = ::rust_webx::Mediator::new(::rust_webx::dispatch_provider());
+                    let result: #rsp_type = mediator.send(request).await?;
+                    #response_expr
                 })
-                }).await
+                .await
             })
         }
     }
+}
+
+/// Whether the declared response type is the framework's raw response envelope.
+///
+/// Matches `ResponseData` and any qualified path ending in `ResponseData`, so
+/// `rust_webx::ResponseData` and `::rust_webx::ResponseData` both work.
+fn is_response_data(rsp_type: &str) -> bool {
+    rsp_type
+        .rsplit("::")
+        .next()
+        .map(|segment| segment.trim() == "ResponseData")
+        .unwrap_or(false)
 }
 
 /// Extract the response type from `impl IRequest<UserModel> for GetUserRequest`.

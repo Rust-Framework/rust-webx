@@ -127,11 +127,11 @@ impl IHttpRequest for TestHttpRequest {
         &mut self.route_pattern
     }
 
-    async fn body_bytes(&self) -> rust_webx_core::error::Result<Vec<u8>> {
+    async fn body_bytes(&mut self) -> rust_webx_core::error::Result<Vec<u8>> {
         Ok(self.body_bytes.clone())
     }
 
-    async fn body_text(&self) -> rust_webx_core::error::Result<String> {
+    async fn body_text(&mut self) -> rust_webx_core::error::Result<String> {
         String::from_utf8(self.body_bytes.clone())
             .map_err(|e| rust_webx_core::error::Error::Http(e.to_string()))
     }

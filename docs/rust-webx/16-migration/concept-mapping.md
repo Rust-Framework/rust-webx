@@ -21,6 +21,15 @@
 | `[Authorize]` | `#[authorize]` | 授权 |
 | `[FromBody]` | `#[derive(Deserialize)]` | Body 绑定 |
 | `[FromRoute]` | 路径同名字段 | 路径参数 |
+| `[FromForm]` + `IFormFile` | 请求结构体字段声明为 `FormFile` | multipart 上传 |
+| `List<IFormFile>` | `Vec<FormFile>` | 多文件上传 |
+| `IFormFile.CopyToAsync()` | `FormFile::save_as()` / `copy_to()` | 落盘 |
+| `FormOptions.MultipartBodyLengthLimit` | `Form.MaxFileSize` / `Form.MaxRequestSize` | 上传大小限制 |
+| `Results.File()` / `PhysicalFile()` | `ResponseData::file()` | 文件下载 |
+| `File(Stream, ...)` | `ResponseData::file_stream()` | 流式下载 |
+| `File(Stream, ...)` + `enableRangeProcessing` | `ResponseData::file_seekable_stream()` | 可 seek 流的断点续传 |
+| `fileDownloadName` | `ResponseData::download_name()` | 下载文件名 |
+| `enableRangeProcessing` | `ResponseData::enable_range_processing()` | 断点续传开关 |
 | `appsettings.json` | `appsettings.json` | 配置文件 |
 | `IConfiguration` | `AppOptions` | 配置访问 |
 | `ProblemDetails` | `ProblemDetails` | RFC 7807 |
@@ -45,6 +54,10 @@
 | `Extension<T>` | DI 注入 | 请求扩展 |
 | `middleware::from_fn` | `IMiddleware` | 中间件 |
 | `Json<T>` | 自动序列化 | JSON 响应 |
+| `Multipart` extractor | 请求结构体字段声明为 `FormFile` | multipart 上传 |
+| `field.bytes().await` | `FormFile::read_bytes().await` | 读取上传内容 |
+| `ServeFile` / `ServeDir` | `ResponseData::file()` / `use_spa()` | 文件与静态资源 |
+| `Body::from_stream` | `ResponseData::file_stream()` | 流式响应体 |
 | `StatusCode` | `Error` 变体 | 状态码 |
 | `AppState` | `ServiceCollection` | 应用状态 |
 | `axum::serve` | `Host::run()` | 启动服务 |
@@ -60,6 +73,8 @@
 | 文档 | Swagger | utoipa | OpenAPI 内置 |
 | 配置 | appsettings | 手动/env | appsettings 内置 |
 | 后台任务 | IHostedService | tokio::spawn | IHostedService |
+| 文件上传 | IFormFile | Multipart | FormFile |
+| 文件下载 | Results.File | ServeFile | ResponseData::file |
 
 ## 小结
 

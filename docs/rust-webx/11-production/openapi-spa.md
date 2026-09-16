@@ -20,9 +20,22 @@ Host::builder().use_spa("wwwroot")
 ```
 
 `SpaMiddleware` 行为：
-1. 请求路径匹配静态文件 → 直接返回
+1. 请求路径匹配静态文件 → 交给宿主流式发送
 2. 非 API 路径无匹配 → fallback 到 `index.html`
 3. 支持前端 History 路由（React Router、Vue Router 等）
+
+静态文件不是整份读进内存，而是以文件响应发送，因此自带：
+
+| 能力 | 行为 |
+|------|------|
+| MIME 类型 | 按扩展名推断（完整扩展名表） |
+| `ETag` / `Last-Modified` | 自动生成 |
+| `Range` | 支持 `206` 断点续传 |
+| `HEAD` | 与 GET 相同头部，无响应体 |
+| `Cache-Control` | `/assets/**` 为 `public, max-age=31536000, immutable`；其余为 `public, max-age=0, must-revalidate`（覆盖默认的 `no-store`） |
+
+> `wwwroot` 下的文件**不经过授权检查**。需要鉴权的文件请放在可写目录，用
+> [`ResponseData::file`](../05-request-pattern/file-upload-download.md) + `#[authorize]` 提供。
 
 ### 目录结构
 

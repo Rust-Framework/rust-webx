@@ -17,10 +17,15 @@ pub use rust_webx_core::config::{
 };
 pub use rust_webx_core::dispatch_runtime::{dispatch_provider, DispatchRuntime};
 pub use rust_webx_core::error::{Error, Result};
+pub use rust_webx_core::form::{
+    sanitize_file_name, set_spool_root, spool_root, FormDeserializer, FormError, FormField,
+    FormFile, FormFileBuilder, MultipartForm, SPOOL_FILE_PREFIX,
+};
 pub use rust_webx_core::handler::{IClaimsCarrier, IEventHandler, IHostedService, IRequestHandler};
 pub use rust_webx_core::http::{
-    read_json_body, write_json_response, FromHttpContext, HttpStatus, IClaimsExt, IHttpContext,
-    IHttpRequest, IHttpResponse, Json,
+    content_disposition_value, read_json_body, write_json_response, ByteRange, Disposition,
+    FileBody, FileSource, FromHttpContext, HttpStatus, IClaimsExt, IHttpContext, IHttpRequest,
+    IHttpResponse, Json, ResponseBody, SeekableReader, STREAM_BUF_SIZE,
 };
 pub use rust_webx_core::mediator::build_pipeline_chain;
 pub use rust_webx_core::mediator::{IEventRequest, IMediator, IRequest};
@@ -43,11 +48,13 @@ pub use rust_webx_core::routing::{HttpMethod, IEndpoint, IRouter, RouteMeta};
 pub use rust_webx_core::route::ext::{
     is_mediator_active, should_scan_endpoints, IServiceCollectionExt,
 };
+pub use rust_webx_core::route::bind::bind_form_request;
 pub use rust_webx_core::route::params::try_deserialize_from_params;
 #[allow(deprecated)]
 pub use rust_webx_core::route::scan::{
     global_provider, set_global_provider, HandlerCache, HandlerEntry, HandlerRegistration,
-    HandlerRegistry, ParamMeta, RequestParamEntry, ResponseData, RouteDispatch, RouteEntry,
+    HandlerRegistry, ParamMeta, RequestParamEntry, ResponseData, RouteDispatch, RouteDispatchFn,
+    RouteEntry,
 };
 
 // --- HTTP layer ---

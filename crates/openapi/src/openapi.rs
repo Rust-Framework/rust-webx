@@ -24,18 +24,23 @@ pub fn generate_openapi_spec(title: &str, version: &str) -> JsonValue {
 
         let mut parameters = Vec::new();
         let mut has_body = false;
+        let mut form_params: Vec<ParamMeta> = Vec::new();
 
         for param in merge_params(entry.handler_type, entry.params, &request_params) {
-            if param.source == "body" {
-                has_body = true;
-            } else {
-                let required = param.source == "path";
-                parameters.push(json!({
-                    "name": param.name,
-                    "in": param.source,
-                    "required": required,
-                    "schema": { "type": param.type_hint },
-                }));
+            match param.source {
+                // An upload endpoint describes its fields as multipart parts;
+                // the generic JSON body is not applicable.
+                "form" => form_params.push(param),
+                "body" => has_body = true,
+                _ => {
+                    let required = param.source == "path";
+                    parameters.push(json!({
+                        "name": param.name,
+                        "in": param.source,
+                        "required": required,
+                        "schema": { "type": param.type_hint },
+                    }));
+                }
             }
         }
 
@@ -56,7 +61,16 @@ pub fn generate_openapi_spec(title: &str, version: &str) -> JsonValue {
             operation["parameters"] = json!(parameters);
         }
 
-        if has_body {
+        if !form_params.is_empty() {
+            operation["requestBody"] = json!({
+                "required": true,
+                "content": {
+                    "multipart/form-data": {
+                        "schema": form_schema(&form_params),
+                    }
+                }
+            });
+        } else if has_body {
             operation["requestBody"] = json!({
                 "required": true,
                 "content": {
@@ -127,6 +141,34 @@ fn merge_params(
     }
 
     merged
+}
+
+/// Build the `multipart/form-data` object schema for an upload endpoint.
+///
+/// `type_hint` of `binary` / `binary[]` (set by the derive for `FormFile`
+/// fields) maps to OpenAPI's `string`/`format: binary` representation.
+fn form_schema(params: &[ParamMeta]) -> JsonValue {
+    let mut properties = serde_json::Map::new();
+    let mut required = Vec::new();
+
+    for param in params {
+        let schema = match param.type_hint {
+            "binary" => json!({ "type": "string", "format": "binary" }),
+            "binary[]" => json!({
+                "type": "array",
+                "items": { "type": "string", "format": "binary" }
+            }),
+            other => json!({ "type": other }),
+        };
+        properties.insert(param.name.to_string(), schema);
+        required.push(json!(param.name));
+    }
+
+    json!({
+        "type": "object",
+        "properties": JsonValue::Object(properties),
+        "required": required,
+    })
 }
 
 /// Build a responses object based on the response type name.

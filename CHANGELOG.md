@@ -3,6 +3,203 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [0.4.0] — 2026-09-16 — 文件上传与下载基础设施
+
+> **English** · **简体中文**
+
+### English
+
+#### Added
+
+- **Uploads**: `multipart/form-data` binding into typed request structs. A request
+  field declared as `FormFile` is filled from the matching file part; text fields,
+  `bool`/numeric/`Option`/`Vec` and unit enums bind as usual. No extra derive and no
+  custom middleware — `#[derive(Deserialize)]` is all a request struct needs.
+- **Uploads**: file parts stream into a `FormFileBuilder` that buffers in memory up to
+  `Form.MemoryThreshold` and then spools to `Form.TempDir`. Peak memory is independent
+  of upload size, and spooled files are deleted when the request struct is dropped.
+- **Uploads**: `FormFile` API — `file_name()` (sanitised), `original_file_name()`,
+  `content_type()`, `size()`, `extension()`, `path()`, `open()`, `read_bytes()`,
+  `copy_to()`, `save_as()` (atomic write).
+- **Downloads**: `ResponseData` as a response type gives a handler full control of
+  status, headers and body: `json` / `text` / `html` / `bytes` / `file` / `no_content`,
+  plus `status()` / `content_type()` / `header()` / `download_name()` / `inline_name()`.
+- **Downloads**: the `File(...)` family, mirroring ASP.NET Core. A response can come
+  from a path (`ResponseData::file`), an async reader of unknown length
+  (`ResponseData::file_stream`, sent chunked), or a seekable reader of known length
+  (`ResponseData::file_seekable_stream`, which keeps exact `Content-Length` and
+  `Range`). `ResponseData::with_file(FileBody)` exposes the file-level knobs:
+  `enable_range_processing`, `entity_tag`, `last_modified`.
+- **Downloads**: `ResponseData::file` is streamed and automatically carries
+  `Content-Length`, `ETag`, `Last-Modified`, `Accept-Ranges` and a RFC 6266/5987
+  `Content-Disposition`, and honours `Range` (`206`/`416`), `If-Range`,
+  `If-None-Match`/`If-Modified-Since` (`304`) and `HEAD`.
+- **Resumable downloads**: `Range` handling is RFC 7233-correct end to end. Ranges are
+  coalesced — overlapping, adjacent and duplicate members merge — so a range request
+  can never amplify traffic beyond the file size; up to eight disjoint parts are
+  answered as `multipart/byteranges` with an exactly computed `Content-Length`; more
+  than that falls back to the full representation. Unsatisfiable members are dropped,
+  an entirely unsatisfiable set is `416` with `Content-Range: bytes */<len>`, and a
+  syntactically invalid member invalidates the whole header (§2.1).
+- **Resumable downloads**: correct validator semantics. `If-Range` uses a **strong**
+  comparison as RFC 7233 §3.2 requires (a weak tag never matches), while
+  `If-None-Match` uses the weak comparison RFC 7232 §3.2 requires. `ETag`s carry full
+  mtime precision, so an in-place edit that preserves the file size is still detected;
+  `Last-Modified` is suppressed when the mtime is in the future (RFC 7232 §2.2.2); and
+  `Accept-Ranges: none` is sent when ranges are unavailable, so download managers stop
+  probing instead of guessing.
+- **Performance**: one shared 64 KiB `STREAM_BUF_SIZE` for streamed responses and
+  spooled uploads (the previous `ReaderStream` default of 4 KiB cost ~16x more
+  reads and socket writes per gigabyte); file responses `open()` once and take
+  length/mtime from the same handle instead of `metadata()` + `open()`; spooled
+  uploads write through a 64 KiB `BufWriter` so `tokio::fs` no longer dispatches
+  to the blocking pool once per transport chunk; memory-backed uploads are held in
+  a reference-counted `Bytes` so `FormFile::open` no longer copies them;
+  `FormFile::copy_to` uses the 64 KiB buffer instead of `tokio::io::copy`'s 8 KiB.
+- **Routing**: `HEAD` now falls back to the `GET` route for the same path, so download
+  endpoints answer `HEAD` with the same headers and no body.
+- **Static files**: `SpaMiddleware` hands files to the host as file bodies, so
+  `wwwroot` assets are streamed with the same validators and range support, get MIME
+  types from a full extension table, and no longer buffer into memory. It also
+  overrides the default `cache-control: no-store` with a caching policy.
+- **Config**: new `Form` section (`MaxRequestSize`, `MaxFileSize`, `MaxFieldSize`,
+  `MemoryThreshold`, `TempDir`). Multipart requests are measured against it; other
+  requests keep using `App.MaxBodySize`. A declared `Content-Length` above the limit
+  is refused with `413` before the upload is read.
+- **Errors**: `Error::PayloadTooLarge` → `413` and `Error::UnsupportedMediaType` → `415`.
+- **Docs**: new chapter [文件上传与下载](docs/rust-webx/05-request-pattern/file-upload-download.md).
+
+#### Changed
+
+- **(breaking)** `IHttpRequest::body_bytes` / `body_text` take `&mut self`: reading the
+  body consumes it, and reading it twice now reports an error instead of returning an
+  empty body. `read_json_body` takes `&mut dyn IHttpRequest`.
+- **(breaking)** `IHttpRequest` gained `content_type()`, `is_multipart()` and
+  `multipart()`; `IHttpResponse` gained `write_body(ResponseBody)`. Both have defaults,
+  so existing implementations keep compiling.
+- **(breaking)** `ResponseData.body` is now a `ResponseBody` (`Bytes` or `File`) and
+  `ResponseData` gained a `headers` field; use the constructors instead of a struct
+  literal.
+- **(breaking)** `IRequest<R>` / `IRequestHandler<T, R>` / `IMediator::send` no longer
+  require `R: Serialize`; the bound is enforced where the value is serialized. This is
+  what allows `IRequest<ResponseData>`.
+- The route dispatch function now receives `&mut dyn IHttpContext` instead of the
+  pre-read body, route/query maps and claims, so endpoints can stream the body.
+- Request bodies are no longer read eagerly; they stay a live stream until the endpoint
+  asks for them.
+- `IHttpResponse` no longer defaults to `Content-Type: application/json`; writers set it
+  explicitly (all built-in endpoints already did).
+- `Cache-Control` defaulting moved from `SecurityHeadersMiddleware` into response
+  finalisation, so it can depend on what the response is: `no-store` for ordinary
+  responses, `public, max-age=0, must-revalidate` for file responses (an `ETag` paired
+  with `no-store` could never be used). Either way an explicit `cache-control` set by
+  the application always wins.
+- Streamed responses are boxed as `UnsyncBoxBody`, so a body only has to be `Send` —
+  requiring `Sync` would rule out most streaming readers.
+- `HttpStatus` gained `PARTIAL_CONTENT`, `NOT_MODIFIED`, `PAYLOAD_TOO_LARGE`,
+  `UNSUPPORTED_MEDIA_TYPE` and `RANGE_NOT_SATISFIABLE`.
+
+#### Fixed
+
+- `crates/spa` MIME lookup replaced with the full extension table (`.csv`, `.md`,
+  `.webp`, `.mp4`, … no longer fell through to `application/octet-stream`).
+- Static assets are no longer forced to `cache-control: no-store`.
+- `docs/rust-webx/13-extensibility/custom-endpoints.md` no longer claims a custom
+  `IEndpoint` can be registered through `register()`; it documents the two supported
+  escape hatches.
+
+#### Reference apps
+
+- **dmbit**: inventory export is a real `text/csv` download with a
+  `Content-Disposition` filename; inventory import is a real `multipart/form-data`
+  upload (`file` + `confirm_update`) instead of a JSON-encoded CSV string.
+
+### 简体中文
+
+#### 新增
+
+- **上传**：`multipart/form-data` 绑定到类型化请求结构体。字段声明为 `FormFile`
+  即可接收对应文件部分；文本、布尔、数值、`Option`、`Vec` 与单元枚举照常绑定。
+  请求结构体只需 `#[derive(Deserialize)]`，无需额外派生或中间件。
+- **上传**：文件部分以流式写入 `FormFileBuilder`，超过 `Form.MemoryThreshold`
+  即落盘到 `Form.TempDir`。峰值内存与文件大小无关，临时文件随请求结构体释放自动删除。
+- **上传**：`FormFile` 提供 `file_name()`（已净化）、`original_file_name()`、
+  `content_type()`、`size()`、`extension()`、`path()`、`open()`、`read_bytes()`、
+  `copy_to()`、`save_as()`（原子写入）。
+- **下载**：响应类型写 `ResponseData` 即可完全掌控状态码、响应头与响应体：
+  `json` / `text` / `html` / `bytes` / `file` / `no_content`，配合
+  `status()` / `content_type()` / `header()` / `download_name()` / `inline_name()`。
+- **下载**：对齐 ASP.NET Core 的 `File(...)` 家族。响应内容可以来自磁盘路径
+  （`ResponseData::file`）、未知长度的异步读取器（`ResponseData::file_stream`，
+  以 chunked 发送）、或已知长度且可 seek 的读取器
+  （`ResponseData::file_seekable_stream`，保留精确 `Content-Length` 与 `Range`）。
+  `ResponseData::with_file(FileBody)` 暴露文件级开关：
+  `enable_range_processing`、`entity_tag`、`last_modified`。
+- **下载**：`ResponseData::file` 流式发送，自动带 `Content-Length`、`ETag`、
+  `Last-Modified`、`Accept-Ranges` 与符合 RFC 6266/5987 的 `Content-Disposition`，
+  并支持 `Range`（`206`/`416`）、`If-Range`、`If-None-Match`/`If-Modified-Since`
+  （`304`）与 `HEAD`。
+- **断点续传**：`Range` 处理端到端符合 RFC 7233。区间先做合并——重叠、相邻、
+  重复的成员都会合并——因此范围请求不可能放大流量到超过文件本身；最多 8 个不相交
+  区间会以 `multipart/byteranges` 应答，`Content-Length` 精确计算；超过上限则退回
+  完整响应。不可满足的成员被丢弃，全部不可满足时返回 `416` 与
+  `Content-Range: bytes */<len>`；语法非法的成员会使整个头失效（§2.1）。
+- **断点续传**：校验器语义正确。`If-Range` 按 RFC 7233 §3.2 使用**强**比较
+  （弱标签永不匹配），`If-None-Match` 按 RFC 7232 §3.2 使用弱比较。`ETag` 保留完整
+  mtime 精度，因此原地修改但大小不变也能被识别；mtime 在未来时不发送
+  `Last-Modified`（RFC 7232 §2.2.2）；不支持范围请求时显式发送
+  `Accept-Ranges: none`，下载工具不必再试探。
+- **性能**：流式响应与落盘上传共用 64 KiB 的 `STREAM_BUF_SIZE`（`ReaderStream`
+  原先默认 4 KiB，每 GiB 会多出约 16 倍的 read 与 socket 写入）；文件响应只
+  `open` 一次并从同一句柄取长度与 mtime，不再 `metadata()` 后再 `open()`；
+  落盘上传走 64 KiB `BufWriter`，`tokio::fs` 不再为每个传输分片调度一次阻塞线程池；
+  内存态上传改用引用计数的 `Bytes` 承载，`FormFile::open` 不再复制；
+  `FormFile::copy_to` 改用 64 KiB 缓冲，而非 `tokio::io::copy` 的 8 KiB。
+- **路由**：`HEAD` 自动回退到同路径的 `GET` 路由，下载端点的 HEAD 头部与 GET 一致、无响应体。
+- **静态文件**：`SpaMiddleware` 改为交给宿主流式发送文件，`wwwroot` 资源同样获得
+  校验器与范围请求支持，MIME 改用完整扩展名表，不再整份读入内存；并覆盖了默认的
+  `cache-control: no-store`。
+- **配置**：新增 `Form` 配置节（`MaxRequestSize`、`MaxFileSize`、`MaxFieldSize`、
+  `MemoryThreshold`、`TempDir`）。multipart 请求按此度量，其余请求仍用
+  `App.MaxBodySize`；声明超限的 `Content-Length` 会在读取上传内容前直接返回 `413`。
+- **错误**：新增 `Error::PayloadTooLarge` → `413`、`Error::UnsupportedMediaType` → `415`。
+- **文档**：新增[文件上传与下载](docs/rust-webx/05-request-pattern/file-upload-download.md)章节。
+
+#### 变更
+
+- **（破坏性）** `IHttpRequest::body_bytes` / `body_text` 改为 `&mut self`：读取即消费，
+  重复读取会返回明确错误而不是空 body；`read_json_body` 改为接收 `&mut dyn IHttpRequest`。
+- **（破坏性）** `IHttpRequest` 新增 `content_type()`、`is_multipart()`、`multipart()`；
+  `IHttpResponse` 新增 `write_body(ResponseBody)`。两者都有默认实现，现有实现仍可编译。
+- **（破坏性）** `ResponseData.body` 改为 `ResponseBody`（`Bytes` 或 `File`）并新增
+  `headers` 字段；请改用构造方法而不是结构体字面量。
+- **（破坏性）** `IRequest<R>` / `IRequestHandler<T, R>` / `IMediator::send` 不再要求
+  `R: Serialize`，约束移到真正序列化的位置。这是 `IRequest<ResponseData>` 能成立的前提。
+- 路由 dispatch 函数改为接收 `&mut dyn IHttpContext`，端点因此可以流式读取请求体。
+- 请求体不再预先读入内存，在使用之前一直是活的流。
+- `IHttpResponse` 不再默认 `Content-Type: application/json`，由写入方显式设置。
+- `Cache-Control` 的默认值从 `SecurityHeadersMiddleware` 移到响应收尾阶段，
+  以便按响应类型区分：普通响应 `no-store`，文件响应
+  `public, max-age=0, must-revalidate`（`ETag` 配 `no-store` 永远用不上）。
+  两种情况都只在应用未显式设置 `cache-control` 时生效，显式设置始终优先。
+- 流式响应的 body 改用 `UnsyncBoxBody` 装箱，只要求 `Send`——要求 `Sync` 会
+  排除掉大多数流式读取器。
+- `HttpStatus` 新增 `PARTIAL_CONTENT`、`NOT_MODIFIED`、`PAYLOAD_TOO_LARGE`、
+  `UNSUPPORTED_MEDIA_TYPE`、`RANGE_NOT_SATISFIABLE`。
+
+#### 修复
+
+- `crates/spa` 的 MIME 推断改用完整扩展名表（`.csv`、`.md`、`.webp`、`.mp4` 等
+  不再落到 `application/octet-stream`）。
+- 静态资源不再被强制 `cache-control: no-store`。
+- 修正 `custom-endpoints.md` 中「可在 `register()` 里注册自定义 `IEndpoint`」的错误说明。
+
+#### 参考应用
+
+- **dmbit**：库存导出改为带 `Content-Disposition` 的 `text/csv` 真下载；
+  库存导入改为真正的 `multipart/form-data` 上传（`file` + `confirm_update`），
+  不再把 CSV 编码进 JSON 字符串。
+
 ## [0.3.7] — 2026-09-01 — rust-ef 1.8.3 + docbit DbContext
 
 > **English** · **简体中文**

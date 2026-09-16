@@ -112,20 +112,32 @@ impl IRouter for Router {
             None => return Ok(None),
         };
 
-        let router = self.method_router(method);
+        if let Some(matched) = self.method_router(method).at(path) {
+            return Ok(Some(collect_match(matched)));
+        }
 
-        if let Some(matched) = router.at(path) {
-            let mut params = HashMap::new();
-            for (key, value) in matched.params.iter() {
-                params.insert(key.to_string(), value.to_string());
+        // HEAD falls back to the GET route for the same path (RFC 9110 §9.3.2:
+        // HEAD is identical to GET without a body). The host suppresses the
+        // body when it writes the response, so the headers — including
+        // `Content-Length`, `ETag` and `Accept-Ranges` — are exactly those of
+        // the equivalent GET.
+        if method == HttpMethod::Head {
+            if let Some(matched) = self.get.at(path) {
+                return Ok(Some(collect_match(matched)));
             }
-
-            let (endpoint, pattern) = matched.value;
-            return Ok(Some((Arc::clone(endpoint), params, pattern.clone())));
         }
 
         Ok(None)
     }
+}
+
+fn collect_match(matched: matchit::Match<'_, '_, &RouteValue>) -> (Arc<dyn IEndpoint>, HashMap<String, String>, String) {
+    let mut params = HashMap::new();
+    for (key, value) in matched.params.iter() {
+        params.insert(key.to_string(), value.to_string());
+    }
+    let (endpoint, pattern) = matched.value;
+    (Arc::clone(endpoint), params, pattern.clone())
 }
 
 impl Default for Router {

@@ -8,6 +8,7 @@
 //! This module provides the `RouteEntry` type that connects compile-time
 //! macro output to runtime routing.
 
+use crate::http::ResponseBody;
 use crate::routing::HttpMethod;
 use std::any::Any;
 use std::collections::HashMap;
@@ -41,7 +42,8 @@ pub fn set_global_provider(provider: Arc<rust_dix::ServiceProvider>) {
 
 /// Deprecated shim: read the process-wide `ServiceProvider` fallback.
 ///
-/// Panics when no shim was set and no [`DispatchRuntime`] is active on this task.
+/// Panics when no shim was set and no [`DispatchRuntime`](crate::DispatchRuntime)
+/// is active on this task.
 #[deprecated(
     since = "0.2.0",
     note = "Use Host::provider() or dispatch_provider() within an active DispatchRuntime"
@@ -92,7 +94,7 @@ pub struct RouteEntry {
     /// Used to dispatch to the correct handler at runtime.
     pub handler_type: &'static str,
 
-    /// OpenAPI response type name (e.g., "UserModel", "Vec<UserModel>", "String").
+    /// OpenAPI response type name (e.g., `"UserModel"`, `"Vec<UserModel>"`, `"String"`).
     pub rsp_type: &'static str,
 
     /// Human-readable summary for OpenAPI docs (e.g., "Get user by ID").
@@ -156,30 +158,254 @@ pub struct HandlerRegistration {
 
 inventory::collect!(HandlerRegistration);
 
+/// The signature every route dispatch function implements.
+///
+/// It receives the live request context — headers, route parameters, claims and
+/// the body stream — and returns the response to write.
+pub type RouteDispatchFn = fn(
+    ctx: &mut dyn crate::http::IHttpContext,
+) -> std::pin::Pin<
+    Box<dyn std::future::Future<Output = crate::error::Result<ResponseData>> + Send + '_>,
+>;
+
 /// A dispatch function registered at compile time via the endpoint macros.
 ///
-/// Each `#[get]`, `#[post]`, etc. macro generates one of these with a
-/// function that constructs the request, looks up the handler, and
-/// calls through the HandlerCache call bridge.
+/// The function receives the live request context, so it can inspect headers,
+/// stream the body as `multipart/form-data`, and produce any
+/// [`ResponseData`] — including streamed file downloads.
 pub struct RouteDispatch {
     pub handler_type: &'static str,
-    #[allow(clippy::type_complexity)]
-    pub dispatch: fn(
-        body_bytes: Vec<u8>,
-        route_params: std::collections::HashMap<String, String>,
-        query_params: std::collections::HashMap<String, String>,
-        claims: Option<Box<dyn crate::auth::IClaims>>,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = crate::error::Result<ResponseData>> + Send>,
-    >,
+    pub dispatch: RouteDispatchFn,
 }
 
-/// Response data produced by a dispatch function.
+/// The HTTP response produced by an endpoint.
+///
+/// Most endpoints never build one directly: the endpoint macro turns a
+/// serializable response value into `application/json`. Return `ResponseData`
+/// from a handler when you need full control over the status, headers and body
+/// — for example to stream a file:
+///
+/// ```ignore
+/// async fn handle(&mut self, req: DownloadReportRequest) -> Result<ResponseData> {
+///     Ok(ResponseData::file(self.reports.path_for(&req.id)?)
+///         .content_type("text/csv")
+///         .download_name("report.csv"))
+/// }
+/// ```
 #[derive(Debug)]
 pub struct ResponseData {
+    /// HTTP status code.
     pub status: u16,
+    /// Media type. Applied before `headers`, so a header can override it.
     pub content_type: String,
-    pub body: Vec<u8>,
+    /// Extra response headers, applied in order.
+    pub headers: Vec<(String, String)>,
+    /// The response body.
+    pub body: ResponseBody,
+}
+
+impl ResponseData {
+    /// An empty `200` response.
+    pub fn new(status: u16) -> Self {
+        Self {
+            status,
+            content_type: String::new(),
+            headers: Vec::new(),
+            body: ResponseBody::Bytes(Vec::new()),
+        }
+    }
+
+    /// Serialize `value` as an `application/json` response.
+    pub fn json<T: serde::Serialize + ?Sized>(value: &T) -> crate::error::Result<Self> {
+        Ok(Self {
+            status: 200,
+            content_type: "application/json".to_string(),
+            headers: Vec::new(),
+            body: ResponseBody::Bytes(serde_json::to_vec(value)?),
+        })
+    }
+
+    /// `204 No Content`.
+    pub fn no_content() -> Self {
+        Self {
+            status: 204,
+            content_type: "application/json".to_string(),
+            headers: Vec::new(),
+            body: ResponseBody::Bytes(Vec::new()),
+        }
+    }
+
+    /// A `text/plain; charset=utf-8` response.
+    pub fn text(body: impl Into<String>) -> Self {
+        Self {
+            status: 200,
+            content_type: "text/plain; charset=utf-8".to_string(),
+            headers: Vec::new(),
+            body: ResponseBody::Bytes(body.into().into_bytes()),
+        }
+    }
+
+    /// A `text/html; charset=utf-8` response.
+    pub fn html(body: impl Into<String>) -> Self {
+        Self {
+            status: 200,
+            content_type: "text/html; charset=utf-8".to_string(),
+            headers: Vec::new(),
+            body: ResponseBody::Bytes(body.into().into_bytes()),
+        }
+    }
+
+    /// A binary response. Set [`ResponseData::content_type`] for anything other
+    /// than `application/octet-stream`.
+    pub fn bytes(body: impl Into<Vec<u8>>) -> Self {
+        Self {
+            status: 200,
+            content_type: "application/octet-stream".to_string(),
+            headers: Vec::new(),
+            body: ResponseBody::Bytes(body.into()),
+        }
+    }
+
+    /// Send the file at `path` — ASP.NET Core's `PhysicalFile(...)`.
+    ///
+    /// The host opens the file once, sends `Content-Length`, `Last-Modified` and
+    /// an `ETag`, honours conditional requests, and serves `Range` requests so
+    /// downloads can be resumed. The media type is inferred from the extension
+    /// unless overridden with [`ResponseData::content_type`].
+    pub fn file(path: impl Into<std::path::PathBuf>) -> Self {
+        Self::with_file(crate::http::FileBody::path(path))
+    }
+
+    /// Send an async reader of unknown length — ASP.NET Core's `File(Stream, ...)`.
+    ///
+    /// Nothing is buffered: bytes flow from the reader to the socket. The
+    /// response uses chunked transfer encoding, so there is no `Content-Length`
+    /// and no `Range` support; use [`ResponseData::file_seekable_stream`] when
+    /// the reader knows its length and can seek.
+    ///
+    /// ```ignore
+    /// // Stream a zip being built on the fly.
+    /// let (reader, writer) = tokio::io::duplex(64 * 1024);
+    /// tokio::spawn(async move { zip_into(writer).await });
+    /// Ok(ResponseData::file_stream(reader, "application/zip")
+    ///     .download_name("export.zip"))
+    /// ```
+    pub fn file_stream(
+        reader: impl tokio::io::AsyncRead + Send + Unpin + 'static,
+        content_type: impl Into<String>,
+    ) -> Self {
+        Self::with_file(crate::http::FileBody::stream(reader).content_type(content_type))
+    }
+
+    /// Send an async reader of known length that supports seeking.
+    ///
+    /// Keeps exact `Content-Length` and `Range`/`206` support, so clients can
+    /// resume. Pass an [`crate::http::FileBody::entity_tag`] to also get
+    /// conditional requests.
+    pub fn file_seekable_stream(
+        reader: impl tokio::io::AsyncRead + tokio::io::AsyncSeek + Send + Unpin + 'static,
+        len: u64,
+        content_type: impl Into<String>,
+    ) -> Self {
+        Self::with_file(
+            crate::http::FileBody::seekable_stream(reader, len).content_type(content_type),
+        )
+    }
+
+    /// Send a fully specified [`crate::http::FileBody`].
+    ///
+    /// Use this to set the file-specific HTTP knobs: `enable_range_processing`,
+    /// `last_modified` and `entity_tag`.
+    pub fn with_file(file: crate::http::FileBody) -> Self {
+        Self {
+            status: 200,
+            content_type: String::new(),
+            headers: Vec::new(),
+            body: ResponseBody::File(file),
+        }
+    }
+
+    /// Override the status code.
+    pub fn status(mut self, status: u16) -> Self {
+        self.status = status;
+        self
+    }
+
+    /// Override the media type.
+    pub fn content_type(mut self, content_type: impl Into<String>) -> Self {
+        self.content_type = content_type.into();
+        self
+    }
+
+    /// Add a response header.
+    pub fn header(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.headers.push((key.into(), value.into()));
+        self
+    }
+
+    /// Send the body as a download named `file_name`.
+    ///
+    /// For file bodies the host emits `Content-Disposition` while streaming;
+    /// for in-memory bodies the header is set here.
+    pub fn download_name(mut self, file_name: impl Into<String>) -> Self {
+        self.set_disposition(crate::http::Disposition::Attachment, file_name.into());
+        self
+    }
+
+    /// Present the body inline under `file_name`.
+    pub fn inline_name(mut self, file_name: impl Into<String>) -> Self {
+        self.set_disposition(crate::http::Disposition::Inline, file_name.into());
+        self
+    }
+
+    /// Enable or disable `Range` processing for a file body.
+    ///
+    /// Has no effect on in-memory bodies, which are always sent whole.
+    pub fn enable_range_processing(mut self, enabled: bool) -> Self {
+        if let ResponseBody::File(file) = &mut self.body {
+            file.enable_range_processing = enabled;
+        }
+        self
+    }
+
+    /// Advertise an explicit `Last-Modified`.
+    ///
+    /// For a file body this becomes the response validator; otherwise it is
+    /// written as a plain header.
+    pub fn last_modified(mut self, last_modified: std::time::SystemTime) -> Self {
+        if let ResponseBody::File(file) = &mut self.body {
+            file.last_modified = Some(last_modified);
+        } else {
+            let value = httpdate::fmt_http_date(last_modified);
+            self.headers.push(("last-modified".to_string(), value));
+        }
+        self
+    }
+
+    /// Advertise an explicit `ETag` (include the quotes).
+    ///
+    /// For a file body this becomes the response validator; otherwise it is
+    /// written as a plain header.
+    pub fn entity_tag(mut self, entity_tag: impl Into<String>) -> Self {
+        let entity_tag = entity_tag.into();
+        if let ResponseBody::File(file) = &mut self.body {
+            file.entity_tag = Some(entity_tag);
+        } else {
+            self.headers.push(("etag".to_string(), entity_tag));
+        }
+        self
+    }
+
+    fn set_disposition(&mut self, disposition: crate::http::Disposition, file_name: String) {
+        if let ResponseBody::File(file) = &mut self.body {
+            file.file_name = Some(file_name);
+            file.disposition = disposition;
+        } else {
+            let value = crate::http::content_disposition_value(disposition, &file_name);
+            self.headers
+                .push(("content-disposition".to_string(), value));
+        }
+    }
 }
 
 inventory::collect!(RouteDispatch);

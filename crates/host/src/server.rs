@@ -4,8 +4,7 @@
 //! are caught and converted to well-formed HTTP error responses using
 //! `Error::status_code()`.
 
-use http_body_util::Full;
-use hyper::body::{Bytes, Incoming};
+use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper::Request;
 use hyper_util::rt::TokioIo;
@@ -21,7 +20,7 @@ use rust_webx_core::routing::{HttpMethod, IEndpoint, IRouter};
 
 use crate::auth_jwt::{init_jwt_secret, jwt_middleware, JwtAuth};
 use crate::authz::{build_resource_policy_from_routes, collect_authorizers};
-use crate::context::HttpContext;
+use crate::context::{BodyLimits, HttpContext, RespBody};
 use crate::cors::{CorsConfig, CorsMiddleware};
 use crate::endpoint::{StaticHtmlEndpoint, StaticJsonEndpoint, StubEndpoint};
 use crate::health::{HealthCheckEndpoint, HealthCheckRegistry, HealthStatus};
@@ -60,6 +59,8 @@ pub struct Host {
     provider: Arc<ServiceProvider>,
     dispatch_runtime: Arc<DispatchRuntime>,
     pub options: AppOptions,
+    /// Body and upload limits, derived from `App` + `Form` configuration.
+    body_limits: BodyLimits,
     pipeline: Arc<MiddlewarePipeline>,
     /// The matchit router (retained for introspection).
     #[allow(dead_code)]
@@ -217,7 +218,8 @@ impl HostBuilder {
 
     /// Enable resource-based authorization using compile-time `#[authorize]` metadata.
     ///
-    /// Builds a [`ResourceAuthorization`] policy from route inventory and enforces it
+    /// Builds a [`ResourceAuthorization`](crate::authz::ResourceAuthorization)
+    /// policy from route inventory and enforces it
     /// at the endpoint layer (after routing, when `route_pattern()` is available).
     /// Requires `add_authentication()` for JWT claims.
     pub fn use_resource_authorization(mut self) -> Self {
@@ -354,6 +356,17 @@ impl HostBuilder {
             modifier(&mut options);
         }
 
+        // Upload spooling and body limits come from the same merged config.
+        let body_limits = BodyLimits::from_options(&options);
+        body_limits.apply_spool_root();
+        tracing::info!(
+            "[Host] Uploads: max request {} bytes, max file {} bytes, spool >{} bytes to {}",
+            body_limits.multipart_body,
+            body_limits.file,
+            body_limits.memory_threshold,
+            body_limits.spool_dir.display()
+        );
+
         let http_metrics = HttpMetrics::new();
 
         let mut pipeline = MiddlewarePipeline::new();
@@ -467,24 +480,10 @@ impl HostBuilder {
 
         crate::diagnostics::assert_route_configuration_valid();
 
-        // Build dispatch map: handler_type →dispatch function
-        #[allow(clippy::type_complexity)]
+        // Build dispatch map: handler_type → dispatch function
         let mut dispatch_map: std::collections::HashMap<
             &'static str,
-            fn(
-                Vec<u8>,
-                std::collections::HashMap<String, String>,
-                std::collections::HashMap<String, String>,
-                Option<Box<dyn rust_webx_core::auth::IClaims>>,
-            ) -> std::pin::Pin<
-                Box<
-                    dyn std::future::Future<
-                            Output = rust_webx_core::error::Result<
-                                rust_webx_core::route::scan::ResponseData,
-                            >,
-                        > + Send,
-                >,
-            >,
+            rust_webx_core::route::scan::RouteDispatchFn,
         > = std::collections::HashMap::new();
 
         for dispatch in inventory::iter::<rust_webx_core::route::scan::RouteDispatch> {
@@ -610,6 +609,7 @@ impl HostBuilder {
             provider,
             dispatch_runtime,
             options,
+            body_limits,
             pipeline,
             router,
             router_handler,
@@ -762,7 +762,7 @@ impl Host {
         let router_handler = self.router_handler.clone();
         let dispatch_runtime = Arc::clone(&self.dispatch_runtime);
         let mode = self.mode;
-        let max_body_size = self.options.app.max_body_size;
+        let body_limits = self.body_limits.clone();
         let max_connections = self.options.app.max_connections;
 
         for addr in &http_addrs {
@@ -778,7 +778,7 @@ impl Host {
                 rh,
                 dr,
                 mode,
-                max_body_size,
+                body_limits.clone(),
                 max_connections,
             )));
         }
@@ -799,7 +799,7 @@ impl Host {
                     rh,
                     dr,
                     mode,
-                    max_body_size,
+                    body_limits.clone(),
                     max_connections,
                 )));
             }
@@ -829,7 +829,7 @@ impl Host {
             self.router_handler.clone(),
             Arc::clone(&self.dispatch_runtime),
             self.mode,
-            self.options.app.max_body_size,
+            self.body_limits.clone(),
             self.options.app.max_connections,
         )
         .await;
@@ -912,12 +912,12 @@ async fn handle_request(
     pipeline: Arc<MiddlewarePipeline>,
     router_handler: HandlerFn,
     dispatch_runtime: Arc<DispatchRuntime>,
-    max_body_size: usize,
-) -> std::result::Result<hyper::Response<Full<Bytes>>, std::convert::Infallible> {
-    let mut ctx = HttpContext::new(req, max_body_size).await;
+    body_limits: BodyLimits,
+) -> std::result::Result<hyper::Response<RespBody>, std::convert::Infallible> {
+    let mut ctx = HttpContext::new(req, body_limits);
 
-    // If HttpContext::new already set an error response (e.g. 413 Payload Too Large),
-    // skip the pipeline — the response is final.
+    // A request rejected during construction (e.g. a declared Content-Length
+    // above the limit) already carries its final response.
     if ctx.response().status() < 400 {
         let result = dispatch_runtime
             .run(async { pipeline.execute(&mut ctx, router_handler).await })
@@ -928,7 +928,7 @@ async fn handle_request(
         }
     }
 
-    Ok(ctx.into_response())
+    Ok(ctx.into_response().await)
 }
 
 async fn write_error_response(ctx: &mut dyn IHttpContext, status: u16, message: &str) {
@@ -1075,7 +1075,7 @@ async fn serve_http(
     router_handler: HandlerFn,
     dispatch_runtime: Arc<DispatchRuntime>,
     mode: AppMode,
-    max_body_size: usize,
+    body_limits: BodyLimits,
     max_connections: usize,
 ) {
     let listener = match tokio::net::TcpListener::bind(&addr).await {
@@ -1112,6 +1112,7 @@ async fn serve_http(
                 let pipeline = Arc::clone(&pipeline);
                 let router_handler = router_handler.clone();
                 let dispatch_runtime = Arc::clone(&dispatch_runtime);
+                let body_limits = body_limits.clone();
 
                 join_set.spawn(async move {
                     let _permit = permit;
@@ -1119,6 +1120,7 @@ async fn serve_http(
                         let pipeline = Arc::clone(&pipeline);
                         let router_handler = router_handler.clone();
                         let dispatch_runtime = Arc::clone(&dispatch_runtime);
+                        let body_limits = body_limits.clone();
                         let mode = mode;
                         async move {
                             let start = Instant::now();
@@ -1129,7 +1131,7 @@ async fn serve_http(
                                 pipeline,
                                 router_handler,
                                 dispatch_runtime,
-                                max_body_size,
+                                body_limits,
                             )
                             .await;
                             let elapsed = start.elapsed();
@@ -1176,7 +1178,7 @@ async fn serve_https(
     router_handler: HandlerFn,
     dispatch_runtime: Arc<DispatchRuntime>,
     mode: AppMode,
-    max_body_size: usize,
+    body_limits: BodyLimits,
     max_connections: usize,
 ) {
     let listener = match tokio::net::TcpListener::bind(&addr).await {
@@ -1213,6 +1215,7 @@ async fn serve_https(
                 let pipeline = Arc::clone(&pipeline);
                 let router_handler = router_handler.clone();
                 let dispatch_runtime = Arc::clone(&dispatch_runtime);
+                let body_limits = body_limits.clone();
 
                 join_set.spawn(async move {
                     let _permit = permit;
@@ -1223,6 +1226,7 @@ async fn serve_https(
                                 let pipeline = Arc::clone(&pipeline);
                                 let router_handler = router_handler.clone();
                                 let dispatch_runtime = Arc::clone(&dispatch_runtime);
+                                let body_limits = body_limits.clone();
                                 let mode = mode;
                                 async move {
                                     let start = Instant::now();
@@ -1233,7 +1237,7 @@ async fn serve_https(
                                         pipeline,
                                         router_handler,
                                         dispatch_runtime,
-                                        max_body_size,
+                                        body_limits,
                                     )
                                     .await;
                                     let elapsed = start.elapsed();

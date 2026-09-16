@@ -19,7 +19,7 @@ use crate::pipeline::BoxedNextFn;
 pub async fn dispatch<T, R>(provider: &Arc<rust_dix::ServiceProvider>, req: T) -> Result<R>
 where
     T: IRequest<R> + Send + 'static,
-    R: serde::Serialize + Send + 'static,
+    R: Send + 'static,
 {
     let req_type_id = std::any::TypeId::of::<T>();
 

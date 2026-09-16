@@ -44,7 +44,7 @@ use crate::mediator::{IEventRequest, IRequest};
 pub trait IRequestHandler<T, R>: Send + Sync
 where
     T: IRequest<R> + Send + 'static,
-    R: serde::Serialize + Send + 'static,
+    R: Send + 'static,
 {
     /// Handle the request. Claims (if any) are already in `req` via `set_claims`.
     async fn handle(&mut self, req: T) -> Result<R>;

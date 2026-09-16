@@ -63,6 +63,7 @@ rust-webx **不是** 全栈 UI 框架（可搭配任意前端）、**不是** OR
 - **零配置 Handler 注册** — `#[handler]` 属性宏自动向 DI 容器注册 Handler。
 - **认证与授权** — JWT Bearer 认证 + 基于路由模式的资源授权（`#[authorize]`、`#[claims]`）。
 - **开箱即用的生产能力** — 优雅关闭、动态健康检查、安全响应头、请求 ID、CORS、TLS、速率限制、压缩、OpenAPI + SPA 托管。
+- **文件上传与下载** — `multipart/form-data` 以类型化 `FormFile` 绑定（流式接收、按阈值落盘、大小受控）；下载提供对齐 ASP.NET Core 的 `File(...)` 家族（`file` / `file_stream` / `file_seekable_stream`），自带 `Content-Disposition`、`ETag`、`Last-Modified` 与 `Range`。
 - **ORM 无关** — 框架不依赖 `rust-ef`；`docbit` 参考应用用极少量胶水代码接入。
 
 ## 架构
@@ -97,7 +98,7 @@ rust-webx **不是** 全栈 UI 框架（可搭配任意前端）、**不是** OR
 
 ```
 rust-webx/
-├── Cargo.toml                 # workspace 根 (v0.3.7)
+├── Cargo.toml                 # workspace 根 (v0.4.0)
 ├── crates/
 │   ├── core/                  # rust-webx-core  — trait 与配置
 │   ├── host/                  # rust-webx-host  — Host 构建器、中间件管道
@@ -259,6 +260,8 @@ docker compose -f docbit/docker-compose.yml --env-file docbit/.env up --build
 | CORS `*` production fail-fast | ✅ |
 | OpenAPI UI | 仅 Development 模式 |
 | 速率限制 / 压缩 | 应用层 opt-in（`use_middleware`） |
+| 文件上传（流式、落盘、限流） | ✅ |
+| 文件下载（`File(...)` 形态、流式、`Content-Disposition`、`ETag`、`Range`、`304`、`HEAD`） | ✅ |
 | TLS | ✅ 通过 `App.Urls` + `Tls.CertPath/KeyPath` |
 
 ## 环境变量

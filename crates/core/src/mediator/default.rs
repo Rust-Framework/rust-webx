@@ -34,7 +34,7 @@ impl IMediator for Mediator {
     async fn send<T, R>(&self, req: T) -> Result<R>
     where
         T: IRequest<R> + Send + 'static,
-        R: serde::Serialize + Send + 'static,
+        R: Send + 'static,
     {
         dispatch::dispatch(&self.provider, req).await
     }

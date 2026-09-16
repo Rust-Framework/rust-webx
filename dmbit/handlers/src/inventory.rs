@@ -399,8 +399,8 @@ pub struct ImportInventoryHandler {
 
 #[handler(inject)]
 #[async_trait]
-impl IRequestHandler<ExportInventoryRequest, InventoryCsvModel> for ExportInventoryHandler {
-    async fn handle(&mut self, _: ExportInventoryRequest) -> Result<InventoryCsvModel> {
+impl IRequestHandler<ExportInventoryRequest, ResponseData> for ExportInventoryHandler {
+    async fn handle(&mut self, _: ExportInventoryRequest) -> Result<ResponseData> {
         let mut products = linq!(self.ctx.set::<Product>();).to_list().await.map_ef()?;
         products.sort_by_key(|a| a.sort_order);
         let specs = linq!(self.ctx.set::<Spec>();).to_list().await.map_ef()?;
@@ -449,7 +449,12 @@ impl IRequestHandler<ExportInventoryRequest, InventoryCsvModel> for ExportInvent
         let mut csv = String::from("\u{FEFF}");
         csv.push_str(&lines.join("\n"));
         csv.push('\n');
-        Ok(InventoryCsvModel { csv })
+
+        // A real file response: the browser gets `text/csv` plus a
+        // `Content-Disposition` filename, and the body is streamed.
+        Ok(ResponseData::bytes(csv.into_bytes())
+            .content_type("text/csv; charset=utf-8")
+            .download_name(INVENTORY_EXPORT_FILE_NAME))
     }
 }
 
@@ -476,7 +481,11 @@ struct AccSpec {
 #[async_trait]
 impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportInventoryHandler {
     async fn handle(&mut self, req: ImportInventoryRequest) -> Result<ImportInventoryResult> {
-        let text = req.csv.trim_start_matches('\u{FEFF}');
+        let bytes = req.file.read_bytes().await?;
+        let raw = String::from_utf8(bytes).map_err(|_| {
+            Error::Validation("导入文件不是有效的 UTF-8 文本，请用 Excel 另存为 UTF-8 CSV".to_string())
+        })?;
+        let text = raw.trim_start_matches('\u{FEFF}');
         let rows = parse_csv_rows(text);
         let mut lines = rows.into_iter();
         let header = lines.next().unwrap_or_default();

@@ -84,8 +84,10 @@ impl<'a> FormDeserializer<'a> {
         let mut index: HashMap<&'a str, usize> = HashMap::new();
 
         {
-            let mut push = |groups: &mut Vec<Group<'a>>, name: &'a str, value: ValueRef<'a>| {
-                match index.get(name) {
+            let mut push =
+                |groups: &mut Vec<Group<'a>>, name: &'a str, value: ValueRef<'a>| match index
+                    .get(name)
+                {
                     Some(&at) => groups[at].values.push(value),
                     None => {
                         index.insert(name, groups.len());
@@ -94,8 +96,7 @@ impl<'a> FormDeserializer<'a> {
                             values: vec![value],
                         });
                     }
-                }
-            };
+                };
 
             for (name, value) in route_params {
                 push(&mut groups, name.as_str(), ValueRef::Text(value.as_str()));
@@ -228,7 +229,11 @@ macro_rules! parse_text {
         fn $method<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, FormError> {
             let text = self.first_text()?;
             let value: $ty = text.parse().map_err(|_| {
-                FormError::custom(format!("cannot parse {text:?} as {} for {}", $label, stringify!($method)))
+                FormError::custom(format!(
+                    "cannot parse {text:?} as {} for {}",
+                    $label,
+                    stringify!($method)
+                ))
             })?;
             visitor.$visit(value)
         }
@@ -242,10 +247,11 @@ impl<'de, 'a> Deserializer<'de> for FormValueDeserializer<'a> {
         match self.values {
             [] => visitor.visit_unit(),
             [ValueRef::Text(text)] => visitor.visit_str(text),
-            [ValueRef::File(position)] => {
-                visitor.visit_map(FormFileAccess::single(*position))
-            }
-            many => visitor.visit_seq(FormSeqAccess { values: many, index: 0 }),
+            [ValueRef::File(position)] => visitor.visit_map(FormFileAccess::single(*position)),
+            many => visitor.visit_seq(FormSeqAccess {
+                values: many,
+                index: 0,
+            }),
         }
     }
 
@@ -266,9 +272,7 @@ impl<'de, 'a> Deserializer<'de> for FormValueDeserializer<'a> {
 
     fn deserialize_map<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, FormError> {
         match self.values {
-            [ValueRef::File(position)] => {
-                visitor.visit_map(FormFileAccess::single(*position))
-            }
+            [ValueRef::File(position)] => visitor.visit_map(FormFileAccess::single(*position)),
             _ => Err(FormError::custom(
                 "expected a single file part for this field",
             )),
@@ -413,8 +417,7 @@ impl<'de> MapAccess<'de> for FormFileAccess {
         if self.index > 0 {
             return Ok(None);
         }
-        seed.deserialize(StrDeserializer(FILE_HANDLE_KEY))
-            .map(Some)
+        seed.deserialize(StrDeserializer(FILE_HANDLE_KEY)).map(Some)
     }
 
     fn next_value_seed<V: DeserializeSeed<'de>>(&mut self, seed: V) -> Result<V::Value, FormError> {
@@ -485,7 +488,10 @@ impl<'de> VariantAccess<'de> for FormVariantAccess {
         Ok(())
     }
 
-    fn newtype_variant_seed<T: DeserializeSeed<'de>>(self, _seed: T) -> Result<T::Value, FormError> {
+    fn newtype_variant_seed<T: DeserializeSeed<'de>>(
+        self,
+        _seed: T,
+    ) -> Result<T::Value, FormError> {
         Err(FormError::custom(
             "form fields cannot carry a newtype enum variant; use a unit variant",
         ))

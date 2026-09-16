@@ -131,7 +131,9 @@ impl IRouter for Router {
     }
 }
 
-fn collect_match(matched: matchit::Match<'_, '_, &RouteValue>) -> (Arc<dyn IEndpoint>, HashMap<String, String>, String) {
+fn collect_match(
+    matched: matchit::Match<'_, '_, &RouteValue>,
+) -> (Arc<dyn IEndpoint>, HashMap<String, String>, String) {
     let mut params = HashMap::new();
     for (key, value) in matched.params.iter() {
         params.insert(key.to_string(), value.to_string());

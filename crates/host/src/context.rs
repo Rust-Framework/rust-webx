@@ -22,6 +22,7 @@
 //! `If-Range`, `If-None-Match` and `If-Modified-Since` requests, so downloads
 //! can be cached and resumed.
 
+use futures_util::{StreamExt, TryStreamExt};
 use http_body_util::{combinators::UnsyncBoxBody, BodyExt, Full};
 use hyper::body::{Bytes, Frame, Incoming};
 use hyper::Request;
@@ -33,7 +34,6 @@ use rust_webx_core::http::{
     content_disposition_value, ByteRange, FileBody, FileSource, IClaimsExt, IHttpContext,
     IHttpRequest, IHttpResponse, ResponseBody, SeekableReader,
 };
-use futures_util::{StreamExt, TryStreamExt};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -182,7 +182,11 @@ impl HttpContext {
             limits,
         };
 
-        Self { req, resp, claims: None }
+        Self {
+            req,
+            resp,
+            claims: None,
+        }
     }
 
     /// Finish the request and produce the hyper response.
@@ -358,7 +362,8 @@ async fn read_body(incoming: Incoming, limit: usize) -> Result<Vec<u8>> {
     let mut stream = incoming.into_data_stream();
 
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|err| Error::Http(format!("failed to read request body: {err}")))?;
+        let chunk =
+            chunk.map_err(|err| Error::Http(format!("failed to read request body: {err}")))?;
         total = total.saturating_add(chunk.len());
         if total > limit {
             return Err(Error::PayloadTooLarge(format!(
@@ -477,12 +482,12 @@ fn charge(total: &mut u64, len: usize, limit: u64) -> Result<u64> {
 
 fn multer_error(err: multer::Error) -> Error {
     match err {
-        multer::Error::FieldSizeExceeded { limit, .. } => Error::PayloadTooLarge(format!(
-            "multipart field exceeds the {limit}-byte limit"
-        )),
-        multer::Error::StreamSizeExceeded { limit } => Error::PayloadTooLarge(format!(
-            "multipart request exceeds the {limit}-byte limit"
-        )),
+        multer::Error::FieldSizeExceeded { limit, .. } => {
+            Error::PayloadTooLarge(format!("multipart field exceeds the {limit}-byte limit"))
+        }
+        multer::Error::StreamSizeExceeded { limit } => {
+            Error::PayloadTooLarge(format!("multipart request exceeds the {limit}-byte limit"))
+        }
         multer::Error::IncompleteFieldData { .. } | multer::Error::IncompleteStream => {
             Error::Validation("multipart body ended unexpectedly".to_string())
         }
@@ -982,7 +987,8 @@ fn multipart_stream(
                     let frame = if header.is_empty() {
                         chunk
                     } else {
-                        let mut combined = bytes::BytesMut::with_capacity(header.len() + chunk.len());
+                        let mut combined =
+                            bytes::BytesMut::with_capacity(header.len() + chunk.len());
                         combined.extend_from_slice(&header);
                         combined.extend_from_slice(&chunk);
                         combined.freeze()
@@ -1045,7 +1051,11 @@ fn problem_bytes(
         "content-type".to_string(),
         "application/problem+json".to_string(),
     );
-    bytes_response(status, headers, problem_to_bytes(&build_problem(status, detail)))
+    bytes_response(
+        status,
+        headers,
+        problem_to_bytes(&build_problem(status, detail)),
+    )
 }
 
 fn build_response(
@@ -1356,7 +1366,8 @@ mod tests {
             Some("----abc123")
         );
         assert_eq!(
-            multipart_boundary("multipart/form-data; charset=utf-8; boundary=\"quoted\"").as_deref(),
+            multipart_boundary("multipart/form-data; charset=utf-8; boundary=\"quoted\"")
+                .as_deref(),
             Some("quoted")
         );
         assert_eq!(multipart_boundary("multipart/form-data"), None);
@@ -1380,7 +1391,10 @@ mod tests {
 
     #[test]
     fn rejects_unsatisfiable_and_malformed_ranges() {
-        assert_eq!(parse_ranges("bytes=1000-", 1000), RangeOutcome::Unsatisfiable);
+        assert_eq!(
+            parse_ranges("bytes=1000-", 1000),
+            RangeOutcome::Unsatisfiable
+        );
         assert_eq!(parse_ranges("bytes=-0", 1000), RangeOutcome::Unsatisfiable);
         assert_eq!(
             parse_ranges("bytes=500-100", 1000),
@@ -1390,7 +1404,10 @@ mod tests {
         assert_eq!(parse_ranges("bytes=", 1000), RangeOutcome::Ignored);
         // RFC 7233 §2.1: one malformed member invalidates the whole header.
         assert_eq!(parse_ranges("bytes=abc-def", 1000), RangeOutcome::Ignored);
-        assert_eq!(parse_ranges("bytes=0-9,abc-def", 1000), RangeOutcome::Ignored);
+        assert_eq!(
+            parse_ranges("bytes=0-9,abc-def", 1000),
+            RangeOutcome::Ignored
+        );
     }
 
     #[test]
@@ -1411,10 +1428,7 @@ mod tests {
 
         // Overlapping ranges merge, so a client cannot ask for the same bytes
         // twice and make the server send them twice.
-        assert_eq!(
-            parse_ranges("bytes=0-99,50-149", 1000),
-            ranges(0, 149)
-        );
+        assert_eq!(parse_ranges("bytes=0-99,50-149", 1000), ranges(0, 149));
 
         // Adjacent ranges merge too — one read instead of two.
         assert_eq!(parse_ranges("bytes=0-9,10-19", 1000), ranges(0, 19));

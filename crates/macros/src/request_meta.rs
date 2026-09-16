@@ -1,8 +1,8 @@
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{
-    parse_macro_input, Attribute, Data, DeriveInput, Fields, GenericArgument, Meta,
-    PathArguments, Type,
+    parse_macro_input, Attribute, Data, DeriveInput, Fields, GenericArgument, Meta, PathArguments,
+    Type,
 };
 
 /// `#[derive(WebxRequestMeta)]` — registers OpenAPI parameter metadata for a request struct.
@@ -117,7 +117,9 @@ fn form_file_hint(ty: &Type) -> Option<&'static str> {
     match last.ident.to_string().as_str() {
         "FormFile" => Some("binary"),
         "Option" => inner_type(last).and_then(form_file_hint),
-        "Vec" => inner_type(last).and_then(form_file_hint).map(|_| "binary[]"),
+        "Vec" => inner_type(last)
+            .and_then(form_file_hint)
+            .map(|_| "binary[]"),
         _ => None,
     }
 }

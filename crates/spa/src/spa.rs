@@ -107,7 +107,8 @@ async fn serve_file(
     cache_control: &str,
 ) -> Result<ControlFlow<()>> {
     ctx.response_mut().set_status(HttpStatus::OK);
-    ctx.response_mut().set_header("cache-control", cache_control);
+    ctx.response_mut()
+        .set_header("cache-control", cache_control);
     ctx.response_mut()
         .write_body(FileBody::path(path).into())
         .await?;

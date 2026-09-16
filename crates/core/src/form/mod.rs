@@ -141,7 +141,10 @@ impl fmt::Debug for FormFile {
             .field("file_name", &self.inner.file_name)
             .field("content_type", &self.inner.content_type)
             .field("size", &self.inner.size)
-            .field("spooled_to_disk", &matches!(self.inner.source, FileSource::Disk { .. }))
+            .field(
+                "spooled_to_disk",
+                &matches!(self.inner.source, FileSource::Disk { .. }),
+            )
             .finish()
     }
 }
@@ -252,10 +255,7 @@ impl FormFile {
             if read == 0 {
                 return Ok(total);
             }
-            writer
-                .write_all(&buffer[..read])
-                .await
-                .map_err(io_error)?;
+            writer.write_all(&buffer[..read]).await.map_err(io_error)?;
             total += read as u64;
         }
     }

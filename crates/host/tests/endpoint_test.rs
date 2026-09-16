@@ -49,9 +49,7 @@ impl IClaims for MockClaims {
 
 fn mock_dispatch_ok(
     _ctx: &mut dyn IHttpContext,
-) -> std::pin::Pin<
-    Box<dyn std::future::Future<Output = LrwfResult<ResponseData>> + Send + '_>,
-> {
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = LrwfResult<ResponseData>> + Send + '_>> {
     Box::pin(async move { ResponseData::json(&serde_json::json!({"ok": true})) })
 }
 

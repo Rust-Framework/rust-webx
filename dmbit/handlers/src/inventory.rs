@@ -483,7 +483,9 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
     async fn handle(&mut self, req: ImportInventoryRequest) -> Result<ImportInventoryResult> {
         let bytes = req.file.read_bytes().await?;
         let raw = String::from_utf8(bytes).map_err(|_| {
-            Error::Validation("导入文件不是有效的 UTF-8 文本，请用 Excel 另存为 UTF-8 CSV".to_string())
+            Error::Validation(
+                "导入文件不是有效的 UTF-8 文本，请用 Excel 另存为 UTF-8 CSV".to_string(),
+            )
         })?;
         let text = raw.trim_start_matches('\u{FEFF}');
         let rows = parse_csv_rows(text);

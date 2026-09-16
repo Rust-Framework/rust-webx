@@ -264,7 +264,8 @@ fn big_body() -> Vec<u8> {
 fn download_dir() -> PathBuf {
     DOWNLOAD_DIR
         .get_or_init(|| {
-            let dir = std::env::temp_dir().join(format!("webx-download-test-{}", std::process::id()));
+            let dir =
+                std::env::temp_dir().join(format!("webx-download-test-{}", std::process::id()));
             std::fs::create_dir_all(&dir).unwrap();
             std::fs::write(dir.join("data.csv"), b"col_a,col_b\n1,2\n").unwrap();
             std::fs::write(dir.join("big.bin"), big_body()).unwrap();
@@ -382,7 +383,10 @@ async fn large_upload_is_spooled_to_disk_and_still_readable() {
     assert_eq!(resp.status().as_u16(), 200);
     let summary: UploadSummary = resp.json().await.unwrap();
     assert_eq!(summary.size, 4096);
-    assert!(summary.spooled, "a 4 KiB part with a 16-byte threshold must spool");
+    assert!(
+        summary.spooled,
+        "a 4 KiB part with a 16-byte threshold must spool"
+    );
     assert_eq!(summary.content.len(), 4096);
 }
 
@@ -401,7 +405,11 @@ async fn json_body_cannot_bind_a_file_field() {
         .await
         .unwrap();
 
-    assert_eq!(resp.status().as_u16(), 400, "JSON must not satisfy a FormFile");
+    assert_eq!(
+        resp.status().as_u16(),
+        400,
+        "JSON must not satisfy a FormFile"
+    );
 }
 
 #[tokio::test]
@@ -543,7 +551,11 @@ async fn file_download_sets_headers_and_streams_the_body() {
             .contains("csv"),
         "content type should be inferred from the extension"
     );
-    let disposition = headers.get("content-disposition").unwrap().to_str().unwrap();
+    let disposition = headers
+        .get("content-disposition")
+        .unwrap()
+        .to_str()
+        .unwrap();
     assert!(disposition.starts_with("attachment"), "got {disposition}");
     assert!(disposition.contains("report.csv"), "got {disposition}");
     assert_eq!(
@@ -579,7 +591,10 @@ async fn range_request_returns_partial_content() {
         headers.get("content-range").unwrap().to_str().unwrap(),
         "bytes 0-4/16"
     );
-    assert_eq!(headers.get("content-length").unwrap().to_str().unwrap(), "5");
+    assert_eq!(
+        headers.get("content-length").unwrap().to_str().unwrap(),
+        "5"
+    );
     assert_eq!(resp.text().await.unwrap(), "col_a");
 
     // Suffix range: the last 4 bytes.
@@ -781,7 +796,11 @@ async fn resumable_download_reassembles_the_file() {
             .await
             .unwrap();
 
-        assert_eq!(resp.status().as_u16(), 206, "resume at {start} must be partial");
+        assert_eq!(
+            resp.status().as_u16(),
+            206,
+            "resume at {start} must be partial"
+        );
         assert_eq!(
             resp.headers()
                 .get("content-range")
@@ -802,7 +821,10 @@ async fn resumable_download_reassembles_the_file() {
     }
 
     assert_eq!(received.len(), body.len());
-    assert!(received == body, "resumed download differs from the original");
+    assert!(
+        received == body,
+        "resumed download differs from the original"
+    );
 }
 
 #[tokio::test]
@@ -1074,10 +1096,7 @@ async fn openapi_documents_the_upload_endpoint_as_multipart() {
     assert_eq!(schema["properties"]["avatar"]["type"], "string");
     assert_eq!(schema["properties"]["avatar"]["format"], "binary");
     assert_eq!(schema["properties"]["gallery"]["type"], "array");
-    assert_eq!(
-        schema["properties"]["gallery"]["items"]["format"],
-        "binary"
-    );
+    assert_eq!(schema["properties"]["gallery"]["items"]["format"], "binary");
 
     // A multipart request documents its unmarked fields as form fields too.
     assert_eq!(schema["properties"]["title"]["type"], "string");
@@ -1121,7 +1140,9 @@ async fn stream_download_is_chunked_and_unbuffered() {
         headers.get("accept-ranges").unwrap().to_str().unwrap(),
         "none"
     );
-    assert!(headers.get("accept-ranges").is_none() || headers.get("accept-ranges").unwrap() == "none");
+    assert!(
+        headers.get("accept-ranges").is_none() || headers.get("accept-ranges").unwrap() == "none"
+    );
     assert!(headers
         .get("content-disposition")
         .unwrap()
@@ -1152,7 +1173,10 @@ async fn seekable_stream_download_serves_ranges_and_validators() {
         headers.get("accept-ranges").unwrap().to_str().unwrap(),
         "bytes"
     );
-    assert_eq!(headers.get("etag").unwrap().to_str().unwrap(), "\"seekable-v1\"");
+    assert_eq!(
+        headers.get("etag").unwrap().to_str().unwrap(),
+        "\"seekable-v1\""
+    );
     assert_eq!(full.text().await.unwrap(), "0123456789abcdef");
 
     // A range on a seekable stream seeks instead of buffering.

@@ -45,10 +45,10 @@ pub use rust_webx_core::route::diagnostics::{
 pub use rust_webx_core::routing::{HttpMethod, IEndpoint, IRouter, RouteMeta};
 
 // --- DI extensions ---
+pub use rust_webx_core::route::bind::bind_form_request;
 pub use rust_webx_core::route::ext::{
     is_mediator_active, should_scan_endpoints, IServiceCollectionExt,
 };
-pub use rust_webx_core::route::bind::bind_form_request;
 pub use rust_webx_core::route::params::try_deserialize_from_params;
 #[allow(deprecated)]
 pub use rust_webx_core::route::scan::{

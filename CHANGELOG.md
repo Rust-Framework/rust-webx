@@ -101,6 +101,9 @@ All notable changes to **rust-webx** are documented in this file.
 
 #### Fixed
 
+- **security**: `rustls` bumped to `0.23.45` and `rustls-webpki` to `0.103.15` for
+  RUSTSEC-2026-0285 (TLS 1.3 handshake messages could be accepted across encryption
+  level boundaries).
 - `crates/spa` MIME lookup replaced with the full extension table (`.csv`, `.md`,
   `.webp`, `.mp4`, … no longer fell through to `application/octet-stream`).
 - Static assets are no longer forced to `cache-control: no-store`.
@@ -189,6 +192,8 @@ All notable changes to **rust-webx** are documented in this file.
 
 #### 修复
 
+- **安全**：`rustls` 升级到 `0.23.45`、`rustls-webpki` 升级到 `0.103.15`，修复
+  RUSTSEC-2026-0285（TLS 1.3 握手消息曾可跨加密层级被接受）。
 - `crates/spa` 的 MIME 推断改用完整扩展名表（`.csv`、`.md`、`.webp`、`.mp4` 等
   不再落到 `application/octet-stream`）。
 - 静态资源不再被强制 `cache-control: no-store`。

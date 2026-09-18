@@ -95,6 +95,19 @@ pub use rust_webx_core::mediator::Mediator;
 // --- Web (SPA) ---
 pub use rust_webx_spa::SpaMiddleware;
 
+/// Static file hosting, including files compiled into the executable.
+///
+/// ```ignore
+/// rust_webx::spa::embed_assets!();   // once per binary, after build.rs ran
+///
+/// Host::builder().use_spa("wwwroot").embed().build()
+/// ```
+pub mod spa {
+    pub use rust_webx_spa::{
+        embed_assets, inventory, EmbeddedAsset, EmbeddedAssets, SpaMiddleware, SpaSource, EMBED_ENV,
+    };
+}
+
 // --- OpenAPI ---
 pub use rust_webx_openapi::{generate_openapi_spec, APIUI_HTML};
 

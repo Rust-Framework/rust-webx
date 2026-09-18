@@ -85,3 +85,14 @@ async fn use_middleware_with_registers_into_pipeline() {
     assert_eq!(resp.status().as_u16(), 200);
     assert_eq!(resp.headers().get("x-via-with").unwrap(), "1");
 }
+
+/// `embed()` must fail loudly when nothing was compiled in: a silent no-op would
+/// serve 404s from a deployment that looks correctly built.
+#[test]
+#[should_panic(expected = "embed() found no compiled-in assets")]
+fn embed_without_a_registered_table_panics() {
+    let _ = Host::builder()
+        .mode(rust_webx_core::mode::AppMode::Development)
+        .use_spa("wwwroot")
+        .embed();
+}

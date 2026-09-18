@@ -584,3 +584,198 @@ async fn e2e_seo_robots_sitemap_and_ssr_shell() {
 
     fx.teardown().await;
 }
+
+// ---------------------------------------------------------------------------
+// Static files compiled into the executable
+// ---------------------------------------------------------------------------
+
+/// Send a conditional GET, returning the status code.
+async fn status_with_range(base: &str, path: &str, range: &str) -> (u16, Option<String>) {
+    let resp = reqwest::Client::new()
+        .get(format!("{base}{path}"))
+        .header("range", range)
+        .send()
+        .await
+        .unwrap();
+    let status = resp.status().as_u16();
+    let content_range = resp
+        .headers()
+        .get("content-range")
+        .map(|value| value.to_str().unwrap().to_string());
+    (status, content_range)
+}
+
+/// A deployment of just the executable: no `wwwroot` at all, so everything is
+/// served from the binary.
+#[tokio::test]
+#[serial]
+async fn e2e_static_files_are_served_from_the_binary_without_wwwroot() {
+    let dir = setup_app_dir();
+    // The shared fixture writes a shell index.html; remove it so this test
+    // exercises the lone-executable deployment.
+    std::fs::remove_dir_all(dir.path().join("wwwroot")).unwrap();
+
+    let port = rust_webx::free_port();
+    let server = rust_webx::spawn(docbit_host::build_host(), port).await;
+    let base = server.base_url.clone();
+    let client = reqwest::Client::new();
+
+    let index = client
+        .get(format!("{base}/index.html"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(index.status().as_u16(), 200);
+    let etag = index
+        .headers()
+        .get("etag")
+        .expect("embedded files carry a content-derived ETag")
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        etag.starts_with("\"sha256-"),
+        "expected a content hash, got {etag}"
+    );
+    assert_eq!(
+        index
+            .headers()
+            .get("accept-ranges")
+            .map(|value| value.to_str().unwrap()),
+        Some("bytes"),
+        "embedded files are seekable, so ranges must work"
+    );
+    assert!(!index.text().await.unwrap().is_empty());
+
+    // A sibling with no index.html fallback involved is served from the binary
+    // too, not shadowed by the SPA shell.
+    let script = client.get(format!("{base}/app.js")).send().await.unwrap();
+    assert_eq!(script.status().as_u16(), 200);
+    assert_eq!(
+        script.headers().get("content-type").unwrap(),
+        "text/javascript"
+    );
+    assert!(script
+        .headers()
+        .get("etag")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .starts_with("\"sha256-"));
+
+    // Conditional request revalidates against the same validator.
+    let conditional = client
+        .get(format!("{base}/index.html"))
+        .header("if-none-match", &etag)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(conditional.status().as_u16(), 304);
+
+    // An unknown path falls back to the embedded index.html for SPA routing.
+    let fallback = client
+        .get(format!("{base}/some/client/route"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(fallback.status().as_u16(), 200);
+    assert_eq!(
+        fallback.headers().get("etag").unwrap().to_str().unwrap(),
+        etag,
+        "the fallback must be the embedded index.html"
+    );
+
+    server.teardown().await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    drop(dir);
+}
+
+#[tokio::test]
+#[serial]
+async fn e2e_embedded_static_file_supports_byte_ranges() {
+    let fx = spawn_docbit().await;
+    let base = fx.base();
+    let client = reqwest::Client::new();
+
+    // Read the length from the representation so the assertions do not depend on
+    // the size of the checked-in stylesheet.
+    let full = client.get(format!("{base}/app.css")).send().await.unwrap();
+    assert_eq!(full.status().as_u16(), 200);
+    let len = full
+        .headers()
+        .get("content-length")
+        .expect("embedded files have an exact Content-Length")
+        .to_str()
+        .unwrap()
+        .to_string();
+
+    let (status, content_range) = status_with_range(&base, "/app.css", "bytes=0-49").await;
+    assert_eq!(status, 206);
+    assert_eq!(
+        content_range.as_deref(),
+        Some(format!("bytes 0-49/{len}").as_str()),
+        "the total length must be the embedded file's length"
+    );
+
+    // A start offset at or past the end cannot be satisfied, and the response
+    // still reports the full length so a client can restart the transfer.
+    let (status, content_range) =
+        status_with_range(&base, "/app.css", &format!("bytes={len}-")).await;
+    assert_eq!(status, 416);
+    assert_eq!(content_range.as_deref(), Some(format!("bytes */{len}").as_str()));
+
+    fx.teardown().await;
+}
+
+/// A file dropped next to the binary wins over the embedded copy; everything
+/// else keeps coming from the binary even though `wwwroot/` exists on disk.
+#[tokio::test]
+#[serial]
+async fn e2e_wwwroot_overrides_embedded_file() {
+    let dir = setup_app_dir();
+    let wwwroot = dir.path().join("wwwroot");
+    std::fs::create_dir_all(&wwwroot).unwrap();
+    std::fs::write(wwwroot.join("app.css"), b"/* operator override */").unwrap();
+
+    let port = rust_webx::free_port();
+    let server = rust_webx::spawn(docbit_host::build_host(), port).await;
+    let base = server.base_url.clone();
+    let client = reqwest::Client::new();
+
+    let overridden = client
+        .get(format!("{base}/app.css"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(overridden.status().as_u16(), 200);
+    let etag = overridden
+        .headers()
+        .get("etag")
+        .map(|value| value.to_str().unwrap().to_string())
+        .unwrap_or_default();
+    assert!(
+        !etag.starts_with("\"sha256-"),
+        "a disk override is validated by size-mtime, not by the embedded content hash"
+    );
+    assert_eq!(overridden.text().await.unwrap(), "/* operator override */");
+
+    // A sibling that was not overridden still comes from the binary. The
+    // fixture's wwwroot/index.html must not swallow it as an SPA fallback.
+    let embedded = client.get(format!("{base}/app.js")).send().await.unwrap();
+    assert_eq!(embedded.status().as_u16(), 200);
+    assert_eq!(
+        embedded.headers().get("content-type").unwrap(),
+        "text/javascript"
+    );
+    assert!(embedded
+        .headers()
+        .get("etag")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .starts_with("\"sha256-"));
+
+    server.teardown().await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    drop(dir);
+}

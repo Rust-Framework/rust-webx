@@ -19,6 +19,12 @@
     跳过 cargo build，直接复用已有的 target\release\docbit-host.exe。
     适合仅调整了 wwwroot 静态资源后的快速重发。
 
+.PARAMETER NoWwwroot
+    不发布 wwwroot/ 目录：静态资源已由 build.rs 编译进 exe（见 host/build.rs 与
+    `Host::builder().use_spa("wwwroot").embed()`），部署产物只剩 exe 与配置文件。
+    如需在 exe 旁覆盖个别文件（例如替换 favicon），在目标目录手工建 wwwroot/
+    放入那几个文件即可，无需重新发布。
+
 .PARAMETER Clean
     发布前清空目标目录（删除后重建），确保无残留旧文件。
     默认为增量覆盖，保留目标目录中的 docs/ 等运行期数据。
@@ -66,6 +72,8 @@ param(
 
     [switch]$SkipBuild,
 
+    [switch]$NoWwwroot,
+
     [switch]$Clean,
 
     [switch]$Production,
@@ -97,8 +105,8 @@ $AppsettingsBase   = Join-Path $DocbitDir 'appsettings.json'
 $AppsettingsProd   = Join-Path $DocbitDir 'appsettings.Production.json'
 
 # ---------- 前置校验 ----------
-if (-not (Test-Path $WwwrootSrc)) {
-    throw "未找到 wwwroot 目录: $WwwrootSrc"
+if (-not $NoWwwroot -and -not (Test-Path $WwwrootSrc)) {
+    throw "未找到 wwwroot 目录: $WwwrootSrc（静态资源已内嵌时可改用 -NoWwwroot）"
 }
 if (-not (Test-Path $AppsettingsBase)) {
     throw "未找到 appsettings.json: $AppsettingsBase"
@@ -123,6 +131,7 @@ Write-Host "WorkspaceRoot : $WorkspaceRoot"
 Write-Host "DocbitDir     : $DocbitDir"
 Write-Host "Destination   : $Destination"
 Write-Host "SkipBuild     : $SkipBuild"
+Write-Host "NoWwwroot     : $NoWwwroot"
 Write-Host "Clean         : $Clean"
 Write-Host "Production    : $Production"
 Write-Host "Linux         : $Linux"
@@ -197,36 +206,39 @@ Write-Host "[2/6] 复制 $ExeName" -ForegroundColor Green
 Copy-Item -Path $ExePath -Destination (Join-Path $Destination $ExeName) -Force
 
 # ---------- 3. 复制 wwwroot ----------
-Write-Host "[3/6] 同步 wwwroot/" -ForegroundColor Green
-$WwwrootDest = Join-Path $Destination 'wwwroot'
-if (Test-Path $WwwrootDest) {
-    # 增量覆盖：先清空目标 wwwroot 内容，再复制（保留 wwwroot 目录本身）
-    Get-ChildItem -Path $WwwrootDest -Force | Remove-Item -Recurse -Force
+if ($NoWwwroot) {
+    Write-Host "[3/6] 跳过 wwwroot/（-NoWwwroot，静态资源已内嵌于 exe）" -ForegroundColor DarkGray
 } else {
-    New-Item -Path $WwwrootDest -ItemType Directory -Force | Out-Null
-}
+    Write-Host "[3/6] 同步 wwwroot/" -ForegroundColor Green
+    $WwwrootDest = Join-Path $Destination 'wwwroot'
+    if (Test-Path $WwwrootDest) {
+        # 增量覆盖：先清空目标 wwwroot 内容，再复制（保留 wwwroot 目录本身）
+        Get-ChildItem -Path $WwwrootDest -Force | Remove-Item -Recurse -Force
+    } else {
+        New-Item -Path $WwwrootDest -ItemType Directory -Force | Out-Null
+    }
 
-# 使用 robocopy 同步目录（高效、保留结构、支持排除）
-# 排除开发期文件
-$robocopyArgs = @(
-    $WwwrootSrc,
-    $WwwrootDest,
-    '/E',          # 包含空目录
-    '/NFL',        # 不列出每个文件
-    '/NDL',        # 不列出目录
-    '/NJH',        # 不显示作业头
-    '/NP',         # 不显示进度
-    '/MT:8',       # 多线程
-    '/R:1',        # 重试 1 次
-    '/W:1'         # 重试等待 1s
-)
-& robocopy @robocopyArgs | Out-Null
-# robocopy 退出码 0-7 视为成功，>=8 才是错误
-if ($LASTEXITCODE -ge 8) {
-    throw "robocopy 失败，退出码 $LASTEXITCODE"
+    # 使用 robocopy 同步目录（高效、保留结构、支持排除）
+    $robocopyArgs = @(
+        $WwwrootSrc,
+        $WwwrootDest,
+        '/E',          # 包含空目录
+        '/NFL',        # 不列出每个文件
+        '/NDL',        # 不列出目录
+        '/NJH',        # 不显示作业头
+        '/NP',         # 不显示进度
+        '/MT:8',       # 多线程
+        '/R:1',        # 重试 1 次
+        '/W:1'         # 重试等待 1s
+    )
+    & robocopy @robocopyArgs | Out-Null
+    # robocopy 退出码 0-7 视为成功，>=8 才是错误
+    if ($LASTEXITCODE -ge 8) {
+        throw "robocopy 失败，退出码 $LASTEXITCODE"
+    }
+    # 重置 $LASTEXITCODE，避免后续判断受影响
+    $global:LASTEXITCODE = 0
 }
-# 重置 $LASTEXITCODE，避免后续判断受影响
-$global:LASTEXITCODE = 0
 
 # ---------- 4. 复制配置文件 ----------
 Write-Host "[4/6] 复制配置文件 (appsettings.json + Production)" -ForegroundColor Green
@@ -297,9 +309,13 @@ if ($Production) {
 Write-Host ""
 Write-Host "=== 发布完成 ===" -ForegroundColor Cyan
 $ExeItem = Get-Item (Join-Path $Destination $ExeName)
-$WwwrootSize = (Get-ChildItem -Path $WwwrootDest -Recurse -File | Measure-Object -Property Length -Sum).Sum
 Write-Host ("exe      : {0} ({1:N0} bytes)" -f $ExeItem.Name, $ExeItem.Length)
-Write-Host ("wwwroot  : {0:N0} bytes" -f $WwwrootSize)
+if ($NoWwwroot) {
+    Write-Host "wwwroot  : (未发布，静态资源已内嵌于 exe)"
+} else {
+    $WwwrootSize = (Get-ChildItem -Path $WwwrootDest -Recurse -File | Measure-Object -Property Length -Sum).Sum
+    Write-Host ("wwwroot  : {0:N0} bytes" -f $WwwrootSize)
+}
 Write-Host ""
 Write-Host "目标目录结构:" -ForegroundColor DarkGray
 Get-ChildItem -Path $Destination | ForEach-Object {

@@ -246,6 +246,23 @@ impl FileBody {
         }
     }
 
+    /// Send bytes compiled into the executable — ASP.NET Core's embedded
+    /// `ManifestEmbeddedFileProvider`.
+    ///
+    /// The slice is borrowed, never copied, and is served as a seekable source,
+    /// so `Content-Length`, `Range`/`206` and conditional requests all work.
+    /// Build one with `include_bytes!`-backed tables, such as the ones produced
+    /// by `rust_webx_build::embed_assets` and included with
+    /// `rust_webx::spa::embed_assets!()`.
+    ///
+    /// The extension-derived media type is not available for in-memory bytes,
+    /// so set [`FileBody::content_type`] explicitly. There is no mtime either,
+    /// so supply [`FileBody::entity_tag`] (a content hash is the usual choice)
+    /// if clients should be able to revalidate.
+    pub fn static_bytes(bytes: &'static [u8]) -> Self {
+        Self::seekable_stream(std::io::Cursor::new(bytes), bytes.len() as u64)
+    }
+
     /// Override the media type instead of deriving it from the extension.
     pub fn content_type(mut self, content_type: impl Into<String>) -> Self {
         self.content_type = Some(content_type.into());

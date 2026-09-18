@@ -34,7 +34,7 @@ use jsonwebtoken::{DecodingKey, Validation};
 use rust_webx_core::route::scan::RouteEntry;
 use rust_webx_core::DispatchRuntime;
 use rust_webx_openapi::{generate_openapi_spec, APIUI_HTML};
-use rust_webx_spa::SpaMiddleware;
+use rust_webx_spa::{EmbeddedAssets, SpaMiddleware, SpaSource, EMBED_ENV};
 
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig;
@@ -54,6 +54,33 @@ fn is_weak_jwt_secret(secret: &str) -> bool {
         || secret.contains("dev-secret")
 }
 
+/// Log where the SPA files come from and which embedded files are overridden.
+///
+/// Overrides are the point of the feature, but a stale one silently defeats an
+/// updated build, so the list is logged instead of waiting to be discovered.
+fn log_spa_source(spa: &SpaMiddleware) {
+    tracing::info!("[Host] SPA root: {}", spa.resolved_root().display());
+    let Some(assets) = spa.embedded() else {
+        return;
+    };
+    tracing::info!(
+        "[Host] Embedded assets: {} files, {:.1} MiB, built from `{}`",
+        assets.len(),
+        assets.total_bytes() as f64 / (1024.0 * 1024.0),
+        assets.root(),
+    );
+    let shadowed = assets.shadowed_by(spa.resolved_root());
+    if !shadowed.is_empty() {
+        tracing::warn!(
+            "[Host] {} embedded file(s) are overridden on disk: {}. \
+             An override older than the current build stays in effect until it is \
+             updated or deleted.",
+            shadowed.len(),
+            shadowed.join(", "),
+        );
+    }
+}
+
 pub struct Host {
     #[allow(dead_code)]
     provider: Arc<ServiceProvider>,
@@ -68,8 +95,9 @@ pub struct Host {
     /// Pre-built router handler —eliminates per-request Arc::new.
     router_handler: HandlerFn,
     mode: AppMode,
+    /// Kept for introspection; the middleware already holds its own copy.
     #[allow(dead_code)]
-    spa_root: Option<String>,
+    spa_source: Option<SpaSource>,
     shutdown: Arc<tokio::sync::Notify>,
     /// Hosted services that are started on host start
     /// and stopped on graceful shutdown.
@@ -80,7 +108,7 @@ pub struct Host {
 pub struct HostBuilder {
     service_configs: Vec<Box<dyn FnOnce(ServiceCollection) -> ServiceCollection + Send>>,
     mode: AppMode,
-    spa_root: Option<String>,
+    spa_source: Option<SpaSource>,
     spa_disabled: bool,
     options_modifiers: Vec<Box<dyn FnOnce(&mut AppOptions) + Send>>,
     cors_config: Option<CorsConfig>,
@@ -117,7 +145,7 @@ impl HostBuilder {
             // 默认从 `APP_ENV` 环境变量解析运行模式；未设置时为 Development。
             // 应用可通过 `.mode()` 显式覆盖。
             mode: AppMode::from_env(),
-            spa_root: None,
+            spa_source: None,
             spa_disabled: false,
             options_modifiers: Vec::new(),
             cors_config: None,
@@ -180,8 +208,78 @@ impl HostBuilder {
         })
     }
 
-    pub fn use_spa(mut self, root: impl Into<String>) -> Self {
-        self.spa_root = Some(root.into());
+    /// Serve SPA static files from a directory on disk.
+    ///
+    /// ```ignore
+    /// Host::builder().use_spa("wwwroot").build()
+    /// ```
+    ///
+    /// Chain [`embed`](Self::embed) to serve files compiled into the executable
+    /// underneath this directory. The call order does not matter: once `.embed()`
+    /// is present, this directory is where an operator may drop overrides.
+    pub fn use_spa(mut self, source: impl Into<SpaSource>) -> Self {
+        self.spa_source = Some(match (self.spa_source.take(), source.into()) {
+            // Compiled-in files are already configured: only move the directory
+            // overrides are read from, rather than dropping the baseline.
+            (Some(SpaSource::Embedded { assets, .. }), SpaSource::Disk(root)) => {
+                SpaSource::Embedded {
+                    assets,
+                    overlay_root: root,
+                }
+            }
+            (_, incoming) => incoming,
+        });
+        self
+    }
+
+    /// Serve files compiled into the executable as the SPA baseline.
+    ///
+    /// ```ignore
+    /// // build.rs
+    /// fn main() -> Result<(), rust_webx_build::Error> {
+    ///     rust_webx_build::embed_assets("wwwroot")
+    /// }
+    ///
+    /// // main.rs
+    /// rust_webx::spa::embed_assets!();
+    ///
+    /// Host::builder().use_spa("wwwroot").embed().build()
+    /// ```
+    ///
+    /// The table comes from the build script, so no directory is named here. A
+    /// file of the same name under the `use_spa` directory wins; the embedded
+    /// copy is served otherwise. Without a preceding `use_spa`, the directory
+    /// the assets were built from is also the override directory.
+    ///
+    /// # Panics
+    ///
+    /// When the crate has not registered exactly one table — i.e. `build.rs` did
+    /// not call [`rust_webx_build::embed_assets`], or more than one crate in
+    /// the binary called `embed_assets!()`. Failing here is deliberate: a silent
+    /// no-op would serve 404s from a deployment that looks correctly built.
+    pub fn embed(mut self) -> Self {
+        let mut found = inventory::iter::<EmbeddedAssets>();
+        let assets = match (found.next(), found.next()) {
+            (Some(assets), None) => *assets,
+            (None, _) => panic!(
+                "embed() found no compiled-in assets. Have build.rs call \
+                 `rust_webx_build::embed_assets(\"wwwroot\")` and invoke \
+                 `rust_webx::spa::embed_assets!();` once in your crate. \
+                 Set {EMBED_ENV}=off to ignore compiled-in files at runtime instead."
+            ),
+            (Some(_), Some(_)) => panic!(
+                "embed() found more than one compiled-in asset table; \
+                 `rust_webx::spa::embed_assets!()` must be invoked exactly once per binary"
+            ),
+        };
+        let overlay_root = match self.spa_source.as_ref() {
+            Some(source) => source.disk_root().to_string(),
+            None => assets.root().to_string(),
+        };
+        self.spa_source = Some(SpaSource::Embedded {
+            assets,
+            overlay_root,
+        });
         self
     }
 
@@ -429,27 +527,29 @@ impl HostBuilder {
             }
         }
 
-        // SPA 自动启用：若应用显式调用 `use_spa`，使用指定根目录；
+        // SPA 自动启用：若应用显式调用 `use_spa`，使用指定的文件源；
         // 否则框架自动检测应用基准目录下的 `wwwroot/`，存在即启用 SPA。
         // 这样新应用无需在 main.rs 手写 `use_spa("wwwroot")` 样板。
         // `no_spa()` 可显式禁用此行为（含自动检测），用于纯 API 主机或测试隔离。
         // SPA runs after JWT so auth middleware sees API requests first; SpaMiddleware
         // skips /api/* paths so unmatched API routes return 404 from the router.
-        let spa_root = if self.spa_disabled {
+        let spa_source = if self.spa_disabled {
             None
         } else {
-            self.spa_root.clone().or_else(|| {
+            self.spa_source.clone().or_else(|| {
                 let candidate = rust_webx_core::paths::app_base().join("wwwroot");
                 if candidate.is_dir() {
                     tracing::info!("[Host] Auto-detected SPA root: {}", candidate.display());
-                    Some(candidate.to_string_lossy().into_owned())
+                    Some(SpaSource::Disk(candidate.to_string_lossy().into_owned()))
                 } else {
                     None
                 }
             })
         };
-        if let Some(ref spa_root) = spa_root {
-            pipeline.add_middleware(Arc::new(SpaMiddleware::new(spa_root.clone())));
+        if let Some(source) = spa_source {
+            let spa = SpaMiddleware::from_source(source);
+            log_spa_source(&spa);
+            pipeline.add_middleware(Arc::new(spa));
         }
 
         // Users can register additional middleware here, e.g.:
@@ -570,8 +670,16 @@ impl HostBuilder {
             tracing::info!("  ----------------------------------------------------------------");
             tracing::info!("    App:      {}", options.app.name);
             tracing::info!("    CORS:     enabled");
-            if let Some(ref root) = self.spa_root {
-                tracing::info!("    SPA Root: {}", root);
+            if let Some(source) = self.spa_source.as_ref() {
+                tracing::info!("    SPA Root: {}", source.disk_root());
+                if let Some(assets) = source.embedded() {
+                    tracing::info!(
+                        "    Embedded: {} files, {:.1} MiB (built from {})",
+                        assets.len(),
+                        assets.total_bytes() as f64 / (1024.0 * 1024.0),
+                        assets.root(),
+                    );
+                }
             }
             if route_count > 0 {
                 tracing::info!("    Routes:   {} registered", route_count);
@@ -614,7 +722,7 @@ impl HostBuilder {
             router,
             router_handler,
             mode: self.mode,
-            spa_root: self.spa_root,
+            spa_source: self.spa_source.clone(),
             shutdown: Arc::new(tokio::sync::Notify::new()),
             hosted_services,
         }

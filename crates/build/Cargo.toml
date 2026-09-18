@@ -1,0 +1,19 @@
+[package]
+name = "rust-webx-build"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "rust-webx build-script support: compile static files into the executable"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme = "../../README.md"
+keywords = ["web", "static-files", "embedded", "build-script"]
+categories = ["web-programming", "build-utils"]
+
+[dependencies]
+mime_guess.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

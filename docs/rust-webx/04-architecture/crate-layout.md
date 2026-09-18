@@ -69,6 +69,33 @@
 
 二者均依赖 `core`，被 `host` 在 `HostBuilder` 中集成。
 
+## build — 编译期资源层
+
+| Crate | 职责 |
+|-------|------|
+| `rust-webx-build` | 构建期把静态目录编译进可执行文件（`build-dependencies`） |
+
+`rust-webx-build` 只在 `build.rs` 中运行，**不依赖任何框架 crate**（无 `core`，
+也就不会把 tokio/hyper 拖进构建期）。它扫描目录、生成 `EmbeddedAsset` 表写入
+`OUT_DIR`，由 `rust-webx-spa` 的 `embed_assets!()` 引入、`HostBuilder::embed()` 启用：
+
+```rust
+// build.rs — 编译期
+fn main() -> Result<(), rust_webx_build::Error> {
+    rust_webx_build::embed_assets("wwwroot")
+}
+```
+
+它属于**编译期**层：文件集、MIME、内容 `ETag` 在编译时确定。运行期配置
+（`appsettings.json`、端口、密钥、TLS）不在此列，否则每次改配置都要重新编译。
+
+依赖方向因此独立于运行时金字塔：
+
+```
+build.rs ──> rust-webx-build          （只读目录 + 写 OUT_DIR）
+src/ ──────> rust-webx (伞) ──> host / macros / spa / openapi ──> core
+```
+
 ## webapp — 伞 Crate
 
 统一 re-export，应用只需：

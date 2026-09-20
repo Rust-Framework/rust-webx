@@ -3,18 +3,60 @@
 //!
 //! Rendering is pure: every field comes from the scan, so one scan produces the
 //! same text everywhere and the generated file is byte-stable between rebuilds.
+//!
+//! Compressed assets are written to `OUT_DIR` first; the table then points
+//! `include_bytes!` at those payloads instead of the source files.
 
 use std::fmt::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use crate::error::Error;
 use crate::scan::Asset;
+
+/// Directory under `OUT_DIR` holding the brotli payloads the table includes.
+pub(crate) const PAYLOAD_DIR: &str = "webx_assets";
+
+/// Write the compressed payloads the generated table will `include_bytes!`.
+///
+/// The directory is rebuilt from scratch, so a payload left by an earlier build
+/// cannot survive as a stale blob the linker keeps for no reason.
+pub(crate) fn payloads(out_dir: &Path, assets: &[Asset]) -> Result<PathBuf, Error> {
+    let dir = out_dir.join(PAYLOAD_DIR);
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).map_err(|source| Error::Io {
+        operation: "create",
+        path: dir.clone(),
+        source,
+    })?;
+
+    for (index, asset) in assets.iter().enumerate() {
+        let Some(compressed) = &asset.compressed else {
+            continue;
+        };
+        let target = dir.join(payload_name(index));
+        std::fs::write(&target, compressed).map_err(|source| Error::Io {
+            operation: "write",
+            path: target,
+            source,
+        })?;
+    }
+    Ok(dir)
+}
+
+/// File name for the payload of the asset at `index`.
+///
+/// Assets are sorted by key before rendering, so an index is stable across
+/// rebuilds and the generated file stays byte-identical.
+fn payload_name(index: usize) -> String {
+    format!("{index:04}.br")
+}
 
 /// Rust source declaring the table and submitting it to the asset registry.
 ///
 /// The embedded paths must be absolute: the generated file is written to
 /// `OUT_DIR`, so `include_bytes!` would resolve a relative path against the out
 /// directory rather than the crate that owns the assets.
-pub(crate) fn table(declared: &Path, assets: &[Asset]) -> String {
+pub(crate) fn table(declared: &Path, assets: &[Asset], payload_dir: &Path) -> String {
     let mut out = String::with_capacity(1024 + assets.len() * 256);
     let _ = writeln!(
         out,
@@ -23,20 +65,31 @@ pub(crate) fn table(declared: &Path, assets: &[Asset]) -> String {
     );
     out.push_str(
         "// Included by `webx::spa::embed_assets!()`; the build script re-runs\n\
-         // when any file below that directory changes.\n\n",
+         // when any file below that directory changes.\n\
+         // `Brotli` entries are brotli streams plus their original length; the\n\
+         // rest are the files themselves.\n\n",
     );
 
     let _ = writeln!(
         out,
         "const _WEBX_EMBEDDED_FILES: &[::webx::spa::EmbeddedAsset] = &["
     );
-    for asset in assets {
+    for (index, asset) in assets.iter().enumerate() {
+        let (bytes, encoding) = match &asset.compressed {
+            Some(_) => (
+                payload_dir.join(payload_name(index)),
+                "::webx::spa::ContentEncoding::Brotli",
+            ),
+            None => (asset.path.clone(), "::webx::spa::ContentEncoding::Identity"),
+        };
         let _ = writeln!(
             out,
             "    ::webx::spa::EmbeddedAsset {{ path: {}, bytes: ::core::include_bytes!({}), \
-             content_type: {}, etag: {} }},",
+             raw_len: {}, encoding: {}, content_type: {}, etag: {} }},",
             literal(&asset.key),
-            literal(&slashed(&asset.path)),
+            literal(&slashed(&bytes)),
+            asset.raw_len,
+            encoding,
             literal(&asset.content_type),
             literal(&asset.etag),
         );
@@ -83,9 +136,11 @@ fn slashed(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{literal, table};
+    use super::{literal, payloads, table};
     use crate::scan::Asset;
     use std::path::{Path, PathBuf};
+
+    const PAYLOAD_DIR: &str = "C:/out/webx_assets";
 
     fn asset(key: &str, content_type: &str) -> Asset {
         Asset {
@@ -93,7 +148,21 @@ mod tests {
             path: PathBuf::from("C:/assets").join(key),
             content_type: content_type.to_string(),
             etag: format!("\"sha256-{key}\""),
+            raw_len: 6,
+            compressed: None,
         }
+    }
+
+    fn encoded_asset(key: &str, content_type: &str) -> Asset {
+        Asset {
+            compressed: Some(b"br".to_vec()),
+            raw_len: 4096,
+            ..asset(key, content_type)
+        }
+    }
+
+    fn render(assets: &[Asset]) -> String {
+        table(Path::new("../wwwroot"), assets, Path::new(PAYLOAD_DIR))
     }
 
     #[test]
@@ -106,9 +175,14 @@ mod tests {
 
     #[test]
     fn every_asset_field_reaches_the_table() {
-        let out = table(Path::new("../wwwroot"), &[asset("app.css", "text/css")]);
+        let out = render(&[asset("app.css", "text/css")]);
         assert!(out.contains("path: \"app.css\""), "got {out}");
         assert!(out.contains("content_type: \"text/css\""), "got {out}");
+        assert!(out.contains("raw_len: 6"), "got {out}");
+        assert!(
+            out.contains("encoding: ::webx::spa::ContentEncoding::Identity"),
+            "got {out}"
+        );
         assert!(
             out.contains("etag: \"\\\"sha256-app.css\\\"\""),
             "got {out}"
@@ -121,8 +195,24 @@ mod tests {
     }
 
     #[test]
+    fn a_compressed_asset_points_at_its_payload_and_reports_its_raw_length() {
+        let out = render(&[encoded_asset("app.js", "text/javascript")]);
+        assert!(
+            out.contains(r#"include_bytes!("C:/out/webx_assets/0000.br")"#),
+            "got {out}"
+        );
+        assert!(
+            out.contains("encoding: ::webx::spa::ContentEncoding::Brotli"),
+            "got {out}"
+        );
+        // The decoded length is the file's size, not the payload's.
+        assert!(out.contains("raw_len: 4096"), "got {out}");
+        assert!(!out.contains("C:/assets/app.js"), "got {out}");
+    }
+
+    #[test]
     fn the_source_directory_is_recorded_for_people_and_for_the_overlay_default() {
-        let out = table(Path::new("../wwwroot"), &[asset("app.css", "text/css")]);
+        let out = render(&[asset("app.css", "text/css")]);
         assert!(out.contains("from `../wwwroot`"), "got {out}");
         assert!(
             out.contains(r#"EmbeddedAssets::new("../wwwroot", _WEBX_EMBEDDED_FILES)"#),
@@ -132,7 +222,7 @@ mod tests {
 
     #[test]
     fn an_empty_directory_still_renders_valid_code() {
-        let out = table(Path::new("wwwroot"), &[]);
+        let out = render(&[]);
         assert!(
             out.contains("const _WEBX_EMBEDDED_FILES: &[::webx::spa::EmbeddedAsset] = &["),
             "got {out}"
@@ -146,11 +236,45 @@ mod tests {
 
     #[test]
     fn a_path_with_a_newline_cannot_break_the_header_comment() {
-        let out = table(Path::new("wwwroot\nlet evil = 1;"), &[]);
-        assert!(!out.contains("let evil = 1;\n"), "got {out}");
-        assert!(
-            out.contains("// @generated by rust-webx-build from `wwwroot"),
-            "got {out}"
+        let out = render(&[]);
+        assert!(out.contains("from `../wwwroot`"), "got {out}");
+
+        let sneaky = table(
+            Path::new("wwwroot\nlet evil = 1;"),
+            &[],
+            Path::new(PAYLOAD_DIR),
         );
+        assert!(!sneaky.contains("let evil = 1;\n"), "got {sneaky}");
+        assert!(
+            sneaky.contains("// @generated by rust-webx-build from `wwwroot"),
+            "got {sneaky}"
+        );
+    }
+
+    #[test]
+    fn payloads_writes_only_compressed_assets_and_clears_stale_files() {
+        let out = tempfile::tempdir().unwrap();
+        let dir = payloads(out.path(), &[asset("a.css", "text/css")]).unwrap();
+        assert!(dir.is_dir());
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+
+        let assets = [
+            encoded_asset("a.js", "text/javascript"),
+            asset("b.png", "image/png"),
+        ];
+        let dir = payloads(out.path(), &assets).unwrap();
+        let written: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            written,
+            ["0000.br"],
+            "only the compressed payload is copied"
+        );
+
+        // A later scan with fewer assets must not leave the old blob behind.
+        payloads(out.path(), &[]).unwrap();
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
     }
 }

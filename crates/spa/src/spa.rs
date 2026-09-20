@@ -9,9 +9,15 @@
 //! rather than read into memory, and every response carries an `ETag` and
 //! `Last-Modified` and honours `Range` requests. That means a 2 GB video in
 //! `wwwroot` is served with a bounded memory footprint and can be seeked.
+//!
+//! Embedded entries may be stored brotli-compressed. Those are sent as-is to
+//! clients that accept `br` and decoded once (then cached) for clients that do
+//! not, so a smaller binary does not cost a decode per request.
 
+use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use webx_core::error::Result;
 use webx_core::http::{FileBody, HttpStatus, IHttpContext};
 use webx_core::middleware::IMiddleware;
@@ -24,6 +30,10 @@ use crate::embed::{EmbeddedAsset, EmbeddedAssets};
 /// year; everything else must revalidate with the `ETag` the host sends.
 const IMMUTABLE_CACHE: &str = "public, max-age=31536000, immutable";
 const REVALIDATE_CACHE: &str = "public, max-age=0, must-revalidate";
+
+/// Embedded files may be answered with a brotli payload or the plain file
+/// depending on the request, so every embedded response varies on this.
+const VARY: &str = "accept-encoding";
 
 /// Environment variable that turns embedded assets off at runtime.
 ///
@@ -288,6 +298,11 @@ async fn serve_file(
 /// exact `Content-Length` and supports `Range`, `If-None-Match` and `HEAD` just
 /// like a file on disk. The `ETag` comes from the table because there is no
 /// mtime to derive one from.
+///
+/// A stored brotli payload is handed over as-is when the client accepts `br`,
+/// which costs neither a decode nor an allocation. A client that cannot read it
+/// gets the decoded bytes instead — decoded once, then reused for the life of
+/// the process.
 async fn serve_embedded(
     ctx: &mut dyn IHttpContext,
     asset: &'static EmbeddedAsset,
@@ -296,15 +311,99 @@ async fn serve_embedded(
     ctx.response_mut().set_status(HttpStatus::OK);
     ctx.response_mut()
         .set_header("cache-control", cache_control);
+
+    let token = asset.encoding.token();
+    if let Some(token) = token {
+        // Only an encoded payload can vary by `Accept-Encoding`; a verbatim one
+        // is the same bytes either way, so it is left without `Vary` rather
+        // than fragmenting a cache for no reason.
+        ctx.response_mut().set_header("vary", VARY);
+        if accepts_encoding(ctx, token) {
+            return send_embedded(ctx, asset, asset.bytes, Some(token)).await;
+        }
+        if let Some(decoded) = decoded_once(asset) {
+            return send_embedded(ctx, asset, decoded, None).await;
+        }
+    }
+    // Either the payload is stored verbatim, or an encoded one failed to decode
+    // and the stored bytes remain the best answer available.
+    send_embedded(ctx, asset, asset.bytes, token).await
+}
+
+/// Write `bytes` as the response body for `asset`.
+///
+/// `token` is the encoding `bytes` is in, so it drives both the
+/// `Content-Encoding` header and which `ETag` variant is sent.
+async fn send_embedded(
+    ctx: &mut dyn IHttpContext,
+    asset: &'static EmbeddedAsset,
+    bytes: &'static [u8],
+    token: Option<&'static str>,
+) -> Result<ControlFlow<()>> {
+    if let Some(token) = token {
+        ctx.response_mut().set_header("content-encoding", token);
+    }
     ctx.response_mut()
         .write_body(
-            FileBody::static_bytes(asset.bytes)
+            FileBody::static_bytes(bytes)
                 .content_type(asset.content_type)
-                .entity_tag(asset.etag)
+                .entity_tag(asset.etag_for(token.is_some()))
                 .into(),
         )
         .await?;
     Ok(ControlFlow::Continue(()))
+}
+
+/// Whether the request's `Accept-Encoding` allows `token`.
+fn accepts_encoding(ctx: &dyn IHttpContext, token: &str) -> bool {
+    ctx.request()
+        .header("accept-encoding")
+        .is_some_and(|value| header_allows(value, token))
+}
+
+/// Parse one `Accept-Encoding` header, honouring an explicit `q=0`.
+///
+/// Listing the token is enough to allow it, and `*` stands in for every coding
+/// the client did not name — some clients and CDNs send only `*`. An explicit
+/// `q=0` rejects the token, which is how a client asks for the identity
+/// representation while still advertising support.
+fn header_allows(value: &str, token: &str) -> bool {
+    let mut wildcard = None;
+    for entry in value.split(',') {
+        let mut params = entry.split(';');
+        let name = params.next().unwrap_or("").trim();
+        // Quality defaults to 1 when omitted; only an explicit 0 rejects.
+        let quality = params
+            .filter_map(|param| param.trim().strip_prefix("q="))
+            .find_map(|quality| quality.trim().parse::<f32>().ok())
+            .unwrap_or(1.0);
+
+        if name.eq_ignore_ascii_case(token) {
+            return quality > 0.0;
+        }
+        if name == "*" {
+            wildcard = Some(quality);
+        }
+    }
+    wildcard.is_some_and(|quality| quality > 0.0)
+}
+
+/// Decoded payload for `asset`, decoded at most once per process.
+///
+/// The bytes are leaked so they can be handed to the response as a
+/// `&'static [u8]`. The cost is bounded by the size of the embedded tree and is
+/// only paid for assets that a client without `br` actually requests.
+fn decoded_once(asset: &'static EmbeddedAsset) -> Option<&'static [u8]> {
+    static DECODED: OnceLock<Mutex<HashMap<&'static str, &'static [u8]>>> = OnceLock::new();
+
+    let cache = DECODED.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut cache = cache.lock().ok()?;
+    if let Some(bytes) = cache.get(asset.path) {
+        return Some(bytes);
+    }
+    let bytes: &'static [u8] = Box::leak(asset.decode()?.into_boxed_slice());
+    cache.insert(asset.path, bytes);
+    Some(bytes)
 }
 
 impl SpaMiddleware {
@@ -451,13 +550,15 @@ fn resolve_spa_root(root: PathBuf) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{alias_static_path, normalize_path, SpaSource};
-    use crate::embed::{EmbeddedAsset, EmbeddedAssets};
+    use super::{alias_static_path, header_allows, normalize_path, SpaSource};
+    use crate::embed::{ContentEncoding, EmbeddedAsset, EmbeddedAssets};
     use std::path::Path;
 
     const FILES: &[EmbeddedAsset] = &[EmbeddedAsset {
         path: "index.html",
         bytes: b"index",
+        raw_len: 5,
+        encoding: ContentEncoding::Identity,
         content_type: "text/html",
         etag: "\"sha256-1\"",
     }];
@@ -585,5 +686,66 @@ mod tests {
         assert!(!embed_enabled(Some("false")));
         assert!(!embed_enabled(Some("0")));
         assert!(!embed_enabled(Some("no")));
+    }
+
+    #[test]
+    fn accept_encoding_recognises_brotli() {
+        assert!(header_allows("gzip, br", "br"));
+        assert!(header_allows("br", "br"));
+        assert!(header_allows("gzip, deflate, br, zstd", "br"));
+        assert!(header_allows("BR", "br"));
+        assert!(header_allows("gzip, br;q=1.0", "br"));
+    }
+
+    #[test]
+    fn accept_encoding_honours_a_zero_quality() {
+        assert!(!header_allows("br;q=0", "br"));
+        assert!(!header_allows("gzip, br;q=0.0", "br"));
+        assert!(!header_allows("gzip", "br"));
+        assert!(!header_allows("", "br"));
+        // A different encoding listed as zero does not affect brotli.
+        assert!(header_allows("gzip;q=0, br", "br"));
+    }
+
+    #[test]
+    fn accept_encoding_understands_the_wildcard() {
+        // Some clients and CDNs advertise only `*`.
+        assert!(header_allows("*", "br"));
+        assert!(header_allows("gzip, *", "br"));
+        assert!(header_allows("*;q=0.5", "br"));
+        // `*;q=0` means "nothing else is acceptable".
+        assert!(!header_allows("*;q=0", "br"));
+        assert!(!header_allows("gzip, *;q=0", "br"));
+        // An explicit token wins over the wildcard, in both directions.
+        assert!(header_allows("*;q=0, br", "br"));
+        assert!(!header_allows("*;q=1, br;q=0", "br"));
+    }
+
+    #[test]
+    fn decoded_payloads_are_cached_per_path() {
+        let source = "x".repeat(2048);
+        let payload = {
+            use std::io::Write as _;
+            let mut out = Vec::new();
+            let mut encoder = brotli::CompressorWriter::new(&mut out, 4096, 11, 22);
+            encoder.write_all(source.as_bytes()).unwrap();
+            encoder.flush().unwrap();
+            drop(encoder);
+            out
+        };
+        let asset: &'static EmbeddedAsset = Box::leak(Box::new(EmbeddedAsset {
+            path: "cached.txt",
+            bytes: Box::leak(payload.into_boxed_slice()),
+            raw_len: source.len(),
+            encoding: ContentEncoding::Brotli,
+            content_type: "text/plain",
+            etag: "\"sha256-c\"",
+        }));
+
+        let first = super::decoded_once(asset).expect("decodes");
+        let second = super::decoded_once(asset).expect("cached");
+        assert_eq!(first, source.as_bytes());
+        // Same allocation on the second call, so nothing is decoded twice.
+        assert!(std::ptr::eq(first.as_ptr(), second.as_ptr()));
     }
 }

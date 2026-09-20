@@ -14,10 +14,10 @@
 ## ResourceAuthorization
 
 ```rust
-use webx::authz::ResourceAuthorization;
+use webx::ResourceAuthorization;
 
 let policy = ResourceAuthorization::new()
-    .allow_role("/api/admin/**", "admin")
+    .allow_role("/api/admin/users", "admin")
     .allow_role("/api/users/{id}", "user");
     // .allow_permission(...) — 需 claims 侧支持对应 permission
 ```
@@ -44,12 +44,12 @@ Host::builder()
 
 `resource_auth_middleware` 仍可用于自定义 `IAuthorizationPolicy`，但须在路由匹配之后才能读取 `route_pattern()`。框架内置的 `.use_resource_authorization()` 已在 endpoint 层处理此场景。
 
-## 通配符
+## 资源键的匹配方式
 
-`/**` 匹配所有子路径：
+资源键按**精确字符串**匹配（`HashMap` 键查找），不是路径通配符：策略中的键必须与 `route_pattern()` 完全一致，否则 `covers_route()` 返回 `false`、规则不会生效。例如 `/api/admin/**` 永远不会匹配到真实路由。
 
 ```rust
-.allow_role("/api/admin/**", "admin")
+.allow_role("/api/admin/users", "admin")
 ```
 
 ## 小结

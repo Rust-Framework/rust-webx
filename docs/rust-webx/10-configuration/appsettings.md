@@ -16,7 +16,8 @@ appsettings.Development.json        # 开发环境覆盖（Development 模式）
   "App": {
     "Name": "My API",
     "Urls": ["http://0.0.0.0:5000"],
-    "MaxBodySize": 10485760
+    "MaxBodySize": 10485760,
+    "MaxConnections": 10000
   },
   "Jwt": {
     "Secret": "change-me"
@@ -31,6 +32,16 @@ appsettings.Development.json        # 开发环境覆盖（Development 模式）
   "Tls": {
     "CertPath": "",
     "KeyPath": ""
+  },
+  "RateLimit": {
+    "Enabled": false,
+    "RequestsPerSecond": 100,
+    "BurstSize": 200,
+    "MaxTrackedIps": 10000,
+    "TrustProxy": false
+  },
+  "Metrics": {
+    "Enabled": false
   },
   "Form": {
     "MaxRequestSize": 268435456,
@@ -50,6 +61,8 @@ appsettings.Development.json        # 开发环境覆盖（Development 模式）
 | `Jwt` | `JwtSection` |
 | `Cors` | `CorsSection` |
 | `Tls` | `TlsSection` |
+| `RateLimit` | `RateLimitSection` |
+| `Metrics` | `MetricsSection` |
 | `Form` | `FormSection` |
 
 合并后为 `AppOptions` 结构体。

@@ -4,9 +4,9 @@
 
 框架在 `HandlerCache` 中缓存 Handler 解析结果，避免每次请求重新查 DI 容器。
 
-## 路由 Trie
+## 路由匹配
 
-`Router` 使用 Trie 树匹配，时间复杂度 O(path_segments)，优于线性扫描。
+`Router` 基于 `matchit` 的基数树（radix tree）匹配，请求期零堆分配。
 
 ## Arc 共享
 

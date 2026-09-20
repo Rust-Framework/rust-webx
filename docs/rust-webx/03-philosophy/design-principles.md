@@ -61,9 +61,17 @@ graph LR
 业务代码依赖抽象，接口定义在 **contracts**，实现在 **handlers**：
 
 ```rust
-// contracts/cache.rs — 接口
-pub trait IDistributedCache: Send + Sync {
-    fn get(&self, key: &str) -> Option<String>;
+// contracts/cache.rs — 接口（节选自 crates/core/src/cache/trait_def.rs）
+#[async_trait]
+pub trait IDistributedCache: Send + Sync + 'static {
+    async fn get(&self, key: &str) -> Result<Option<Vec<u8>>>;
+    async fn set(
+        &self,
+        key: &str,
+        value: Vec<u8>,
+        options: Option<&DistributedCacheEntryOptions>,
+    ) -> Result<()>;
+    async fn remove(&self, key: &str) -> Result<()>;
 }
 
 // handlers/cache.rs — Handler 只依赖 trait
@@ -94,7 +102,7 @@ struct GetUserHandler {
 Rust 的 `Result<T, Error>` 贯穿全栈：
 
 ```rust
-async fn handle(&self, req: GetUserRequest) -> Result<UserDto> {
+async fn handle(&mut self, req: GetUserRequest) -> Result<UserDto> {
     self.repo.find(&req.id)
         .ok_or_else(|| Error::NotFound(format!("User {}", req.id)))
 }

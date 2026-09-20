@@ -30,8 +30,16 @@ rust-webx 推荐的业务应用分层：
 
 ```rust
 // contracts/auth.rs
-pub trait IAuthService: Send + Sync {
-    fn login(&self, email: &str, password: &str) -> Result<AuthResponse, String>;
+#[derive(Default, Deserialize)]
+pub struct LoginRequest {
+    pub email: String,
+    pub password: String,
+}
+
+#[derive(Serialize)]
+pub struct AuthResponse {
+    pub token: String,
+    pub user: UserView,
 }
 
 #[post("/api/auth/login")]
@@ -41,6 +49,8 @@ impl IRequest<AuthResponse> for LoginRequest {}
 - 不含业务实现
 - **仅依赖框架**（`webx`），**禁止依赖 domain**
 - 是对外 API 与业务抽象的「说明书」
+- `I…Service` trait 只在该层定义；Docbit 用到的只有 `IDocumentService`，其余业务直接经
+  mediator 操作 `DbContext`。约定见 [职责归属与边界](../12-project-structure/responsibility-division.md)。
 
 ### handlers — 应用层
 
@@ -48,23 +58,25 @@ impl IRequest<AuthResponse> for LoginRequest {}
 
 ```rust
 // handlers/auth.rs
-#[inject]
-pub struct AuthService { ... }
-impl IAuthService for AuthService { ... }
-
 #[derive(Inject)]
 pub struct LoginHandler {
-    auth: Arc<dyn IAuthService>,
+    #[inject(owned)]
+    ctx: DbContext,
 }
 
 #[handler(inject)]
 #[async_trait]
-impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler { ... }
+impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
+    async fn handle(&mut self, req: LoginRequest) -> Result<AuthResponse> {
+        // 领域查询经 DbContext，业务规则留在 domain
+        ...
+    }
+}
 ```
 
 - 薄 Handler：参数传递、`Error` 映射
-- 厚 Service 实现：业务规则、domain 访问
-- Handler 只依赖 `Arc<dyn I…Service>`
+- 重业务：规则与 domain 访问在 Service 或 domain 中
+- 需要抽象时 Handler 只依赖 `Arc<dyn I…Service>`（如 `Arc<dyn IDocumentService>`）
 
 ### domain — 领域模型层
 
@@ -84,11 +96,11 @@ pub struct UserEntity {
 - **可以**引用 contracts 复用枚举或 model
 - 不依赖框架类型（除 `serde`）
 
-### main.rs / startup.rs — 组合根
+### main.rs / startup/ — 组合根
 
-**拥有**：Host 配置、`bootstrap` 基础设施注册、`IHostedService`
+**拥有**：Host 配置、基础设施注册、`IHostedService`
 
-- 唯一允许手动注册 `DbContext`、`AppPaths` 等框架外类型的地方
+- 唯一允许手动注册 `DbContext` 等框架外基础设施的地方（路径统一由 `webx::app_base()` 派生）
 - 业务 Handler / Service 由 `#[inject]` 自动收集，**不在 main 手动注册**
 
 ### appsettings.json
@@ -114,15 +126,14 @@ handlers ──→ domain
 ## Docbit 实例（目标结构）
 
 ```
-docbit/src/
-├── contracts/     # LoginRequest, IBlogService trait, BlogPostSummary DTO, ...
-├── handlers/      # LoginHandler, BlogService (impl IBlogService), ...
-├── domain/        # UserEntity, migrations/
-├── startup.rs     # DbInitService (IHostedService)
-└── main.rs        # Host::builder() 组合根
+docbit/
+├── contracts/src/   # LoginRequest, IDocumentService trait, BlogPostSummary DTO, ...
+├── domain/src/      # entities/（User 等实体）、seed
+├── handlers/src/    # LoginHandler, DocService (impl IDocumentService), ...
+└── host/src/        # Host::builder() 组合根
+    ├── main.rs
+    └── startup/     # mod.rs、hosted/（DbInitService 等）、seed/
 ```
-
-> **迁移说明**：早期 Docbit 将 `I…Service` 放在 `services/`、contracts 引用 domain 类型，与本文规范不符。当前 Docbit 已按 contracts / handlers / domain 三层重构。
 
 ## 小结
 

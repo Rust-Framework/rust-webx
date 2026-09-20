@@ -12,18 +12,18 @@ pub struct RequestLoggingMiddleware;
 ### 2. 实现 IMiddleware
 
 ```rust
+use std::ops::ControlFlow;
+
 #[async_trait]
 impl IMiddleware for RequestLoggingMiddleware {
-    async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<()> {
-        let method = ctx.request().method().to_string();
-        let path = ctx.request().path().to_string();
-        let start = std::time::Instant::now();
+    async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
+        tracing::info!("→ {} {}", ctx.request().method(), ctx.request().path());
+        Ok(ControlFlow::Continue(()))
+    }
 
-        tracing::info!("→ {} {}", method, path);
-
-        // 注意：当前管道模型中，此处无法获取 Handler 执行后的耗时
-        // 可在后续洋葱模型中实现 post-process
-
+    async fn after(&self, ctx: &mut dyn IHttpContext) -> Result<()> {
+        // `after` 在 Handler 执行后运行，可记录状态码或追加响应头
+        tracing::info!("← {} {}", ctx.response().status(), ctx.request().path());
         Ok(())
     }
 }
@@ -50,9 +50,8 @@ pub trait HostBuilderExt {
 
 impl HostBuilderExt for HostBuilder {
     fn use_tenant_resolver(self, resolver: Arc<TenantResolver>) -> Self {
-        self.register(move |svc| {
-            svc.add_middleware_instance(tenant_middleware(resolver))
-        })
+        // `tenant_middleware(resolver) -> Arc<dyn IMiddleware>`
+        self.use_middleware_with(move || tenant_middleware(Arc::clone(&resolver)))
     }
 }
 ```
@@ -61,17 +60,29 @@ impl HostBuilderExt for HostBuilder {
 
 ## 工厂函数模式
 
-JWT 中间件使用工厂函数返回 `Arc<dyn IMiddleware>`：
+需要构造参数的中间件用工厂函数 + `HostBuilder::use_middleware_with` 挂载：
 
 ```rust
-pub fn jwt_middleware(auth: Arc<JwtAuth>) -> Arc<dyn IMiddleware> {
-    Arc::new(JwtAuthMiddleware { auth })
-}
-
-svc.add_middleware_instance(jwt_middleware(auth))
+Host::builder().use_middleware_with(move || {
+    Arc::new(TenantMiddleware::new(Arc::clone(&resolver))) as Arc<dyn IMiddleware>
+})
 ```
 
-适用于需要构造参数的中间件。
+也可以直接注册到 `register()` 的 `ServiceCollection`：
+
+```rust
+svc.add(ServiceLifetime::Singleton, move |_| {
+    Arc::new(TenantMiddleware::new(Arc::clone(&resolver))) as Arc<dyn IMiddleware>
+})
+```
+
+框架自带的 JWT 中间件同样由工厂函数产出：
+
+```rust
+pub fn jwt_middleware(handler: Arc<dyn IAuthenticationHandler>) -> impl IMiddleware
+```
+
+它由 `add_authentication()` 自动接入管道，通常无需手动注册。
 
 ## 小结
 

@@ -1,54 +1,67 @@
 # 架构与模块划分
 
-## 源码结构
+## 源码结构（workspace）
 
 ```
-docbit/src/
-├── main.rs              # 组合根：仅 Host 配置
-├── startup.rs           # DbInitService（IHostedService）
-├── common/
-│   ├── bootstrap.rs     # AppPaths + DbContext（唯一手动 DI）
-│   ├── paths.rs         # 数据目录解析
-│   └── mod.rs           # 拦截器、授权器（#[inject] 自动注册）
-├── contracts/           # Request/Response/enum/I…Service trait
-├── handlers/            # Handler + Service 实现（#[inject] + #[handler(inject)]）
-│   ├── doc_service.rs   # DocService（impl IDocumentService）
-│   └── blog_service.rs  # BlogService（impl IBlogService）
-└── domain/              # 实体 + EF 迁移
+docbit/
+├── contracts/src/           # Request/Response/enum/IDocumentService trait
+│   ├── docs.rs              # IDocumentService + 文档路由
+│   └── blog.rs              # 博客 DTO/路由（无 service 抽象）
+├── domain/src/              # 实体、EF 配置、seed
+├── handlers/src/            # Handler + Service 实现
+│   ├── doc_service.rs       # DocService（impl IDocumentService）
+│   └── blog.rs              # 博客 Handler（直接使用 DbContext）
+└── host/
+    ├── Cargo.toml           # package = "docbit-host"
+    ├── build.rs             # webx::builder().web_root("../wwwroot").build()
+    └── src/
+        ├── main.rs          # 组合根：#[webx::main(embed)]
+        ├── lib.rs           # pub mod startup;
+        └── startup/
+            ├── mod.rs
+            ├── extensions/  # Add* / Use* 扩展方法
+            ├── hosted/      # DbInitService（IHostedService）
+            └── seed/        # 一次性数据初始化（admin 账户等）
 ```
 
 ## main.rs
 
 ```rust
-let host = Host::builder()
-    .mode(AppMode::Development)
-    .register(common::bootstrap::configure)
-    .use_spa(wwwroot)
-    .add_authentication()
-    .add_memory_cache()
-    .build();
-
-host.run().await?;
+#[webx::main(embed)]
+async fn main() {
+    Host::builder()
+        .register(|svc| svc.add_docbit_db())
+        .register(|svc| svc.add_mediator())
+        .add_options::<SiteConfig>("Site")
+        .add_authentication()
+        .use_resource_authorization()
+        .add_memory_cache()
+        .use_spa("wwwroot")
+        .build()
+        .run()
+        .await
+        .expect("Server failed");
+}
 ```
 
 `main.rs` 不做业务注册。Handler、`IHostedService`、业务 Service、`IDynamicAuthorizer` 均由 `ServiceCollection::from_injected()` 自动收集。
 
-## bootstrap.rs
+## startup/extensions/
 
-仅注册框架无法自动构造的基础设施：
+`Add*` / `Use*` 扩展方法住在这里，只注册框架无法自动构造的基础设施：
 
-- `AppPaths` — docs / blog-data / wwwroot / 数据库路径
-- `Mutex<DbContext>` — rust-ef SQLite 上下文
+- `add_docbit_db()` — 用 `webx::app_base()` 解析 `<app_base>/app.db`，把 `DbContext` 注册为 **Scoped**（每个请求一份 owned 实例）
+- `use_production_middleware()` — 生产环境的压缩、计时、请求追踪
 
-业务 Service 在 `handlers/` 通过 `#[inject] (implements I…Service)` 自注册。
+业务 Service 在 `handlers/` 通过 `#[derive(Inject)]` + 在 `impl Trait for Type` 上标注 `#[inject]` 自注册。
 
-## startup.rs
+## startup/hosted/ 与 startup/seed/
 
 `DbInitService` 注入 `Arc<dyn IDocumentService>`，在 `start()` 中：
 
-1. 运行 EF 迁移（m001–m004）
-2. 生成缺失的文档 `INDEX.json`
-3. 同步作品集 logo 到 `wwwroot`
+1. `ctx.ensure_created()` 确保 schema（没有版本化迁移）
+2. seed 默认 admin 账户
+3. 生成缺失的文档 `INDEX.json`、同步作品 logo 到 `wwwroot`
 
 ## 请求数据流
 

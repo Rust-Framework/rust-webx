@@ -114,7 +114,8 @@ pub use webx_spa::SpaMiddleware;
 /// ```
 pub mod spa {
     pub use webx_spa::{
-        embed_assets, inventory, EmbeddedAsset, EmbeddedAssets, SpaMiddleware, SpaSource, EMBED_ENV,
+        embed_assets, inventory, ContentEncoding, EmbeddedAsset, EmbeddedAssets, SpaMiddleware,
+        SpaSource, EMBED_ENV,
     };
 }
 

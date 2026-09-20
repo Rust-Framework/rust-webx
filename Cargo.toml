@@ -72,6 +72,9 @@ tokio-util = { version = "0.7", features = ["io"] }
 multer = "3"
 mime_guess = "2"
 sha2 = "0.10"
+# Embedded static assets: brotli at build time, decoded on demand at runtime.
+brotli = "9"
+brotli-decompressor = "6"
 tempfile = "3"
 httpdate = "1"
 serde = { version = "1", features = ["derive"] }

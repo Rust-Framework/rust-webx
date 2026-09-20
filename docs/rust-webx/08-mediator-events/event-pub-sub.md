@@ -29,7 +29,7 @@ impl IEventHandler<UserCreatedEvent> for SendWelcomeEmailHandler {
 ## 发布事件
 
 ```rust
-async fn handle(&self, req: CreateUserRequest) -> Result<UserDto> {
+async fn handle(&mut self, req: CreateUserRequest) -> Result<UserDto> {
     let user = self.repo.create(&req).await?;
 
     self.mediator.publish(UserCreatedEvent {

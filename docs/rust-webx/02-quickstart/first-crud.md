@@ -72,7 +72,21 @@ use webx::*;
 use tokio::sync::RwLock;
 use crate::contracts::user::*;
 
-type UserStore = Arc<RwLock<HashMap<String, UserDto>>>;
+// ── 共享存储：注册为单例，由 DI 注入 ──
+#[derive(Default)]
+pub struct UserStore {
+    users: RwLock<HashMap<String, UserDto>>,
+}
+
+impl UserStore {
+    pub async fn insert(&self, id: String, user: UserDto) {
+        self.users.write().await.insert(id, user);
+    }
+
+    pub async fn get(&self, id: &str) -> Option<UserDto> {
+        self.users.read().await.get(id).cloned()
+    }
+}
 
 // ── List ──
 #[derive(Default)]
@@ -81,51 +95,48 @@ struct ListUsersHandler;
 #[handler]
 #[async_trait]
 impl IRequestHandler<ListUsersRequest, Vec<UserDto>> for ListUsersHandler {
-    async fn handle(&self, _req: ListUsersRequest) -> Result<Vec<UserDto>> {
+    async fn handle(&mut self, _req: ListUsersRequest) -> Result<Vec<UserDto>> {
         // 实际项目中通过 DI 注入 store
         Ok(vec![])
     }
 }
 ```
 
-带依赖注入的完整版本：
+带依赖注入的完整版本，用 `#[derive(Inject)]` 声明 Handler 依赖，并用 `#[handler(inject)]` 标记注入式构造：
 
 ```rust
+#[derive(Inject)]
 struct CreateUserHandler {
-    store: UserStore,
+    #[inject]
+    store: Arc<UserStore>,
 }
 
+#[handler(inject)]
 #[async_trait]
 impl IRequestHandler<CreateUserRequest, UserDto> for CreateUserHandler {
-    async fn handle(&self, req: CreateUserRequest) -> Result<UserDto> {
+    async fn handle(&mut self, req: CreateUserRequest) -> Result<UserDto> {
         let id = uuid::Uuid::new_v4().to_string();
         let user = UserDto {
             id: id.clone(),
             name: req.name,
             email: req.email,
         };
-        self.store.write().await.insert(id, user.clone());
+        self.store.insert(id, user.clone()).await;
         Ok(user)
     }
 }
 ```
 
-## 注册带依赖的 Handler
+## 注册共享依赖
 
-在 `main.rs` 中：
+Handler 由 `#[handler]` / `#[handler(inject)]` 自动向 `inventory` 注册，HTTP 分发通过 `HandlerCache` 查找，**不**经过 DI 查找 `dyn IRequestHandler`。`main.rs` 只需注册 Handler 依赖的服务：
 
 ```rust
-#[tokio::main]
+#[webx::main]
 async fn main() {
-    let store: UserStore = Arc::new(RwLock::new(HashMap::new()));
-
     Host::builder()
-        .register(move |svc| {
-            let store = Arc::clone(&store);
-            svc.singleton::<dyn IRequestHandler<CreateUserRequest, UserDto>>(
-                move |_| Arc::new(CreateUserHandler { store: Arc::clone(&store) })
-            );
-            // 其他 Handler 同理...
+        .register(|svc| {
+            svc.singleton::<UserStore>(|_| Arc::new(UserStore::default()));
         })
         .build()
         .run()
@@ -133,19 +144,6 @@ async fn main() {
         .expect("Server failed");
 }
 ```
-
-HTTP 端点应使用 `#[handler]` / `#[handler(inject)]`（inventory 自动注册）。以下 **`register_handlers!` 已弃用**，仅适用于非 HTTP 的 Mediator 场景：
-
-```rust
-.register(|svc| {
-    register_handlers!(svc,
-        ListUsersRequest => Vec<UserDto> => ListUsersHandler,
-        GetUserRequest => UserDto => GetUserHandler,
-    )
-})
-```
-
-手动 `.singleton::<dyn IRequestHandler<…>>()` 同理：HTTP `RouteDispatch` 不经过 DI 查找 Handler，请勿将其作为主路径。
 
 ## 测试 API
 
@@ -173,16 +171,15 @@ curl -X DELETE http://localhost:5000/api/users/{id}
 ## 错误处理示例
 
 ```rust
-async fn handle(&self, req: GetUserRequest) -> Result<UserDto> {
-    let store = self.store.read().await;
-    store
+async fn handle(&mut self, req: GetUserRequest) -> Result<UserDto> {
+    self.store
         .get(&req.id)
-        .cloned()
+        .await
         .ok_or_else(|| Error::NotFound(format!("User {} not found", req.id)))
 }
 ```
 
-`Error::NotFound` 自动映射为 HTTP 404，响应体 `{"error":"...","status":404}`。
+`Error::NotFound` 自动映射为 HTTP 404，响应体为 RFC 7807 `application/problem+json`（`type` / `title` / `status` / `detail`）。
 
 ## 设计要点
 

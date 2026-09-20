@@ -20,11 +20,13 @@ impl IRequestHandler<GetUserRequest, String> for GetUserHandler { ... }
 ### Handler 注册类型
 
 ```rust
-// ✅ 注册为 dyn trait object
-svc.singleton::<dyn IRequestHandler<GetUserRequest, UserDto>>(...)
+// ✅ #[handler] 向 inventory 提交注册，HTTP 分发通过 HandlerCache 查找
+#[handler]
+#[async_trait]
+impl IRequestHandler<GetUserRequest, UserDto> for GetUserHandler { ... }
 
-// ❌ 注册具体类型，框架无法通过 dyn 解析
-svc.singleton(|_| Arc::new(GetUserHandler::default()))
+// ❌ 手动把 Handler 注册进 DI：HTTP 分发不会查找它
+svc.singleton::<dyn IRequestHandler<GetUserRequest, UserDto>>(...)
 ```
 
 ### #[handler] 前置条件
@@ -34,7 +36,7 @@ svc.singleton(|_| Arc::new(GetUserHandler::default()))
 #[derive(Default)]
 struct HelloHandler;
 
-// ❌ 有字段的 Handler 不能用 #[handler]，需 inject 或手动注册
+// ❌ 有字段的 Handler 不能用 #[handler]，需改用 #[handler(inject)]
 struct GetUserHandler { repo: Arc<Repo> }
 ```
 
@@ -42,7 +44,7 @@ struct GetUserHandler { repo: Arc<Repo> }
 
 框架的 trait 抽象在运行时开销极低：
 
-- 路由匹配使用 Trie 树，O(path_segments)
+- 路由匹配使用 matchit（radix 树），每请求零堆分配
 - Handler 解析结果缓存在 `HandlerCache` 中
 - `inventory` 元数据在编译期收集，`build()` 时一次性注册
 
@@ -64,7 +66,7 @@ Rust 的 async trait 通过 `async-trait` crate 实现：
 ```rust
 #[async_trait]
 impl IRequestHandler<HelloRequest, String> for HelloHandler {
-    async fn handle(&self, req: HelloRequest) -> Result<String> { ... }
+    async fn handle(&mut self, req: HelloRequest) -> Result<String> { ... }
 }
 ```
 
@@ -88,7 +90,7 @@ Host::builder()
 |------|------|
 | `Arc<T>` | 不可变共享（连接池、配置） |
 | `Arc<RwLock<T>>` | 读写锁保护的可变状态 |
-| `Arc<Mutex<T>>` | 互斥锁（Docbit 的 DbContext） |
+| `Arc<Mutex<T>>` | 互斥锁保护的共享可变状态 |
 
 ## 显式错误处理
 
@@ -104,20 +106,10 @@ panic!("user not found");
 |-----------|------|------|
 | `NotFound` | 404 | 资源不存在 |
 | `Validation` | 400 | 参数校验 |
-| `Http` | 400/401/403 | 协议/认证/授权 |
+| `Http` | 400 | 协议错误 |
+| `Unauthorized` | 401 | 未认证 |
+| `Forbidden` | 403 | 未授权 |
 | `Internal` | 500 | 未预期内部错误 |
-
-## 模块与可见性
-
-```rust
-// contracts/ — 公开 API 契约
-pub struct CreateUserRequest { ... }
-
-// handlers/ — 可保持 Handler struct 私有
-struct CreateUserHandler { ... }  // 不 pub
-```
-
-Handler 通过 `#[handler]` 或 DI 注册暴露，无需 `pub`。
 
 ## 小结
 

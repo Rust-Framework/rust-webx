@@ -35,21 +35,20 @@ Cargo **包名**带连字符，Rust **导入名**用下划线库名。两者不�
 设计意图：
 - 第三方可基于 core trait 编写可插拔组件
 - 单元测试可 Mock 全部接口
-- 未来可替换 HTTP 引擎（如从 hyper 迁移）
+- 可替换 HTTP 引擎（如从 hyper 迁移）
 
 核心模块：
 
 | 模块 | 职责 |
 |------|------|
 | `app` | `IHost` |
-| `mediator` | `IRequest`, `IMediator`, `IEventRequest` |
+| `mediator` | `IRequest`, `IEventRequest`, `IMediator` trait + `Mediator` 实现 |
 | `handler` | `IRequestHandler`, `IEventHandler`, `IHostedService` |
 | `http` | `IHttpContext`, `IHttpRequest`, `IHttpResponse` |
 | `middleware` | `IMiddleware` |
 | `routing` | `IRouter`, `IEndpoint`, `RouteMeta` |
 | `auth` | `IClaims`, `IAuthenticationHandler`, `IAuthorizationPolicy` |
 | `route` | 扫描类型、`HandlerCache`、`RouteEntry` |
-| `mediator` | `IMediator` trait + `Mediator` 具体实现 |
 
 ## host — 运行时层
 
@@ -58,7 +57,7 @@ Cargo **包名**带连字符，Rust **导入名**用下划线库名。两者不�
 | 组件 | 实现 |
 |------|------|
 | HTTP 服务 | hyper + tokio |
-| 路由 | Trie 树 `Router` |
+| 路由 | matchit radix 树 `Router` |
 | 上下文 | `HttpContext`, `HttpRequest`, `HttpResponse` |
 | 管道 | `MiddlewarePipeline` |
 | 认证 | `JwtAuth`, `jwt_middleware` |
@@ -71,7 +70,7 @@ Cargo **包名**带连字符，Rust **导入名**用下划线库名。两者不�
 `rust-webx-macros` 在编译期生成：
 
 - 路由注册代码（写入 `inventory`）
-- Handler DI 注册代码
+- Handler 注册代码（向 `inventory` 提交 `HandlerRegistration`）
 - 授权元数据收集
 
 应用开发者通过 `#[get]`、`#[handler]` 等使用，无需直接接触宏展开代码。
@@ -81,7 +80,7 @@ Cargo **包名**带连字符，Rust **导入名**用下划线库名。两者不�
 | Crate | 职责 |
 |-------|------|
 | `rust-webx-spa` | `SpaMiddleware` 静态文件 + History fallback |
-| `rust-webx-openapi` | OpenAPI 3.0 规范生成 + Swagger UI |
+| `rust-webx-openapi` | OpenAPI 3.0 规范生成 + 内置 API 文档 UI（`/api/openapi.html`） |
 
 二者均依赖 `core`，被 `host` 在 `HostBuilder` 中集成。
 
@@ -92,9 +91,9 @@ Cargo **包名**带连字符，Rust **导入名**用下划线库名。两者不�
 | `rust-webx-build` | 构建期把静态目录编译进可执行文件（`build-dependencies`） |
 
 `rust-webx-build` 只在 `build.rs` 中运行，**不依赖任何框架 crate**（无 `core`，
-也就不会把 tokio/hyper 拖进构建期）。它扫描目录、生成 `EmbeddedAsset` 表写入
-`OUT_DIR`，由 `webx::spa::embed_assets!()`（经 `#[webx::main(embed)]`）引入；
-`Host::build` 若发现已注册的表，会自动叠到 SPA 源上：
+也就不会把 tokio/hyper 拖进构建期）。它扫描目录、给可压缩的文件做 brotli 编码，再把
+`EmbeddedAsset` 表写入 `OUT_DIR`，由 `webx::spa::embed_assets!()`（经
+`#[webx::main(embed)]`）引入；`Host::build` 若发现已注册的表，会自动叠到 SPA 源上：
 
 ```rust
 // build.rs — 编译期源树（库名 `webx`）
@@ -108,7 +107,7 @@ fn main() -> Result<(), webx::Error> {
 应用入口用 `#[webx::main(embed)]` 显式链接该表；`.use_spa("wwwroot")` 只表示
 运行期磁盘覆盖目录。不写 `(embed)` 则不烤进二进制。
 
-它属于**编译期**层：文件集、MIME、内容 `ETag` 在编译时确定。运行期配置
+它属于**编译期**层：文件集、MIME、内容 `ETag` 与压缩表示都在编译时确定。运行期配置
 （`appsettings.json`、端口、密钥、TLS）不在此列，否则每次改配置都要重新编译。
 
 依赖方向因此独立于运行时金字塔：

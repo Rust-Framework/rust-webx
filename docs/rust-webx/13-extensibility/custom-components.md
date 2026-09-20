@@ -5,6 +5,8 @@
 将中间件 + 配置 + 注册封装为 Builder 扩展：
 
 ```rust
+use webx::*;
+
 pub trait TenantBuilderExt {
     fn use_multi_tenant(self, config: TenantConfig) -> Self;
 }
@@ -12,10 +14,16 @@ pub trait TenantBuilderExt {
 impl TenantBuilderExt for HostBuilder {
     fn use_multi_tenant(self, config: TenantConfig) -> Self {
         let resolver = Arc::new(TenantResolver::new(config));
-        self.register(move |svc| {
-            svc.singleton::<TenantResolver>(move |_| Arc::clone(&resolver));
-            svc.add_middleware_instance(tenant_middleware(Arc::clone(&resolver)));
-        })
+        let for_di = Arc::clone(&resolver);
+        let for_mw = Arc::clone(&resolver);
+
+        self
+            // 普通组件仍走 DI 注册
+            .register(move |svc| svc.singleton::<TenantResolver>(move |_| Arc::clone(&for_di)))
+            // 中间件必须通过 HostBuilder 扩展方法注册（不能在 register 闭包内直接添加）
+            .use_middleware_with(move || {
+                Arc::new(TenantMiddleware::new(Arc::clone(&for_mw))) as Arc<dyn IMiddleware>
+            })
     }
 }
 ```
@@ -26,6 +34,8 @@ impl TenantBuilderExt for HostBuilder {
 Host::builder().use_multi_tenant(config).build()
 ```
 
+`use_middleware::<T>()` 注册无参中间件；需要构造参数时用 `use_middleware_with`。
+
 ## 封装服务组件
 
 ```rust
@@ -33,8 +43,8 @@ Host::builder().use_multi_tenant(config).build()
 pub struct EmailModule;
 
 impl EmailModule {
-    pub fn register(svc: &mut ServiceCollection, config: SmtpConfig) {
-        svc.singleton::<EmailService>(move |_| Arc::new(EmailService::new(config)));
+    pub fn register(svc: ServiceCollection, config: SmtpConfig) -> ServiceCollection {
+        svc.singleton::<EmailService>(move |_| Arc::new(EmailService::new(config.clone())))
     }
 }
 
@@ -71,7 +81,7 @@ pub struct GetUserProfileHandler {
 
 ```toml
 [dependencies]
-rust-webx-core = "0.2"
+rust-webx-core = "0.5"
 ```
 
 ## 小结

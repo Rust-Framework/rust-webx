@@ -45,7 +45,7 @@ let app = Router::new()
 ```rust
 Host::builder()
     .use_cors(CorsConfig::default())
-    // RequestTracing 自动启用
+    // SecurityHeaders 与 RequestId 默认启用，RequestTracing 需显式 use_middleware
     .build()
 ```
 
@@ -66,8 +66,9 @@ struct AppState {
 
 ```rust
 // 通过 DI 容器管理，无需 AppState
-#[inject]
+#[derive(Inject)]
 pub struct GetUserHandler {
+    #[inject]
     db: Arc<DbPool>,
 }
 ```
@@ -85,7 +86,7 @@ async fn get_user(id: String) -> Result<Json<User>, AppError> {
 ### rust-webx
 
 ```rust
-async fn handle(&self, req: GetUserRequest) -> Result<UserDto> {
+async fn handle(&mut self, req: GetUserRequest) -> Result<UserDto> {
     // Error 自动映射 HTTP 状态码
 }
 ```

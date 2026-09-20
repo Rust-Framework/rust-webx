@@ -64,9 +64,10 @@ fn log_spa_source(spa: &SpaMiddleware) {
         return;
     };
     tracing::info!(
-        "[Host] Embedded assets: {} files, {:.1} MiB, built from `{}`",
+        "[Host] Embedded assets: {} files, {:.1} MiB embedded ({:.1} MiB uncompressed), built from `{}`",
         assets.len(),
         assets.total_bytes() as f64 / (1024.0 * 1024.0),
+        assets.total_raw_bytes() as f64 / (1024.0 * 1024.0),
         assets.root(),
     );
     let shadowed = assets.shadowed_by(spa.resolved_root());
@@ -673,9 +674,10 @@ impl HostBuilder {
                 tracing::info!("    SPA Root: {}", source.disk_root());
                 if let Some(assets) = source.embedded() {
                     tracing::info!(
-                        "    Embedded: {} files, {:.1} MiB (built from {})",
+                        "    Embedded: {} files, {:.1} MiB from {:.1} MiB (built from {})",
                         assets.len(),
                         assets.total_bytes() as f64 / (1024.0 * 1024.0),
+                        assets.total_raw_bytes() as f64 / (1024.0 * 1024.0),
                         assets.root(),
                     );
                 }
@@ -1445,11 +1447,13 @@ fn build_tls_acceptor(cert_path: &str, key_path: &str) -> Result<TlsAcceptor> {
 #[cfg(test)]
 mod embedded_attach_tests {
     use super::{registered_embedded_assets, with_embedded_assets};
-    use webx_spa::{EmbeddedAsset, EmbeddedAssets, SpaSource};
+    use webx_spa::{ContentEncoding, EmbeddedAsset, EmbeddedAssets, SpaSource};
 
     const FILES: &[EmbeddedAsset] = &[EmbeddedAsset {
         path: "index.html",
         bytes: b"hi",
+        raw_len: 2,
+        encoding: ContentEncoding::Identity,
         content_type: "text/html",
         etag: "\"x\"",
     }];

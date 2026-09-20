@@ -22,9 +22,9 @@
 
 - [ ] `contracts/` 仅依赖框架，无 `use crate::domain::*`
 - [ ] `I…Service` trait 定义在 `contracts/`
-- [ ] Service 实现在 `handlers/`，带 `#[inject] (implements I…Service)`
-- [ ] 无独立 `services/` 目录（或仅为迁移中的临时结构）
-- [ ] `domain/` 不依赖框架类型，可引用 `contracts` 枚举/model
+- [ ] Service 实现在 `handlers/`，`#[inject]` 标注在 `impl Trait for Type` 上
+- [ ] 无独立 `services/` 目录
+- [ ] `domain/` 不依赖 host，可引用 `contracts` 枚举/model 与框架核心原语
 - [ ] `main.rs` 不手动注册业务 Service
 
 ## 安全

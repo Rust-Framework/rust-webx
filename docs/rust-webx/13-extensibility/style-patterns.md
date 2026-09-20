@@ -54,14 +54,14 @@ pub struct UserDto {
 
 ## 版本化
 
+版本号写进路径，由路由宏逐条声明（没有 `#[controller]` 这类控制器宏）：
+
 ```rust
-// 方式一：路径版本
 #[get("/api/v1/users")]
 impl IRequest<Vec<UserDto>> for ListUsersV1Request {}
 
-// 方式二：controller 宏
-#[controller("/api/v2")]
-mod v2_routes { ... }
+#[get("/api/v2/users")]
+impl IRequest<Vec<UserDto>> for ListUsersV2Request {}
 ```
 
 ## 项目级封装

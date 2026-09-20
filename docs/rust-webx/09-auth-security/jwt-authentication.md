@@ -9,7 +9,8 @@ Host::builder().add_authentication().build().run().await?;
 自动：
 1. 从 `appsettings.json` 读取 `Jwt.Secret`
 2. 注册 `jwt_middleware`
-3. 注册 `resource_auth_middleware`
+
+资源级授权不由 `add_authentication()` 注册；需要时显式调用 `.use_resource_authorization()`（见[基于资源的授权](resource-authorization.md)）。
 
 ## 配置
 
@@ -50,7 +51,7 @@ println!("Roles: {:?}", claims.roles());
 
 ## 签发 Token
 
-框架提供 `jwt_secret()` 获取当前密钥（进程级 shim，由 `add_authentication()` 在 build 时初始化；与已弃用的 `global_provider()` 无关）：
+框架提供 `jwt_secret()` 获取当前签名密钥；shim 的初始化与使用约定见[安全最佳实践](security-best-practices.md#jwt_secret-进程级-shim)：
 
 ```rust
 use jsonwebtoken::{encode, EncodingKey, Header};

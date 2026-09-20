@@ -5,7 +5,7 @@
 `Host::run()` 监听 shutdown 信号（Ctrl+C / SIGTERM）：
 
 ```
-收到信号 → 停止接受新连接 → 等待进行中请求完成 → IHostedService::stop() 逆序 → 退出
+收到信号 → 停止接受新连接 → 等待进行中请求完成 → IHostedService::stop() 按启动顺序 → 退出
 ```
 
 ## 可观测性

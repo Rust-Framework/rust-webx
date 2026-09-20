@@ -8,7 +8,7 @@
 mod embed;
 mod spa;
 
-pub use embed::{EmbeddedAsset, EmbeddedAssets};
+pub use embed::{ContentEncoding, EmbeddedAsset, EmbeddedAssets};
 pub use spa::{SpaMiddleware, SpaSource, EMBED_ENV};
 
 /// Re-exported so build-script-generated code can register a table without

@@ -19,15 +19,7 @@ rust-webx/                    # Workspace 根
 
 ### 包名与导入名
 
-| 包名（`Cargo.toml`） | 导入名（`use`） |
-|----------------------|-----------------|
-| `rust-webx` | `webx` |
-| `rust-webx-core` | `webx_core` |
-| `rust-webx-host` | `webx_host` |
-| `rust-webx-macros` | `webx_macros` |
-| `rust-webx-spa` | `webx_spa` |
-| `rust-webx-openapi` | `webx_openapi` |
-| `rust-webx-build` | `webx`（build-dependencies） |
+各 Crate 的包名、导入名与职责对照表见 [Crate 分层结构](../04-architecture/crate-layout.md#包名与导入名)。
 
 ## 依赖关系图
 
@@ -48,14 +40,13 @@ graph BT
     Host --> Core
     Host --> OpenAPI
     Host --> SPA
-    Macros --> Core
 ```
 
 **关键原则**：`core` 只定义 trait，不依赖任何实现 Crate。这保证了：
 
 - 自定义中间件只需依赖 `core`
 - 测试可 Mock 所有抽象接口
-- 未来可替换 HTTP 实现而不影响业务代码
+- 可替换 HTTP 实现而不影响业务代码
 
 ## 各 Crate 职责
 
@@ -95,7 +86,7 @@ graph BT
 | 宏 | 作用 |
 |----|------|
 | `#[get("/path")]` 等 | 路由注册 + HTTP 方法 |
-| `#[handler]` | Handler 自动 DI 注册 |
+| `#[handler]` | Handler 编译时注册（提交 `HandlerRegistration` 到 `inventory`） |
 | `#[authorize]` | 声明式授权元数据 |
 | `#[derive(WebxRequestMeta)]` + `#[from_query]` / `#[from_route]` / `#[from_body]` | OpenAPI 参数元数据（字段级属性，非独立宏） |
 
@@ -105,7 +96,7 @@ graph BT
 
 ### rust-webx-openapi
 
-从编译时收集的路由元数据生成 OpenAPI 3.0 规范，内置 Swagger UI HTML。
+从编译时收集的路由元数据生成 OpenAPI 3.0 规范，并内置自定义 API 文档 UI（`/api/openapi.html`）。
 
 ### rust-webx（伞 Crate）
 
@@ -113,7 +104,7 @@ graph BT
 
 ```toml
 [dependencies]
-rust-webx = "0.2"
+rust-webx = "0.5"
 ```
 
 ```rust
@@ -146,9 +137,9 @@ use webx::*;  // 一次导入全部公开 API
 - `IHostedService` 数据初始化
 - JWT 认证与 `#[authorize]`
 - `#[inject]` 依赖注入
-- 多模块 handlers（auth、blog、docs、work 等）
+- 多模块 handlers（auth、blog、docs、works 等）
 
-运行：`cargo run -p docbit`
+运行：`cargo run -p docbit-host`
 
 ## 小结
 

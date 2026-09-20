@@ -10,11 +10,10 @@
 
 ### `jwt_secret()` 进程级 shim
 
-`HostBuilder::add_authentication()` 在 build 时调用 `init_jwt_secret()`，登录 Handler 通过 `jwt_secret()` 读取签名密钥。这是**独立于 DI `ServiceProvider` 的配置单例**（`OnceLock`），与 Phase 4 废弃的 `global_provider()` 不同：JWT 密钥不是 per-request 依赖，且需在 middleware 与 Handler 间共享。
+`HostBuilder::add_authentication()` 在 build 时调用 `init_jwt_secret()`，登录 Handler 通过 `jwt_secret()` 读取签名密钥。这是**独立于 DI `ServiceProvider` 的配置单例**（`OnceLock`）：JWT 密钥不是 per-request 依赖，且需在 middleware 与 Handler 间共享。
 
 - **推荐**：保持 `add_authentication()` + `Jwt.Secret` / `JWT_SECRET` 环境变量；Handler 内继续用 `jwt_secret()` 签发 token。
 - **不推荐**：在 Handler 中硬编码密钥或绕过 `init_jwt_secret`。
-- **未来**：若需多 Host 实例各用不同密钥，需显式重构（例如经 `IHttpContext` 或 DI 注入 `JwtOptions`）；当前单 Host 进程模型下 shim 可接受。
 
 ## HTTPS
 

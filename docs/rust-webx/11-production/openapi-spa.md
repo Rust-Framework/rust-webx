@@ -2,11 +2,12 @@
 
 ## OpenAPI 自动生成
 
-框架从编译时收集的路由元数据自动生成 OpenAPI 3.0 规范：
+框架从编译时收集的路由元数据自动生成 OpenAPI 3.0 规范。两个端点**只在
+Development 下注册**，Production 下不存在：
 
 ```
-GET /openapi.json    → OpenAPI 规范 JSON
-GET /swagger         → Swagger UI 页面
+GET /api/openapi.json    → OpenAPI 规范 JSON
+GET /api/openapi.html    → 内置 API 文档页
 ```
 
 ```rust
@@ -32,7 +33,8 @@ Host::builder().use_spa("wwwroot")
 | `ETag` / `Last-Modified` | 自动生成 |
 | `Range` | 支持 `206` 断点续传 |
 | `HEAD` | 与 GET 相同头部，无响应体 |
-| `Cache-Control` | `/assets/**` 为 `public, max-age=31536000, immutable`；其余为 `public, max-age=0, must-revalidate`（覆盖默认的 `no-store`） |
+
+`Cache-Control` 的取值见 [文件服务的生产部署](file-serving.md)。
 
 > `wwwroot` 下的文件**不经过授权检查**。需要鉴权的文件请放在可写目录，用
 > [`ResponseData::file`](../05-request-pattern/file-upload-download.md) + `#[authorize]` 提供。
@@ -58,7 +60,7 @@ Host::builder()
     .await?;
 ```
 
-一个二进制同时服务 API + 前端 + Swagger 文档。
+一个二进制同时服务 API、前端与内置 API 文档。
 
 ## 把 wwwroot 编译进 exe
 
@@ -84,7 +86,7 @@ fn main() -> Result<(), webx::Error> {
 ```
 
 ```rust
-// Program.cs —— (embed) = 明确「要嵌入」
+// main.rs —— (embed) = 明确「要嵌入」
 #[webx::main(embed)]
 async fn main() {
     Host::builder()
@@ -123,6 +125,29 @@ async fn main() {
 | 磁盘文件 | 大小 + mtime | 文件一变就变 |
 | 内嵌文件 | 内容 `sha256` | 跨机器、跨重新编译都一致，多副本/CDN 不会缓存出两份 |
 
+### 内嵌文件怎么压缩
+
+`build.rs` 会对可压缩的文件做 brotli 编码（质量 11），表里存的是**压缩后的字节流
+加上原始长度**。因此二进制显著变小，而磁盘上不需要任何中间产物。
+
+已压缩的媒体（PNG、WOFF2、ZIP 等）和小于 256 字节的文件原样存储——再压一次既费
+构建时间，也不会变小。
+
+运行期按 `Accept-Encoding` 协商：
+
+| 客户端 | 响应 |
+|--------|------|
+| 接受 `br` | 直接发送压缩字节流，附 `Content-Encoding: br`，不解压、不分配 |
+| 不接受 `br` | 解压一次并缓存到进程结束，发送原文件 |
+
+两条路径都带 `Vary: Accept-Encoding`，且 `ETag` 按表示区分：压缩表示是
+`"sha256-…-br"`，原文件是 `"sha256-…"`。共享缓存因此不会把 brotli 字节交给只请求
+原文件的客户端。
+
+解压是按需的：只有客户端不支持 `br` 时才会发生，并且每个文件最多一次。反过来，接受
+`br` 的客户端拿到的静态资源也是压缩传输的——磁盘文件本身没有被压缩过，这是内嵌表
+额外带来的收益。
+
 ### 必须知道的取舍
 
 * **僵尸覆盖（stale override）**：磁盘上的同名文件**永远**赢。如果某次更新改了 exe 内的
@@ -135,8 +160,8 @@ async fn main() {
   ```
 
   建议把覆盖目录当白名单用：只放确实要自定义的文件，升级时一并检查。
-* **体积**：内嵌会让每个 exe 变大（docbit 实测 576 个文件 / 27 MiB）。因此必须
-  **同时**写 `build.rs` 的 `web_root` 与 `#[webx::main(embed)]`——缺一则不烤进包。
+* **体积**：可压缩文件先经 brotli 编码才进入二进制；docbit 实测 576 个文件 / 27 MiB
+  的 `wwwroot` 只占约 4.7 MiB。详见[内嵌文件怎么压缩](#内嵌文件怎么压缩)。
 * **编译期与运行期**：`web_root` 是**编译目录**；`.use_spa` 是**部署覆盖目录**。
   二者可以不同（docbit 从 `../wwwroot` 编译、部署用 `wwwroot`）。
 * **增删文件**：build.rs 会为整个目录树发出 `cargo:rerun-if-changed`，所以新增、
@@ -172,4 +197,4 @@ async fn main() {
 OpenAPI 从类型信息自动生成，SPA 托管让全栈单体部署成为可能；`build.rs` 的
 `web_root` 再把静态资源收进 exe，部署收敛为单个文件，同时保留逐个文件的覆盖能力。
 
-下一节：[优雅关闭与可观测性](graceful-shutdown.md)
+下一节：[文件服务的生产部署](file-serving.md)

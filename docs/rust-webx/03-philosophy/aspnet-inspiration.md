@@ -98,17 +98,6 @@ Rust 没有 GC，DI 容器使用 `Arc<T>` 共享所有权。ASP.NET Core 的 Sco
 | SignalR | WebSocket 非当前重点 |
 | 过滤器（Filters） | 由 `IPipelineBehavior` + 中间件替代 |
 
-## 迁移友好性
-
-若你来自 ASP.NET Core， mental model 迁移路径：
-
-1. Controller Action → `IRequest` + `IRequestHandler`
-2. `Startup.ConfigureServices` → `Host::builder().register()`
-3. `Startup.Configure` → 中间件注册 + `use_spa()` 等
-4. `IHostedService` → 同名，几乎相同 API
-
-详见 [第十六章迁移指南](../16-migration/from-aspnet-core.md)。
-
 ## 小结
 
 rust-webx 是 ASP.NET Core 设计哲学的 Rust 表达：相同的架构舒适度，更强的编译期保证。

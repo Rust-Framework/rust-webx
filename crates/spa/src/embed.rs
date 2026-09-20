@@ -34,6 +34,19 @@
 //! `web_root` and `use_spa` can differ — build from `frontend/dist`, overrides
 //! in deploy-time `wwwroot`.
 //!
+//! # Payload encoding
+//!
+//! Compressible files are stored brotli-encoded ([`ContentEncoding::Brotli`])
+//! alongside their original length, which is what stops a large `wwwroot` from
+//! becoming a large binary. The middleware hands the stored stream straight to
+//! clients that accept `br`, and only decodes — once per file, then cached — for
+//! clients that do not. Media that is already compressed stays verbatim
+//! ([`ContentEncoding::Identity`]).
+//!
+//! The build script decides all of this per file. A hand-written table must
+//! keep the two fields consistent: `raw_len` is the decoded length, and
+//! `bytes.len() == raw_len` whenever `encoding` is `Identity`.
+//!
 //! # Requirements on a hand-written table
 //!
 //! [`EmbeddedAssets::get`] binary-searches, so `files` **must be sorted by
@@ -42,6 +55,25 @@
 //! middleware is constructed.
 
 use std::path::Path;
+
+/// How an [`EmbeddedAsset`]'s payload is stored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContentEncoding {
+    /// The payload is the file itself.
+    Identity,
+    /// The payload is a brotli stream; `raw_len` is the decoded length.
+    Brotli,
+}
+
+impl ContentEncoding {
+    /// The `Content-Encoding` token the payload is stored in, if any.
+    pub const fn token(self) -> Option<&'static str> {
+        match self {
+            Self::Identity => None,
+            Self::Brotli => Some("br"),
+        }
+    }
+}
 
 /// One file compiled into the executable.
 ///
@@ -52,8 +84,15 @@ pub struct EmbeddedAsset {
     /// Normalized path relative to the embedded root, `/`-separated and without
     /// a leading slash (e.g. `assets/app.abc123.js`). Matched case-sensitively.
     pub path: &'static str,
-    /// The file contents, placed in the binary's read-only data section.
+    /// The stored payload: the file for [`ContentEncoding::Identity`], its
+    /// brotli stream for [`ContentEncoding::Brotli`]. Placed in the binary's
+    /// read-only data section.
     pub bytes: &'static [u8],
+    /// Length of the file before compression. Equals `bytes.len()` when the
+    /// payload is stored verbatim.
+    pub raw_len: usize,
+    /// How `bytes` is encoded.
+    pub encoding: ContentEncoding,
     /// Media type resolved at build time, so no runtime extension lookup is needed.
     pub content_type: &'static str,
     /// A strong, quoted `ETag` derived from the content.
@@ -62,6 +101,49 @@ pub struct EmbeddedAsset {
     /// offer. Because it hashes the bytes it is also stable across machines and
     /// rebuilds, unlike the host's `size-mtime` tag for files on disk.
     pub etag: &'static str,
+}
+
+impl EmbeddedAsset {
+    /// Decode the stored payload back to the original file.
+    ///
+    /// `None` only when an encoded payload fails to decode, which means the
+    /// table is corrupt; the caller still has [`bytes`](Self::bytes) to serve.
+    pub fn decode(&self) -> Option<Vec<u8>> {
+        match self.encoding {
+            ContentEncoding::Identity => Some(self.bytes.to_vec()),
+            ContentEncoding::Brotli => decode_brotli(self.bytes, self.raw_len),
+        }
+    }
+
+    /// Whether the payload is stored compressed.
+    pub fn is_encoded(&self) -> bool {
+        matches!(self.encoding, ContentEncoding::Brotli)
+    }
+
+    /// The strong validator for one representation of this asset.
+    ///
+    /// A compressed payload is a different representation, so it needs its own
+    /// `ETag`: reusing the identity tag would let a shared cache hand brotli
+    /// bytes to a client that asked for the plain file.
+    pub fn etag_for(&self, encoded: bool) -> String {
+        if !encoded {
+            return self.etag.to_string();
+        }
+        match self.etag.strip_suffix('"') {
+            Some(head) => format!("{head}-br\""),
+            None => format!("{}-br", self.etag),
+        }
+    }
+}
+
+/// Decode one brotli stream, reserving the original length up front.
+fn decode_brotli(payload: &[u8], raw_len: usize) -> Option<Vec<u8>> {
+    use std::io::Read as _;
+
+    let mut out = Vec::with_capacity(raw_len);
+    let mut decoder = brotli_decompressor::Decompressor::new(payload, 4096);
+    decoder.read_to_end(&mut out).ok()?;
+    Some(out)
 }
 
 /// A build-time directory tree of static files.
@@ -101,9 +183,17 @@ impl EmbeddedAssets {
         self.files.is_empty()
     }
 
-    /// Combined size of the embedded files, in bytes.
+    /// Combined size of the stored payloads, in bytes — what the binary holds.
     pub fn total_bytes(&self) -> u64 {
         self.files.iter().map(|file| file.bytes.len() as u64).sum()
+    }
+
+    /// Combined size of the files as they exist on disk.
+    ///
+    /// Larger than [`total_bytes`](Self::total_bytes) whenever something was
+    /// compressed; the difference is what brotli saved.
+    pub fn total_raw_bytes(&self) -> u64 {
+        self.files.iter().map(|file| file.raw_len as u64).sum()
     }
 
     /// Look up `path`, which must already be normalized: relative, `/`-separated,
@@ -173,28 +263,46 @@ inventory::collect!(EmbeddedAssets);
 
 #[cfg(test)]
 mod tests {
-    use super::{EmbeddedAsset, EmbeddedAssets};
+    use super::{ContentEncoding, EmbeddedAsset, EmbeddedAssets};
 
     const FILES: &[EmbeddedAsset] = &[
         EmbeddedAsset {
             path: "assets/app.css",
             bytes: b"a{}",
+            raw_len: 3,
+            encoding: ContentEncoding::Identity,
             content_type: "text/css",
             etag: "\"sha256-1\"",
         },
         EmbeddedAsset {
             path: "index.html",
             bytes: b"index",
+            raw_len: 5,
+            encoding: ContentEncoding::Identity,
             content_type: "text/html",
             etag: "\"sha256-2\"",
         },
         EmbeddedAsset {
             path: "only-embedded.txt",
             bytes: b"embedded",
+            raw_len: 8,
+            encoding: ContentEncoding::Identity,
             content_type: "text/plain",
             etag: "\"sha256-3\"",
         },
     ];
+
+    /// Brotli-encode `source`, the way the build script would.
+    fn brotli(source: &str) -> Vec<u8> {
+        use std::io::Write as _;
+
+        let mut out = Vec::new();
+        let mut encoder = brotli::CompressorWriter::new(&mut out, 4096, 11, 22);
+        encoder.write_all(source.as_bytes()).unwrap();
+        encoder.flush().unwrap();
+        drop(encoder);
+        out
+    }
 
     #[test]
     fn get_finds_every_entry() {
@@ -205,6 +313,71 @@ mod tests {
         }
         assert_eq!(assets.len(), 3);
         assert_eq!(assets.total_bytes(), 16);
+        assert_eq!(assets.total_raw_bytes(), 16);
+    }
+
+    #[test]
+    fn an_encoded_entry_decodes_back_to_the_original_file() {
+        let source = "body { color: red; }".repeat(32);
+        let payload = brotli(&source);
+        assert!(
+            payload.len() < source.len(),
+            "the fixture must actually compress"
+        );
+
+        let encoded = EmbeddedAsset {
+            path: "app.css",
+            bytes: Box::leak(payload.into_boxed_slice()),
+            raw_len: source.len(),
+            encoding: ContentEncoding::Brotli,
+            content_type: "text/css",
+            etag: "\"sha256-x\"",
+        };
+        assert!(encoded.is_encoded());
+        assert_eq!(encoded.decode().unwrap(), source.as_bytes());
+
+        // Identity entries decode to themselves.
+        assert_eq!(FILES[0].decode().unwrap(), b"a{}");
+        assert!(!FILES[0].is_encoded());
+    }
+
+    #[test]
+    fn totals_separate_the_stored_payload_from_the_original_size() {
+        let source = "x".repeat(4096);
+        let payload = brotli(&source);
+        let encoded: &'static EmbeddedAsset = Box::leak(Box::new(EmbeddedAsset {
+            path: "big.txt",
+            bytes: Box::leak(payload.into_boxed_slice()),
+            raw_len: 4096,
+            encoding: ContentEncoding::Brotli,
+            content_type: "text/plain",
+            etag: "\"sha256-y\"",
+        }));
+        let assets = EmbeddedAssets::new("wwwroot", std::slice::from_ref(encoded));
+        assert!(assets.total_bytes() < assets.total_raw_bytes());
+        assert_eq!(assets.total_raw_bytes(), 4096);
+    }
+
+    #[test]
+    fn each_representation_gets_its_own_validator() {
+        let plain = &FILES[0];
+        assert_eq!(plain.etag_for(false), "\"sha256-1\"");
+        assert_eq!(plain.etag_for(true), "\"sha256-1-br\"");
+        assert_ne!(plain.etag_for(false), plain.etag_for(true));
+
+        // A hand-written table without the surrounding quotes still yields a
+        // distinct, well-formed tag rather than a truncated one.
+        let bare = EmbeddedAsset {
+            etag: "sha256-z",
+            ..*plain
+        };
+        assert_eq!(bare.etag_for(true), "sha256-z-br");
+    }
+
+    #[test]
+    fn encoding_tokens_are_the_http_ones() {
+        assert_eq!(ContentEncoding::Identity.token(), None);
+        assert_eq!(ContentEncoding::Brotli.token(), Some("br"));
     }
 
     #[test]

@@ -13,7 +13,7 @@
 - 返回 PagedResponse<BlogPostDto>
 ```
 
-AI 生成的代码可直接放入 `contracts/blog.rs`（DTO + `IBlogService` trait + `IRequest`）+ `handlers/blog.rs`（`BlogService` 实现 + Handler）。
+AI 生成的代码可直接放入 `contracts/blog.rs`（DTO + `IRequest`）+ `handlers/blog.rs`（Handler 通过 mediator 直接操作 `DbContext`）。博客模块不需要 Service 抽象；只有需要可替换实现时才定义 `I…Service`（如 `IDocumentService`），见 [可复用的模式提炼](../15-case-study/docbit-patterns.md)。
 
 **contracts 禁止引用 domain**；DTO 必须在 contracts 定义。
 
@@ -56,11 +56,11 @@ handlers/blog/
 
 ```
 使用 rust-webx 框架，遵循以下约定：
-- contracts/：Request、Response DTO、enum、I…Service trait（仅依赖框架，禁止引用 domain）
-- handlers/：IRequestHandler 实现 + I…Service 实现（#[inject] 自动注册）
-- domain/：实体与迁移（可引用 contracts 枚举）
+- contracts/：Request、Response DTO、enum、可选 I…Service trait（仅依赖框架，禁止引用 domain）
+- handlers/：IRequestHandler 实现；需要抽象时才提供 I…Service 实现（#[derive(Inject)] + #[inject] 自动注册）
+- domain/：实体与 EF 配置、seed（可引用 contracts 枚举）
 - 使用 #[get]/#[post] 标注 impl IRequest<T>
-- Handler 注入 Arc<dyn I…Service>，使用 #[inject] + #[handler(inject)]
+- Handler 需要数据库时用 #[inject(owned)] ctx: DbContext；需要服务时注入 Arc<dyn I…Service>，用 #[handler(inject)]
 - 错误使用 Error::NotFound / Error::Validation
 - 返回 Result<T>
 

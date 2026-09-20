@@ -60,3 +60,5 @@ Host::builder()
 ## 小结
 
 `add_memory_cache()` 一行启用缓存；`RateLimit` / `Metrics` 配置节用于生产防护与可观测性。
+
+下一节：[OpenAPI 与 SPA 托管](openapi-spa.md)

@@ -5,7 +5,12 @@
     "docTitle": "Rust Web Framework 开发者手册",
     "description": "以 ASP.NET Core 为蓝本的生产级 Rust Web 框架 — 编译时路由、DI+中介者双核心、JWT 认证，请求即端点，零配置 Handler。 | ASP.NET Core-inspired Web API framework for Rust — compile-time routing, DI + Mediator, JWT auth, and zero-config handlers.",
     "category": "framework",
-    "tags": ["rust","webapp", "webapi", "mediator"],
+    "tags": [
+      "rust",
+      "webapp",
+      "webapi",
+      "mediator"
+    ],
     "repoUrl": "https://github.com/Rust-Framework/rust-webx",
     "demoUrl": "",
     "featured": true,
@@ -22,8 +27,8 @@
   },
   "parts": [
     {
-      "id": "part-1-start",
-      "title": "第一部分 · 入门",
+      "id": "part-1",
+      "title": "第一部分 · 入门与认知",
       "chapters": [
         {
           "id": "01-introduction",
@@ -91,8 +96,8 @@
       ]
     },
     {
-      "id": "part-2-design",
-      "title": "第二部分 · 设计与架构",
+      "id": "part-2",
+      "title": "第二部分 · 设计思想与架构",
       "chapters": [
         {
           "id": "03-philosophy",
@@ -167,8 +172,8 @@
       ]
     },
     {
-      "id": "part-3-core",
-      "title": "第三部分 · 核心模式",
+      "id": "part-3",
+      "title": "第三部分 · 核心开发模式",
       "chapters": [
         {
           "id": "05-request-pattern",
@@ -201,6 +206,13 @@
               "title": "参数绑定与序列化",
               "summary": "路径、查询、Body 参数提取",
               "readingTime": 12,
+              "difficulty": "intermediate"
+            },
+            {
+              "id": "file-upload-download",
+              "title": "文件上传与下载",
+              "summary": "多部分表单解析、流式读写与断点续传",
+              "readingTime": 20,
               "difficulty": "intermediate"
             },
             {
@@ -246,13 +258,7 @@
               "difficulty": "advanced"
             }
           ]
-        }
-      ]
-    },
-    {
-      "id": "part-4-pipeline",
-      "title": "第四部分 · 管道与事件",
-      "chapters": [
+        },
         {
           "id": "07-middleware",
           "title": "中间件管道",
@@ -319,8 +325,8 @@
       ]
     },
     {
-      "id": "part-5-security",
-      "title": "第五部分 · 安全与配置",
+      "id": "part-4",
+      "title": "第四部分 · 安全、配置与生产",
       "chapters": [
         {
           "id": "09-auth-security",
@@ -384,13 +390,7 @@
               "difficulty": "intermediate"
             }
           ]
-        }
-      ]
-    },
-    {
-      "id": "part-6-production",
-      "title": "第六部分 · 生产与工程",
-      "chapters": [
+        },
         {
           "id": "11-production",
           "title": "生产级能力",
@@ -418,6 +418,13 @@
               "difficulty": "intermediate"
             },
             {
+              "id": "file-serving",
+              "title": "文件服务的生产部署",
+              "summary": "反向代理、范围请求与缓存策略",
+              "readingTime": 12,
+              "difficulty": "intermediate"
+            },
+            {
               "id": "graceful-shutdown",
               "title": "优雅关闭与可观测性",
               "summary": "信号处理、连接排空与追踪",
@@ -425,7 +432,13 @@
               "difficulty": "intermediate"
             }
           ]
-        },
+        }
+      ]
+    },
+    {
+      "id": "part-5",
+      "title": "第五部分 · 工程化与进阶",
+      "chapters": [
         {
           "id": "12-project-structure",
           "title": "项目组织与职责划分",
@@ -460,13 +473,7 @@
               "difficulty": "intermediate"
             }
           ]
-        }
-      ]
-    },
-    {
-      "id": "part-7-practice",
-      "title": "第七部分 · 扩展与实践",
-      "chapters": [
+        },
         {
           "id": "13-extensibility",
           "title": "扩展与自定义封装",
@@ -540,8 +547,8 @@
       ]
     },
     {
-      "id": "part-8-case-migration",
-      "title": "第八部分 · 案例与迁移",
+      "id": "part-6",
+      "title": "第六部分 · 案例与迁移",
       "chapters": [
         {
           "id": "15-case-study",
@@ -577,10 +584,10 @@
           "subtitle": "版本升级、ASP.NET Core 与 Axum / Actix 迁移",
           "sections": [
             {
-              "id": "upgrade-to-webx-import",
-              "title": "升级到 webx 导入路径",
-              "summary": "0.4 → 0.5：导入路径、环境变量与 SPA 嵌入变更",
-              "readingTime": 10,
+              "id": "upgrade-to-0.5",
+              "title": "升级到 0.5（破坏性变更）",
+              "summary": "导入路径改名、环境变量、SPA 内嵌模型与压缩存储",
+              "readingTime": 15,
               "difficulty": "intermediate"
             },
             {

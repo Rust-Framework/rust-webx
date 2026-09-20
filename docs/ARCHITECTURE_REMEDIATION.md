@@ -112,7 +112,7 @@ Docs previously described `dyn IRequestHandler` DI lookup as the primary path. T
 - Macro pass that fails `cargo build` on orphan routes (inventory link-time only; runtime panic + `--doctor` instead)
 - `jwt_secret()` process-wide shim → per-Host injection (documented in [security-best-practices.md](rust-webx/09-auth-security/security-best-practices.md); acceptable for single-Host deployments)
 
-**Migration:** See [docs/rust-webx/16-migration/global-state.md](rust-webx/16-migration/global-state.md). Use `host.provider()` or `dispatch_provider()` inside `host.dispatch_runtime().run()`. Replace `global_provider()` in hosted services with `dispatch_provider()` (scoped automatically during `Host::run()`).
+**Migration:** Use `host.provider()` or `dispatch_provider()` inside `host.dispatch_runtime().run()`. Replace `global_provider()` in hosted services with `dispatch_provider()` (scoped automatically during `Host::run()`).
 
 ### 4.2 Compile-time orphan detection
 
@@ -142,7 +142,7 @@ When upgrading to a release containing these fixes:
 
 - [x] Run `cargo run -p <host-crate> -- --doctor` and fix all orphan routes/handlers
 - [x] Verify no client depends on `/api/*` returning SPA `index.html`
-- [x] Replace `global_provider()` with `dispatch_provider()` / `host.provider()` — see [global-state.md](rust-webx/16-migration/global-state.md)
+- [x] Replace `global_provider()` with `dispatch_provider()` / `host.provider()`
 - [x] Replace `inject_attr` references with `#[inject]` / `#[derive(Inject)]` (rust-dix)
 
 ---

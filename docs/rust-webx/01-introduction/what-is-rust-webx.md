@@ -17,7 +17,7 @@
 | 痛点 | rust-webx 的解法 |
 |------|-------------------|
 | 路由与处理器脱节 | `IRequest<T>` 自带路由元数据，`#[get("/path")]` 编译时注册 |
-| Handler 注册样板代码 | `#[handler]` 宏自动向 DI 容器注册 |
+| Handler 注册样板代码 | `#[handler]` 宏编译时向 `inventory` 提交注册 |
 | 模块间强耦合 | `IMediator::send()` 调度请求，`publish()` 发布事件 |
 | 错误与 HTTP 状态码映射分散 | 统一 `Error` 类型 + 内置异常中间件 |
 | 认证授权各自为政 | `add_authentication()` + `#[authorize]` 声明式授权 |
@@ -54,7 +54,7 @@ graph TB
 ```rust
 use webx::*;
 
-#[tokio::main]
+#[webx::main]
 async fn main() {
     Host::builder()
         .mode(AppMode::Development)
@@ -63,7 +63,7 @@ async fn main() {
         })
         .use_spa("wwwroot")      // 可选：SPA 静态托管
         .add_authentication()              // 可选：JWT 认证
-        .add_memory_cache()      // 可选：分布式缓存
+        .add_memory_cache()      // 可选：进程内内存缓存
         .build()
         .run()
         .await
@@ -86,10 +86,10 @@ impl IRequest<String> for HelloRequest {}
 #[derive(Default)]
 struct HelloHandler;
 
-#[handler]  // 编译时自动注册到 DI
+#[handler]  // 编译时向 inventory 注册
 #[async_trait]
 impl IRequestHandler<HelloRequest, String> for HelloHandler {
-    async fn handle(&self, _req: HelloRequest) -> Result<String> {
+    async fn handle(&mut self, _req: HelloRequest) -> Result<String> {
         Ok("Hello, World!".to_string())
     }
 }
@@ -109,7 +109,7 @@ Handler 不直接调用彼此，而是通过 `IMediator` 调度。这带来：
 
 - JWT Bearer 认证 + 基于路由模式的资源授权
 - CORS、速率限制、安全响应头、Gzip 压缩
-- OpenAPI 3.0 自动生成 + Swagger UI
+- OpenAPI 3.0 文档，开发模式下暴露 `GET /api/openapi.json` 与 `GET /api/openapi.html`（内置 API 文档 UI）
 - SPA 静态文件托管（History 模式 fallback）
 - `appsettings.json` 配置体系
 - `IHostedService` 后台服务生命周期（数据迁移、种子数据）

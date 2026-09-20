@@ -28,17 +28,22 @@ Level 4: 框架扩展 + 贡献 core trait 实现
 Host::builder().build().run().await?;
 ```
 
-`#[handler]` + `#[get]` 自动完成路由与 DI。适合原型和简单 API。
+`#[handler]` + `#[get]` 自动完成路由与 Handler 注册。适合原型和简单 API。
 
 ### 第二层：显式注册
 
 ```rust
-Host::builder()
-    .register(|svc| {
-        register_handlers!(svc, ...);
-        svc.singleton::<MyRepo>(|_| Arc::new(MyRepo::new()));
-    })
-    .build()
+#[derive(Inject)]
+pub struct MyHandler {
+    #[inject]
+    repo: Arc<dyn IMyRepo>,
+}
+
+#[handler(inject)]
+#[async_trait]
+impl IRequestHandler<MyRequest, MyResponse> for MyHandler {
+    async fn handle(&mut self, req: MyRequest) -> Result<MyResponse> { ... }
+}
 ```
 
 当 Handler 需要注入依赖时披露。
@@ -112,13 +117,6 @@ graph TD
 ```
 
 详见 [第十三章 扩展与自定义封装](../13-extensibility/INDEX.md)。
-
-## 对文档读者的建议
-
-1. **先跑通 Hello World**，建立肌肉记忆
-2. **遇到具体需求时再深入对应章节**，不要试图一次读完
-3. **参考 Docbit 源码**作为「标准答案」
-4. **遇到框架限制**，先查 [常见陷阱](../14-best-practices/common-pitfalls.md)，再考虑扩展点
 
 ## 小结
 

@@ -22,7 +22,7 @@ sequenceDiagram
     Pipeline->>Router: match_route(method, path)
     alt 匹配成功
         Router->>Endpoint: 提取 route_params
-        Endpoint->>DI: 解析 Handler
+        Endpoint->>Handler: HandlerCache 查找（经 DI 构造依赖）
         Endpoint->>Mediator: send(request)
         Mediator->>Handler: handle(request)
         Handler-->>Mediator: Result<Response>
@@ -37,7 +37,7 @@ sequenceDiagram
 
 ### 1. 连接与请求读取
 
-`Host::run()` 启动 hyper 监听器。每个连接由 Tokio 异步处理。`HttpContext::new()` 读取请求 body bytes（有大小限制，默认 10MB，可通过 `App.MaxBodySize` 配置）。
+`Host::run()` 启动 hyper 监听器。每个连接由 Tokio 异步处理。`HttpContext::new()` 不读取 body；body 由 `IHttpRequest::body_bytes()` 按需读取，并强制 `App.MaxBodySize` 限制（默认 10MB）。
 
 ### 2. 中间件管道
 
@@ -51,7 +51,7 @@ sequenceDiagram
 
 ### 3. 路由匹配
 
-`Router` 使用 Trie 树匹配 HTTP method + path：
+`Router` 基于 matchit（radix 树）匹配 HTTP method + path：
 
 - 静态段精确匹配
 - `{param}` 动态段提取到 `route_params`
@@ -71,8 +71,15 @@ sequenceDiagram
 若 Handler 返回 `Err(Error::...)` 或管道中抛出错误，内置异常中间件捕获并映射：
 
 ```json
-{"error": "User abc not found", "status": 404}
+{
+  "type": "https://httpstatuses.com/404",
+  "title": "Not Found",
+  "status": 404,
+  "detail": "User abc not found"
+}
 ```
+
+响应头为 `content-type: application/problem+json`（RFC 7807）。
 
 ### 6. 响应发送
 
@@ -88,13 +95,11 @@ RouteDispatch → Mediator::send(request) → dispatch → HandlerCache → IReq
 
 `IPipelineBehavior` 在 `dispatch` 内部包装 Handler 调用，实现验证、缓存等横切逻辑。
 
-## DispatchRuntime（Phase 4）
+## DispatchRuntime
 
 每个 `Host` 持有实例级 `DispatchRuntime`（`ServiceProvider` + `HandlerCache`）。HTTP 请求与 `IHostedService::start` 在 `DispatchRuntime::run()` 作用域内执行；宏生成的 `RouteDispatch` 通过 `dispatch_provider()` 解析 DI。
 
-`global_provider()` / `set_global_provider()` 已弃用，仅作手动 shim；`Host::build()` 不再设置进程级 provider。无活跃 runtime 时，`dispatch_provider()` 在 shim 未设置时会 panic 并提示使用 `host.provider()` 或 `dispatch_runtime().run()`。
-
-多 Host 集成测试：`host.dispatch_runtime().run(async { ... }).await` 或 `host.provider()`。详见 [全局状态迁移](../16-migration/global-state.md)。
+多 Host 集成测试：`host.dispatch_runtime().run(async { ... }).await` 或 `host.provider()`。
 
 ## 启动与关闭生命周期
 

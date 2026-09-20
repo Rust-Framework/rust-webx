@@ -117,7 +117,7 @@ rust-webx/
 > `rust-webx-host` → `webx_host`, `rust-webx-macros` → `webx_macros`,
 > `rust-webx-spa` → `webx_spa`, `rust-webx-openapi` → `webx_openapi`.
 > Upgrading from 0.4 or earlier: see the
-> [migration guide](docs/rust-webx/16-migration/upgrade-to-webx-import.md).
+> [0.5 upgrade guide](docs/rust-webx/16-migration/upgrade-to-0.5.md).
 
 ## Request-as-Endpoint: Hello World
 

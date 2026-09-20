@@ -26,7 +26,7 @@ Host::builder()
 
 ```bash
 # Docbit 作品集
-cargo run -p docbit
+cargo run -p docbit-host
 
 # 仅编译检查
 cargo check --workspace
@@ -41,15 +41,14 @@ curl -v http://localhost:5000/hello
 curl -H "Authorization: Bearer <token>" http://localhost:5000/api/auth/me
 ```
 
-### OpenAPI / Swagger UI
+### 内置 API 文档
 
-框架在开发模式下自动暴露 OpenAPI 端点。访问：
+框架在开发模式（`AppMode::Development`）下自动暴露 API 文档端点：
 
 ```
-http://localhost:5000/swagger
+http://localhost:5000/api/openapi.html   # 内置 API 文档 UI，可浏览所有已注册路由
+http://localhost:5000/api/openapi.json   # OpenAPI 3.0 规范
 ```
-
-可交互测试所有已注册路由。
 
 ### 健康检查
 
@@ -61,12 +60,12 @@ GET /health
 
 ## 调试技巧
 
-### 启用 tracing 日志
+### 调整 tracing 日志级别
 
-在 `main.rs` 开头：
+`Host::build()` 会自动初始化 tracing；用环境变量 `RUST_LOG` 控制级别（默认 `info`）：
 
-```rust
-tracing_subscriber::fmt::init();
+```bash
+RUST_LOG=debug cargo run
 ```
 
 中间件如 `RequestTracing`、`TimingMiddleware` 会输出请求耗时与路径。
@@ -75,10 +74,10 @@ tracing_subscriber::fmt::init();
 
 | 错误现象 | 原因 | 解决 |
 |---------|------|------|
-| `No handler registered` | Handler 未注册到 DI | 检查 `#[handler]` 或手动 `singleton` 注册 |
+| `No #[handler] registered for request type '...'` | 缺少 `#[handler]` 的 inventory 注册 | 确认 `impl IRequestHandler` 上标注了 `#[handler]` / `#[handler(inject)]` |
 | `route not found` 404 | 路由未收集 | 确认 `#[get]` 标注在 `impl IRequest` 上 |
 | 端口占用 | 5000 已被使用 | 修改 `App.Urls` |
-| 类型不匹配 panic | Request/Handler 响应类型不一致 | 确保 `IRequest<T>` 的 T = Handler 的 R |
+| 类型不匹配 | Request/Handler 响应类型不一致（编译错误，受 `T: IRequest<R>` 约束） | 确保 `IRequest<T>` 的 T = Handler 的 R；运行期 downcast 失败返回 `Error::Internal` |
 
 ### 编译时检查清单
 
@@ -107,6 +106,6 @@ Workspace 的 release profile 已配置 LTO 与 strip，产物体积与性能均
 
 ## 小结
 
-运行 rust-webx 应用只需 `cargo run`；验证通过 curl、Swagger UI 或集成测试。遇到问题时，先查 Handler 注册与路由标注两个最高频原因。
+运行 rust-webx 应用只需 `cargo run`；验证通过 curl、内置 API 文档或集成测试。遇到问题时，先查 Handler 注册与路由标注两个最高频原因。
 
 本章完成！下一章进入设计哲学：[第三章](../03-philosophy/INDEX.md)

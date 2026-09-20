@@ -25,13 +25,7 @@ impl IRequest<SettingsDto> for UpdateSettingsRequest {}
 
 ## 与 add_authentication() 的关系
 
-| 配置 | 效果 |
-|------|------|
-| 无 `add_authentication()` | JWT 未启用；`#[authorize]` 元数据收集但不执行 |
-| `add_authentication()` | 注册 **JWT 中间件**；路由级 `#[authorize]` 在 `StubEndpoint` 内检查；`IDynamicAuthorizer` 可扩展策略 |
-| `.use_resource_authorization()` | 从路由元数据构建 `ResourceAuthorization`，在 endpoint 层（路由匹配后）额外校验 |
-
-详见 [资源授权](resource-authorization.md) 与 [中间件顺序](../07-middleware/ordering-strategy.md)。
+bare `#[authorize]` 展开为角色 `"authenticated"`，`StubEndpoint` 在 dispatch 前检查 claims；因此未启用 `add_authentication()` 时，无 claims 的请求仍会返回 401，元数据并非只收集不执行。认证与资源授权的组合方式详见 [资源授权](resource-authorization.md) 与 [中间件顺序](../07-middleware/ordering-strategy.md)。
 
 ## Docbit 实例
 

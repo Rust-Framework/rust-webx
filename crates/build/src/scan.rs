@@ -2,22 +2,49 @@
 //!
 //! Traversal happens once and yields both the table entries and the paths cargo
 //! must watch, so a single function owns the directory contract.
+//!
+//! Compressible files are brotli-encoded here, so the bytes that reach the
+//! binary are the compressed form and the raw file never enters the executable.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use crate::error::Error;
 
+/// Brotli quality. 11 is the maximum: it costs build time, not runtime size or
+/// startup, so it is the right trade for a value fixed at compile time.
+const BROTLI_QUALITY: u32 = 11;
+
+/// Brotli window (`lgwin`). 24 keeps multi-megabyte bundles inside one window,
+/// which is where most of the ratio on vendored JS comes from.
+const BROTLI_WINDOW: u32 = 24;
+
+/// Files smaller than this are stored verbatim: a brotli frame header costs
+/// more than the body it would wrap.
+const MIN_COMPRESSIBLE: u64 = 256;
+
+/// Extensions that are already compressed on disk. Recompressing them cannot
+/// shrink them, so they are stored verbatim instead of burning build time.
+const ALREADY_COMPRESSED: &[&str] = &[
+    "png", "jpg", "jpeg", "gif", "ico", "webp", "avif", "woff", "woff2", "zip", "gz", "br", "xz",
+    "7z", "zst", "mp3", "mp4", "webm", "pdf",
+];
+
 /// A file compiled into the executable.
 pub(crate) struct Asset {
     /// Path relative to the asset root, `/`-separated: the table key.
     pub(crate) key: String,
-    /// Absolute path on disk, for `include_bytes!`.
+    /// Absolute path on disk, for `include_bytes!` when stored verbatim.
     pub(crate) path: PathBuf,
     /// Media type inferred from the extension.
     pub(crate) content_type: String,
     /// Content-derived validator, quoted and ready to send.
     pub(crate) etag: String,
+    /// Size of the file as it exists on disk — the decoded length.
+    pub(crate) raw_len: u64,
+    /// The brotli stream, when compressing was worth it. `None` means the
+    /// payload is the original file, referenced by `include_bytes!`.
+    pub(crate) compressed: Option<Vec<u8>>,
 }
 
 /// Everything one traversal of the asset directory yields.
@@ -66,12 +93,7 @@ impl Scan {
                 self.dirs.push(path.clone());
                 self.visit(&path, base)?;
             } else if file_type.is_file() {
-                self.assets.push(Asset {
-                    key: relative_key(&path, base),
-                    content_type: content_type(&path),
-                    etag: etag_for(&path)?,
-                    path: path.clone(),
-                });
+                self.assets.push(asset(&path, base)?);
                 self.files.push(path);
             }
         }
@@ -140,21 +162,76 @@ fn content_type(path: &Path) -> String {
         .to_string()
 }
 
+/// Read one file and describe it for the generated table.
+///
+/// The file is read once: the same bytes produce the `ETag` and, when it pays
+/// off, the compressed payload.
+fn asset(path: &Path, base: &Path) -> Result<Asset, Error> {
+    let bytes = std::fs::read(path).map_err(|source| unreadable(path, source))?;
+    let raw_len = bytes.len() as u64;
+    Ok(Asset {
+        key: relative_key(path, base),
+        content_type: content_type(path),
+        etag: etag_of(&bytes),
+        path: path.to_path_buf(),
+        raw_len,
+        compressed: compress(path, &bytes),
+    })
+}
+
 /// A strong, quoted `ETag` derived from the file's contents.
 ///
 /// Content-derived means it is stable across machines and rebuilds, so clients
 /// and CDNs revalidate identically against every instance of the app — which
 /// the disk file's size-mtime validator cannot offer.
-fn etag_for(path: &Path) -> Result<String, Error> {
+fn etag_of(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
 
-    let bytes = std::fs::read(path).map_err(|source| unreadable(path, source))?;
-    let digest = Sha256::digest(&bytes);
+    let digest = Sha256::digest(bytes);
     let mut hex = String::with_capacity(64);
     for byte in digest {
         let _ = write!(hex, "{byte:02x}");
     }
-    Ok(format!("\"sha256-{hex}\""))
+    format!("\"sha256-{hex}\"")
+}
+
+/// Brotli-compress `bytes` when it is worth doing, otherwise `None`.
+///
+/// A payload that does not come back smaller is dropped: a table entry holding
+/// a larger "compressed" copy than the file it replaced would be a regression,
+/// and that is possible on tiny or already-entropic files.
+fn compress(path: &Path, bytes: &[u8]) -> Option<Vec<u8>> {
+    if (bytes.len() as u64) < MIN_COMPRESSIBLE || is_already_compressed(path) {
+        return None;
+    }
+    let compressed = brotli(bytes)?;
+    (compressed.len() < bytes.len()).then_some(compressed)
+}
+
+/// Whether `path`'s extension is one that compression cannot improve.
+fn is_already_compressed(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            ALREADY_COMPRESSED
+                .iter()
+                .any(|known| known.eq_ignore_ascii_case(extension))
+        })
+}
+
+/// One-shot brotli encode at [`BROTLI_QUALITY`].
+///
+/// `None` when the encoder fails, which is not fatal: the caller falls back to
+/// storing the file verbatim.
+fn brotli(bytes: &[u8]) -> Option<Vec<u8>> {
+    use std::io::Write as _;
+
+    let mut out = Vec::with_capacity(bytes.len() / 3);
+    let mut encoder = brotli::CompressorWriter::new(&mut out, 4096, BROTLI_QUALITY, BROTLI_WINDOW);
+    encoder.write_all(bytes).ok()?;
+    encoder.flush().ok()?;
+    drop(encoder);
+    Some(out)
 }
 
 /// `/`-separated key for a file, relative to the asset root.
@@ -172,7 +249,7 @@ fn relative_key(path: &Path, base: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{relative_key, resolve, resolve_from, Scan};
+    use super::{is_already_compressed, relative_key, resolve, resolve_from, Scan};
     use std::path::Path;
 
     fn tree(files: &[(&str, &[u8])]) -> tempfile::TempDir {
@@ -324,5 +401,57 @@ mod tests {
             ),
             "a/b.css"
         );
+    }
+
+    #[test]
+    fn compressible_files_are_stored_compressed_and_media_is_not() {
+        let script = b"export const answer = 42;\n".repeat(64);
+        let dir = tree(&[
+            ("app.js", script.as_slice()),
+            ("logo.png", b"\x89PNG\r\n\x1a\n binary payload"),
+            (
+                "site.webmanifest",
+                b"{\"name\":\"docbit\"}\n".repeat(32).as_slice(),
+            ),
+        ]);
+        let scan = Scan::of(dir.path(), dir.path()).unwrap();
+        let find = |key: &str| scan.assets.iter().find(|a| a.key == key).unwrap();
+        let payload_len = |key: &str| find(key).compressed.as_ref().unwrap().len();
+
+        let js = find("app.js");
+        assert!(js.compressed.is_some(), "repetitive JS must be compressed");
+        assert_eq!(js.raw_len, script.len() as u64);
+        assert!((payload_len("app.js") as u64) < js.raw_len);
+
+        // Already compressed on disk: re-encoding cannot shrink it.
+        let png = find("logo.png");
+        assert!(png.compressed.is_none());
+        assert_eq!(
+            png.raw_len,
+            b"\x89PNG\r\n\x1a\n binary payload".len() as u64
+        );
+
+        // A `.webmanifest` is a text asset even though the extension looks odd.
+        assert!(find("site.webmanifest").compressed.is_some());
+    }
+
+    #[test]
+    fn tiny_and_incompressible_files_are_stored_verbatim() {
+        let dir = tree(&[("small.txt", b"hi")]);
+        let scan = Scan::of(dir.path(), dir.path()).unwrap();
+        let small = &scan.assets[0];
+        assert!(
+            small.compressed.is_none(),
+            "a frame header would exceed the body"
+        );
+        assert_eq!(small.raw_len, 2);
+    }
+
+    #[test]
+    fn encoding_is_recognised_case_insensitively() {
+        assert!(is_already_compressed(Path::new("a/b.PNG")));
+        assert!(is_already_compressed(Path::new("a/b.woff2")));
+        assert!(!is_already_compressed(Path::new("a/b.js")));
+        assert!(!is_already_compressed(Path::new("no-extension")));
     }
 }

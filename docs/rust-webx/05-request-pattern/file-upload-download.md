@@ -118,8 +118,7 @@ pub struct UploadRequest {
 
 * 无论大小，字节只存一份，**先落盘再拼接字符串**这种反模式不会出现。
 * 临时文件由 `FormFile` 自己持有，最后一个引用释放时自动删除——也就是请求结构体被丢弃时。
-* 因此：**想长期保存，就在 Handler 里调用 `save_as` / `copy_to`**。这与其他主流框架（ASP.NET Core 的
-  `IFormFile`）的语义一致。
+* 因此：**想长期保存，就在 Handler 里调用 `save_as` / `copy_to`**。
 * `path()` 返回 `Some` 时可以直接把路径交给下游，做零拷贝移交。
 
 ### 1.5 错误语义
@@ -211,16 +210,15 @@ impl IRequestHandler<DownloadReportRequest, ResponseData> for DownloadReportHand
 
 ### 2.2 `File(...)` 的三种来源
 
-对应 ASP.NET Core 的 `File(...)` / `PhysicalFile(...)` / `Results.File(...)`，
 按你手上**已经有什么**来选，都不需要先把内容整体读进内存：
 
-| 你有的东西 | 构造方法 | 对应 ASP.NET Core |
-|-----------|----------|-------------------|
-| 磁盘路径 | `ResponseData::file(path)` | `PhysicalFile(path, ...)` |
-| 未知长度的异步读取器 | `ResponseData::file_stream(reader, ct)` | `File(Stream, ...)` |
-| 已知长度且可 seek 的读取器 | `ResponseData::file_seekable_stream(reader, len, ct)` | `File(Stream, ...)` + `enableRangeProcessing` |
-| 内存字节 | `ResponseData::bytes(v)` / `::text(s)` | `File(byte[], ...)` / `Results.Bytes` |
-| 完全自定义 | `ResponseData::with_file(FileBody::...)` | 手写 `IActionResult` |
+| 你有的东西 | 构造方法 |
+|-----------|----------|
+| 磁盘路径 | `ResponseData::file(path)` |
+| 未知长度的异步读取器 | `ResponseData::file_stream(reader, ct)` |
+| 已知长度且可 seek 的读取器 | `ResponseData::file_seekable_stream(reader, len, ct)` |
+| 内存字节 | `ResponseData::bytes(v)` / `::text(s)` |
+| 完全自定义 | `ResponseData::with_file(FileBody::...)` |
 
 流式下载（内容边生成边发送，总量未知）：
 
@@ -259,7 +257,7 @@ Ok(ResponseData::with_file(
 | `ResponseData::text(s)` | UTF-8 文本 | `text/plain; charset=utf-8` |
 | `ResponseData::html(s)` | UTF-8 文本 | `text/html; charset=utf-8` |
 | `ResponseData::bytes(v)` | 二进制（内存） | `application/octet-stream` |
-| `ResponseData::no_content()` | 空 | —（状态 204） |
+| `ResponseData::no_content()` | 空 | `application/json`（状态 204） |
 | `ResponseData::file(path)` | 流式发送文件 | 按扩展名推断 |
 | `ResponseData::file_stream(r, ct)` | 流式转发读取器 | 显式指定 |
 | `ResponseData::file_seekable_stream(r, len, ct)` | 流式转发 + 支持 Range | 显式指定 |
@@ -354,7 +352,7 @@ curl -C - -H 'If-Range: "2bc0e0-18d5a82de3e3ec00"' -o video.mp4 https://example.
 `.entity_tag("\"sha256-…\"")` 显式指定。文件 mtime 落在未来时（归档恢复、时钟偏移）
 不会发送 `Last-Modified`，避免 `If-Modified-Since` 与之矛盾。
 
-### 2.6 下载内存里的内容
+### 2.6 缓存策略与校验器
 
 因为有了 `ETag` 与 `Range`，大文件可以断点续传，视频可以拖动进度条，客户端也能用
 `If-None-Match` 省掉重复传输。
@@ -367,7 +365,7 @@ curl -C - -H 'If-Range: "2bc0e0-18d5a82de3e3ec00"' -o video.mp4 https://example.
 > `ResponseData::bytes` / `::text` 是即时生成的内存内容，框架不会替你计算校验器；
 > 需要断点续传或条件请求的内容请落到文件，或用 `file_seekable_stream`。
 
-### 2.5 下载内存里的内容
+### 2.7 下载内存里的内容
 
 导出的 CSV、动态生成的图片等，直接给字节即可：
 
@@ -384,7 +382,7 @@ impl IRequestHandler<ExportInventoryRequest, ResponseData> for ExportInventoryHa
 }
 ```
 
-### 2.7 先鉴权再下载
+### 2.8 先鉴权再下载
 
 下载端点和别的端点一样受 `#[authorize]` 保护——这是把文件放在 `wwwroot` 之外、
 由 Handler 决定是否放行的主要理由：
@@ -464,7 +462,7 @@ impl IMiddleware for ImportMiddleware {
         }
 
         // 直接吐一个文件
-        // ctx.response_mut().write_body(FileBody::new("report.csv").into()).await?;
+        // ctx.response_mut().write_body(FileBody::path("report.csv").into()).await?;
         Ok(ControlFlow::Break(()))
     }
 }
@@ -497,7 +495,7 @@ socket ──▶ hyper Incoming ──▶ multer 逐块解析 ──▶ FormFile
   直接逐块写会让每个传输分片都付一次线程切换；缓冲后每 64 KiB 才调度一次。
 * 超过 `MaxFileSize` / `MaxFieldSize` / `MaxRequestSize` 立即中止，不会把整个请求收完再拒绝。
 * 请求头里的 `Content-Length` 已经超限时，**在读上传内容之前**就返回 `413`。
-* 小文件留在内存里，用引用计数的 `Bytes` 承载：`open()` 不再复制这几十 KB 到几百 KB。
+* 小文件留在内存里，用引用计数的 `Bytes` 承载：`open()` 读取时共享同一份字节，不复制。
 
 ### 5.2 下载
 
@@ -507,8 +505,7 @@ socket ──▶ hyper Incoming ──▶ multer 逐块解析 ──▶ FormFile
 
 * 统一使用 64 KiB 读缓冲（框架常量 `STREAM_BUF_SIZE`）。`ReaderStream` 的默认值是 4 KiB，
   1 GiB 会变成约 26 万次 `read` + 26 万次 socket 写入；64 KiB 把两者都降到 1/16。
-* 路径来源只 `open` 一次，长度与 mtime 从同一个句柄上取（`File::open` + `File::metadata`），
-  不再 `metadata()` 之后再 `open()`。
+* 路径来源只 `open` 一次，长度与 mtime 从同一个句柄上取（`File::open` + `File::metadata`）。
 * `Range` 请求用 `seek` 定位后只读需要的字节，不会为了发 4 KiB 而把整个文件过一遍。
 * 多区间请求复用同一个文件句柄，逐段 `seek` 读取；每段各自分块，不会把整段读进内存。
 * 未知长度的流直接 chunked 转发，不做任何缓冲。
@@ -526,9 +523,7 @@ socket ──▶ hyper Incoming ──▶ multer 逐块解析 ──▶ FormFile
 ### 5.4 明确的边界
 
 * **没有 `sendfile` 零拷贝。** hyper 1.x 把连接 IO 封装在内部，用户态代码拿不到底层 socket，
-  无法调用 `sendfile(2)`。因此「文件 → 响应体 → socket」会有一次用户态拷贝。
-  这一条对所有基于 hyper 的框架都成立（Axum/tower-http 同样如此），不是本框架的取舍。
-  真正的零拷贝需要自己在 hyper 之下接管连接，代价是失去中间件与路由能力。
+  「文件 → 响应体 → socket」会有一次用户态拷贝。
 * **HTTPS 下 `sendfile` 本来也用不上**，因为需要先加密，必须经过用户态。
 
 ### 5.5 实践建议
@@ -538,8 +533,6 @@ socket ──▶ hyper Incoming ──▶ multer 逐块解析 ──▶ FormFile
 * 从对象存储回源时，如果 SDK 能返回可 seek 的读取器，用 `file_seekable_stream`——
   断点续传能让客户端少下很多字节。
 * 把 `MemoryThreshold` 调到比典型小文件略大一点，可以避免为头像这类请求碰磁盘。
-* 反代（nginx）放在前面时，把 `proxy_buffering` 和上游 `Content-Length` 的关系想清楚；
-  未知长度的 chunked 响应在反代上默认会被缓冲。
 
 ---
 
@@ -554,33 +547,12 @@ socket ──▶ hyper Incoming ──▶ multer 逐块解析 ──▶ FormFile
 
 ---
 
-## 七、与其它框架对照
-
-| 场景 | ASP.NET Core | FastAPI | rust-webx |
-|------|--------------|---------|-----------|
-| 接收文件 | `IFormFile` | `UploadFile` | `FormFile` |
-| 多文件 | `List<IFormFile>` | `list[UploadFile]` | `Vec<FormFile>` |
-| 保存到磁盘 | `CopyToAsync(stream)` | `shutil.copyfileobj` | `save_as(path)` / `copy_to(&mut w)` |
-| 流式读取 | `OpenReadStream()` | `UploadFile.file` | `open()` |
-| 单文件大小限制 | `FormOptions.MultipartBodyLengthLimit` | 手写 | `Form.MaxFileSize` |
-| 内存/落盘阈值 | `FormOptions.MemoryBufferThreshold` | `SpooledTemporaryFile` | `Form.MemoryThreshold` |
-| 返回路径文件 | `PhysicalFile(...)` | `FileResponse(...)` | `ResponseData::file(...)` |
-| 返回流 | `File(Stream, ...)` | `StreamingResponse(...)` | `ResponseData::file_stream(...)` |
-| 返回可 seek 流 | `File(Stream, ...)` + `enableRangeProcessing` | 手写 | `ResponseData::file_seekable_stream(...)` |
-| 返回内存字节 | `File(byte[], ...)` / `Results.Bytes` | `Response(content=...)` | `ResponseData::bytes(...)` |
-| 下载文件名 | `fileDownloadName` | `filename=` | `.download_name(...)` |
-| 范围请求 | `enableRangeProcessing` | 内建 | 内建（含 `multipart/byteranges`） |
-| 断点续传 | `If-Range` + `ETag` | `If-Range` | 内建（强校验器 + `If-Range`） |
-| 显式校验器 | `lastModified` / `entityTag` | `headers=` | `.last_modified(...)` / `.entity_tag(...)` |
-
----
-
 ## 小结
 
 * 上传：请求结构体里写 `FormFile`，照常 `#[derive(Deserialize)]`，不需要额外派生或中间件。
 * 文件流式接收、按阈值落盘、自动清理，内存占用与文件大小无关。
 * 下载：响应类型写 `ResponseData`；按手上有的东西选 `file` / `file_stream` /
-  `file_seekable_stream`，对应 ASP.NET Core 的 `PhysicalFile` 与 `File(Stream, ...)`。
+  `file_seekable_stream`。
 * 文件响应自带 `ETag` / `Last-Modified` / `Range` / `304` / `HEAD`，无需手工实现。
 * 断点续传开箱可用：`Accept-Ranges`、强校验器、`If-Range` 强比较、
   `multipart/byteranges`、区间合并与上限、`416` 语义都已就位。

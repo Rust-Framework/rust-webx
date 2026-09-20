@@ -21,13 +21,13 @@ struct HelloHandler;
 #[handler]
 #[async_trait]
 impl IRequestHandler<HelloRequest, String> for HelloHandler {
-    async fn handle(&self, _req: HelloRequest) -> Result<String> {
+    async fn handle(&mut self, _req: HelloRequest) -> Result<String> {
         Ok("Hello, World! Welcome to rust-webx.".to_string())
     }
 }
 
 // ── 第四步：启动 Host ──
-#[tokio::main]
+#[webx::main]
 async fn main() {
     Host::builder()
         .build()
@@ -77,7 +77,7 @@ struct HelloHandler;
 #[handler]
 #[async_trait]
 impl IRequestHandler<HelloRequest, String> for HelloHandler {
-    async fn handle(&self, _req: HelloRequest) -> Result<String> { ... }
+    async fn handle(&mut self, _req: HelloRequest) -> Result<String> { ... }
 }
 ```
 
@@ -85,7 +85,7 @@ impl IRequestHandler<HelloRequest, String> for HelloHandler {
 |------|------|
 | `IRequestHandler<HelloRequest, String>` | 处理 `HelloRequest`，返回 `String` |
 | `#[derive(Default)]` | `#[handler]` 宏要求 Handler 可默认构造 |
-| `#[handler]` | 编译时向 DI 注册 `dyn IRequestHandler<HelloRequest, String>` |
+| `#[handler]` | 编译时向 `inventory` 提交 `HandlerRegistration`，HTTP 分发时由 `HandlerCache` 查找 |
 | `Result<String>` | 成功返回数据，失败返回 `Error`（自动映射 HTTP 状态码） |
 
 ### 第四步：启动 Host
@@ -117,7 +117,7 @@ sequenceDiagram
     Client->>Pipeline: GET /hello
     Pipeline->>Router: 匹配路由
     Router->>Endpoint: HelloRequest 端点
-    Endpoint->>Handler: DI 解析 HelloHandler
+    Endpoint->>Handler: HandlerCache 查找 HelloHandler
     Handler-->>Endpoint: Ok("Hello...")
     Endpoint-->>Client: 200 JSON
 ```
@@ -133,7 +133,7 @@ sequenceDiagram
 impl IRequest<()> for DeleteItemRequest {}
 
 impl IRequestHandler<DeleteItemRequest, ()> for DeleteItemHandler {
-    async fn handle(&self, req: DeleteItemRequest) -> Result<()> {
+    async fn handle(&mut self, req: DeleteItemRequest) -> Result<()> {
         // 删除逻辑
         Ok(())
     }

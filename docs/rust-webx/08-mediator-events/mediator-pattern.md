@@ -8,7 +8,7 @@ pub trait IMediator: Send + Sync {
     async fn send<T, R>(&self, req: T) -> Result<R>
     where
         T: IRequest<R> + Send + 'static,
-        R: serde::Serialize + Send + 'static;
+        R: Send + 'static;
 
     async fn publish<T: IEventRequest>(&self, event: T) -> Result<()>;
 }
@@ -22,7 +22,7 @@ pub struct CreateOrderHandler {
     mediator: Arc<Mediator>,
 }
 
-async fn handle(&self, req: CreateOrderRequest) -> Result<OrderDto> {
+async fn handle(&mut self, req: CreateOrderRequest) -> Result<OrderDto> {
     let order = self.create_order(&req).await?;
 
     // 调度另一个请求

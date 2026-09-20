@@ -23,10 +23,7 @@ async-trait = "0.1"
 ```
 
 > **包名 vs 导入名**：`Cargo.toml` 里写包名 `rust-webx`，代码里 `use webx::*;`。
-> 各子 crate 同理（`rust-webx-core` → `webx_core`，`rust-webx-host` → `webx_host`，
-> `rust-webx-macros` → `webx_macros`，`rust-webx-spa` → `webx_spa`，
-> `rust-webx-openapi` → `webx_openapi`）。从 0.4 及更早版本升级见
-> [升级到 webx 导入路径](../16-migration/upgrade-to-webx-import.md)。
+> 各子 crate 的完整对照表见 [Crate 分层结构](../04-architecture/crate-layout.md)。
 
 若在本仓库内开发，使用 path 依赖：
 
@@ -85,7 +82,7 @@ mod handlers;
 也可直接参考本仓库的 `docbit` 项目：
 
 ```bash
-cargo run -p docbit
+cargo run -p docbit-host
 ```
 
 Docbit 展示了完整的中型项目结构，详见 [第十五章案例研究](../15-case-study/INDEX.md)。

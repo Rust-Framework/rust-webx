@@ -19,6 +19,12 @@ name = "webx_spa"
 rust-webx-core.workspace = true
 async-trait.workspace = true
 inventory.workspace = true
+brotli-decompressor.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+# Encoding side only: the round-trip and serving tests build the payloads the
+# build script would have generated.
+brotli.workspace = true
+tokio.workspace = true
+async-trait.workspace = true

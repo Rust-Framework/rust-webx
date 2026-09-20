@@ -1,41 +1,32 @@
 # Contracts / Handlers / Domain 分层
 
-基于 rust-webx 的业务应用采用**契约驱动、面向接口**的三层结构。关注契约，不关注实现。
+基于 rust-webx 的业务应用采用**契约驱动、面向接口**的 workspace 结构。关注契约，不关注实现。
 
 ## contracts — API 与业务接口契约
 
-**仅依赖框架**（`webx`），**禁止依赖 domain 或 handlers**。
+**仅依赖框架**（`rust-webx`），**禁止依赖 domain 或 handlers**。
 
 ```rust
-// contracts/auth.rs — 定义「对外承诺什么」
+// contracts/docs.rs — 定义「对外承诺什么」
 
+use serde::Deserialize;
 use webx::*;
 
-#[derive(Deserialize)]
-pub struct LoginRequest {
-    pub email: String,
-    pub password: String,
+/// 文档读取服务接口 — 与 Request 同级，同属契约层
+pub trait IDocumentService: Send + Sync {
+    fn list_works(&self) -> std::result::Result<Vec<String>, String>;
+    fn index(&self, work: &str) -> std::result::Result<DocIndex, String>;
+    fn content(&self, work: &str, path: &str) -> std::result::Result<DocContent, String>;
 }
 
-#[derive(Serialize)]
-pub struct AuthResponse {
-    pub token: String,
-    pub user: UserView,
+#[derive(Default, Deserialize, WebxRequestMeta)]
+pub struct GetDocIndexRequest {
+    #[from_route]
+    pub work: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy)]
-pub enum UserRole {
-    Admin,
-    User,
-}
-
-/// 业务服务接口 — 与 Request 同级，同属契约层
-pub trait IAuthService: Send + Sync {
-    fn login(&self, email: &str, password: &str) -> Result<AuthResponse, String>;
-}
-
-#[post("/api/auth/login")]
-impl IRequest<AuthResponse> for LoginRequest {}
+#[get("/api/docs/{work}/index")]
+impl IRequest<DocIndex> for GetDocIndexRequest {}
 ```
 
 特点：
@@ -45,38 +36,42 @@ impl IRequest<AuthResponse> for LoginRequest {}
 - 是 OpenAPI 生成的数据源；团队讨论 API 时**只看 contracts**
 - **不含** `async fn` 业务实现、数据库访问
 
+> `IDocumentService` 是 docbit 抽取的唯一服务接口；博客等模块由 mediator 直接操作 `DbContext`，见 [可复用的模式提炼](../15-case-study/docbit-patterns.md)。
+
 ## handlers — Handler 与 Service 实现
 
 **履约层**：实现 `IRequestHandler` 与 `I…Service`。
 
 ```rust
-// handlers/auth.rs — 定义「如何履约」
+// handlers/doc_service.rs — 定义「如何履约」
 
-use crate::contracts::auth::{IAuthService, LoginRequest, AuthResponse};
-use crate::domain::user::UserEntity;
+use docbit_contracts::docs::{DocIndex, GetDocIndexRequest, IDocumentService};
+use std::sync::Arc;
+use webx::*;
 
+#[derive(Inject)]
+pub struct DocService;
+
+// `#[inject]` 标注在 trait impl 上：注册为 `dyn IDocumentService` 单例
 #[inject]
-pub struct AuthService {
-    ctx: Arc<Mutex<DbContext>>,
-}
-
-impl IAuthService for AuthService {
-    fn login(&self, email: &str, password: &str) -> Result<AuthResponse, String> {
-        // 读 UserEntity → 组装 AuthResponse（contracts DTO）
+impl IDocumentService for DocService {
+    fn index(&self, work: &str) -> std::result::Result<DocIndex, String> {
+        // 扫盘 → 组装 DocIndex（contracts DTO）
     }
+    // ...
 }
 
-#[inject]
-pub struct LoginHandler {
-    auth: Arc<dyn IAuthService>,
+#[derive(Inject)]
+pub struct GetDocIndexHandler {
+    #[inject]
+    docs: Arc<dyn IDocumentService>,
 }
 
 #[handler(inject)]
 #[async_trait]
-impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
-    async fn handle(&self, req: LoginRequest) -> Result<AuthResponse> {
-        self.auth.login(&req.email, &req.password)
-            .map_err(|e| Error::Validation(e))
+impl IRequestHandler<GetDocIndexRequest, DocIndex> for GetDocIndexHandler {
+    async fn handle(&mut self, req: GetDocIndexRequest) -> Result<DocIndex> {
+        self.docs.index(&req.work).map_err(Error::NotFound)
     }
 }
 ```
@@ -85,10 +80,11 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
 
 - Handler 薄编排；复杂逻辑在 Service 实现中
 - Handler **只注入** `Arc<dyn I…Service>`
-- `#[inject]` + `#[handler(inject)]` 自动注册，无需改 `main.rs`
+- `#[derive(Inject)]` + `#[handler(inject)]` 自动注册，无需改 `main.rs`
+- 需要数据库时声明 owned 字段 `#[inject(owned)] ctx: DbContext`（EFCore 风格 per-request unit-of-work，无需 `Arc<Mutex>`）
 - 返回 `Result<T>`，不直接操作 HTTP
 
-## domain — 持久化实体与迁移
+## domain — 持久化实体与配置
 
 ```rust
 // domain/user.rs — 定义「数据是什么」
@@ -104,9 +100,9 @@ pub struct UserEntity {
 
 特点：
 
-- 数据库实体、EF 配置、迁移
+- 数据库实体、EF 配置、seed
 - **可以**引用 contracts 复用枚举或共享 model
-- **禁止**依赖框架类型（`serde` 除外）
+- 可依赖框架核心原语（`rust-webx-core`），**禁止**依赖 `host`
 - **禁止**引用 handlers
 
 ## 数据流
@@ -121,19 +117,15 @@ HTTP Request
     → HTTP Response
 ```
 
-## 依赖规则速查
+## 依赖规则
 
-| 从 → 到 | contracts | handlers | domain |
-|---------|-----------|----------|--------|
-| contracts | — | ❌ | ❌ |
-| handlers | ✅ | — | ✅ |
-| domain | ✅（复用 enum/model） | ❌ | — |
+各层依赖方向与边界见 [职责归属与边界](responsibility-division.md)。
 
 ## 反模式
 
 - `contracts` 中 `use crate::domain::*` → DTO 应在 contracts，映射在 handlers
 - 独立 `services/` 目录 → 接口归 contracts，实现归 handlers
-- Handler 依赖 `Arc<AuthService>` → 应使用 `Arc<dyn IAuthService>`
+- Handler 依赖 `Arc<DocService>` → 应使用 `Arc<dyn IDocumentService>`
 
 ## 小结
 

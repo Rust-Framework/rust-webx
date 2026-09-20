@@ -3,42 +3,48 @@
 ## IMiddleware 接口
 
 ```rust
+use std::ops::ControlFlow;
+
 #[async_trait]
 pub trait IMiddleware: Send + Sync {
-    async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<()>;
-}
-```
+    async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>>;
 
-## 执行模型
-
-当前版本为**顺序管道**（非洋葱模型）：
-
-```
-请求 → MW1 → MW2 → MW3 → Router → Endpoint
-```
-
-每个中间件按注册顺序调用。中间件可**短路**——设置 response status 后直接返回，跳过后续处理和路由。
-
-## 短路示例
-
-```rust
-#[async_trait]
-impl IMiddleware for AuthMiddleware {
-    async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<()> {
-        if ctx.claims().is_none() {
-            ctx.response_mut().set_status(401);
-            return Ok(());  // 短路，不继续
-        }
+    /// Handler 执行后调用，默认空实现
+    async fn after(&self, _ctx: &mut dyn IHttpContext) -> Result<()> {
         Ok(())
     }
 }
 ```
 
-## 与 ASP.NET Core 的差异
+## 执行模型（洋葱模型）
 
-ASP.NET Core 中间件支持 `next()` 闭包实现洋葱模型（请求进入和响应返回各经过一次）。rust-webx 当前为顺序调用，响应阶段不回溯中间件。
+请求先按注册顺序执行各中间件的 `invoke`，最终处理器返回后，**已执行**的中间件再按**逆序**执行
+`after` 钩子：
 
-> 后续版本计划在 async closure 稳定后升级为洋葱模型。
+```
+invoke 顺序: MW1 → MW2 → MW3 → Router → Endpoint
+after  顺序: MW3 → MW2 → MW1
+```
+
+中间件可**短路**——返回 `ControlFlow::Break(())` 跳过后续中间件与最终处理器，但已执行中间件的
+`after` 钩子仍按逆序运行。
+
+## 短路示例
+
+```rust
+use std::ops::ControlFlow;
+
+#[async_trait]
+impl IMiddleware for AuthMiddleware {
+    async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
+        if ctx.claims().is_none() {
+            ctx.response_mut().set_status(401);
+            return Ok(ControlFlow::Break(()));  // 短路，不继续
+        }
+        Ok(ControlFlow::Continue(()))
+    }
+}
+```
 
 ## IHttpContext
 

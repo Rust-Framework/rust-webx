@@ -8,7 +8,7 @@ rust-webx 用两个 trait 定义一个完整端点：
 // 声明：这是一个请求，响应类型为 T
 pub trait IRequest<TResponse>: Send + 'static
 where
-    TResponse: serde::Serialize + Send + 'static,
+    TResponse: Send + 'static,
 {}
 
 // 实现：如何处理这个请求
@@ -16,9 +16,9 @@ where
 pub trait IRequestHandler<T, R>: Send + Sync
 where
     T: IRequest<R> + Send + 'static,
-    R: serde::Serialize + Send + 'static,
+    R: Send + 'static,
 {
-    async fn handle(&self, req: T) -> Result<R>;
+    async fn handle(&mut self, req: T) -> Result<R>;
 }
 ```
 
@@ -52,8 +52,9 @@ impl IRequestHandler<GetUserRequest, UserDto> for GetUserHandler { ... }
 
 | 响应类型 | HTTP 行为 |
 |---------|----------|
-| `String`, `UserDto`, `Vec<T>` 等 | 200 + JSON body |
+| `String`, `UserDto`, `Vec<T>` 等（`Serialize`） | 200 + JSON body |
 | `()` | 204 No Content，空 body |
+| `ResponseData` | Handler 自行掌控状态码、响应头与响应体 |
 
 ## IRequestHandler 的职责
 
@@ -62,7 +63,7 @@ Handler 是**唯一执行业务逻辑**的地方：
 ```rust
 #[async_trait]
 impl IRequestHandler<CreateUserRequest, UserDto> for CreateUserHandler {
-    async fn handle(&self, req: CreateUserRequest) -> Result<UserDto> {
+    async fn handle(&mut self, req: CreateUserRequest) -> Result<UserDto> {
         // 1. 校验（或用 PipelineBehavior）
         // 2. 调用领域服务
         // 3. 返回结果或 Error
@@ -72,26 +73,19 @@ impl IRequestHandler<CreateUserRequest, UserDto> for CreateUserHandler {
 }
 ```
 
-## 注册为 dyn trait object
+## 分发方式：inventory + HandlerCache
 
-框架通过 `dyn IRequestHandler<T, R>` 做类型擦除和 DI 解析：
+HTTP 请求分发使用 **编译时 inventory 收集**，不通过 DI 查找 `dyn IRequestHandler`：
 
-```rust
-svc.singleton::<dyn IRequestHandler<CreateUserRequest, UserDto>>(
-    |_| Arc::new(CreateUserHandler::default())
-)
-```
+| 宏 | 提交内容 |
+|----|---------|
+| `#[handler]` / `#[handler(inject)]` | `HandlerRegistration` — 每请求工厂与调用桥接 |
 
-**必须注册为 dyn trait**，不能注册具体类型。
+`Host::build()` 将这些记录收集为 `HandlerCache`，按请求类型（`TypeId` / 类型名）查找后在每请求作用域内构造处理器。手动把处理器注册为 `dyn IRequestHandler<T, R>` 仅用于非 HTTP 的显式 DI 场景，不会参与 HTTP 路由分发。详见 [Handler 注册策略](handler-registration.md)。
 
 ## 与 IMediator 的协作
 
-```rust
-// 在另一个 Handler 或 Service 中
-let user = self.mediator.send(GetUserRequest { id: "123".into() }).await?;
-```
-
-`send()` 根据 `GetUserRequest` 的类型自动找到对应 Handler，无需手动指定。
+在 Handler 或 Service 中跨模块发送请求，见 [IMediator 请求调度](../08-mediator-events/mediator-pattern.md)。
 
 ## 设计优势
 

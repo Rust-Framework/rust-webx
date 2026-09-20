@@ -49,6 +49,21 @@ Ok(ResponseData::file(payslip)
 多实例部署时注意：自动推导的 `ETag` 依赖文件的 mtime，多副本同步时若 mtime 不一致，
 同一个文件在不同节点会给出不同 `ETag`，CDN 会缓存两份。这种情况下显式指定内容哈希。
 
+### 内嵌资源的压缩与缓存
+
+烤进二进制的静态资源可能以 brotli 存储，并按 `Accept-Encoding` 协商发送
+（见 [OpenAPI 与 SPA 托管](openapi-spa.md#内嵌文件怎么压缩)）。运维上只需注意三点：
+
+* **`Content-Encoding` 属于表示的一部分**：压缩表示与原文件是两个不同的实体，各自带
+  自己的 `ETag`（`"sha256-…-br"` 与 `"sha256-…"`）。框架只对可能变化的响应发
+  `Vary: Accept-Encoding`，缓存按此分桶即可，不会串味。
+* **不要让代理二次压缩**：上游已经带了 `Content-Encoding`，规范的代理会跳过；若反向代理
+  被配置成强制压缩，可能叠加或改写，务必让它按 `Content-Encoding` 与 `Vary` 正常处理。
+* **不要剥掉 `Content-Encoding`**：一旦被中间层丢弃，客户端会拿到 brotli 字节却按明文解析。
+
+内嵌资源同样支持 `Range` / `206`：`Content-Length` 与范围都基于**实际发送的表示**，
+所以 `HEAD` 探到的长度与 `HEAD` 之后再 `Range` 的语义始终自洽。
+
 ## 二、断点续传与反向代理
 
 客户端契约（`HEAD` 探长度与校验器 → `Range` + `If-Range` 续传）在
@@ -152,6 +167,7 @@ Handler 里一定要在**请求结束前**调用 `save_as` / `copy_to` 把要保
 - [ ] 敏感文件不在 `wwwroot` 下，走后端 `ResponseData::file` + `#[authorize]`
 - [ ] 多实例部署时确认 `ETag` 策略一致（需要字节级一致就显式指定内容哈希）
 - [ ] CDN 已确认能透传 `Range` 并缓存 `206`
+- [ ] 反代/CDN 未二次压缩或剥离内嵌资源的 `Content-Encoding`，且按 `Vary: Accept-Encoding` 缓存
 - [ ] 出流量、`206`/`304`/`413` 计数有监控
 
 ## 小结

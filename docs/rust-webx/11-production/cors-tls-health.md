@@ -8,7 +8,7 @@ Host::builder().use_cors(CorsConfig::default())
 
 或从 `appsettings.json` 自动加载 `Cors` 节。
 
-Production 环境应避免使用 `Cors.Origins: ["*"]`，请通过 `Cors.Origins` 或环境变量 `APP__Cors__Origins` 设置明确白名单。
+Production 环境禁止使用 `Cors.Origins: ["*"]`：builder 会直接 panic 硬失败，必须通过 `Cors.Origins` 或环境变量 `APP__Cors__Origins` 设置明确白名单。
 
 ## TLS
 

@@ -8,7 +8,7 @@ rust-webx 使用 `rust-dix` 作为 DI 容器：
 Host::builder()
     .register(|svc| {
         svc.singleton::<MyService>(|_| Arc::new(MyService::new()))
-           .singleton::<dyn IRequestHandler<...>>(|_| Arc::new(...))
+           .singleton::<dyn IMyService>(|_| Arc::new(MyServiceImpl::new()))
     })
     .build()
 ```
@@ -20,12 +20,19 @@ Host::builder()
 | 生命周期 | 方法 | 语义 |
 |---------|------|------|
 | Singleton | `svc.singleton::<T>()` | 全局唯一实例 |
-| Scoped | `svc.scoped::<T>()` | 每请求一个实例（预留） |
+| Scoped | `svc.scoped::<T>()` | 每请求一个实例 |
 | Transient | `svc.transient::<T>()` | 每次解析新建 |
 
-WebApi 场景主要使用 **Singleton**（数据库连接池、缓存、Repository）。
+WebApi 场景主要使用 **Singleton**（数据库连接池、缓存、Repository），需要每请求隔离的
+`DbContext` 之类用 **Scoped**。
 
 ## 注册 Handler
+
+HTTP 分发不通过 DI 查找 `dyn IRequestHandler`：`#[handler]` 把处理器工厂提交到 inventory，
+`Host::build()` 将其收集为 `HandlerCache`，按请求类型查找后在每请求作用域内构造。
+因此 `#[handler]` / `#[handler(inject)]` 的处理器不做 DI 注册，也无需手动注册。
+
+需要把处理器注册为 trait object 时（用于非 HTTP 的手动 DI 场景）：
 
 ```rust
 svc.singleton::<dyn IRequestHandler<GetUserRequest, UserDto>>(
@@ -36,14 +43,21 @@ svc.singleton::<dyn IRequestHandler<GetUserRequest, UserDto>>(
 )
 ```
 
-注册为 `dyn IRequestHandler<T, R>` trait object 是**强制要求**。
-
 ## 注册中间件
 
 ```rust
 svc.add_middleware::<LoggingMiddleware>()
-svc.add_middleware_instance(jwt_middleware(auth))
 ```
+
+需要构造参数的中间件用 `HostBuilder::use_middleware_with(...)`：
+
+```rust
+Host::builder().use_middleware_with(|| {
+    Arc::new(RateLimitMiddleware::new(10.0, 20)) as Arc<dyn IMiddleware>
+})
+```
+
+或在 `register()` 里用 `svc.add(ServiceLifetime::Singleton, |_| ...)` 注册为 `dyn IMiddleware`。
 
 ## 注册后台服务
 
@@ -53,12 +67,15 @@ svc.add_hosted_service::<DbInitService>()
 
 ## 框架自动注册
 
-`Host::build()` 自动注册：
+`Host::build()` 在构建时自动：
 
-- `#[handler]` 收集的所有 Handler
-- `IMediator` → `Mediator`
-- `add_memory_cache()` 时的 `IDistributedCache`
-- `add_authentication()` 时的 JWT 中间件
+- 把 `#[handler]` 提交的 `HandlerRegistration` 收集进 inventory `HandlerCache`（不做 DI 注册）
+- `add_authentication()` 时构建 JWT 中间件并加入管道
+- `add_memory_cache()` 时把 `Arc<MemoryCache>` 注册为具体实例
+
+需要显式调用的：
+
+- `IMediator` → `svc.add_mediator()`（`Host::build()` 不会自动注册）
 
 ## 小结
 

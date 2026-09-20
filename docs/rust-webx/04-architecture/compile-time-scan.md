@@ -36,7 +36,7 @@ graph TD
     C --> D[inventory::iter 遍历 HandlerRegistration]
     D --> E[构建 HandlerCache]
     E --> F[assert_route_configuration_valid]
-    F --> G[构建 ServiceProvider + set_global_provider]
+    F --> G[构建 ServiceProvider]
     G --> H[生成 OpenAPI spec]
 ```
 
@@ -70,9 +70,10 @@ HTTP 分发通过 `HandlerCache` 查找上述注册项，**不**通过 DI 查找
 当 Handler 需要 DI 注入时：
 
 ```rust
-#[inject]
+#[derive(Inject)]
 pub struct LoginHandler {
-    ctx: Arc<Mutex<DbContext>>,
+    #[inject(owned)]
+    ctx: DbContext,
 }
 
 #[handler(inject)]
@@ -80,11 +81,11 @@ pub struct LoginHandler {
 impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler { ... }
 ```
 
-`#[inject]` 向 DI 容器注册构造逻辑；`#[handler(inject)]` 标记该 Handler 走注入路径而非 Default。
+`#[derive(Inject)]` 生成构造函数（`get_owned` 解析 bare 字段、`get` 解析 `Arc<T>` 字段）；`#[handler(inject)]` 标记该 Handler 走注入路径而非 Default。
 
 ## 授权元数据收集
 
-`#[authorize(role = "admin")]` 在编译期收集授权要求；`collect_authorizers()` 在 `build()` 时可构建 `ResourceAuthorization` 策略对象。
+`#[authorize(role = "admin")]` 在编译期收集授权要求；`build_resource_policy_from_routes()` 依据路由元数据构建 `ResourceAuthorization` 策略对象，`collect_authorizers()` 则从 DI 收集 `IDynamicAuthorizer` 并返回 `Option<Arc<AuthorizerSet>>`。
 
 > **注意：** `add_authentication()` 仅注册 JWT 中间件，**不会**自动挂载 `resource_auth_middleware`。路由级授权在 `StubEndpoint` 内执行；全局 Resource Auth 中间件需手动添加。详见 [资源授权](../09-auth-security/resource-authorization.md)。
 

@@ -33,7 +33,7 @@
 | `appsettings.json` | `appsettings.json` | 配置文件 |
 | `IConfiguration` | `AppOptions` | 配置访问 |
 | `ProblemDetails` | `ProblemDetails` | RFC 7807 |
-| `UseMiddleware<T>()` | `add_middleware::<T>()` | 中间件注册 |
+| `UseMiddleware<T>()` | `use_middleware::<T>()` | 中间件注册 |
 | `UseAuthentication()` | `add_authentication()` | 认证 |
 | `UseAuthorization()` | 自动（`#[authorize]` 宏编译期收集） | 授权 |
 | `UseCors()` | `use_cors()` | CORS |
@@ -42,7 +42,7 @@
 | `ActionResult<T>` | `Result<T>` | 返回类型 |
 | `NotFound()` | `Error::NotFound` | 404 |
 | `BadRequest()` | `Error::Validation` | 400 |
-| `IApplicationBuilder` | `HostBuilder`（含 `use_middleware`） | 应用配置 |
+| `IApplicationBuilder` | `HostBuilder`（`use_middleware` / `use_middleware_with`） | 应用配置 |
 
 ## Axum ↔ rust-webx
 
@@ -84,4 +84,4 @@
 
 **恭喜读完 rust-webx 开发者手册！**
 
-回到 [目录](../INDEX.md) 查阅具体章节，或运行 `cargo run -p docbit` 开始实践。
+回到 [目录](../INDEX.md) 查阅具体章节，或运行 `cargo run -p docbit-host` 开始实践。

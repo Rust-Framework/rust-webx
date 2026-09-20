@@ -18,19 +18,19 @@ graph LR
     B --> C[HTTP 监听启动]
     C --> D[服务运行中]
     D --> E[收到 shutdown 信号]
-    E --> F[stop × N 逆序]
+    E --> F[stop × N 按注册顺序]
     F --> G[连接排空]
 ```
 
 - `start()` 在 HTTP 监听器启动**之前**执行
-- `stop()` 在优雅关闭时**逆序**执行
+- `stop()` 在优雅关闭时按**与启动相同的顺序**执行
 - `stop()` 有默认空实现，不需要关闭逻辑可省略
 
 ## 典型用途
 
 | 用途 | 示例 |
 |------|------|
-| 数据库迁移 | `m001_initial::up()` |
+| 数据库初始化 | `ctx.ensure_created()` 建表 |
 | 种子数据 | 默认管理员账户 |
 | 索引生成 | DocService 扫描 docs/ |
 | 连接池预热 | 预建立数据库连接 |
@@ -38,19 +38,27 @@ graph LR
 
 ## Docbit 实例
 
+`#[derive(Inject)]` 标注 struct 生成构造器，`#[inject]` 标注 `impl IHostedService` 块把实现注册为
+`dyn IHostedService`：
+
 ```rust
-#[inject]
+#[derive(Inject)]
 pub struct DbInitService {
-    ctx: Arc<Mutex<DbContext>>,
-    docs: Arc<DocService>,
+    #[inject]
+    docs: Arc<dyn IDocumentService>,
 }
 
+#[inject]
 #[async_trait]
 impl IHostedService for DbInitService {
     async fn start(&self) -> Result<()> {
-        // 1. 运行迁移
-        // 2. 种子数据
-        // 3. 生成文档索引
+        // 请求作用域由框架建立，Scoped 依赖在此解析
+        let mut ctx: DbContext = dispatch_provider()
+            .get_owned()
+            .map_err(|e| Error::Internal(format!("DbContext resolution failed: {}", e)))?;
+
+        ensure_schema(&mut ctx).await?;             // 建表
+        admin_user::ensure_admin_user(&mut ctx).await?;  // 种子数据
         Ok(())
     }
 
@@ -66,23 +74,24 @@ impl IHostedService for DbInitService {
 ## 注册
 
 ```rust
-// 通过 #[inject] 自动注册
+// 在 impl IHostedService 上标注 #[inject]，通过 inventory 自动注册
 #[inject]
-pub struct DbInitService { ... }
+#[async_trait]
+impl IHostedService for DbInitService { ... }
 
-// 或手动
+// 或手动注册（要求类型实现 Default）
 Host::builder()
-    .register(|svc| svc.add_hosted_service::<DbInitService>())
+    .register(|svc| svc.add_hosted_service::<CacheWarmupService>())
 ```
 
 ## 多个 HostedService
 
-按注册顺序启动，逆序停止：
+按注册顺序启动，也按注册顺序停止：
 
 ```
 注册顺序: DbInit → CacheWarmup → QueueConsumer
 启动顺序: DbInit → CacheWarmup → QueueConsumer
-停止顺序: QueueConsumer → CacheWarmup → DbInit
+停止顺序: DbInit → CacheWarmup → QueueConsumer
 ```
 
 ## 小结

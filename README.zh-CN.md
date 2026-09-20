@@ -115,7 +115,7 @@ rust-webx/
 > `rust-webx-core` → `webx_core`、`rust-webx-host` → `webx_host`、
 > `rust-webx-macros` → `webx_macros`、`rust-webx-spa` → `webx_spa`、
 > `rust-webx-openapi` → `webx_openapi`。从 0.4 及更早版本升级见
-> [迁移指南](docs/rust-webx/16-migration/upgrade-to-webx-import.md)。
+> [0.5 升级指南](docs/rust-webx/16-migration/upgrade-to-0.5.md)。
 
 ## 请求即端点：Hello World
 

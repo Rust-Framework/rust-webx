@@ -80,7 +80,7 @@ pub struct UserDto {
 ```rust
 use webx::Json;
 
-async fn handle(&self, req: MyRequest) -> Result<Json<serde_json::Value>> {
+async fn handle(&mut self, req: MyRequest) -> Result<Json<serde_json::Value>> {
     Ok(Json(serde_json::json!({ "custom": true })))
 }
 ```

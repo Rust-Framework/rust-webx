@@ -21,18 +21,18 @@ Host::builder()
 
 | 行为 | Development | Production |
 |------|------------|------------|
-| 加载 Development.json | ✅ | ❌ |
-| 详细错误信息 | ✅ | 精简 |
-| Swagger UI | 可用 | 建议关闭 |
-| 日志级别 | debug | info/warn |
+| 环境 overlay | `appsettings.Development.json` | `appsettings.Production.json` |
+| 内置 API 文档 | 仅 Development | 不注册 |
+| 日志级别 | `RUST_LOG` 控制（默认 `info`） | 同 Development |
 
 ## 环境变量
 
 ```bash
+APP_ENV=Production cargo run
 RUST_LOG=debug cargo run
 ```
 
-配合 `tracing` 使用。
+`APP_ENV` 选择运行模式（`Production` / `Prod` 或 `Development` / `Dev`，未设置时默认 `Development`）；`RUST_LOG` 控制 `tracing` 日志过滤级别（默认 `info`）。
 
 ## 小结
 

@@ -1,66 +1,76 @@
 # 可复用的模式提炼
 
-## 模式 1：#[inject] + #[handler(inject)]
+## 模式 1：#[derive(Inject)] + #[handler(inject)]
 
 ```rust
-#[inject]
-pub struct LoginHandler {
-    auth: Arc<dyn IAuthService>,
+#[derive(Inject)]
+pub struct GetDocIndexHandler {
+    #[inject]
+    docs: Arc<dyn IDocumentService>,
 }
 
 #[handler(inject)]
 #[async_trait]
-impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler { ... }
+impl IRequestHandler<GetDocIndexRequest, DocIndex> for GetDocIndexHandler { ... }
 ```
 
 **复用场景**：任何需要 DI 的 HTTP 端点。
 
-## 模式 2：接口在 contracts，实现在 handlers
+## 模式 2：中介者直连 DbContext（无 service 抽象）
 
 ```rust
-// contracts/blog.rs — 契约
-pub trait IBlogService: Send + Sync {
-    fn list_all_posts(&self) -> Result<Vec<BlogPostSummary>, String>;
-}
+// contracts/blog.rs — 契约：DTO + 路由，不定义 service trait
+#[derive(Serialize)]
+pub struct BlogPostSummary { /* ... */ }
 
-pub struct ListBlogPostsRequest;
 #[get("/api/blog")]
 impl IRequest<Vec<BlogPostSummary>> for ListBlogPostsRequest {}
 
-// handlers/blog.rs — 实现
-#[inject]
-pub struct BlogService {
-    paths: Arc<AppPaths>,
+// handlers/blog.rs — 直接持有 owned DbContext
+#[derive(Inject)]
+pub struct ListBlogPostsHandler {
+    #[inject(owned)]
+    ctx: DbContext,
 }
 
-impl IBlogService for BlogService { ... }
-
-#[inject]
-pub struct ListBlogPostsHandler {
-    blog: Arc<dyn IBlogService>,
+#[handler(inject)]
+#[async_trait]
+impl IRequestHandler<ListBlogPostsRequest, Vec<BlogPostSummary>> for ListBlogPostsHandler {
+    async fn handle(&mut self, _: ListBlogPostsRequest) -> Result<Vec<BlogPostSummary>> {
+        let blogs = linq!(self.ctx.set::<Blog>();).to_list().await.map_ef()?;
+        Ok(blogs.into_iter().map(BlogPostSummary::from).collect())
+    }
 }
 ```
 
-**复用场景**：文档、博客、订单、通知等可替换业务模块。换存储实现时 Handler 与契约无需改动。
+**复用场景**：CRUD 类业务模块（博客、分类、评论）。只有实现需要可替换时才抽 `I…Service`——`IDocumentService`（文件系统实现可 mock）就是这种场景。
 
 ## 模式 3：IHostedService 初始化
 
 ```rust
-#[inject]
+#[derive(Inject)]
 pub struct DbInitService {
-    ctx: Arc<Mutex<DbContext>>,
+    #[inject]
     docs: Arc<dyn IDocumentService>,
-    paths: Arc<AppPaths>,
+}
+
+#[inject]
+#[async_trait]
+impl IHostedService for DbInitService {
+    async fn start(&self) -> Result<()> {
+        // ensure_created → seed → 索引/资源同步
+        Ok(())
+    }
 }
 ```
 
-**复用场景**：迁移、索引构建、资源同步——不在 `main()` 写初始化逻辑。
+**复用场景**：schema 初始化、seed、索引构建、资源同步——不在 `main()` 写初始化逻辑。
 
 ## 模式 4：薄 Handler + 厚 Service 实现
 
 ```rust
-async fn handle(&self, req: GetDocIndexRequest) -> Result<DocIndex> {
-    self.docs.index(&req.work).map_err(|e| Error::NotFound(e))
+async fn handle(&mut self, req: GetDocIndexRequest) -> Result<DocIndex> {
+    self.docs.index(&req.work).map_err(Error::NotFound)
 }
 ```
 
@@ -69,10 +79,10 @@ Service 实现不感知 HTTP；Handler 只做参数传递与 `Error` 映射。
 ## 模式 5：组合根最小化
 
 ```rust
-.register(common::bootstrap::configure)  // 仅 AppPaths + DbContext
+.register(|svc| svc.add_docbit_db())  // 仅 DbContext 等基础设施
 ```
 
-业务代码通过 `#[inject]` 在 handlers 自注册，开发时聚焦 `contracts` / `handlers` / `domain`。
+业务代码通过 `#[derive(Inject)]` + `#[inject]` 在 handlers 自注册，开发时聚焦 `contracts` / `handlers` / `domain`。
 
 ## 模式 6：DTO 在 contracts，实体在 domain
 
@@ -81,26 +91,18 @@ Service 实现不感知 HTTP；Handler 只做参数传递与 `Error` 映射。
 #[derive(Serialize)]
 pub struct BlogPostSummary { pub slug: String, pub title: String }
 
-// domain/comment.rs — 仅持久化实体
-pub struct BlogCommentEntity { ... }
+// domain/entities/blog.rs — 仅持久化实体
+pub struct Blog { /* ... */ }
 
-// handlers/blog_service.rs — 映射
-fn to_summary(meta: &BlogPostMeta) -> BlogPostSummary { ... }
+// domain/conversions.rs — 映射
+impl From<Blog> for BlogPostSummary { /* ... */ }
 ```
 
-contracts 不引用 domain；domain 可通过 `use crate::contracts::…` 复用枚举。
+contracts 不引用 domain；domain 可通过 `use docbit_contracts::…` 复用枚举。
 
-## 从 Docbit 到新项目的检查清单
+## 新项目检查清单
 
-- [ ] `contracts` / `handlers` / `domain` 三层，无 `services/` 目录
-- [ ] `I…Service` trait 在 `contracts/`，实现在 `handlers/`
-- [ ] `contracts` 仅依赖框架，不引用 `domain`
-- [ ] Handler 注入 `Arc<dyn I…Service>`，不用具体类型
-- [ ] `bootstrap::configure` 只注册 DbContext、路径等基础设施
-- [ ] 初始化放在 `IHostedService`
-- [ ] `main.rs` 仅 Host 配置
-- [ ] `appsettings.json` 配置框架运行时参数
-- [ ] 认证端点使用 `#[authorize]`
+见 [代码审查清单](../14-best-practices/code-review-checklist.md) 与 [职责归属与边界](../12-project-structure/responsibility-division.md)。
 
 ## 小结
 

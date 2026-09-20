@@ -43,10 +43,21 @@ fn brotli(source: &str) -> Vec<u8> {
 struct Fixture {
     compressed_source: String,
     plain_source: String,
+    /// Held only so the directory outlives the test — dropping it deletes the
+    /// directory the middleware is still configured to look in.
+    #[allow(dead_code)]
+    overlay: tempfile::TempDir,
 }
 
 /// A table with one brotli-stored asset and one stored verbatim, built the way
 /// the build script would build it.
+///
+/// The disk overlay is an empty temp directory on purpose. The middleware
+/// resolves a relative overlay against the process working directory and the
+/// app base, which on some platforms reaches the repository's own `wwwroot`
+/// (docbit ships an `app.css` there), and a disk hit would silently shadow the
+/// embedded table these tests exist to check. An absolute path cannot resolve
+/// anywhere else, so the lookup misses on every platform.
 fn fixture() -> (Fixture, SpaMiddleware) {
     let compressed_source = compressible();
     let plain_source = "already-compressed-bytes".to_string();
@@ -76,14 +87,16 @@ fn fixture() -> (Fixture, SpaMiddleware) {
         .into_boxed_slice(),
     );
 
-    let middleware =
-        SpaMiddleware::from_source(SpaSource::from(EmbeddedAssets::new("wwwroot", entries)));
+    let overlay = tempfile::tempdir().expect("temp dir for the disk overlay");
+    let source = SpaSource::from(EmbeddedAssets::new("wwwroot", entries))
+        .with_overlay_root(overlay.path().to_string_lossy().into_owned());
     (
         Fixture {
             compressed_source,
             plain_source,
+            overlay,
         },
-        middleware,
+        SpaMiddleware::from_source(source),
     )
 }
 

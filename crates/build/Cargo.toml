@@ -9,7 +9,9 @@ homepage.workspace = true
 documentation.workspace = true
 readme = "../../README.md"
 keywords = ["web", "static-files", "embedded", "build-script"]
-categories = ["web-programming", "build-utils"]
+# `development-tools::build-utils`, not the bare `build-utils`: crates.io rejects
+# unknown slugs, and a release cannot be republished once a crate is up.
+categories = ["web-programming", "development-tools::build-utils"]
 
 # Imported in build.rs as `webx::builder()` — same namespace as the app,
 # separate compilation unit from the umbrella crate.

@@ -10,7 +10,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use rust_webx_host::authz::{ResourceAuthorization, resource_auth_middleware};
+//! use webx_host::authz::{ResourceAuthorization, resource_auth_middleware};
 //!
 //! let policy = ResourceAuthorization::new()
 //!     .allow_role("/api/users", "admin")
@@ -23,7 +23,7 @@
 //! # Dynamic authorizer (preferred)
 //!
 //! ```ignore
-//! use rust_webx_core::auth::{IClaims, IDynamicAuthorizer};
+//! use webx_core::auth::{IClaims, IDynamicAuthorizer};
 //!
 //! #[derive(Default)]
 //! struct RoleAuthorizer;
@@ -42,13 +42,13 @@
 //! svc.singleton::<dyn IDynamicAuthorizer>(|_| Arc::new(RoleAuthorizer::default()))
 //! ```
 
-use rust_webx_core::auth::{IAuthorizationPolicy, IClaims, IDynamicAuthorizer};
-use rust_webx_core::error::Result;
-use rust_webx_core::http::IHttpContext;
-use rust_webx_core::middleware::IMiddleware;
 use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::sync::Arc;
+use webx_core::auth::{IAuthorizationPolicy, IClaims, IDynamicAuthorizer};
+use webx_core::error::Result;
+use webx_core::http::IHttpContext;
+use webx_core::middleware::IMiddleware;
 
 // ---------------------------------------------------------------------------
 // ResourceAuthorization —IAuthorizationPolicy implementation
@@ -137,7 +137,7 @@ impl IAuthorizationPolicy for ResourceAuthorization {
         }
 
         // No matching policies found —deny by default
-        Err(rust_webx_core::error::Error::Forbidden(format!(
+        Err(webx_core::error::Error::Forbidden(format!(
             "no policy grants access to '{} {}'",
             _method, resource_key
         )))
@@ -178,7 +178,7 @@ impl IMiddleware for ResourceAuthMiddleware {
                 .authorize(claims, &route_pattern, &method)
                 .await
                 .map(|_| ControlFlow::Continue(())),
-            None => Err(rust_webx_core::error::Error::Unauthorized(
+            None => Err(webx_core::error::Error::Unauthorized(
                 "no authentication claims found".to_string(),
             )),
         }
@@ -236,9 +236,9 @@ impl AuthorizerSet {
 }
 
 /// Build a [`ResourceAuthorization`] policy from compile-time
-/// [`RouteEntry`](rust_webx_core::route::scan::RouteEntry) metadata.
+/// [`RouteEntry`](webx_core::route::scan::RouteEntry) metadata.
 pub fn build_resource_policy_from_routes() -> ResourceAuthorization {
-    use rust_webx_core::route::scan::RouteEntry;
+    use webx_core::route::scan::RouteEntry;
 
     let mut policy = ResourceAuthorization::new();
     for entry in inventory::iter::<RouteEntry> {

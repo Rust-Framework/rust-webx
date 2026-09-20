@@ -30,7 +30,7 @@ cargo test -p rust-webx-host
 
 ```rust
 // tests/api_test.rs
-use rust_webx::*;
+use webx::*;
 
 #[tokio::test]
 async fn test_hello_endpoint() {

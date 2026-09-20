@@ -7,7 +7,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use rust_webx_host::auth_jwt::{JwtAuth, jwt_middleware};
+//! use webx_host::auth_jwt::{JwtAuth, jwt_middleware};
 //! use jsonwebtoken::{DecodingKey, Validation};
 //!
 //! let auth = JwtAuth::new(
@@ -18,14 +18,14 @@
 //! ```
 
 use jsonwebtoken::{decode, DecodingKey, Validation};
-use rust_webx_core::auth::{IAuthenticationHandler, IClaims};
-use rust_webx_core::error::Result;
-use rust_webx_core::http::IHttpContext;
-use rust_webx_core::middleware::IMiddleware;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::sync::{Arc, OnceLock};
+use webx_core::auth::{IAuthenticationHandler, IClaims};
+use webx_core::error::Result;
+use webx_core::http::IHttpContext;
+use webx_core::middleware::IMiddleware;
 
 // ---------------------------------------------------------------------------
 // JwtClaims —IClaims implementation backed by JWT payload
@@ -168,10 +168,7 @@ impl IAuthenticationHandler for JwtAuth {
 
         let token_data = decode::<RawClaims>(&token, &self.decoding_key, &self.validation)
             .map_err(|e| {
-                rust_webx_core::error::Error::Unauthorized(format!(
-                    "invalid or expired token: {}",
-                    e
-                ))
+                webx_core::error::Error::Unauthorized(format!("invalid or expired token: {}", e))
             })?;
 
         let claims: JwtClaims = token_data.claims.into();

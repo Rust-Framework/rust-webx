@@ -1,7 +1,7 @@
 //! Product contracts — master table CRUD.
 
-use rust_webx::*;
 use serde::{Deserialize, Serialize};
+use webx::*;
 
 use crate::goods::GoodsModel;
 

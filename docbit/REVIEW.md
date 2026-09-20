@@ -6,7 +6,7 @@
 
 | 能力 | 状态 | 实现位置 |
 |------|------|----------|
-| Per-request `DbContext`（owned，无 Mutex） | ✅ | `#[inject(owned)]` + `host::register_db_context` |
+| Per-request `DbContext`（owned，无 Mutex） | ✅ | `#[inject(owned)]` + `startup::extensions::ServiceCollectionExt::add_docbit_db` |
 | 全局软删除查询过滤器 | ✅ | `docbit/domain/src/filters.rs` + `prepare_context` |
 | Handler 持久化规范 | ✅ | `set` → `add`/`update` → 一次 `save_changes` |
 | 写后 reload（含导航） | ✅ | `handlers` 内 `ef_require_by_id!` |

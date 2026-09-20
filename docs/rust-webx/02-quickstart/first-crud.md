@@ -7,7 +7,7 @@
 `src/contracts/user.rs`：
 
 ```rust
-use rust_webx::*;
+use webx::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -68,7 +68,7 @@ impl IRequest<()> for DeleteUserRequest {}
 ```rust
 use std::collections::HashMap;
 use std::sync::Arc;
-use rust_webx::*;
+use webx::*;
 use tokio::sync::RwLock;
 use crate::contracts::user::*;
 

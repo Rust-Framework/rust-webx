@@ -1,10 +1,10 @@
 //! Timing middleware —demonstrates the after hook by injecting a per-request counter.
 
-use rust_webx_core::error::Result;
-use rust_webx_core::http::IHttpContext;
-use rust_webx_core::middleware::IMiddleware;
 use std::ops::ControlFlow;
 use std::sync::atomic::{AtomicU64, Ordering};
+use webx_core::error::Result;
+use webx_core::http::IHttpContext;
+use webx_core::middleware::IMiddleware;
 
 static REQUEST_COUNT: AtomicU64 = AtomicU64::new(0);
 

@@ -52,7 +52,7 @@ graph TB
 一个典型的 `main.rs` 只有十几行：
 
 ```rust
-use rust_webx::*;
+use webx::*;
 
 #[tokio::main]
 async fn main() {

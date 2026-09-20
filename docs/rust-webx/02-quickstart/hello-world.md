@@ -5,7 +5,7 @@
 `src/main.rs`：
 
 ```rust
-use rust_webx::*;
+use webx::*;
 
 // ── 第一步：定义 Request ──
 struct HelloRequest;

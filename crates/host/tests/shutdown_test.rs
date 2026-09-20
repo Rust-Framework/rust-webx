@@ -3,7 +3,7 @@
 use std::net::TcpListener;
 use std::sync::Arc;
 
-use rust_webx_core::app::IHost;
+use webx_core::app::IHost;
 
 fn find_free_port() -> u16 {
     TcpListener::bind("127.0.0.1:0")
@@ -16,8 +16,8 @@ fn find_free_port() -> u16 {
 #[tokio::test]
 async fn server_handle_shutdown_stops_run_at() {
     let port = find_free_port();
-    let host = rust_webx_host::server::Host::builder()
-        .mode(rust_webx_core::mode::AppMode::Development)
+    let host = webx_host::server::Host::builder()
+        .mode(webx_core::mode::AppMode::Development)
         .no_spa()
         .build();
     let handle = host.server_handle();
@@ -39,8 +39,8 @@ async fn server_handle_shutdown_stops_run_at() {
 async fn ihost_stop_triggers_shutdown() {
     let port = find_free_port();
     let host = Arc::new(
-        rust_webx_host::server::Host::builder()
-            .mode(rust_webx_core::mode::AppMode::Development)
+        webx_host::server::Host::builder()
+            .mode(webx_core::mode::AppMode::Development)
             .no_spa()
             .build(),
     );
@@ -58,8 +58,8 @@ async fn ihost_stop_triggers_shutdown() {
 async fn integration_payload_too_large_returns_413_problem_json() {
     let port = find_free_port();
     let addr = format!("127.0.0.1:{}", port);
-    let host = rust_webx_host::server::Host::builder()
-        .mode(rust_webx_core::mode::AppMode::Development)
+    let host = webx_host::server::Host::builder()
+        .mode(webx_core::mode::AppMode::Development)
         .no_spa()
         .configure(|app| {
             app.useOptions(|o| o.app.max_body_size = 64);

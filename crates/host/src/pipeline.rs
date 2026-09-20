@@ -4,12 +4,12 @@
 //! inspect or modify the request. The final handler (router) is called
 //! after all middlewares have passed.
 
-use rust_webx_core::error::Result;
-use rust_webx_core::http::IHttpContext;
-use rust_webx_core::middleware::IMiddleware;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use webx_core::error::Result;
+use webx_core::http::IHttpContext;
+use webx_core::middleware::IMiddleware;
 
 /// Boxed final handler function type.
 pub type HandlerFn = Arc<

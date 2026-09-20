@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use rust_ef::{db_context::DbContext, prelude::*};
-use rust_webx::*;
+use webx::*;
 
 use dmbit_contracts::dashboard::*;
 use dmbit_contracts::goods::ComponentModel;

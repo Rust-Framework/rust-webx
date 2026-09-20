@@ -1,7 +1,7 @@
 //! Exhibition contracts — replaces work.rs; stores INDEX.json metadata for searchability.
 
-use rust_webx::*;
 use serde::{Deserialize, Serialize};
+use webx::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExhibitionModel {

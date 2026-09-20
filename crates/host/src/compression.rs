@@ -6,11 +6,11 @@
 
 use flate2::write::GzEncoder;
 use flate2::Compression;
-use rust_webx_core::error::Result;
-use rust_webx_core::http::IHttpContext;
-use rust_webx_core::middleware::IMiddleware;
 use std::io::Write;
 use std::ops::ControlFlow;
+use webx_core::error::Result;
+use webx_core::http::IHttpContext;
+use webx_core::middleware::IMiddleware;
 
 /// Compress a byte buffer using gzip at the given compression level (0-9).
 pub fn compress_gzip(data: &[u8], level: u32) -> Option<Vec<u8>> {

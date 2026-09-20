@@ -903,6 +903,29 @@
         markdown: { toc: true },
         theme: { current: dark ? "dark" : "light" },
       },
+      // Images and attachments are stored by the API and referenced by URL;
+      // `format` turns the response into the markdown Vditor inserts.
+      upload: {
+        url: "/api/media",
+        fieldName: "file",
+        multiple: false,
+        accept: "image/*,.pdf,.zip,.txt,.md,.csv,.json",
+        headers: (function () {
+          const h = Docbit.Auth?.getAuthHeader?.();
+          return h ? { Authorization: h } : {};
+        })(),
+        format: function (_files, responseText) {
+          try {
+            const asset = JSON.parse(responseText);
+            return asset.markdown || asset.url || "";
+          } catch (_) {
+            return responseText;
+          }
+        },
+        error: function (msg) {
+          if (window.layui?.layer) layui.layer.msg(msg);
+        },
+      },
       toolbar: [
         "headings",
         "bold",
@@ -918,6 +941,8 @@
         "code",
         "inline-code",
         "link",
+        "upload",
+        "insert",
         "table",
         "|",
         "undo",

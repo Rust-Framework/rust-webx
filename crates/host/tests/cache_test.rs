@@ -1,11 +1,11 @@
 //! Tests for MemoryCache implementing IDistributedCache.
 
-use rust_webx_core::cache::{
-    DistributedCacheEntryOptions, DistributedCacheExtensions, IDistributedCache,
-};
-use rust_webx_host::memory_cache::MemoryCache;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+use webx_core::cache::{
+    DistributedCacheEntryOptions, DistributedCacheExtensions, IDistributedCache,
+};
+use webx_host::memory_cache::MemoryCache;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct TestUser {

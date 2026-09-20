@@ -3,6 +3,72 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [Unreleased]
+
+### Breaking
+
+- **Import path**: the crate **library names** are now `webx` / `webx_core` /
+  `webx_host` / `webx_macros` / `webx_spa` / `webx_openapi` (package names are
+  unchanged: `rust-webx`, `rust-webx-core`, …). Update `use rust_webx::*;` to
+  `use webx::*;`, `#[rust_webx::main]` to `#[webx::main]`, and so on.
+- **Environment variables**: `RUST_WEBX_APP_BASE` → `WEBX_APP_BASE`;
+  `RUST_WEBX_EMBED` → `WEBX_EMBED`.
+- **Generated file**: `rust_webx_embedded_assets.rs` → `webx_embedded_assets.rs`.
+- **SPA entry**: `HostBuilder::embed()` removed. Use
+  `#[webx::main(embed)]` with `build.rs` `webx::builder().web_root(...).build()`;
+  plain `#[webx::main]` never bakes assets.
+
+> Migration guide: [`docs/rust-webx/16-migration/upgrade-to-webx-import.md`](docs/rust-webx/16-migration/upgrade-to-webx-import.md)
+
+### Added
+
+- **Docbit — sixth work (`rust-agent-flow`)**: the `rust-flow` repository is now
+  part of the portfolio. Its documentation slug is `rust-agent-flow`, so the
+  wiring names it explicitly everywhere it appears: `DocService::WORK_SLUGS`,
+  `sibling_doc_relative` (`rust-flow/docs/rust-agent-flow`), the seed exhibition
+  row, and both `scripts/copy-ecosystem-docs` variants — the publish bundle now
+  carries six doc trees instead of five.
+- **Docbit — documentation bundle upload**: `POST /api/works/{slug}/docs`
+  (admin-only) installs an uploaded zip as `<app_base>/docs/{slug}` and re-syncs
+  the catalog in the same request. Extraction is sandboxed against path
+  traversal, symlink entries and zip bombs; the install is an atomic swap with
+  rollback, so the served documentation is never left half-replaced. Works with
+  no seed template are created from their `INDEX.json`.
+- **Docbit — blog media**: `POST /api/media` (authenticated) stores images and
+  attachments under `<app_base>/uploads/`, served back by `GET /api/media/{*path}`.
+  Raster images are inline; everything else — notably SVG — is sent as a download
+  so it cannot execute on this origin. Vditor's `upload`/`insert` toolbar entries
+  are wired to it.
+- **Docbit — admin UI**: a "上传文档" action on each 作品管理 row, with progress
+  and a post-upload summary.
+
+### Changed
+
+- **SPA embed**: `Host::build` layers the compiled-in table under `.use_spa(...)`
+  automatically once the table is linked; `.use_spa` is the runtime disk overlay.
+- **Build script API**: `webx::builder().web_root(...).build()` (the
+  `rust-webx-build` package exposes the `webx` library name).
+
+### Fixed
+
+- **Docbit admin password**: the built-in `admin@docbit.local` / `admin123`
+  account was created on every boot with no environment gate, and the password
+  was written to the log. Production now provisions the admin only from
+  `DOCBIT_ADMIN_PASSWORD` and never falls back to a built-in password.
+- **`rust-webx-build` is now published.** The documented
+  `[build-dependencies] rust-webx-build = "…"` dependency resolves; the crate was
+  missing from the release lists (`publish.sh` and `.github/workflows/publish.yml`).
+- **`cargo doc --workspace` no longer collides.** `rust-webx-build` shares the
+  library name `webx` with the umbrella crate, so it is marked `doc = false`
+  (it is a build-script helper with no runtime API to browse).
+- **Crate-level rustdoc**: the crate roots now use `//!` docs (previously `//`
+  comments, which left every docs.rs landing page without a description).
+- **`publish.sh --check`** reports a dependent crate whose internal dependency is
+  not yet on crates.io as "packages OK; dry-run skipped" instead of a hard
+  failure, and its pre-flight now mirrors the CI gates (`fmt`, `clippy -D warnings`,
+  workspace tests).
+
+
 ## [0.4.0] — 2026-09-16 — 文件上传与下载基础设施
 
 > **English** · **简体中文**
@@ -425,7 +491,7 @@ under the `Rust-Framework` organization.
 
 ### Changed
 
-- **Rebrand**: crate series renamed from `rust-webapp` to `rust-webx` (`rust_webx` import path).
+- **Rebrand**: crate series renamed from `rust-webapp` to `rust-webx` (`webx` import path).
 - **DI**: upgraded to `rust-dix 0.6` (formerly `rust-dicore 0.5`); `build()` returns `Arc<ServiceProvider>`; `get()` / `get_owned()` return `Result`.
 - **ORM**: upgraded to `rust-ef 1.5.1` (+ `rust-ef-sqlite`, `rust-ef-mysql` from crates.io).
 - Removed local `[patch.crates-io]` overrides for rust-ef; all ecosystem crates resolve from crates.io.
@@ -438,7 +504,7 @@ under the `Rust-Framework` organization.
 ### Migration 鈥?0.1.x 鈫?0.2.0
 
 1. `Cargo.toml`: `rust-webapp = "0.1"` 鈫?`rust-webx = "0.2"`.
-2. `use rust_webapp::*` 鈫?`use rust_webx::*`.
+2. `use rust_webapp::*` 鈫?`use webx::*`.
 3. `rust_dicore` 鈫?`rust_dix`; `rust-dicore` 鈫?`rust-dix`.
 4. Remove `Arc::new()` around `ServiceCollection::build()`; handle `Result` from `get()` / `get_owned()`.
 5. `rust-ef = "1.5.1"` with provider crates on crates.io (no path patch).

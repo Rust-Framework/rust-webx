@@ -8,8 +8,8 @@
 //!
 //! 中介者模式下不需要 IBlogService 抽象 —— handler 直接使用 DbContext。
 
-use rust_webx::*;
 use serde::{Deserialize, Serialize};
+use webx::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlogPostModel {

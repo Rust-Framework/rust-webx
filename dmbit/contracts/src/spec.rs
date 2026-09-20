@@ -1,7 +1,7 @@
 //! Spec contracts — 设备规格 CRUD.
 
-use rust_webx::*;
 use serde::{Deserialize, Serialize};
+use webx::*;
 
 use crate::goods::ComponentModel;
 

@@ -1,11 +1,11 @@
 //! Endpoint —IEndpoint implementations for dual-mode dispatch.
 
-use rust_webx_core::auth::IAuthorizationPolicy;
-use rust_webx_core::error::Result;
-use rust_webx_core::http::IHttpContext;
-use rust_webx_core::routing::IEndpoint;
 use serde_json;
 use std::sync::Arc;
+use webx_core::auth::IAuthorizationPolicy;
+use webx_core::error::Result;
+use webx_core::http::IHttpContext;
+use webx_core::routing::IEndpoint;
 
 use crate::authz::AuthorizerSet;
 use crate::problem_response::{write_forbidden, write_problem};
@@ -58,7 +58,7 @@ pub struct StubEndpoint {
     pub method: &'static str,
     pub path: &'static str,
     pub handler_type: &'static str,
-    pub dispatch_fn: Option<rust_webx_core::route::scan::RouteDispatchFn>,
+    pub dispatch_fn: Option<webx_core::route::scan::RouteDispatchFn>,
     pub auth_required_role: &'static str,
     pub auth_required_permission: &'static str,
     /// Optional route policy built from compile-time `#[authorize]` metadata when

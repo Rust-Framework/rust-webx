@@ -278,7 +278,7 @@ mod tests {
         let message = err.to_string();
         assert!(message.contains("../no-such-assets"), "got {message}");
         assert!(message.contains("no-such-assets"), "got {message}");
-        assert!(message.contains("embed_assets()"), "got {message}");
+        assert!(message.contains("web_root"), "got {message}");
     }
 
     #[test]

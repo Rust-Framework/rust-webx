@@ -19,7 +19,7 @@
 ## CORS
 
 ```rust
-use rust_webx::CorsConfig;
+use webx::CorsConfig;
 
 Host::builder()
     .use_cors(CorsConfig {

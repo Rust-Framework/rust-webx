@@ -3,10 +3,10 @@
 //! Automatically configured from `appsettings.json` `Cors` section.
 //! Handles preflight OPTIONS requests and sets CORS response headers.
 
-use rust_webx_core::error::Result;
-use rust_webx_core::http::IHttpContext;
-use rust_webx_core::middleware::IMiddleware;
 use std::ops::ControlFlow;
+use webx_core::error::Result;
+use webx_core::http::IHttpContext;
+use webx_core::middleware::IMiddleware;
 
 /// CORS configuration loaded from appsettings.json.
 #[derive(Debug, Clone)]

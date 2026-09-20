@@ -3,10 +3,10 @@
 //! Provides HealthCheckRegistry and typed HealthStatus.
 //! Endpoints follow RFC 8407 (`application/health+json` content type).
 
-use rust_webx_core::error::Result;
-use rust_webx_core::http::IHttpContext;
-use rust_webx_core::routing::IEndpoint;
 use std::sync::{Arc, Mutex};
+use webx_core::error::Result;
+use webx_core::http::IHttpContext;
+use webx_core::routing::IEndpoint;
 
 pub type HealthCheckFn = Arc<dyn Fn() -> HealthStatus + Send + Sync>;
 

@@ -1,9 +1,9 @@
 //! Route/handler startup diagnostics (uses tracing — host layer only).
 
-use rust_webx_core::route::diagnostics::{
+use webx_core::route::diagnostics::{
     duplicate_handlers, orphan_handlers, orphan_route_details, route_snapshots,
 };
-use rust_webx_core::route::scan::{RouteDispatch, RouteEntry};
+use webx_core::route::scan::{RouteDispatch, RouteEntry};
 
 /// Fail fast when route/handler configuration is inconsistent.
 ///
@@ -16,7 +16,7 @@ pub fn assert_route_configuration_valid() {
     let missing_routes = orphan_handlers();
 
     let mut missing_dispatch: Vec<(&'static str, &'static str, &'static str)> = Vec::new();
-    let cache = rust_webx_core::route::scan::HandlerCache::build();
+    let cache = webx_core::route::scan::HandlerCache::build();
     let dispatch_types: std::collections::HashSet<&'static str> =
         inventory::iter::<RouteDispatch>()
             .map(|d| d.handler_type)

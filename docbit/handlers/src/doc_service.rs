@@ -21,7 +21,7 @@ use serde::Deserialize;
 
 use docbit_contracts::docs::{DocContent, DocIndex, DocIndexItem, IDocumentService};
 use docbit_contracts::exhibition::ExhibitionModel;
-use rust_webx::{app_base, framework_root, inject, Inject};
+use webx::{app_base, framework_root, inject, Inject};
 
 /// Ecosystem documentation slugs served by docbit.
 const WORK_SLUGS: &[&str] = &[
@@ -30,6 +30,7 @@ const WORK_SLUGS: &[&str] = &[
     "rust-webx",
     "rust-agent-framework",
     "rust-gpui-rml",
+    "rust-agent-flow",
 ];
 
 // `#[derive(Inject)]` 生成 `__rdi_construct_DocService` 构造器。
@@ -38,6 +39,9 @@ pub struct DocService;
 
 impl DocService {
     /// Relative doc path inside the Rust-Framework monorepo for a work slug.
+    ///
+    /// The slug is the documentation identity; the repository directory may
+    /// differ (e.g. `rust-agent-flow` lives in the `rust-flow` repo).
     fn sibling_doc_relative(work: &str) -> Option<&'static str> {
         match work {
             "rust-dix" => Some("rust-dix/docs/rust-dix"),
@@ -45,6 +49,7 @@ impl DocService {
             "rust-webx" => Some("rust-webx/docs/rust-webx"),
             "rust-agent-framework" => Some("rust-agent-framework/docs"),
             "rust-gpui-rml" => Some("rust-gpui-rml/docs"),
+            "rust-agent-flow" => Some("rust-flow/docs/rust-agent-flow"),
             _ => None,
         }
     }
@@ -225,7 +230,8 @@ impl IDocumentService for DocService {
                 let entry = entry.map_err(|e| e.to_string())?;
                 if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
                     let name = entry.file_name().to_string_lossy().to_string();
-                    if !works.iter().any(|w| w == &name) {
+                    // Dot-directories are staging/scratch, never published works.
+                    if !name.starts_with('.') && !works.iter().any(|w| w == &name) {
                         works.push(name);
                     }
                 }
@@ -388,6 +394,58 @@ impl IDocumentService for DocService {
             );
         }
         Ok(())
+    }
+
+    fn deploy_dir(&self, work: &str) -> PathBuf {
+        app_base().join("docs").join(work)
+    }
+
+    /// Swap `docs/{work}` for `staging` in two renames so a failure at any point
+    /// leaves the previously served tree in place.
+    ///
+    /// The outgoing tree is parked under `uploads/.tmp/` rather than beside its
+    /// replacement, so it is never mistaken for a work while the swap is running.
+    fn install_work_dir(&self, work: &str, staging: &Path) -> Result<PathBuf, String> {
+        if !staging.is_dir() {
+            return Err(format!(
+                "staging directory '{}' is missing",
+                staging.display()
+            ));
+        }
+
+        let target = self.deploy_dir(work);
+        let parent = target
+            .parent()
+            .ok_or_else(|| "documentation path has no parent".to_string())?;
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+
+        let staging_root = crate::works::uploads_root().join(".tmp");
+        fs::create_dir_all(&staging_root).map_err(|e| e.to_string())?;
+        let parked = staging_root.join(format!("previous-{}-{}", work, std::process::id()));
+        if parked.exists() {
+            fs::remove_dir_all(&parked).map_err(|e| e.to_string())?;
+        }
+
+        let had_previous = target.exists();
+        if had_previous {
+            fs::rename(&target, &parked).map_err(|e| e.to_string())?;
+        }
+
+        match fs::rename(staging, &target) {
+            Ok(()) => {
+                if had_previous {
+                    let _ = fs::remove_dir_all(&parked);
+                }
+                Ok(target)
+            }
+            Err(e) => {
+                // Put the old tree back so the site keeps serving something.
+                if had_previous {
+                    let _ = fs::rename(&parked, &target);
+                }
+                Err(format!("cannot install documentation: {}", e))
+            }
+        }
     }
 }
 

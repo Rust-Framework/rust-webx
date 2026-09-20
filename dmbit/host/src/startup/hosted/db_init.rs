@@ -1,7 +1,7 @@
-//! Database initialization hosted service.
+//! Schema ensure on host start (admin credentials logged for local demo).
 
 use rust_ef::db_context::DbContext;
-use rust_webx::*;
+use webx::*;
 
 use dmbit_domain::configure_for_init;
 

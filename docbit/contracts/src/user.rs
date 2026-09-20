@@ -7,8 +7,8 @@
 //! - `roles: Vec<String>` added
 //! - `created_at` changed from String to i64
 
-use rust_webx::*;
 use serde::{Deserialize, Serialize};
+use webx::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserModel {

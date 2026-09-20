@@ -1,11 +1,11 @@
 //! HTTP request counters exposed at `GET /metrics` (Prometheus text format).
 
-use rust_webx_core::error::Result;
-use rust_webx_core::http::IHttpContext;
-use rust_webx_core::middleware::IMiddleware;
-use rust_webx_core::routing::IEndpoint;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use webx_core::error::Result;
+use webx_core::http::IHttpContext;
+use webx_core::middleware::IMiddleware;
+use webx_core::routing::IEndpoint;
 
 /// Shared HTTP metrics counters.
 #[derive(Default)]

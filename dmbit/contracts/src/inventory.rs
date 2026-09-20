@@ -1,7 +1,7 @@
 //! Inventory CSV import / export.
 
-use rust_webx::*;
 use serde::{Deserialize, Serialize};
+use webx::*;
 
 /// Filename offered to the browser when exporting the inventory.
 pub const INVENTORY_EXPORT_FILE_NAME: &str = "智算机房规格清单.csv";

@@ -1,7 +1,7 @@
 //! Device handlers — 设备实例 CRUD + 批量生成.
 
 use rust_ef::{db_context::DbContext, prelude::*};
-use rust_webx::*;
+use webx::*;
 
 use dmbit_contracts::device::*;
 use dmbit_domain::entities::{Device, Product, Spec};

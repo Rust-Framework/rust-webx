@@ -26,20 +26,20 @@ use futures_util::{StreamExt, TryStreamExt};
 use http_body_util::{combinators::UnsyncBoxBody, BodyExt, Full};
 use hyper::body::{Bytes, Frame, Incoming};
 use hyper::Request;
-use rust_webx_core::auth::IClaims;
-use rust_webx_core::config::AppOptions;
-use rust_webx_core::error::{Error, Result};
-use rust_webx_core::form::{FormFileBuilder, MultipartForm};
-use rust_webx_core::http::{
-    content_disposition_value, ByteRange, FileBody, FileSource, IClaimsExt, IHttpContext,
-    IHttpRequest, IHttpResponse, ResponseBody, SeekableReader,
-};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeekExt, SeekFrom};
 use tokio::sync::Mutex;
+use webx_core::auth::IClaims;
+use webx_core::config::AppOptions;
+use webx_core::error::{Error, Result};
+use webx_core::form::{FormFileBuilder, MultipartForm};
+use webx_core::http::{
+    content_disposition_value, ByteRange, FileBody, FileSource, IClaimsExt, IHttpContext,
+    IHttpRequest, IHttpResponse, ResponseBody, SeekableReader,
+};
 
 use crate::problem_response::{build_problem, problem_to_bytes};
 
@@ -77,7 +77,7 @@ impl Default for BodyLimits {
             file: 128 * 1024 * 1024,
             field: 1024 * 1024,
             memory_threshold: 1024 * 1024,
-            spool_dir: rust_webx_core::form::spool_root(),
+            spool_dir: webx_core::form::spool_root(),
         }
     }
 }
@@ -94,10 +94,10 @@ impl BodyLimits {
                 if path.is_absolute() {
                     path
                 } else {
-                    rust_webx_core::paths::app_base().join(path)
+                    webx_core::paths::app_base().join(path)
                 }
             }
-            _ => rust_webx_core::form::spool_root(),
+            _ => webx_core::form::spool_root(),
         };
 
         Self {
@@ -113,7 +113,7 @@ impl BodyLimits {
     /// Publish the spool directory so `FormFile` values can be validated
     /// wherever they are bound.
     pub fn apply_spool_root(&self) {
-        rust_webx_core::form::set_spool_root(self.spool_dir.clone());
+        webx_core::form::set_spool_root(self.spool_dir.clone());
     }
 }
 
@@ -1015,7 +1015,7 @@ fn multipart_stream(
 /// Read buffer used for every streamed response body.
 ///
 /// Shared with the upload path so both sides of a transfer use the same size.
-const STREAM_BUF_SIZE: usize = rust_webx_core::http::STREAM_BUF_SIZE;
+const STREAM_BUF_SIZE: usize = webx_core::http::STREAM_BUF_SIZE;
 
 /// Turn any async reader into a streaming response body.
 fn reader_body<R>(reader: R) -> RespBody

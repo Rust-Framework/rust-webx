@@ -11,7 +11,9 @@ readme = "../../README.md"
 keywords = ["web", "http", "async", "framework", "proc-macro"]
 categories = ["web-programming"]
 
+# Library name used by dependents; package stays `rust-webx-macros`.
 [lib]
+name = "webx_macros"
 proc-macro = true
 
 [dependencies]

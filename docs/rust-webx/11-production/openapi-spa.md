@@ -10,7 +10,7 @@ GET /swagger         → Swagger UI 页面
 ```
 
 ```rust
-use rust_webx::{generate_openapi_spec, APIUI_HTML};
+use webx::{generate_openapi_spec, APIUI_HTML};
 ```
 
 ## SPA 静态托管
@@ -62,36 +62,44 @@ Host::builder()
 
 ## 把 wwwroot 编译进 exe
 
-默认部署需要带上 `wwwroot/` 目录。加上 `.embed()` 后静态文件直接编译进可执行文件，
-发布产物可以只有一个 exe；同时保留「在 exe 旁放 `wwwroot/` 覆盖个别文件」的能力
-（比如替换 favicon）。这与 ASP.NET Core 的 `CompositeFileProvider` +
-`ManifestEmbeddedFileProvider` 是同一个模型。
+默认部署需要带上 `wwwroot/` 目录。要把静态文件**烤进**可执行文件，需要两处显式声明
+（对标 ASP.NET：csproj 声明资源 + Program 仍写 UseStaticFiles）：
 
-三步接入：
+| 符号 | 时机 | 含义 |
+|------|------|------|
+| `build.rs` → `web_root(...)` | 编译期 | **烤进二进制的源目录**（文件集固定） |
+| `#[webx::main(embed)]` | 编译期入口 | **确认链接**该表；不写 `(embed)` 则不进包 |
+| `.use_spa("wwwroot")` | 运行期 | **磁盘覆盖目录**（运维可改 favicon 等） |
+
+不写 `build.rs` / 不写 `(embed)`：行为与纯磁盘 SPA 相同（`.use_spa` 或自动检测
+`wwwroot/`），exe 里没有内嵌表。
 
 ```rust
-// 1) build.rs —— 目录只在这里出现一次；错误用 ? 冒泡成构建失败
-fn main() -> Result<(), rust_webx_build::Error> {
-    rust_webx_build::embed_assets("wwwroot")
+// build.rs —— 编译期源树
+fn main() -> Result<(), webx::Error> {
+    webx::builder()
+        .web_root("wwwroot")   // 或 "../wwwroot"（crate 在子目录时）
+        .build()
 }
 ```
 
 ```rust
-// 2) 每个二进制声明一次（lib.rs 或 main.rs 的模块层级）
-rust_webx::spa::embed_assets!();
+// Program.cs —— (embed) = 明确「要嵌入」
+#[webx::main(embed)]
+async fn main() {
+    Host::builder()
+        .use_spa("wwwroot")   // 部署旁的覆盖目录；可与 web_root 路径不同
+        .build()
+        .run()
+        .await?;
+}
 ```
 
-```rust
-// 3) 启用
-Host::builder()
-    .use_spa("wwwroot")   // 覆盖文件的读取目录；不写则用编译目录
-    .embed()
-    .build()
-    .run()
-    .await?;
-```
+只有 `web_root` 没有 `(embed)`：build 仍会生成表，但**不会**链进二进制。  
+只有 `(embed)` 没有 `web_root`：编译失败（缺少 `OUT_DIR` 生成文件）。
 
-`Cargo.toml` 需要 `[build-dependencies] rust-webx-build = "0.4"`。
+`Cargo.toml` 需要 `[build-dependencies] rust-webx-build = "0.5"`（库名导入为
+`webx`）。
 
 ### 查找顺序
 
@@ -127,31 +135,29 @@ Host::builder()
   ```
 
   建议把覆盖目录当白名单用：只放确实要自定义的文件，升级时一并检查。
-* **体积**：内嵌会让每个 exe 变大（docbit 实测 576 个文件 / 27 MiB）。因此 `.embed()`
-  是显式 opt-in，不调用就与现在完全一致。
-* **编译期与运行期**：`.embed()` 记录的是**编译目录**，不随部署变化。构建目录与部署
-  目录不同时用 `use_spa` 指定（docbit 从 `../wwwroot` 编译、部署用 `wwwroot`，
-  因此写了 `.use_spa("wwwroot")`）。
+* **体积**：内嵌会让每个 exe 变大（docbit 实测 576 个文件 / 27 MiB）。因此必须
+  **同时**写 `build.rs` 的 `web_root` 与 `#[webx::main(embed)]`——缺一则不烤进包。
+* **编译期与运行期**：`web_root` 是**编译目录**；`.use_spa` 是**部署覆盖目录**。
+  二者可以不同（docbit 从 `../wwwroot` 编译、部署用 `wwwroot`）。
 * **增删文件**：build.rs 会为整个目录树发出 `cargo:rerun-if-changed`，所以新增、
   修改、删除文件都会正确触发重编译。
 * **符号链接**：不跟随。链接到别处的文件会让内嵌内容超出 manifest 的描述范围，
   链接的目录还可能造成遍历环。需要内嵌就放真实文件或副本。
-* **失败即报错**：`embed_assets` 返回 `Result`，目录不存在时由 `?` 冒泡成构建失败，
-  而不是 panic。这也是 `fn main() -> Result<(), rust_webx_build::Error>` 的写法：
+* **失败即报错**：缺少目录时由 `?` 冒泡成构建失败。推荐写法：
 
   ```
   error: failed to run custom build command for `docbit-host v0.1.0`
   --- stderr
   Error: static asset directory `../wwwrooot` does not exist
-  (resolved to `D:\...\docbit\wwwrooot`); create it, or pass the right path to embed_assets()
+  (resolved to `D:\...\docbit\wwwrooot`); create it, or pass the right path to builder().web_root(...)
   ```
 
-* **调试逃生开关**：`RUST_WEBX_EMBED=off` 让运行期忽略内嵌文件、只读磁盘，
+* **调试逃生开关**：`WEBX_EMBED=off` 让运行期忽略内嵌文件、只读磁盘，
   不必重新编译就能确认问题是否来自覆盖。
 * **大小写**：内嵌表按精确路径匹配，区分大小写（与 Linux 一致）；磁盘在不区分
   大小写的系统上仍按系统行为匹配。
-* **依赖**：生成的代码引用 `::rust_webx`，因此调用 `embed_assets` 的 crate 需依赖
-  伞 crate `rust-webx`；`build-dependencies` 加 `rust-webx-build` 即可。
+* **依赖**：生成的代码引用伞 crate `::webx`；`build-dependencies` 加
+  `rust-webx-build`（在 build.rs 里以 `webx::` 使用）即可。
 
 ### 发布脚本
 
@@ -163,7 +169,7 @@ Host::builder()
 
 ## 小结
 
-OpenAPI 从类型信息自动生成，SPA 托管让全栈单体部署成为可能；`embed()` 再把静态资源
-收进 exe，部署收敛为单个文件，同时保留逐个文件的覆盖能力。
+OpenAPI 从类型信息自动生成，SPA 托管让全栈单体部署成为可能；`build.rs` 的
+`web_root` 再把静态资源收进 exe，部署收敛为单个文件，同时保留逐个文件的覆盖能力。
 
 下一节：[优雅关闭与可观测性](graceful-shutdown.md)

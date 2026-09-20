@@ -1,7 +1,7 @@
 mod test_utils;
 
-use rust_webx_core::middleware::IMiddleware;
-use rust_webx_host::cors::{CorsConfig, CorsMiddleware};
+use webx_core::middleware::IMiddleware;
+use webx_host::cors::{CorsConfig, CorsMiddleware};
 
 fn find_header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
     headers

@@ -11,6 +11,17 @@ readme = "../../README.md"
 keywords = ["web", "static-files", "embedded", "build-script"]
 categories = ["web-programming", "build-utils"]
 
+# Imported in build.rs as `webx::builder()` — same namespace as the app,
+# separate compilation unit from the umbrella crate.
+#
+# `doc = false`: this library shares the name `webx` with the umbrella crate
+# (`rust-webx`), so documenting both would collide on `doc/webx/`. This is a
+# build-script helper with no runtime API to browse; its usage is documented
+# in the crate docs above and in the production guide.
+[lib]
+name = "webx"
+doc = false
+
 [dependencies]
 mime_guess.workspace = true
 sha2.workspace = true

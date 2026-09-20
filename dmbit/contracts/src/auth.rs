@@ -1,7 +1,7 @@
 //! Auth contracts — login / me / change-password.
 
-use rust_webx::*;
 use serde::{Deserialize, Serialize};
+use webx::*;
 
 #[derive(Serialize)]
 pub struct AuthResponse {

@@ -1,11 +1,12 @@
 //! Exhibition handlers — list / get / upsert / delete portfolio works.
 //!
 //! 每个 handler 持有 owned `DbContext`，`handle(&mut self, ...)` 直接操作 `self.ctx`。
-//! Public list/get serve DB rows only; INDEX.json is synced into the DB at startup
-//! (`exhibition_seed::ensure_exhibition_repo_urls`), not overlaid at request time.
+//! Public list/get serve DB rows only; INDEX.json is synced into the DB by
+//! `catalog::sync_exhibitions` (at boot and after a documentation upload), never
+//! overlaid at request time.
 
 use rust_ef::{db_context::DbContext, prelude::*};
-use rust_webx::*;
+use webx::*;
 
 use docbit_contracts::exhibition::{
     DeleteExhibitionRequest, ExhibitionModel, GetExhibitionRequest, ListExhibitionsRequest,

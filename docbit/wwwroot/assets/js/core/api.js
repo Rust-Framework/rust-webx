@@ -58,6 +58,55 @@
     return request("DELETE", path, null, auth);
   }
 
+  /**
+   * POST `multipart/form-data`.
+   *
+   * Always sends a `{ file }` part (the upload endpoints expect that field
+   * name). `onProgress(percent)` is called while the browser reports progress.
+   * Returns the parsed JSON body.
+   */
+  function upload(path, file, auth, onProgress, extraFields) {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    if (extraFields) {
+      Object.keys(extraFields).forEach(function (k) {
+        form.append(k, extraFields[k]);
+      });
+    }
+
+    return new Promise(function (resolve, reject) {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", API + path);
+      xhr.setRequestHeader("Accept", "application/json");
+      if (auth && Docbit.Auth?.getAuthHeader) {
+        const h = Docbit.Auth.getAuthHeader();
+        if (h) xhr.setRequestHeader("Authorization", h);
+      }
+      if (onProgress && xhr.upload) {
+        xhr.upload.onprogress = function (e) {
+          if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+        };
+      }
+      xhr.onload = function () {
+        let data = null;
+        try {
+          data = JSON.parse(xhr.responseText);
+        } catch (_) {}
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(data);
+        } else {
+          const detail =
+            data && (data.detail || data.error || data.title || data.message);
+          reject(new Error(detail || xhr.statusText || "Upload failed"));
+        }
+      };
+      xhr.onerror = function () {
+        reject(new Error("Network error during upload"));
+      };
+      xhr.send(form);
+    });
+  }
+
   function docContentUrl(docsSlug, docPath) {
     // Encode nested paths as a single segment with `:` so both:
     // - legacy `/content/{path}` and
@@ -81,5 +130,5 @@
   }
 
   window.Docbit = window.Docbit || {};
-  Docbit.Api = { get, post, put, del, docContentUrl, encodeDocPath };
+  Docbit.Api = { get, post, put, del, upload, docContentUrl, encodeDocPath };
 })();

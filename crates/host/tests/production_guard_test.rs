@@ -1,9 +1,9 @@
 //! Production-mode build guards (fail-fast).
 
-use rust_webx_core::mode::AppMode;
-use rust_webx_host::server::Host;
+use webx_core::mode::AppMode;
+use webx_host::server::Host;
 
-fn production_options(app: &mut rust_webx_host::server::HostAppBuilder) {
+fn production_options(app: &mut webx_host::server::HostAppBuilder) {
     app.useOptions(|o| {
         o.cors.origins = vec!["https://example.com".into()];
     });

@@ -1,5 +1,12 @@
-//! Application startup.
+//! Application startup — ASP.NET Core `Startup` / extension methods analogue.
+//!
+//! | Folder | Role |
+//! |--------|------|
+//! | [`extensions`] | `Add*` / `Use*` on DI and `HostBuilder` |
+//! | [`hosted`] | `IHostedService` implementations |
 
-mod db_init;
+pub mod extensions;
+pub mod hosted;
 
-pub use db_init::DbInitService;
+pub use extensions::{HostBuilderExt, ServiceCollectionExt};
+pub use hosted::DbInitService;

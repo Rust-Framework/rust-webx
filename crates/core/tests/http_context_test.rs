@@ -4,9 +4,9 @@
 //! These tests exercise the mock TestHttpContext from lrwf-http/test_utils
 //! as well as trait-based verification of the real HttpContext.
 
-use rust_webx_core::auth::IClaims;
-use rust_webx_core::http::IHttpResponse;
 use std::collections::HashMap;
+use webx_core::auth::IClaims;
+use webx_core::http::IHttpResponse;
 
 // â”€â”€â”€ Mock IClaims for testing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -89,7 +89,7 @@ fn test_claims_empty_roles_and_permissions() {
 
 #[test]
 fn http_status_constants() {
-    use rust_webx_core::http::HttpStatus;
+    use webx_core::http::HttpStatus;
     assert_eq!(HttpStatus::OK, 200);
     assert_eq!(HttpStatus::CREATED, 201);
     assert_eq!(HttpStatus::NO_CONTENT, 204);
@@ -131,7 +131,7 @@ impl IHttpResponse for MinimalResponse {
         self.body.is_some()
     }
 
-    async fn write_bytes(&mut self, data: Vec<u8>) -> rust_webx_core::error::Result<()> {
+    async fn write_bytes(&mut self, data: Vec<u8>) -> webx_core::error::Result<()> {
         self.body = Some(data);
         Ok(())
     }

@@ -9,6 +9,7 @@ pub mod category;
 pub mod comment;
 pub mod docs;
 pub mod exhibition;
+pub mod media;
 pub mod rbac;
 pub mod site;
 pub mod tracking;

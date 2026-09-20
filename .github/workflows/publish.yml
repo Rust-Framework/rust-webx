@@ -62,7 +62,7 @@ jobs:
           }
 
           # Publish order: dependencies must appear before their dependents.
-          CRATES="rust-webx-macros rust-webx-core rust-webx-spa rust-webx-openapi rust-webx-host rust-webx"
+          CRATES="rust-webx-macros rust-webx-core rust-webx-build rust-webx-spa rust-webx-openapi rust-webx-host rust-webx"
           metadata="$(cargo metadata --no-deps --format-version 1)"
           for name in $CRATES; do
             version="$(printf '%s' "$metadata" \

@@ -10,8 +10,8 @@
 use bcrypt::{hash, verify, DEFAULT_COST};
 use jsonwebtoken::{encode, EncodingKey, Header};
 use rust_ef::{db_context::DbContext, prelude::*};
-use rust_webx::*;
 use serde::{Deserialize, Serialize};
+use webx::*;
 
 use docbit_contracts::auth::*;
 use docbit_domain::entities::{PasswordResetToken, RoleUser, User};

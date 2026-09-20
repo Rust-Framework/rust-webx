@@ -10,7 +10,7 @@
     "demoUrl": "",
     "featured": true,
     "sortOrder": 1,
-    "version": "0.3.7",
+    "version": "0.5.0",
     "language": "zh-CN",
     "author": "Start",
     "logo": "logo.svg",
@@ -574,8 +574,15 @@
         {
           "id": "16-migration",
           "title": "迁移指南",
-          "subtitle": "从 ASP.NET Core、Axum / Actix 迁移",
+          "subtitle": "版本升级、ASP.NET Core 与 Axum / Actix 迁移",
           "sections": [
+            {
+              "id": "upgrade-to-webx-import",
+              "title": "升级到 webx 导入路径",
+              "summary": "0.4 → 0.5：导入路径、环境变量与 SPA 嵌入变更",
+              "readingTime": 10,
+              "difficulty": "intermediate"
+            },
             {
               "id": "from-aspnet-core",
               "title": "从 ASP.NET Core 迁移",

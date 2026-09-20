@@ -1,8 +1,8 @@
 //! OpenAPI spec generation tests.
 
-use rust_webx_core::route::scan::{ParamMeta, RequestParamEntry, RouteEntry};
-use rust_webx_core::routing::HttpMethod;
-use rust_webx_openapi::generate_openapi_spec;
+use webx_core::route::scan::{ParamMeta, RequestParamEntry, RouteEntry};
+use webx_core::routing::HttpMethod;
+use webx_openapi::generate_openapi_spec;
 
 inventory::submit! {
     RouteEntry::new(

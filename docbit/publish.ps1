@@ -21,7 +21,7 @@
 
 .PARAMETER NoWwwroot
     不发布 wwwroot/ 目录：静态资源已由 build.rs 编译进 exe（见 host/build.rs 与
-    `Host::builder().use_spa("wwwroot").embed()`），部署产物只剩 exe 与配置文件。
+    `#[webx::main(embed)]`），部署产物只剩 exe 与配置文件。
     如需在 exe 旁覆盖个别文件（例如替换 favicon），在目标目录手工建 wwwroot/
     放入那几个文件即可，无需重新发布。
 
@@ -61,7 +61,7 @@
         appsettings.json
         appsettings.Production.json
         wwwroot\          (admin / assets / pages / index.html ...)
-        docs\             (五项目文档，publish 时从源仓库复制)
+        docs\             (六项目文档，publish 时从源仓库复制)
         run.cmd           (-Production 时生成，设置 APP_ENV=Production 启动)
 #>
 
@@ -172,10 +172,14 @@ if (-not $SkipBuild) {
     }
     Push-Location $WorkspaceRoot
     try {
+        # 注意：cargo 把进度写在 stderr。Windows PowerShell 5.1 在
+        # $ErrorActionPreference='Stop' 下会把 native stderr 变成终止性
+        # NativeCommandError，从而在第一行 "Compiling …" 就中断构建。
+        # 在 cmd 层合并 stderr 既保持输出可读，也保留退出码。
         if ($Linux) {
-            & cargo build --release -p docbit-host --target x86_64-unknown-linux-gnu
+            cmd /c "cargo build --release -p docbit-host --target x86_64-unknown-linux-gnu 2>&1"
         } else {
-            & cargo build --release -p docbit-host
+            cmd /c "cargo build --release -p docbit-host 2>&1"
         }
         if ($LASTEXITCODE -ne 0) {
             throw "cargo build 失败，退出码 $LASTEXITCODE"

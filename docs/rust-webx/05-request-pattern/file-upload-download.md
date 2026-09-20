@@ -19,7 +19,7 @@
 上传端点就是一个普通的 POST 端点。文件字段用 `FormFile`：
 
 ```rust
-use rust_webx::*;
+use webx::*;
 
 #[derive(Deserialize)]
 pub struct UploadAvatarRequest {
@@ -184,7 +184,7 @@ pub struct UploadAvatarRequest {
 把响应类型写成 `ResponseData`：
 
 ```rust
-use rust_webx::*;
+use webx::*;
 
 #[derive(Default, Deserialize)]
 pub struct DownloadReportRequest {

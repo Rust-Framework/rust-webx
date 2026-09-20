@@ -1,9 +1,9 @@
 //! Tests for configuration loading: appsettings.json parsing,
 //! environment variable overrides, JSON binding, and development merge.
 
-use rust_webx_core::config;
-use rust_webx_core::mode::AppMode;
 use serde::Deserialize;
+use webx_core::config;
+use webx_core::mode::AppMode;
 
 // â”€â”€â”€ Test types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -79,7 +79,7 @@ fn config_env_override_bind_root_preserves_values() {
     });
 
     // Verify bind_root works with standard JSON
-    let app_opts: rust_webx_core::config::AppOptions = config::bind_root(&loaded);
+    let app_opts: webx_core::config::AppOptions = config::bind_root(&loaded);
     assert_eq!(app_opts.app.name, "BaseApp");
 }
 
@@ -94,7 +94,7 @@ fn config_merge_and_bind_root() {
     });
 
     // Verify bind_root parses the base config correctly
-    let opts: rust_webx_core::config::AppOptions = config::bind_root(&base);
+    let opts: webx_core::config::AppOptions = config::bind_root(&base);
     assert_eq!(opts.app.name, "Base");
     assert_eq!(opts.jwt.secret, "base-secret");
 }
@@ -119,7 +119,7 @@ fn config_load_appsettings_production_mode() {
 
 #[test]
 fn config_app_options_defaults() {
-    let defaults = rust_webx_core::config::AppOptions::default();
+    let defaults = webx_core::config::AppOptions::default();
     assert_eq!(defaults.app.urls, vec!["http://0.0.0.0:5000"]);
     assert_eq!(defaults.app.max_body_size, 10 * 1024 * 1024);
     assert!(defaults.jwt.secret.is_empty());
@@ -131,7 +131,7 @@ fn config_app_options_defaults() {
 
 #[test]
 fn config_cors_section_defaults() {
-    let defaults = rust_webx_core::config::CorsSection::default();
+    let defaults = webx_core::config::CorsSection::default();
     assert!(defaults.origins.contains(&"*".to_string()));
     assert!(defaults.methods.contains(&"GET".to_string()));
     assert!(defaults.headers.contains(&"Authorization".to_string()));
@@ -148,7 +148,7 @@ fn config_cors_binds_pascal_case_origins() {
             "Headers": ["Content-Type", "Authorization"]
         }
     });
-    let opts: rust_webx_core::config::AppOptions = config::bind_root(&loaded);
+    let opts: webx_core::config::AppOptions = config::bind_root(&loaded);
     assert_eq!(
         opts.cors.origins,
         vec!["https://www.lusida.net".to_string()]
@@ -172,7 +172,7 @@ fn config_jwt_secret_env_override() {
         let result = config::load_appsettings(AppMode::Development);
         std::env::remove_var("JWT_SECRET");
         let json = result.expect("expected config when JWT_SECRET set");
-        let opts: rust_webx_core::config::AppOptions = config::bind_root(&json);
+        let opts: webx_core::config::AppOptions = config::bind_root(&json);
         assert_eq!(opts.jwt.secret, "env-jwt-secret-that-is-long-enough-32");
     }
 }
@@ -188,7 +188,7 @@ fn config_app_jwt_secret_overrides_jwt_secret_env() {
     std::env::remove_var("JWT_SECRET");
     std::env::remove_var("APP__Jwt__Secret");
     if let Some(json) = result {
-        let opts: rust_webx_core::config::AppOptions = config::bind_root(&json);
+        let opts: webx_core::config::AppOptions = config::bind_root(&json);
         assert_eq!(opts.jwt.secret, "from-app-override-secret-32chars-minimum");
     }
 }

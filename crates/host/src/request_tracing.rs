@@ -1,10 +1,10 @@
 //! Structured request tracing middleware with trace_id injection.
 
-use rust_webx_core::error::Result;
-use rust_webx_core::http::IHttpContext;
-use rust_webx_core::middleware::IMiddleware;
 use std::ops::ControlFlow;
 use std::sync::atomic::{AtomicU64, Ordering};
+use webx_core::error::Result;
+use webx_core::http::IHttpContext;
+use webx_core::middleware::IMiddleware;
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 static TRACE_SEQ: AtomicU64 = AtomicU64::new(0);

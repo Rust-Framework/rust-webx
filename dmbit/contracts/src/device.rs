@@ -1,7 +1,7 @@
 //! Device contracts — 设备实例 CRUD + 批量生成.
 
-use rust_webx::*;
 use serde::{Deserialize, Serialize};
+use webx::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceModel {

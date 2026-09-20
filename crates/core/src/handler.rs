@@ -70,7 +70,7 @@ where
 /// field and generate the inherent `set_claims` method:
 ///
 /// ```ignore
-/// use rust_webx::*;
+/// use webx::*;
 /// use serde::Deserialize;
 ///
 /// #[claims]

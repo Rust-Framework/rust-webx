@@ -25,8 +25,8 @@ async fn integration_https_health_with_generated_cert() {
     let cert_s = cert_path.to_string_lossy().into_owned();
     let key_s = key_path.to_string_lossy().into_owned();
 
-    let host = rust_webx_host::server::Host::builder()
-        .mode(rust_webx_core::mode::AppMode::Development)
+    let host = webx_host::server::Host::builder()
+        .mode(webx_core::mode::AppMode::Development)
         .no_spa()
         .configure(move |app| {
             app.useOptions(move |o| {
@@ -59,8 +59,8 @@ async fn integration_https_health_with_generated_cert() {
 
 #[test]
 fn build_tls_acceptor_rejects_missing_cert() {
-    let err = rust_webx_host::server::Host::builder()
-        .mode(rust_webx_core::mode::AppMode::Development)
+    let err = webx_host::server::Host::builder()
+        .mode(webx_core::mode::AppMode::Development)
         .no_spa()
         .configure(|app| {
             app.useOptions(|o| {

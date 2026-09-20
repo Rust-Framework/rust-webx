@@ -34,6 +34,22 @@ pub fn canonical_exhibition_repo_urls() -> &'static [(&'static str, &'static str
     ]
 }
 
+/// Category row for an INDEX.json `meta.category` value, for works that have no
+/// seed template (anything an operator uploads).
+///
+/// Unknown or empty categories fall back to "uncategorized" rather than failing
+/// the insert, since `Exhibition.category_id` is a required foreign key.
+pub fn category_id_for(category: &str) -> &'static str {
+    match category.trim().to_ascii_lowercase().as_str() {
+        "orm" => id::CAT_ORM,
+        "framework" => id::CAT_FRAMEWORK,
+        "di" | "dependency-injection" => id::CAT_DI,
+        "agent" => id::CAT_AGENT,
+        "ui" => id::CAT_UI,
+        _ => id::CAT_UNCATEGORIZED,
+    }
+}
+
 /// Full exhibition seed rows (stable UUIDs). Shared by `has_data` and startup upsert.
 pub fn exhibition_seed_rows() -> Vec<Exhibition> {
     let now = 0i64;
@@ -81,7 +97,7 @@ pub fn exhibition_seed_rows() -> Vec<Exhibition> {
             category: BelongsTo::new(),
         },
         Exhibition {
-            id: id::EXH_RUST_WEBX.into(),
+            id: id::EXH_WEBX.into(),
             slug: "rust-webx".into(),
             title: "Rust Web Framework".into(),
             subtitle: "高内聚·编译时路由·DI+中介者双核心".into(),
@@ -136,6 +152,27 @@ pub fn exhibition_seed_rows() -> Vec<Exhibition> {
             featured: true,
             sort_order: 5,
             logo_url: Some("/assets/works/rust-gpui-rml.svg".into()),
+            created_at: now,
+            updated_at: now,
+            created_id: None,
+            updated_id: None,
+            is_deleted: false,
+            category: BelongsTo::new(),
+        },
+        Exhibition {
+            id: id::EXH_RUST_AGENT_FLOW.into(),
+            slug: "rust-agent-flow".into(),
+            title: "Rust Agent Flow".into(),
+            subtitle: "GPUI 流程图设计器·图灵完备控制流·策略模式扩展".into(),
+            description: "基于 GPUI 与 gpui-component 的框架无关流程图设计组件库 — 图灵完备控制流节点、dagre 自动布局、ReactFlow 风格边路径算法与 Schema 驱动属性面板。 | Framework-agnostic flow-chart editor for GPUI — Turing-complete control-flow nodes, dagre layout, ReactFlow-style edge routing, and schema-driven property panels.".into(),
+            category_id: id::CAT_FRAMEWORK.into(),
+            tags: r#"["rust","gpui","flow-editor","agent-flow","reactflow"]"#.into(),
+            repo_url: Some("https://github.com/Rust-Framework/rust-flow".into()),
+            demo_url: None,
+            docs_slug: Some("rust-agent-flow".into()),
+            featured: true,
+            sort_order: 6,
+            logo_url: None,
             created_at: now,
             updated_at: now,
             created_id: None,

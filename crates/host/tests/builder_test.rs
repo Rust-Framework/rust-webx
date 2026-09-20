@@ -4,9 +4,9 @@ use std::net::TcpListener;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
-use rust_webx_core::http::IHttpContext;
-use rust_webx_core::middleware::IMiddleware;
-use rust_webx_host::server::Host;
+use webx_core::http::IHttpContext;
+use webx_core::middleware::IMiddleware;
+use webx_host::server::Host;
 
 fn find_free_port() -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -26,7 +26,7 @@ impl IMiddleware for MarkerMiddleware {
     async fn invoke(
         &self,
         ctx: &mut dyn IHttpContext,
-    ) -> rust_webx_core::error::Result<ControlFlow<()>> {
+    ) -> webx_core::error::Result<ControlFlow<()>> {
         ctx.response_mut().set_header("x-marker", "yes");
         Ok(ControlFlow::Continue(()))
     }
@@ -37,7 +37,7 @@ async fn use_middleware_registers_into_pipeline() {
     let port = find_free_port();
     let addr = format!("127.0.0.1:{}", port);
     let host = Host::builder()
-        .mode(rust_webx_core::mode::AppMode::Development)
+        .mode(webx_core::mode::AppMode::Development)
         .no_spa()
         .use_middleware::<MarkerMiddleware>()
         .build();
@@ -53,9 +53,9 @@ async fn use_middleware_registers_into_pipeline() {
 
 #[tokio::test]
 async fn use_middleware_with_registers_into_pipeline() {
-    use rust_webx_core::http::IHttpContext;
-    use rust_webx_core::middleware::IMiddleware;
     use std::ops::ControlFlow;
+    use webx_core::http::IHttpContext;
+    use webx_core::middleware::IMiddleware;
 
     struct TagMiddleware;
     #[async_trait::async_trait]
@@ -63,7 +63,7 @@ async fn use_middleware_with_registers_into_pipeline() {
         async fn invoke(
             &self,
             ctx: &mut dyn IHttpContext,
-        ) -> rust_webx_core::error::Result<ControlFlow<()>> {
+        ) -> webx_core::error::Result<ControlFlow<()>> {
             ctx.response_mut().set_header("x-via-with", "1");
             Ok(ControlFlow::Continue(()))
         }
@@ -72,7 +72,7 @@ async fn use_middleware_with_registers_into_pipeline() {
     let port = find_free_port();
     let addr = format!("127.0.0.1:{}", port);
     let host = Host::builder()
-        .mode(rust_webx_core::mode::AppMode::Development)
+        .mode(webx_core::mode::AppMode::Development)
         .no_spa()
         .use_middleware_with(|| Arc::new(TagMiddleware) as Arc<dyn IMiddleware>)
         .build();
@@ -84,15 +84,4 @@ async fn use_middleware_with_registers_into_pipeline() {
         .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     assert_eq!(resp.headers().get("x-via-with").unwrap(), "1");
-}
-
-/// `embed()` must fail loudly when nothing was compiled in: a silent no-op would
-/// serve 404s from a deployment that looks correctly built.
-#[test]
-#[should_panic(expected = "embed() found no compiled-in assets")]
-fn embed_without_a_registered_table_panics() {
-    let _ = Host::builder()
-        .mode(rust_webx_core::mode::AppMode::Development)
-        .use_spa("wwwroot")
-        .embed();
 }

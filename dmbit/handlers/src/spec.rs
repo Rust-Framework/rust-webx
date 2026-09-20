@@ -1,7 +1,7 @@
 //! Spec handlers — 设备规格 CRUD + components.
 
 use rust_ef::{db_context::DbContext, prelude::*};
-use rust_webx::*;
+use webx::*;
 
 use dmbit_contracts::spec::*;
 use dmbit_domain::entities::{Device, Product, Spec, SpecComponent};

@@ -12,10 +12,22 @@ rust-webx/                    # Workspace 根
 │   ├── macros/                 # rust-webx-macros — 过程宏
 │   ├── spa/                    # rust-webx-spa — SPA 静态托管
 │   ├── openapi/                # rust-webx-openapi — OpenAPI 生成
-│   └── webapp/                 # rust-webx — 伞 Crate，统一导出
+│   └── webx/                   # rust-webx — 伞 Crate，统一导出
 ├── docbit/                     # 示例：作品集全栈应用
-└── docs/rust-webx/           # 本书文档（仓库根目录）
+└── docs/rust-webx/             # 本书文档（仓库根目录）
 ```
+
+### 包名与导入名
+
+| 包名（`Cargo.toml`） | 导入名（`use`） |
+|----------------------|-----------------|
+| `rust-webx` | `webx` |
+| `rust-webx-core` | `webx_core` |
+| `rust-webx-host` | `webx_host` |
+| `rust-webx-macros` | `webx_macros` |
+| `rust-webx-spa` | `webx_spa` |
+| `rust-webx-openapi` | `webx_openapi` |
+| `rust-webx-build` | `webx`（build-dependencies） |
 
 ## 依赖关系图
 
@@ -105,7 +117,7 @@ rust-webx = "0.2"
 ```
 
 ```rust
-use rust_webx::*;  // 一次导入全部公开 API
+use webx::*;  // 一次导入全部公开 API
 ```
 
 ## 外部依赖

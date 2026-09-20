@@ -1,6 +1,6 @@
 # Docbit — Rust-Framework 生态作品集
 
-Docbit 是 rust-webx 的参考应用：作品集 SPA + 博客 + 五项目完整文档浏览。
+Docbit 是 rust-webx 的参考应用：作品集 SPA + 博客 + 六项目完整文档浏览。
 
 ## 快速开始
 
@@ -17,7 +17,7 @@ cargo run -p docbit-host
 cargo run -p docbit-host -- --doctor
 ```
 
-## 五项目文档
+## 六项目文档
 
 启动后访问：
 
@@ -28,6 +28,9 @@ cargo run -p docbit-host -- --doctor
 | rust-webx | `/works/rust-webx` | `/works/rust-webx/docs` |
 | rust-agent-framework | `/works/rust-agent-framework` | `/works/rust-agent-framework/docs` |
 | rust-gpui-rml | `/works/rust-gpui-rml` | `/works/rust-gpui-rml/docs` |
+| rust-agent-flow | `/works/rust-agent-flow` | `/works/rust-agent-flow/docs` |
+
+> `rust-agent-flow` 的源码仓库是 `rust-flow`，文档 slug 与目录名为 `rust-agent-flow`。
 
 文档源文件各仓库 `docs/` 为 **source of truth**。
 
@@ -49,8 +52,8 @@ cargo run -p docbit-host -- --doctor
 docbit/
 ├── contracts/   # 路由 DTO + #[get]/#[authorize]
 ├── handlers/    # #[handler(inject)] + DocService
-├── domain/      # EF 实体 + seed（五项目 exhibition）
-├── host/        # build_host() + main
+├── domain/      # EF 实体 + seed（六项目 exhibition）
+├── host/        # Program.cs（main）+ startup/{extensions,hosted,seed} + build.rs
 └── wwwroot/     # SPA（pages/docs/ 文档阅读器）
 ```
 
@@ -81,7 +84,7 @@ cargo build --release -p docbit-host --target x86_64-unknown-linux-gnu
 
 ### 2. 打包部署目录
 
-发布脚本会从 monorepo 源仓库复制五项目文档到 bundle（需完整 checkout 或设置 `RUST_FRAMEWORK_ROOT`）：
+发布脚本会从 monorepo 源仓库复制六项目文档到 bundle（需完整 checkout 或设置 `RUST_FRAMEWORK_ROOT`）：
 
 ```bash
 chmod +x docbit/publish.sh
@@ -109,12 +112,43 @@ Windows 开发机发布：
 
 ## 默认账号
 
-- 邮箱：`admin@docbit.local`
-- 密码：`admin123`
+| 环境 | 行为 |
+|------|------|
+| 开发（`APP_ENV` 未设或 `Development`） | 自动创建 `admin@docbit.local` / `admin123`，启动日志给出警告 |
+| 生产（`APP_ENV=Production`） | **不创建任何账号**；必须设置 `DOCBIT_ADMIN_PASSWORD` 才会按该口令创建 |
+
+**部署前务必设置**：
+
+```bash
+DOCBIT_ADMIN_PASSWORD='一个足够长的口令'
+```
+
+生产环境不会回落到内置口令，也从不把运维提供的口令写进日志。账号只在缺失时创建一次，改环境变量不会覆盖已存在账号的密码。
+
+## 文档上传与数据自动同步
+
+后台「作品管理」每个作品都有 **上传文档** 按钮：选择该作品的文档 zip（压缩包根目录直接包含 `INDEX.json`），一次请求完成
+
+1. 解压到 `uploads/.tmp/` 下的暂存目录（防 zip-slip / 符号链接 / 解压炸弹）
+2. 原子替换 `docs/{slug}/`（失败自动回滚，站点不会半更新）
+3. 重新同步作品数据：INDEX.json → DB 作品行、logo → `wwwroot/assets/works/`
+
+因此**不需要重启**：文档正文按请求实时读盘，作品元数据与 logo 在上传返回前已同步。上传新作品（此前无 seed 模板）也会自动建行，分类按 `meta.category` 映射，未知则归「未分类」。
+
+首次部署需带 `[build-dependencies] rust-webx-build`（见 `host/build.rs`）。
+
+## 博客图片与附件
+
+博客编辑器（Vditor）的 `upload`/`insert` 已接到 `POST /api/media`：
+
+- 文件存到 `<app_base>/uploads/{images|files}/{shard}/{id}.{ext}`（可写、与 exe 同级）
+- 通过 `GET /api/media/...` 只读回送
+- 光栅图片（png/jpg/gif/webp/avif/bmp）内联返回；**SVG 等一律作为下载**，避免同源脚本执行
+- 上传接口需登录；`/api/media/...` 公开可读（内容里要能直接引用）
 
 ## 数据库与种子数据
 
-展览（五项目作品）数据在 **首次创建数据库** 时由 EF seed 写入。若你之前已运行过 docbit，升级后看不到新作品入口，请删除本地 SQLite 文件后重启：
+展览（六项目作品）数据在 **首次创建数据库** 时由 EF seed 写入，之后每次启动由一个可复用的 catalog 同步例程刷新（与上传走同一条代码路径）。若本地 `app.db` 结构过旧，`DbInitService` 会检测到缺列并重建（**会清空数据**，仅本地开发如此）。
 
 ```bash
 # 默认位于运行目录下的 app.db（及 -shm / -wal 伴随文件）

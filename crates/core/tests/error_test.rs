@@ -1,4 +1,4 @@
-use rust_webx_core::error::{Error, Result};
+use webx_core::error::{Error, Result};
 
 #[test]
 fn error_status_code_http_maps_to_400() {

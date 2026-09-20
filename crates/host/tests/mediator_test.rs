@@ -9,8 +9,8 @@
 //!
 //! Handlers are registered manually via `inventory::submit!` with
 //! `HandlerRegistration` (same mechanism as `#[handler]` macro) using
-//! `rust_webx_core::` paths directly, since `rust-webx-host` cannot
-//! depend on the `rust_webx` umbrella crate (circular dependency).
+//! `webx_core::` paths directly, since `rust-webx-host` cannot
+//! depend on the `webx` umbrella crate (circular dependency).
 
 // Manual handler-bridge functions mimic `#[handler]` macro output, whose
 // `Pin<Box<dyn Future<Output = Result<Box<dyn Any + Send>>> + Send>>` return
@@ -18,12 +18,12 @@
 #![allow(clippy::type_complexity)]
 
 use rust_dix::ServiceCollection;
-use rust_webx_core::error::{Error, Result as LrwfResult};
-use rust_webx_core::handler::{IEventHandler, IRequestHandler};
-use rust_webx_core::mediator::Mediator;
-use rust_webx_core::mediator::{IEventRequest, IMediator, IRequest};
-use rust_webx_core::route::scan::HandlerRegistration;
 use std::sync::{Arc, Mutex};
+use webx_core::error::{Error, Result as LrwfResult};
+use webx_core::handler::{IEventHandler, IRequestHandler};
+use webx_core::mediator::Mediator;
+use webx_core::mediator::{IEventRequest, IMediator, IRequest};
+use webx_core::route::scan::HandlerRegistration;
 
 // --- Request / Response Types ---
 
@@ -39,7 +39,7 @@ impl IRequest<HelloResponse> for HelloRequest {}
 // --- Handlers ---
 //
 // Manually registered via `inventory::submit!` — equivalent to what the
-// `#[handler]` macro generates, but using `rust_webx_core::` paths.
+// `#[handler]` macro generates, but using `webx_core::` paths.
 
 #[derive(Default)]
 struct HelloHandler;
@@ -427,7 +427,7 @@ async fn mediator_send_uses_per_call_scope_for_scoped_services() {
 // Behaviors wrap the handler in a MediatR-style chain: each behavior can
 // inspect/modify the request, short-circuit, or pass through to the next.
 
-use rust_webx_core::pipeline::{BoxedNextFn, IPipelineBehavior};
+use webx_core::pipeline::{BoxedNextFn, IPipelineBehavior};
 
 struct BehaviorProbeRequest;
 

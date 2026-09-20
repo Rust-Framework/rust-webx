@@ -630,6 +630,50 @@ PAGES.blog={render:async function(c){
 // ============================================================
 //  PAGE: Exhibitions
 // ============================================================
+
+/** Upload a documentation bundle (zip) for one work and re-sync the catalog. */
+function showDocsUpload(slug, onDone){
+    layui.layer.open({type:1,title:'上传文档 — '+esc(slug),area:['580px','340px'],content:
+        '<div style="padding:22px 28px">'+
+          '<p style="color:var(--text-muted);font-size:13px;line-height:1.7;margin-bottom:14px">'+
+            '选择一个 zip：压缩包根目录需直接包含 <code>INDEX.json</code> 与 Markdown 目录'+
+            '（压缩「文档目录本身」，而不是它的上级）。上传后会原子替换该作品的文档，'+
+            '并立即重新同步作品数据与 logo，无需重启服务。'+
+          '</p>'+
+          '<input type="file" id="docs-zip" accept=".zip,application/zip" class="layui-input" style="padding:6px">'+
+          '<div id="docs-prog" style="margin-top:12px;font-size:13px;color:var(--text-muted)"></div>'+
+          '<div style="margin-top:16px"><button class="layui-btn" id="docs-go" type="button">上传并同步</button></div>'+
+        '</div>',
+        success:function(){
+            document.getElementById('docs-go').onclick=function(){
+                var input=document.getElementById('docs-zip');
+                if(!input.files||!input.files[0]){ toast('请选择 zip 文件', 5); return; }
+                var btn=document.getElementById('docs-go');
+                var prog=document.getElementById('docs-prog');
+                btn.disabled=true; btn.classList.add('layui-btn-disabled');
+                prog.textContent='上传中… 0%';
+                Docbit.Api.upload(
+                    '/api/works/'+encodeURIComponent(slug)+'/docs',
+                    input.files[0],
+                    true,
+                    function(p){ prog.textContent='上传中… '+p+'%'; }
+                ).then(function(res){
+                    var cat=(res&&res.catalog)||{};
+                    prog.textContent='完成：'+res.files+' 个文件 / '+(res.bytes/1048576).toFixed(2)+
+                        ' MiB；作品同步 updated='+cat.updated+' inserted='+cat.inserted;
+                    toast('文档已更新，作品数据已同步');
+                    if(onDone) onDone();
+                    setTimeout(function(){ layui.layer.closeAll(); }, 1500);
+                }).catch(function(e){
+                    prog.textContent='';
+                    btn.disabled=false; btn.classList.remove('layui-btn-disabled');
+                    toast('失败：'+e.message, 3);
+                });
+            };
+        }
+    });
+}
+
 PAGES.exhibitions={render:async function(c){
     var gen=++__GEN;
     c.innerHTML='<div class="admin-loading">加载中...</div>';
@@ -682,12 +726,17 @@ PAGES.exhibitions={render:async function(c){
             items.map(function(it){
                 var tags=(it.tags||[]).map(function(t){return '<span class="badge badge-blue">'+esc(t)+'</span>'}).join(' ');
                 return '<tr><td>'+it.id+'</td><td><a href="/works/'+esc(it.slug)+'" target="_blank">'+esc(it.title)+'</a></td><td>'+esc(it.category_name||'-')+'</td><td>'+(tags||'-')+'</td><td>'+(it.featured?'<span class="badge badge-green">是</span>':'<span class="badge badge-orange">否</span>')+'</td><td>'+it.sort_order+'</td><td>'+dateStr(it.updated_at)+'</td><td>'+
+                    '<button class="layui-btn layui-btn-xs layui-btn-normal" data-docs="'+esc(it.slug)+'">上传文档</button>'+
                     '<button class="layui-btn layui-btn-xs" data-edit="'+esc(it.slug)+'">编辑</button>'+
                     '<button class="layui-btn layui-btn-xs layui-btn-danger" data-del="'+esc(it.slug)+'">删除</button></td></tr>';
             }).join('')
         );
 
     document.getElementById('e-add').onclick=__guard(gen, function(){ showForm('添加作品', {}); });
+    c.querySelectorAll('button[data-docs]').forEach(function(btn){
+        var slug=btn.dataset.docs;
+        btn.onclick=__guard(gen, function(){ showDocsUpload(slug, function(){ PAGES.exhibitions.render(c); }); });
+    });
     c.querySelectorAll('button[data-edit]').forEach(function(btn){
         var slug=btn.dataset.edit;
         btn.onclick=__guard(gen, function(){

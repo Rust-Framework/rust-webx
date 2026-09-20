@@ -11,6 +11,10 @@ readme = "../../README.md"
 keywords = ["web", "spa", "static-files", "middleware"]
 categories = ["web-programming"]
 
+# Library name used by dependents (`use webx_spa::...`); package stays `rust-webx-spa`.
+[lib]
+name = "webx_spa"
+
 [dependencies]
 rust-webx-core.workspace = true
 async-trait.workspace = true

@@ -18,6 +18,7 @@ jsonwebtoken.workspace = true
 bcrypt = "0.16"
 tracing.workspace = true
 inventory.workspace = true
+zip.workspace = true
 
 [dev-dependencies]
 rust-ef-sqlite.workspace = true

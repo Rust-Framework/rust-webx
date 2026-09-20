@@ -7,26 +7,32 @@
 //! while an operator can still drop one or two files into `wwwroot/` next to it
 //! to override what is baked in.
 //!
-//! Build a table with `rust_webx_build::embed_assets` in `build.rs`:
+//! Build a table with `webx::builder()` in `build.rs`, then opt in at the
+//! entry point with `#[webx::main(embed)]`:
 //!
 //! ```ignore
-//! // build.rs
-//! fn main() -> Result<(), rust_webx_build::Error> {
-//!     rust_webx_build::embed_assets("wwwroot")
+//! // build.rs — compile-time source tree (baked into the binary)
+//! fn main() -> Result<(), webx::Error> {
+//!     webx::builder()
+//!         .web_root("wwwroot")
+//!         .build()
 //! }
 //!
-//! // src/main.rs
-//! rust_webx::spa::embed_assets!();
-//!
-//! Host::builder()
-//!     .use_spa("wwwroot")
-//!     .embed()
-//!     .build()
+//! // main.rs — (embed) links the table; use_spa is the runtime disk overlay
+//! #[webx::main(embed)]
+//! async fn main() {
+//!     Host::builder()
+//!         .use_spa("wwwroot")
+//!         .build()
+//!         .run()
+//!         .await
+//!         .unwrap();
+//! }
 //! ```
 //!
-//! The build script names the directory the assets come from; `use_spa` names
-//! the disk directory operators override through. The two can differ — build
-//! from `frontend/dist` while overrides arrive in `wwwroot`.
+//! Without `(embed)` (and without `build.rs` web root), SPA is disk-only.
+//! `web_root` and `use_spa` can differ — build from `frontend/dist`, overrides
+//! in deploy-time `wwwroot`.
 //!
 //! # Requirements on a hand-written table
 //!
@@ -160,9 +166,9 @@ fn collect_shadowed(
     }
 }
 
-// Lets `rust_webx_build::embed_assets` register the table it generates, so
-// `Host::builder().embed()` can pick it up without the application naming a
-// value. Absence is fine: apps without embedded assets simply have no entry.
+// Lets `webx::builder()` register the table it generates, so
+// `Host::build` can pick it up without the application naming a value.
+// Absence is fine: apps without embedded assets simply have no entry.
 inventory::collect!(EmbeddedAssets);
 
 #[cfg(test)]

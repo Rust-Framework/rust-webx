@@ -1,6 +1,6 @@
-﻿//! Role-based authorizer.
+//! Role-based authorizer.
 
-use rust_webx::*;
+use webx::*;
 
 #[derive(Inject)]
 pub struct RoleAuthorizer;

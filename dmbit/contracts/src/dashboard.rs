@@ -2,8 +2,8 @@
 //!
 //! Aggregates are derived only from persisted product / goods / component rows.
 
-use rust_webx::*;
 use serde::{Deserialize, Serialize};
+use webx::*;
 
 use crate::product::ProductModel;
 

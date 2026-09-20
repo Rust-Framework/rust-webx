@@ -3,11 +3,11 @@
 //! Uses `matchit::Router` (the same library as Axum) for efficient
 //! radix-tree based route matching with zero heap allocations per request.
 
-use rust_webx_core::error::Result;
-use rust_webx_core::http::IHttpContext;
-use rust_webx_core::routing::{HttpMethod, IEndpoint, IRouter};
 use std::collections::HashMap;
 use std::sync::Arc;
+use webx_core::error::Result;
+use webx_core::http::IHttpContext;
+use webx_core::routing::{HttpMethod, IEndpoint, IRouter};
 
 type RouteValue = (Arc<dyn IEndpoint>, String);
 

@@ -9,16 +9,16 @@
 //! ```
 
 use crate::problem_response::write_problem;
-use rust_webx_core::config::RateLimitSection;
-use rust_webx_core::error::Result;
-use rust_webx_core::http::IHttpContext;
-use rust_webx_core::middleware::IMiddleware;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::time::Instant;
 use tokio::sync::Mutex;
+use webx_core::config::RateLimitSection;
+use webx_core::error::Result;
+use webx_core::http::IHttpContext;
+use webx_core::middleware::IMiddleware;
 
 struct TokenBucket {
     tokens: f64,

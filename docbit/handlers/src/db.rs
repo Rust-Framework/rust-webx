@@ -2,7 +2,7 @@
 
 use rust_ef::db_context::DbContext;
 use rust_ef::error::EFError;
-use rust_webx::{Error, Result};
+use webx::{Error, Result};
 
 /// Convert an `EFError` into a framework `Error`.
 pub fn map_ef_error(err: EFError) -> Error {

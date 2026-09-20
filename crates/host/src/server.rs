@@ -9,14 +9,14 @@ use hyper::service::service_fn;
 use hyper::Request;
 use hyper_util::rt::TokioIo;
 use rust_dix::{ServiceCollection, ServiceProvider};
-use rust_webx_core::app::IHost;
-use rust_webx_core::config::{self, AppOptions};
-use rust_webx_core::error::Result;
-use rust_webx_core::handler::IHostedService;
-use rust_webx_core::http::IHttpContext;
-use rust_webx_core::middleware::IMiddleware;
-use rust_webx_core::mode::AppMode;
-use rust_webx_core::routing::{HttpMethod, IEndpoint, IRouter};
+use webx_core::app::IHost;
+use webx_core::config::{self, AppOptions};
+use webx_core::error::Result;
+use webx_core::handler::IHostedService;
+use webx_core::http::IHttpContext;
+use webx_core::middleware::IMiddleware;
+use webx_core::mode::AppMode;
+use webx_core::routing::{HttpMethod, IEndpoint, IRouter};
 
 use crate::auth_jwt::{init_jwt_secret, jwt_middleware, JwtAuth};
 use crate::authz::{build_resource_policy_from_routes, collect_authorizers};
@@ -31,10 +31,10 @@ use crate::problem_response::{build_problem, write_problem_response};
 use crate::rate_limit::RateLimitMiddleware;
 use crate::router::Router;
 use jsonwebtoken::{DecodingKey, Validation};
-use rust_webx_core::route::scan::RouteEntry;
-use rust_webx_core::DispatchRuntime;
-use rust_webx_openapi::{generate_openapi_spec, APIUI_HTML};
-use rust_webx_spa::{EmbeddedAssets, SpaMiddleware, SpaSource, EMBED_ENV};
+use webx_core::route::scan::RouteEntry;
+use webx_core::DispatchRuntime;
+use webx_openapi::{generate_openapi_spec, APIUI_HTML};
+use webx_spa::{EmbeddedAssets, SpaMiddleware, SpaSource};
 
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig;
@@ -79,6 +79,49 @@ fn log_spa_source(spa: &SpaMiddleware) {
             shadowed.join(", "),
         );
     }
+}
+
+/// The single compiled-in asset table registered by `#[webx::main(embed)]`
+/// (or `embed_assets!()`), if any.
+///
+/// # Panics
+///
+/// When more than one table is registered — that is always a wiring mistake
+/// (e.g. both `#[webx::main(embed)]` and a second `#[webx::embed_assets]`
+/// in the same binary).
+fn registered_embedded_assets() -> Option<EmbeddedAssets> {
+    let mut found = inventory::iter::<EmbeddedAssets>();
+    match (found.next(), found.next()) {
+        (Some(assets), None) => Some(*assets),
+        (None, _) => None,
+        (Some(_), Some(_)) => panic!(
+            "more than one compiled-in asset table is registered; \
+             use `#[webx::main(embed)]` (or `#[webx::embed_assets]`) \
+             exactly once per binary"
+        ),
+    }
+}
+
+/// Layer a compiled-in table under `source` when one was registered.
+///
+/// Opt-in is `#[webx::main(embed)]` (plus `build.rs` `web_root`).
+/// `use_spa` names the disk overlay; without it, the table's build-time root
+/// is used as the overlay path.
+fn with_embedded_assets(
+    source: Option<SpaSource>,
+    assets: Option<EmbeddedAssets>,
+) -> Option<SpaSource> {
+    let Some(assets) = assets else {
+        return source;
+    };
+    let overlay_root = match source.as_ref() {
+        Some(existing) => existing.disk_root().to_string(),
+        None => assets.root().to_string(),
+    };
+    Some(SpaSource::Embedded {
+        assets,
+        overlay_root,
+    })
 }
 
 pub struct Host {
@@ -214,9 +257,14 @@ impl HostBuilder {
     /// Host::builder().use_spa("wwwroot").build()
     /// ```
     ///
-    /// Chain [`embed`](Self::embed) to serve files compiled into the executable
-    /// underneath this directory. The call order does not matter: once `.embed()`
-    /// is present, this directory is where an operator may drop overrides.
+    /// **Runtime disk root** — the directory next to the process (or under
+    /// `app_base`) where operators may drop overrides. This is not
+    /// `build.rs` `web_root` (that path only names what was baked in).
+    ///
+    /// When the binary was built with `#[webx::main(embed)]` (and
+    /// `build.rs` wrote a table), that table is layered underneath this
+    /// directory at [`build`](Self::build): same-named disk files win.
+    /// Without `(embed)`, only the disk directory is served.
     pub fn use_spa(mut self, source: impl Into<SpaSource>) -> Self {
         self.spa_source = Some(match (self.spa_source.take(), source.into()) {
             // Compiled-in files are already configured: only move the directory
@@ -228,57 +276,6 @@ impl HostBuilder {
                 }
             }
             (_, incoming) => incoming,
-        });
-        self
-    }
-
-    /// Serve files compiled into the executable as the SPA baseline.
-    ///
-    /// ```ignore
-    /// // build.rs
-    /// fn main() -> Result<(), rust_webx_build::Error> {
-    ///     rust_webx_build::embed_assets("wwwroot")
-    /// }
-    ///
-    /// // main.rs
-    /// rust_webx::spa::embed_assets!();
-    ///
-    /// Host::builder().use_spa("wwwroot").embed().build()
-    /// ```
-    ///
-    /// The table comes from the build script, so no directory is named here. A
-    /// file of the same name under the `use_spa` directory wins; the embedded
-    /// copy is served otherwise. Without a preceding `use_spa`, the directory
-    /// the assets were built from is also the override directory.
-    ///
-    /// # Panics
-    ///
-    /// When the crate has not registered exactly one table — i.e. `build.rs` did
-    /// not call [`rust_webx_build::embed_assets`], or more than one crate in
-    /// the binary called `embed_assets!()`. Failing here is deliberate: a silent
-    /// no-op would serve 404s from a deployment that looks correctly built.
-    pub fn embed(mut self) -> Self {
-        let mut found = inventory::iter::<EmbeddedAssets>();
-        let assets = match (found.next(), found.next()) {
-            (Some(assets), None) => *assets,
-            (None, _) => panic!(
-                "embed() found no compiled-in assets. Have build.rs call \
-                 `rust_webx_build::embed_assets(\"wwwroot\")` and invoke \
-                 `rust_webx::spa::embed_assets!();` once in your crate. \
-                 Set {EMBED_ENV}=off to ignore compiled-in files at runtime instead."
-            ),
-            (Some(_), Some(_)) => panic!(
-                "embed() found more than one compiled-in asset table; \
-                 `rust_webx::spa::embed_assets!()` must be invoked exactly once per binary"
-            ),
-        };
-        let overlay_root = match self.spa_source.as_ref() {
-            Some(source) => source.disk_root().to_string(),
-            None => assets.root().to_string(),
-        };
-        self.spa_source = Some(SpaSource::Embedded {
-            assets,
-            overlay_root,
         });
         self
     }
@@ -444,7 +441,7 @@ impl HostBuilder {
         });
 
         // Per-host dispatch runtime (provider + handler registry).
-        let handler_cache = Arc::new(rust_webx_core::route::scan::HandlerCache::build());
+        let handler_cache = Arc::new(webx_core::route::scan::HandlerCache::build());
         let dispatch_runtime = Arc::new(DispatchRuntime::new(Arc::clone(&provider), handler_cache));
 
         let appsettings =
@@ -531,23 +528,25 @@ impl HostBuilder {
         // 否则框架自动检测应用基准目录下的 `wwwroot/`，存在即启用 SPA。
         // 这样新应用无需在 main.rs 手写 `use_spa("wwwroot")` 样板。
         // `no_spa()` 可显式禁用此行为（含自动检测），用于纯 API 主机或测试隔离。
+        // A registered `embed_assets!()` table is layered underneath automatically.
         // SPA runs after JWT so auth middleware sees API requests first; SpaMiddleware
         // skips /api/* paths so unmatched API routes return 404 from the router.
         let spa_source = if self.spa_disabled {
             None
         } else {
-            self.spa_source.clone().or_else(|| {
-                let candidate = rust_webx_core::paths::app_base().join("wwwroot");
+            let base = self.spa_source.clone().or_else(|| {
+                let candidate = webx_core::paths::app_base().join("wwwroot");
                 if candidate.is_dir() {
                     tracing::info!("[Host] Auto-detected SPA root: {}", candidate.display());
                     Some(SpaSource::Disk(candidate.to_string_lossy().into_owned()))
                 } else {
                     None
                 }
-            })
+            });
+            with_embedded_assets(base, registered_embedded_assets())
         };
-        if let Some(source) = spa_source {
-            let spa = SpaMiddleware::from_source(source);
+        if let Some(ref source) = spa_source {
+            let spa = SpaMiddleware::from_source(source.clone());
             log_spa_source(&spa);
             pipeline.add_middleware(Arc::new(spa));
         }
@@ -583,10 +582,10 @@ impl HostBuilder {
         // Build dispatch map: handler_type → dispatch function
         let mut dispatch_map: std::collections::HashMap<
             &'static str,
-            rust_webx_core::route::scan::RouteDispatchFn,
+            webx_core::route::scan::RouteDispatchFn,
         > = std::collections::HashMap::new();
 
-        for dispatch in inventory::iter::<rust_webx_core::route::scan::RouteDispatch> {
+        for dispatch in inventory::iter::<webx_core::route::scan::RouteDispatch> {
             dispatch_map.insert(dispatch.handler_type, dispatch.dispatch);
         }
 
@@ -670,7 +669,7 @@ impl HostBuilder {
             tracing::info!("  ----------------------------------------------------------------");
             tracing::info!("    App:      {}", options.app.name);
             tracing::info!("    CORS:     enabled");
-            if let Some(source) = self.spa_source.as_ref() {
+            if let Some(source) = spa_source.as_ref() {
                 tracing::info!("    SPA Root: {}", source.disk_root());
                 if let Some(assets) = source.embedded() {
                     tracing::info!(
@@ -722,7 +721,7 @@ impl HostBuilder {
             router,
             router_handler,
             mode: self.mode,
-            spa_source: self.spa_source.clone(),
+            spa_source,
             shutdown: Arc::new(tokio::sync::Notify::new()),
             hosted_services,
         }
@@ -830,7 +829,7 @@ impl Host {
                 "http" => http_addrs.push(addr),
                 "https" => https_addrs.push(addr),
                 other => {
-                    return Err(rust_webx_core::error::Error::Http(format!(
+                    return Err(webx_core::error::Error::Http(format!(
                         "Unsupported URL scheme '{}' in '{}'",
                         other, url
                     )))
@@ -841,7 +840,7 @@ impl Host {
         let acceptor = if !https_addrs.is_empty() {
             let tls = &self.options.tls;
             if tls.cert_path.is_empty() || tls.key_path.is_empty() {
-                return Err(rust_webx_core::error::Error::Http(
+                return Err(webx_core::error::Error::Http(
                     "HTTPS URLs require Tls.CertPath and Tls.KeyPath".into(),
                 ));
             }
@@ -1115,7 +1114,7 @@ async fn start_hosted_services(
             for svc in services {
                 svc.start().await?;
             }
-            Ok::<(), rust_webx_core::error::Error>(())
+            Ok::<(), webx_core::error::Error>(())
         })
         .await?;
     tracing::info!("All hosted services started.");
@@ -1167,7 +1166,7 @@ fn parse_url(url: &str) -> Result<(&str, String)> {
     } else if let Some(rest) = url.strip_prefix("http://") {
         Ok(("http", rest.to_string()))
     } else {
-        Err(rust_webx_core::error::Error::Http(format!(
+        Err(webx_core::error::Error::Http(format!(
             "Invalid URL '{}'. Use http://host:port or https://host:port",
             url
         )))
@@ -1397,25 +1396,25 @@ fn build_tls_acceptor(cert_path: &str, key_path: &str) -> Result<TlsAcceptor> {
     use std::io::BufReader;
 
     if cert_path.is_empty() || key_path.is_empty() {
-        return Err(rust_webx_core::error::Error::Http(
+        return Err(webx_core::error::Error::Http(
             "TLS certificate or key path not configured.".into(),
         ));
     }
 
     let cert_file = File::open(cert_path).map_err(|e| {
-        rust_webx_core::error::Error::Http(format!("Cannot open cert '{}': {}", cert_path, e))
+        webx_core::error::Error::Http(format!("Cannot open cert '{}': {}", cert_path, e))
     })?;
     let mut cert_reader = BufReader::new(cert_file);
     let certs: Vec<CertificateDer> = certs(&mut cert_reader).filter_map(|r| r.ok()).collect();
     if certs.is_empty() {
-        return Err(rust_webx_core::error::Error::Http(format!(
+        return Err(webx_core::error::Error::Http(format!(
             "No valid certs in '{}'",
             cert_path
         )));
     }
 
     let key_file = File::open(key_path).map_err(|e| {
-        rust_webx_core::error::Error::Http(format!("Cannot open key '{}': {}", key_path, e))
+        webx_core::error::Error::Http(format!("Cannot open key '{}': {}", key_path, e))
     })?;
     let mut key_reader = BufReader::new(key_file);
     let key = pkcs8_private_keys(&mut key_reader)
@@ -1432,13 +1431,66 @@ fn build_tls_acceptor(cert_path: &str, key_path: &str) -> Result<TlsAcceptor> {
             rsa_keys.into_iter().next()
         })
         .ok_or_else(|| {
-            rust_webx_core::error::Error::Http(format!("No valid private key in '{}'", key_path))
+            webx_core::error::Error::Http(format!("No valid private key in '{}'", key_path))
         })?;
 
     let config = ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(certs, key)
-        .map_err(|e| rust_webx_core::error::Error::Http(format!("TLS config error: {}", e)))?;
+        .map_err(|e| webx_core::error::Error::Http(format!("TLS config error: {}", e)))?;
 
     Ok(TlsAcceptor::from(std::sync::Arc::new(config)))
+}
+
+#[cfg(test)]
+mod embedded_attach_tests {
+    use super::{registered_embedded_assets, with_embedded_assets};
+    use webx_spa::{EmbeddedAsset, EmbeddedAssets, SpaSource};
+
+    const FILES: &[EmbeddedAsset] = &[EmbeddedAsset {
+        path: "index.html",
+        bytes: b"hi",
+        content_type: "text/html",
+        etag: "\"x\"",
+    }];
+
+    #[test]
+    fn no_table_leaves_disk_source() {
+        let source = Some(SpaSource::Disk("wwwroot".into()));
+        let merged = with_embedded_assets(source, None);
+        assert!(matches!(merged, Some(SpaSource::Disk(ref r)) if r == "wwwroot"));
+    }
+
+    #[test]
+    fn table_layers_under_use_spa_overlay() {
+        let assets = EmbeddedAssets::new("../wwwroot", FILES);
+        let merged = with_embedded_assets(Some(SpaSource::Disk("wwwroot".into())), Some(assets));
+        match merged {
+            Some(SpaSource::Embedded {
+                overlay_root,
+                assets,
+            }) => {
+                assert_eq!(overlay_root, "wwwroot");
+                assert_eq!(assets.root(), "../wwwroot");
+            }
+            other => panic!("expected embedded, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn table_alone_uses_build_root_as_overlay() {
+        let assets = EmbeddedAssets::new("../wwwroot", FILES);
+        let merged = with_embedded_assets(None, Some(assets));
+        match merged {
+            Some(SpaSource::Embedded { overlay_root, .. }) => {
+                assert_eq!(overlay_root, "../wwwroot");
+            }
+            other => panic!("expected embedded, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn host_crate_registers_no_asset_table() {
+        assert!(registered_embedded_assets().is_none());
+    }
 }

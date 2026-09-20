@@ -1,8 +1,8 @@
 //! RFC 7807 Problem Details helpers for consistent HTTP error responses.
 
-use rust_webx_core::http::IHttpContext;
-use rust_webx_core::problem::ProblemDetails;
 use std::collections::HashMap;
+use webx_core::http::IHttpContext;
+use webx_core::problem::ProblemDetails;
 
 /// Standard HTTP status phrase for Problem Details `title`.
 pub fn problem_status_title(status: u16) -> &'static str {

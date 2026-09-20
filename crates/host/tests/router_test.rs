@@ -1,10 +1,10 @@
 mod test_utils;
 
-use rust_webx_core::error::Result as LrwfResult;
-use rust_webx_core::http::IHttpContext;
-use rust_webx_core::routing::{HttpMethod, IEndpoint, IRouter};
-use rust_webx_host::router::Router;
 use std::sync::Arc;
+use webx_core::error::Result as LrwfResult;
+use webx_core::http::IHttpContext;
+use webx_core::routing::{HttpMethod, IEndpoint, IRouter};
+use webx_host::router::Router;
 
 struct TestEndpoint {
     #[allow(dead_code)]

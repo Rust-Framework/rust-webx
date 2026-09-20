@@ -29,7 +29,7 @@
 
 Monorepo 开发时 `DocService` 会实时解析 sibling 仓库文档，**无需**将 sibling 文档复制到 `rust-webx/docs/`。
 
-**发布时**，`docbit/publish.sh` 直接从源仓库复制五项目文档到 bundle 的 `docs/`：
+**发布时**，`docbit/publish.sh` 直接从源仓库复制六项目文档到 bundle 的 `docs/`：
 
 | 源 | bundle 目标 |
 |----|-------------|
@@ -37,7 +37,10 @@ Monorepo 开发时 `DocService` 会实时解析 sibling 仓库文档，**无需*
 | `{framework}/rust-ef/docs/rust-ef` | `docs/rust-ef` |
 | `{framework}/rust-agent-framework/docs` | `docs/rust-agent-framework` |
 | `{framework}/rust-gpui-rml/docs` | `docs/rust-gpui-rml` |
+| `{framework}/rust-flow/docs/rust-agent-flow` | `docs/rust-agent-flow` |
 | `{workspace}/docs/rust-webx` | `docs/rust-webx` |
+
+目标目录名是**文档 slug**，不一定等于仓库目录名：`rust-flow` 仓库发布为 `rust-agent-flow`（与 `INDEX.json`、`DocService` 的 `sibling_doc_relative` 一致）。
 
 `{framework}` 由 `RUST_FRAMEWORK_ROOT` 或 rust-webx 父目录解析（与 `framework_root()` 一致）。
 
@@ -70,7 +73,7 @@ chmod +x docbit/publish.sh
 ├── appsettings.json
 ├── appsettings.Production.json
 ├── wwwroot/                 # SPA 静态资源
-├── docs/                    # 五项目文档（publish 时从源仓库复制）
+├── docs/                    # 六项目文档（publish 时从源仓库复制）
 └── run.sh                   # 生产启动脚本（--production 时生成）
 ```
 

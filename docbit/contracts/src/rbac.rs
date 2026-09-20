@@ -1,7 +1,7 @@
 //! RBAC contracts — roles, resources (通用资源模型), and authorizations.
 
-use rust_webx::*;
 use serde::{Deserialize, Serialize};
+use webx::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoleModel {

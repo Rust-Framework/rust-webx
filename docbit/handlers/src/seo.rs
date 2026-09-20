@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use rust_ef::{db_context::DbContext, prelude::*};
-use rust_webx::*;
+use webx::*;
 
 use docbit_contracts::docs::{DocIndexItem, IDocumentService};
 use docbit_contracts::exhibition::ExhibitionModel;

@@ -6,7 +6,7 @@ use dmbit_contracts::goods::ComponentModel;
 use dmbit_domain::entities::{Device, Product, Spec, SpecComponent};
 use dmbit_domain::new_id;
 use rust_ef::{db_context::DbContext, prelude::*};
-use rust_webx::*;
+use webx::*;
 
 use crate::db::EfResultExt;
 use crate::util::{now_secs, operator_id};

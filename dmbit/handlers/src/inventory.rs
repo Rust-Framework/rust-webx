@@ -12,7 +12,7 @@
 use std::collections::{BTreeSet, HashMap};
 
 use rust_ef::{db_context::DbContext, prelude::*};
-use rust_webx::*;
+use webx::*;
 
 use dmbit_contracts::goods::ComponentModel;
 use dmbit_contracts::inventory::*;

@@ -1,14 +1,19 @@
-//! Database initialization hosted service.
+//! Schema ensure + first-boot seed — runs once when the host starts.
+//!
+//! Catalog synchronisation is delegated to `docbit_handlers::catalog`, the same
+//! routine the documentation upload endpoint runs, so a boot and an upload can
+//! never drift apart.
 
 use std::sync::Arc;
 
 use rust_ef::db_context::DbContext;
-use rust_webx::*;
+use webx::*;
 
 use docbit_contracts::docs::IDocumentService;
 use docbit_domain::configure_for_init;
+use docbit_handlers::catalog;
 
-use super::{admin_user, exhibition_seed};
+use crate::startup::seed::admin_user;
 
 async fn ensure_schema(ctx: &mut DbContext) -> Result<()> {
     match ctx.ensure_created().await {
@@ -58,17 +63,10 @@ impl IHostedService for DbInitService {
 
         admin_user::ensure_admin_user(&mut ctx).await?;
 
-        self.docs
-            .ensure_all_indexes()
-            .map_err(|e| Error::Internal(format!("Doc index generation failed: {}", e)))?;
-
-        // EF has_data is INSERT OR IGNORE only — sync INDEX.json metadata into DB on every boot.
-        exhibition_seed::ensure_exhibition_repo_urls(&mut ctx, self.docs.as_ref()).await?;
-
-        let wwwroot = rust_webx::app_base().join("wwwroot");
-        self.docs
-            .sync_portfolio_assets(&wwwroot)
-            .map_err(|e| Error::Internal(format!("Portfolio asset sync failed: {}", e)))?;
+        // Indexes → exhibition rows → logo copies. Same path the upload endpoint
+        // takes, so a manual bundle upload and a restart converge.
+        let wwwroot = webx::app_base().join("wwwroot");
+        catalog::resync_catalog(&mut ctx, self.docs.as_ref(), &wwwroot).await?;
 
         tracing::info!("[DbInit] Initialization complete.");
         Ok(())

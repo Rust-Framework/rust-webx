@@ -1,4 +1,9 @@
-// rust-webx-host — HTTP server, middleware pipeline, and routing.
+//! HTTP server, middleware pipeline, and routing (package `rust-webx-host`,
+//! imported as `webx_host`).
+//!
+//! Implements the [`webx_core`] contracts on hyper + tokio: the `Host` builder,
+//! the middleware pipeline, the Trie router, JWT auth/authorization, and the
+//! production middleware (compression, timing, tracing, rate limiting).
 
 pub mod auth_jwt;
 pub mod authz;

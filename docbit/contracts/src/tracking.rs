@@ -1,7 +1,7 @@
 //! Tracking contracts — site visit statistics.
 
-use rust_webx::*;
 use serde::{Deserialize, Serialize};
+use webx::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrackingModel {

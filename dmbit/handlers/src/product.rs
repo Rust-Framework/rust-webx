@@ -1,7 +1,7 @@
 //! Product handlers — device type (master) CRUD.
 
 use rust_ef::{db_context::DbContext, prelude::*};
-use rust_webx::*;
+use webx::*;
 
 use dmbit_contracts::goods::GoodsModel;
 use dmbit_contracts::product::*;

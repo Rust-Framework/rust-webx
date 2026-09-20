@@ -11,6 +11,10 @@ readme = "../../README.md"
 keywords = ["web", "http", "async", "framework", "aspnet-core"]
 categories = ["web-programming", "asynchronous"]
 
+# Library name used by dependents (`use webx_core::...`); package stays `rust-webx-core`.
+[lib]
+name = "webx_core"
+
 [dependencies]
 async-trait.workspace = true
 serde.workspace = true

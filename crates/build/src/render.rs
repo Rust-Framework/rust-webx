@@ -22,18 +22,18 @@ pub(crate) fn table(declared: &Path, assets: &[Asset]) -> String {
         comment_text(declared),
     );
     out.push_str(
-        "// Included by `rust_webx::spa::embed_assets!()`; the build script re-runs\n\
+        "// Included by `webx::spa::embed_assets!()`; the build script re-runs\n\
          // when any file below that directory changes.\n\n",
     );
 
     let _ = writeln!(
         out,
-        "const _RUST_WEBX_EMBEDDED_FILES: &[::rust_webx::spa::EmbeddedAsset] = &["
+        "const _WEBX_EMBEDDED_FILES: &[::webx::spa::EmbeddedAsset] = &["
     );
     for asset in assets {
         let _ = writeln!(
             out,
-            "    ::rust_webx::spa::EmbeddedAsset {{ path: {}, bytes: ::core::include_bytes!({}), \
+            "    ::webx::spa::EmbeddedAsset {{ path: {}, bytes: ::core::include_bytes!({}), \
              content_type: {}, etag: {} }},",
             literal(&asset.key),
             literal(&slashed(&asset.path)),
@@ -45,8 +45,8 @@ pub(crate) fn table(declared: &Path, assets: &[Asset]) -> String {
 
     let _ = writeln!(
         out,
-        "::rust_webx::spa::inventory::submit! {{\n    \
-         ::rust_webx::spa::EmbeddedAssets::new({}, _RUST_WEBX_EMBEDDED_FILES)\n}}",
+        "::webx::spa::inventory::submit! {{\n    \
+         ::webx::spa::EmbeddedAssets::new({}, _WEBX_EMBEDDED_FILES)\n}}",
         literal(&declared.to_string_lossy()),
     );
     out
@@ -125,7 +125,7 @@ mod tests {
         let out = table(Path::new("../wwwroot"), &[asset("app.css", "text/css")]);
         assert!(out.contains("from `../wwwroot`"), "got {out}");
         assert!(
-            out.contains(r#"EmbeddedAssets::new("../wwwroot", _RUST_WEBX_EMBEDDED_FILES)"#),
+            out.contains(r#"EmbeddedAssets::new("../wwwroot", _WEBX_EMBEDDED_FILES)"#),
             "got {out}"
         );
     }
@@ -134,9 +134,7 @@ mod tests {
     fn an_empty_directory_still_renders_valid_code() {
         let out = table(Path::new("wwwroot"), &[]);
         assert!(
-            out.contains(
-                "const _RUST_WEBX_EMBEDDED_FILES: &[::rust_webx::spa::EmbeddedAsset] = &["
-            ),
+            out.contains("const _WEBX_EMBEDDED_FILES: &[::webx::spa::EmbeddedAsset] = &["),
             "got {out}"
         );
         assert!(

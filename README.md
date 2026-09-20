@@ -99,7 +99,7 @@ The framework is split into a small set of focused crates, re-exported through t
 
 ```
 rust-webx/
-├── Cargo.toml                 # workspace root (v0.4.0)
+├── Cargo.toml                 # workspace root (v0.5.0)
 ├── crates/
 │   ├── core/                  # rust-webx-core  — traits, configuration
 │   ├── host/                  # rust-webx-host  — Host builder, middleware
@@ -112,12 +112,19 @@ rust-webx/
 └── dmbit/                     # reference app: device & inventory management
 ```
 
+> **Package vs import name**: the dependency is `rust-webx`, the code is
+> `use webx::*;`. Same for the sub-crates — `rust-webx-core` → `webx_core`,
+> `rust-webx-host` → `webx_host`, `rust-webx-macros` → `webx_macros`,
+> `rust-webx-spa` → `webx_spa`, `rust-webx-openapi` → `webx_openapi`.
+> Upgrading from 0.4 or earlier: see the
+> [migration guide](docs/rust-webx/16-migration/upgrade-to-webx-import.md).
+
 ## Request-as-Endpoint: Hello World
 
 Declare a request, map a route onto it, implement its handler — no route table to maintain:
 
 ```rust
-use rust_webx::*;
+use webx::*;
 
 struct HelloRequest;
 
@@ -268,7 +275,7 @@ docker compose -f docbit/docker-compose.yml --env-file docbit/.env up --build
 ## Environment Variables
 
 - `APP_ENV` — application environment (`Development` / `Production`).
-- `RUST_WEBX_APP_BASE` — application base directory.
+- `WEBX_APP_BASE` — application base directory.
 - `JWT_SECRET` — JWT signing secret (≥32 chars; requires `APP_ENV=Production`).
 - `APP__Jwt__Secret` — overrides `JWT_SECRET`.
 - `DATABASE_URL` — optional DB override (docbit defaults to SQLite `app.db` beside the binary).

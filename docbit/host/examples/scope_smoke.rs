@@ -1,7 +1,7 @@
 //! Per-request DI scope 冒烟测试。
 //!
 //! 模拟 `crates/macros/src/endpoint.rs` 中的 dispatch 流程：
-//! 1. 以 `add_dbcontext` 注册 DbContext 为 **Scoped**（与 `host/src/main.rs:register_db_context` 一致）
+//! 1. 以 `add_dbcontext` 注册 DbContext 为 **Scoped**（与 `startup::ServiceCollectionExt::add_docbit_db` 一致）
 //! 2. 构建 root ServiceProvider
 //! 3. 每个"请求"：`provider.create_scope()` → `scope.get_owned::<DbContext>()` → 处理 → drop scope
 //!
@@ -26,7 +26,7 @@ use rust_ef::di::DbContextServiceCollectionExt as _;
 use rust_ef_sqlite::DbContextOptionsBuilderExt as _;
 
 fn build_provider() -> Arc<ServiceProvider> {
-    // 与 docbit/host/src/main.rs:register_db_context 相同的注册方式：
+    // 与 docbit-host 相同的注册方式：
     // `add_dbcontext` 把 DbContext 注册为 Scoped，工厂闭包每次创建全新实例。
     let collection = ServiceCollection::new().add_dbcontext(|opts| {
         opts.use_sqlite_in_memory();

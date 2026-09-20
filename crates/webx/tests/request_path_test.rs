@@ -5,8 +5,8 @@
 
 use std::net::TcpListener;
 
-use rust_webx::*;
 use serde::{Deserialize, Serialize};
+use webx::*;
 
 fn find_free_port() -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();

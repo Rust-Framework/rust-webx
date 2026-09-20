@@ -71,6 +71,8 @@ copy_ecosystem_docs() {
     copy_doc_tree "$framework_root/rust-ef/docs/rust-ef" "$docs_dest/rust-ef" "rust-ef"
     copy_doc_tree "$framework_root/rust-agent-framework/docs" "$docs_dest/rust-agent-framework" "rust-agent-framework"
     copy_doc_tree "$framework_root/rust-gpui-rml/docs" "$docs_dest/rust-gpui-rml" "rust-gpui-rml"
+    # rust-flow repo, doc slug `rust-agent-flow`.
+    copy_doc_tree "$framework_root/rust-flow/docs/rust-agent-flow" "$docs_dest/rust-agent-flow" "rust-agent-flow"
     copy_doc_tree "$workspace_root/docs/rust-webx" "$docs_dest/rust-webx" "rust-webx"
 
     if [[ -f "$framework_root/rust-dix/assets/logo.svg" ]]; then

@@ -14,8 +14,8 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use rust_webx::*;
 use serde::{Deserialize, Serialize};
+use webx::*;
 
 fn find_free_port() -> u16 {
     TcpListener::bind("127.0.0.1:0")

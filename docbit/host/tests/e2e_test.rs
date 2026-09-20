@@ -1,6 +1,9 @@
 //! Docbit HTTP end-to-end tests (SQLite, isolated temp directory per test).
 
+mod support;
+
 use serial_test::serial;
+use support::build_host;
 
 use std::sync::Once;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -98,13 +101,13 @@ fn setup_app_dir() -> tempfile::TempDir {
         r#"<!doctype html><html><head><title>Shell</title></head><body><main id="app"><div class="loading-state"></div></main></body></html>"#,
     )
     .unwrap();
-    std::env::set_var("RUST_WEBX_APP_BASE", dir.path());
+    std::env::set_var("WEBX_APP_BASE", dir.path());
     dir
 }
 
 struct DocbitFixture {
     _dir: tempfile::TempDir,
-    server: rust_webx::TestServer,
+    server: webx::TestServer,
 }
 
 impl DocbitFixture {
@@ -120,8 +123,8 @@ impl DocbitFixture {
 
 async fn spawn_docbit() -> DocbitFixture {
     let dir = setup_app_dir();
-    let port = rust_webx::free_port();
-    let server = rust_webx::spawn(docbit_host::build_host(), port).await;
+    let port = webx::free_port();
+    let server = webx::spawn(build_host(), port).await;
     DocbitFixture { _dir: dir, server }
 }
 
@@ -615,8 +618,8 @@ async fn e2e_static_files_are_served_from_the_binary_without_wwwroot() {
     // exercises the lone-executable deployment.
     std::fs::remove_dir_all(dir.path().join("wwwroot")).unwrap();
 
-    let port = rust_webx::free_port();
-    let server = rust_webx::spawn(docbit_host::build_host(), port).await;
+    let port = webx::free_port();
+    let server = webx::spawn(build_host(), port).await;
     let base = server.base_url.clone();
     let client = reqwest::Client::new();
 
@@ -722,7 +725,10 @@ async fn e2e_embedded_static_file_supports_byte_ranges() {
     let (status, content_range) =
         status_with_range(&base, "/app.css", &format!("bytes={len}-")).await;
     assert_eq!(status, 416);
-    assert_eq!(content_range.as_deref(), Some(format!("bytes */{len}").as_str()));
+    assert_eq!(
+        content_range.as_deref(),
+        Some(format!("bytes */{len}").as_str())
+    );
 
     fx.teardown().await;
 }
@@ -737,16 +743,12 @@ async fn e2e_wwwroot_overrides_embedded_file() {
     std::fs::create_dir_all(&wwwroot).unwrap();
     std::fs::write(wwwroot.join("app.css"), b"/* operator override */").unwrap();
 
-    let port = rust_webx::free_port();
-    let server = rust_webx::spawn(docbit_host::build_host(), port).await;
+    let port = webx::free_port();
+    let server = webx::spawn(build_host(), port).await;
     let base = server.base_url.clone();
     let client = reqwest::Client::new();
 
-    let overridden = client
-        .get(format!("{base}/app.css"))
-        .send()
-        .await
-        .unwrap();
+    let overridden = client.get(format!("{base}/app.css")).send().await.unwrap();
     assert_eq!(overridden.status().as_u16(), 200);
     let etag = overridden
         .headers()
@@ -778,4 +780,214 @@ async fn e2e_wwwroot_overrides_embedded_file() {
     server.teardown().await;
     tokio::time::sleep(Duration::from_millis(300)).await;
     drop(dir);
+}
+
+/// Write a documentation bundle zip the way an operator would.
+fn write_bundle_zip(path: &std::path::Path) {
+    use std::io::Write as _;
+
+    let file = std::fs::File::create(path).unwrap();
+    let mut zip = zip::ZipWriter::new(file);
+    let options = zip::write::SimpleFileOptions::default();
+
+    let index = r#"{
+  "meta": {
+    "title": "Uploaded Work",
+    "docTitle": "Uploaded Docs",
+    "subtitle": "Uploaded subtitle",
+    "description": "Replaced by an upload",
+    "category": "tool",
+    "tags": ["uploaded"],
+    "sortOrder": 9,
+    "pathRules": {
+      "chapterIndex": "{chapterId}/INDEX.md",
+      "sectionFile": "{chapterId}/{sectionId}.md"
+    }
+  },
+  "parts": [{
+    "title": "Part",
+    "chapters": [{
+      "id": "up",
+      "title": "Uploaded Chapter",
+      "sections": [{ "id": "fresh", "title": "Fresh Section" }]
+    }]
+  }]
+}"#;
+
+    for (name, body) in [
+        ("INDEX.json", index),
+        ("up/INDEX.md", "# Uploaded Chapter\n"),
+        (
+            "up/fresh.md",
+            "# Fresh Section\n\ncontent from the upload\n",
+        ),
+    ] {
+        zip.start_file(name, options).unwrap();
+        zip.write_all(body.as_bytes()).unwrap();
+    }
+    zip.finish().unwrap();
+}
+
+/// An admin upload replaces the work's documentation and the API reflects it
+/// immediately — no restart, and the catalog re-sync runs inside the request.
+#[tokio::test]
+#[serial]
+async fn e2e_admin_uploads_documentation_bundle() {
+    let fx = spawn_docbit().await;
+    let base = fx.base();
+    let client = reqwest::Client::new();
+
+    // A section that only exists after the upload.
+    let before = client
+        .get(format!("{base}/api/docs/demo-work/content/up/fresh.md"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        before.status().as_u16(),
+        404,
+        "the fixture must not already contain the uploaded chapter"
+    );
+
+    let bundle_dir = tempfile::tempdir().unwrap();
+    let bundle = bundle_dir.path().join("bundle.zip");
+    write_bundle_zip(&bundle);
+    let bytes = std::fs::read(&bundle).unwrap();
+
+    let token = admin_token(&client, &base).await;
+    let part = reqwest::multipart::Part::bytes(bytes)
+        .file_name("bundle.zip")
+        .mime_str("application/zip")
+        .unwrap();
+    let form = reqwest::multipart::Form::new().part("archive", part);
+
+    let upload = client
+        .post(format!("{base}/api/works/demo-work/docs"))
+        .header("Authorization", format!("Bearer {}", token))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    let status = upload.status().as_u16();
+    let body = upload.text().await.unwrap();
+    assert_eq!(status, 200, "upload failed: {body}");
+
+    let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(json["slug"], "demo-work");
+    assert!(
+        json["files"].as_u64().unwrap() >= 3,
+        "expected the bundle's files, got {body}"
+    );
+
+    // The new content is served straight away…
+    let content = client
+        .get(format!("{base}/api/docs/demo-work/content/up/fresh.md"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(content.status().as_u16(), 200);
+    assert!(content
+        .text()
+        .await
+        .unwrap()
+        .contains("content from the upload"));
+
+    // …the navigation is rebuilt from the uploaded INDEX.json…
+    let index: serde_json::Value = client
+        .get(format!("{base}/api/docs/demo-work/index"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(index["title"], "Uploaded Docs");
+
+    // …and the catalog re-sync picked up the new metadata, with no restart.
+    let work: serde_json::Value = client
+        .get(format!("{base}/api/exhibitions/demo-work"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        work["title"], "Uploaded Work",
+        "the exhibition row must be re-synced from the uploaded INDEX.json"
+    );
+
+    fx.teardown().await;
+}
+
+/// Anonymous uploads are refused outright, and an admin's traversing archive is
+/// rejected without writing anything outside the docs tree.
+#[tokio::test]
+#[serial]
+async fn e2e_docs_upload_rejects_anonymous_and_traversing_archives() {
+    let fx = spawn_docbit().await;
+    let base = fx.base();
+    let client = reqwest::Client::new();
+
+    let bundle_dir = tempfile::tempdir().unwrap();
+    let bundle = bundle_dir.path().join("bundle.zip");
+    write_bundle_zip(&bundle);
+    let bytes = std::fs::read(&bundle).unwrap();
+
+    let anonymous = client
+        .post(format!("{base}/api/works/demo-work/docs"))
+        .multipart(
+            reqwest::multipart::Form::new().part(
+                "archive",
+                reqwest::multipart::Part::bytes(bytes)
+                    .file_name("bundle.zip")
+                    .mime_str("application/zip")
+                    .unwrap(),
+            ),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        anonymous.status().as_u16() == 401 || anonymous.status().as_u16() == 403,
+        "anonymous upload must be refused, got {}",
+        anonymous.status()
+    );
+
+    // A zip whose entry escapes the archive root.
+    let evil = bundle_dir.path().join("evil.zip");
+    {
+        use std::io::Write as _;
+        let file = std::fs::File::create(&evil).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        zip.start_file("../escaped.md", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(b"# escaped").unwrap();
+        zip.finish().unwrap();
+    }
+    let evil_bytes = std::fs::read(&evil).unwrap();
+
+    let token = admin_token(&client, &base).await;
+    let response = client
+        .post(format!("{base}/api/works/demo-work/docs"))
+        .header("Authorization", format!("Bearer {}", token))
+        .multipart(
+            reqwest::multipart::Form::new().part(
+                "archive",
+                reqwest::multipart::Part::bytes(evil_bytes)
+                    .file_name("evil.zip")
+                    .mime_str("application/zip")
+                    .unwrap(),
+            ),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status().as_u16(),
+        400,
+        "a traversing archive must be a validation error"
+    );
+
+    fx.teardown().await;
 }

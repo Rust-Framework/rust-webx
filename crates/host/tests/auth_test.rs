@@ -1,9 +1,9 @@
 mod test_utils;
 
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation};
-use rust_webx_core::auth::IAuthenticationHandler;
-use rust_webx_host::auth_jwt::JwtAuth;
 use serde::{Deserialize, Serialize};
+use webx_core::auth::IAuthenticationHandler;
+use webx_host::auth_jwt::JwtAuth;
 
 fn now_plus_seconds(secs: u64) -> usize {
     std::time::SystemTime::now()

@@ -11,6 +11,10 @@ readme = "../../README.md"
 keywords = ["web", "http", "server", "hyper", "middleware"]
 categories = ["web-programming", "asynchronous"]
 
+# Library name used by dependents (`use webx_host::...`); package stays `rust-webx-host`.
+[lib]
+name = "webx_host"
+
 [dependencies]
 rust-webx-core.workspace = true
 rust-webx-spa.workspace = true

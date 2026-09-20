@@ -1,13 +1,13 @@
 //! In-process memory cache —matches ASP.NET Core's `MemoryCache`.
 //!
 //! Implements [`IDistributedCache`] and provides typed access
-//! via [`DistributedCacheExtensions`](rust_webx_core::DistributedCacheExtensions).
+//! via [`DistributedCacheExtensions`](webx_core::DistributedCacheExtensions).
 
-use rust_webx_core::cache::options::DistributedCacheEntryOptions;
-use rust_webx_core::cache::trait_def::{CacheError, IDistributedCache, Result};
 use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 use tokio::sync::RwLock;
+use webx_core::cache::options::DistributedCacheEntryOptions;
+use webx_core::cache::trait_def::{CacheError, IDistributedCache, Result};
 
 struct CacheEntry {
     data: Vec<u8>,

@@ -26,6 +26,9 @@ pub enum Error {
 
     /// Called outside a build script, where cargo has not provided `OUT_DIR`.
     MissingOutDir,
+
+    /// [`crate::Builder::build`] was called without [`crate::Builder::web_root`].
+    MissingWebRoot,
 }
 
 impl Display for Error {
@@ -34,7 +37,7 @@ impl Display for Error {
             Error::NotADirectory { declared, resolved } => write!(
                 f,
                 "static asset directory `{}` does not exist (resolved to `{}`); \
-                 create it, or pass the right path to embed_assets()",
+                 create it, or pass the right path to builder().web_root(...)",
                 collapsed(declared).display(),
                 collapsed(resolved).display(),
             ),
@@ -45,7 +48,11 @@ impl Display for Error {
             } => write!(f, "cannot {operation} `{}`: {source}", path.display()),
             Error::MissingOutDir => write!(
                 f,
-                "embed_assets() must be called from a build script: OUT_DIR is not set"
+                "webx::builder() must be called from a build script: OUT_DIR is not set"
+            ),
+            Error::MissingWebRoot => write!(
+                f,
+                "webx::builder().build() needs .web_root(\"...\") before .build()"
             ),
         }
     }
@@ -90,7 +97,7 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Error::Io { source, .. } => Some(source),
-            Error::NotADirectory { .. } | Error::MissingOutDir => None,
+            Error::NotADirectory { .. } | Error::MissingOutDir | Error::MissingWebRoot => None,
         }
     }
 }
@@ -147,7 +154,7 @@ mod tests {
         let message = error.to_string();
 
         assert!(message.contains("`../wwwroot`"), "got {message}");
-        assert!(message.contains("embed_assets()"), "got {message}");
+        assert!(message.contains("web_root"), "got {message}");
 
         // The resolved path is shown collapsed, not as it was assembled.
         let raw = resolved.display().to_string();

@@ -1,100 +1,130 @@
 //! Build-script support for compiling static files into the executable.
 //!
-//! One story, three call sites:
+//! The package name on crates.io is `rust-webx-build`; the library is
+//! [`webx`] so `build.rs` reads like the rest of the framework.
 //!
-//! | Where | Call | Role |
-//! |-------|------|------|
-//! | `build.rs` | [`embed_assets`] | read the directory, write the table |
-//! | `src/main.rs` | `rust_webx::spa::embed_assets!()` | include the table |
-//! | runtime | `.embed()` | serve the table under the disk overlay |
+//! # Three deployment shapes
+//!
+//! | Setup | Result |
+//! |-------|--------|
+//! | No `build.rs` web root, `#[webx::main]` | Disk SPA only (`.use_spa` or auto-detect `wwwroot/`) |
+//! | `build.rs` `web_root` + `#[webx::main(embed)]` | Files baked into the exe; disk overlay optional |
+//! | `build.rs` without `(embed)` on main | Table is generated but **not** linked — nothing baked in |
+//!
+//! ## Terms
+//!
+//! - **`web_root` (build.rs)** — compile-time source tree copied into the binary  
+//! - **`.use_spa(dir)` (runtime)** — disk directory checked first (operator overrides).
+//!   Often the same name (`"wwwroot"`) but a different path than `web_root`
+//!   (e.g. compile from `../wwwroot`, deploy overlay `wwwroot` next to the exe).
 //!
 //! ```ignore
 //! // build.rs
-//! fn main() -> Result<(), rust_webx_build::Error> {
-//!     rust_webx_build::embed_assets("wwwroot")
+//! fn main() -> Result<(), webx::Error> {
+//!     webx::builder()
+//!         .web_root("wwwroot")
+//!         .build()
 //! }
-//! ```
 //!
-//! ```ignore
-//! // src/main.rs
-//! rust_webx::spa::embed_assets!();
-//!
-//! #[tokio::main]
-//! async fn main() -> std::io::Result<()> {
+//! // main.rs
+//! #[webx::main(embed)]
+//! async fn main() {
 //!     Host::builder()
-//!         .use_spa("wwwroot")   // optional: where operators may drop overrides
-//!         .embed()              // serve the compiled-in files underneath
+//!         .use_spa("wwwroot")
 //!         .build()
 //!         .run()
 //!         .await
+//!         .unwrap();
 //! }
 //! ```
+//!
+//! | Where | Call | Role |
+//! |-------|------|------|
+//! | `build.rs` | [`builder`] → [`Builder::web_root`] → [`Builder::build`] | write the table |
+//! | `main` | `#[webx::main(embed)]` | link the table into this binary |
+//! | runtime | `Host::build` | serve table under the disk overlay |
 //!
 //! # What belongs in a build script
 //!
 //! Compiling assets in is a build-time decision because the bytes are fixed when
-//! the binary is produced: the file set, their media types, their validators and
-//! the SPA shell. Anything an operator may change after deploying — settings,
-//! origins, secrets, TLS material — must stay a runtime concern, which is why
-//! this crate deliberately has no configuration surface.
+//! the binary is produced. Runtime concerns (settings, origins, secrets, TLS)
+//! stay out of this crate on purpose.
 //!
 //! # Failures are values
 //!
-//! Following the framework's runtime convention, a missing asset directory is
-//! reported as an [`Error`] rather than a panic, so `build.rs` can return it from
-//! `main` and let cargo attribute the failure to the build. `Error` renders
-//! through [`Display`](std::fmt::Display) even in `Debug`, because that is the
-//! form cargo prints.
-//!
-//! # Generated code
-//!
-//! The table is written to `OUT_DIR` as [`GENERATED_FILE`] and refers to
-//! `::rust_webx`, so the crate that calls [`embed_assets`] must depend on the
-//! umbrella crate — the documented way to build an app.
+//! A missing asset directory is an [`Error`], so `build.rs` can return it from
+//! `main` and let cargo attribute the failure to the build.
 //!
 //! ```ignore
 //! [build-dependencies]
-//! rust-webx-build = "0.4"
+//! rust-webx-build = "0.5"   # imports as `webx`
 //! ```
 
 mod error;
 mod render;
 mod scan;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub use error::Error;
 
 /// Name of the file written to `OUT_DIR`, and read back by
-/// `rust_webx::spa::embed_assets!()`.
+/// `#[webx::main(embed)]` / `webx::spa::embed_assets!()`.
 ///
-/// The runtime macro spells the same name out because a build dependency cannot
-/// be reached from `rust-webx-spa`; the two sides name this constant to keep the
-/// include working, and a mismatch fails at compile time rather than silently.
-pub const GENERATED_FILE: &str = "rust_webx_embedded_assets.rs";
+/// Spelled out in the runtime macro because a build dependency cannot be
+/// reached from `rust-webx-spa`; a mismatch fails at compile time.
+pub const GENERATED_FILE: &str = "webx_embedded_assets.rs";
+
+/// Start a compile-time web-root builder (call from `build.rs` only).
+pub fn builder() -> Builder {
+    Builder::new()
+}
+
+/// Fluent compile-time configuration for embedding a static-file directory.
+///
+/// `web_root` names the **compile-time** tree. Pair with
+/// `#[webx::main(embed)]` and usually `.use_spa("wwwroot")` at runtime.
+#[derive(Debug, Default)]
+pub struct Builder {
+    web_root: Option<PathBuf>,
+}
+
+impl Builder {
+    /// Empty builder; set [`web_root`](Self::web_root) before [`build`](Self::build).
+    pub fn new() -> Self {
+        Self { web_root: None }
+    }
+
+    /// Directory of files to bake into the binary (resolved against
+    /// `CARGO_MANIFEST_DIR`).
+    pub fn web_root(mut self, dir: impl AsRef<Path>) -> Self {
+        self.web_root = Some(dir.as_ref().to_path_buf());
+        self
+    }
+
+    /// Scan the web root, write the asset table to `OUT_DIR`, and register
+    /// `cargo:rerun-if-changed` watchers.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotADirectory`] when the web root is missing,
+    /// [`Error::Io`] on filesystem failures, [`Error::MissingOutDir`] outside a
+    /// build script, and [`Error::MissingWebRoot`] when [`web_root`](Self::web_root)
+    /// was never set.
+    pub fn build(self) -> Result<(), Error> {
+        let declared = self.web_root.ok_or(Error::MissingWebRoot)?;
+        embed_assets(declared)
+    }
+}
 
 /// Compile `dir` into a table of static assets for this crate's binary.
 ///
-/// `dir` is resolved against the calling crate's `CARGO_MANIFEST_DIR`, so it does
-/// not depend on the working directory. Every file becomes an `include_bytes!`
-/// entry carrying its media type and a content-derived `ETag`, ordered by key so
-/// the generated file is reproducible.
-///
-/// The build script re-runs when any file below `dir` is added, changed or
-/// removed. Symbolic links are skipped, so the table always matches the files
-/// the manifest actually describes.
-///
-/// # Errors
-///
-/// Returns [`Error::NotADirectory`] when `dir` is missing or is not a directory,
-/// [`Error::Io`] when an asset or the generated file cannot be handled, and
-/// [`Error::MissingOutDir`] when called outside a build script.
+/// Prefer [`builder`] for new code. This remains as a one-shot equivalent of
+/// `builder().web_root(dir).build()`.
 pub fn embed_assets(dir: impl AsRef<Path>) -> Result<(), Error> {
     let declared = dir.as_ref();
     let resolved = scan::resolve(declared);
 
-    // One traversal: its assets become the table, the paths it saw become the
-    // watch list.
     let scan = scan::Scan::of(declared, &resolved)?;
     let generated = render::table(declared, &scan.assets);
 
@@ -109,7 +139,6 @@ pub fn embed_assets(dir: impl AsRef<Path>) -> Result<(), Error> {
     Ok(())
 }
 
-/// Where [`embed_assets`] writes the generated table.
 fn output_path() -> Result<std::path::PathBuf, Error> {
     let out_dir = std::env::var("OUT_DIR").map_err(|_| Error::MissingOutDir)?;
     Ok(Path::new(&out_dir).join(GENERATED_FILE))

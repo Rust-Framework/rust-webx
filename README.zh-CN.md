@@ -98,7 +98,7 @@ rust-webx **不是** 全栈 UI 框架（可搭配任意前端）、**不是** OR
 
 ```
 rust-webx/
-├── Cargo.toml                 # workspace 根 (v0.4.0)
+├── Cargo.toml                 # workspace 根 (v0.5.0)
 ├── crates/
 │   ├── core/                  # rust-webx-core  — trait 与配置
 │   ├── host/                  # rust-webx-host  — Host 构建器、中间件管道
@@ -111,12 +111,18 @@ rust-webx/
 └── dmbit/                     # 参考应用：设备与库存管理
 ```
 
+> **包名 vs 导入名**：依赖写 `rust-webx`，代码写 `use webx::*;`。子 crate 同理：
+> `rust-webx-core` → `webx_core`、`rust-webx-host` → `webx_host`、
+> `rust-webx-macros` → `webx_macros`、`rust-webx-spa` → `webx_spa`、
+> `rust-webx-openapi` → `webx_openapi`。从 0.4 及更早版本升级见
+> [迁移指南](docs/rust-webx/16-migration/upgrade-to-webx-import.md)。
+
 ## 请求即端点：Hello World
 
 声明一个请求、在它上面映射路由、并实现其 Handler——无需维护路由表：
 
 ```rust
-use rust_webx::*;
+use webx::*;
 
 struct HelloRequest;
 
@@ -267,7 +273,7 @@ docker compose -f docbit/docker-compose.yml --env-file docbit/.env up --build
 ## 环境变量
 
 - `APP_ENV` — 应用环境（`Development` / `Production`）。
-- `RUST_WEBX_APP_BASE` — 应用基础目录。
+- `WEBX_APP_BASE` — 应用基础目录。
 - `JWT_SECRET` — JWT 签名密钥（≥32 字符；需 `APP_ENV=Production`）。
 - `APP__Jwt__Secret` — 覆盖 `JWT_SECRET`。
 - `DATABASE_URL` — 可选数据库覆盖（docbit 默认使用可执行文件旁的 SQLite `app.db`）。

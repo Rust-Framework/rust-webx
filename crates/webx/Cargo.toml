@@ -11,6 +11,10 @@ readme = "../../README.md"
 keywords = ["web", "http", "async", "framework", "aspnet-core"]
 categories = ["web-programming", "asynchronous"]
 
+# Umbrella library name (`use webx::...`); package stays `rust-webx`.
+[lib]
+name = "webx"
+
 [dependencies]
 rust-webx-core.workspace = true
 rust-webx-host.workspace = true

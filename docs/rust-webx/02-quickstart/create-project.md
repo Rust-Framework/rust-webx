@@ -16,11 +16,17 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-rust-webx = "0.2"
+rust-webx = "0.5"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 async-trait = "0.1"
 ```
+
+> **包名 vs 导入名**：`Cargo.toml` 里写包名 `rust-webx`，代码里 `use webx::*;`。
+> 各子 crate 同理（`rust-webx-core` → `webx_core`，`rust-webx-host` → `webx_host`，
+> `rust-webx-macros` → `webx_macros`，`rust-webx-spa` → `webx_spa`，
+> `rust-webx-openapi` → `webx_openapi`）。从 0.4 及更早版本升级见
+> [升级到 webx 导入路径](../16-migration/upgrade-to-webx-import.md)。
 
 若在本仓库内开发，使用 path 依赖：
 

@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use rust_webx::*;
+use webx::*;
 
 use docbit_contracts::site::{SiteConfig, SiteInfoRequest};
 

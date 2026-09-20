@@ -11,11 +11,11 @@ async fn spawn_test_host(port: u16) {
 
 async fn spawn_test_host_with<F>(port: u16, configure: F)
 where
-    F: FnOnce(rust_webx_host::server::HostBuilder) -> rust_webx_host::server::HostBuilder,
+    F: FnOnce(webx_host::server::HostBuilder) -> webx_host::server::HostBuilder,
 {
     let addr = format!("127.0.0.1:{}", port);
-    let builder = rust_webx_host::server::Host::builder()
-        .mode(rust_webx_core::mode::AppMode::Development)
+    let builder = webx_host::server::Host::builder()
+        .mode(webx_core::mode::AppMode::Development)
         .no_spa();
     let host = configure(builder).build();
     tokio::spawn(async move { host.run_at(&addr).await.unwrap() });
@@ -218,7 +218,7 @@ async fn integration_health_with_failing_probe_returns_fail() {
     let port = find_free_port();
     spawn_test_host_with(port, |b| {
         b.add_health_check("db", || {
-            rust_webx_host::health::HealthStatus::fail("db unreachable")
+            webx_host::health::HealthStatus::fail("db unreachable")
         })
     })
     .await;
@@ -247,9 +247,9 @@ async fn integration_health_probe_evaluated_at_request_time() {
     spawn_test_host_with(port, move |b| {
         b.add_health_check("db", move || {
             if flag.load(Ordering::Relaxed) {
-                rust_webx_host::health::HealthStatus::pass()
+                webx_host::health::HealthStatus::pass()
             } else {
-                rust_webx_host::health::HealthStatus::fail("db down")
+                webx_host::health::HealthStatus::fail("db down")
             }
         })
     })
@@ -371,8 +371,8 @@ async fn integration_rate_limit_returns_429_when_exceeded() {
     let port = find_free_port();
     spawn_test_host_with(port, |b| {
         b.use_middleware_with(|| {
-            Arc::new(rust_webx_host::rate_limit::RateLimitMiddleware::new(1.0, 2))
-                as Arc<dyn rust_webx_core::middleware::IMiddleware>
+            Arc::new(webx_host::rate_limit::RateLimitMiddleware::new(1.0, 2))
+                as Arc<dyn webx_core::middleware::IMiddleware>
         })
     })
     .await;
@@ -433,9 +433,9 @@ async fn integration_metrics_endpoint_when_enabled() {
 
 #[tokio::test]
 async fn integration_use_middleware_with_runs_in_pipeline() {
-    use rust_webx_core::http::IHttpContext;
-    use rust_webx_core::middleware::IMiddleware;
     use std::ops::ControlFlow;
+    use webx_core::http::IHttpContext;
+    use webx_core::middleware::IMiddleware;
 
     struct HeaderTagMiddleware;
     #[async_trait::async_trait]
@@ -443,7 +443,7 @@ async fn integration_use_middleware_with_runs_in_pipeline() {
         async fn invoke(
             &self,
             ctx: &mut dyn IHttpContext,
-        ) -> rust_webx_core::error::Result<ControlFlow<()>> {
+        ) -> webx_core::error::Result<ControlFlow<()>> {
             ctx.response_mut().set_header("x-tagged", "true");
             Ok(ControlFlow::Continue(()))
         }
@@ -468,14 +468,14 @@ async fn integration_use_middleware_with_runs_in_pipeline() {
 
 #[tokio::test]
 async fn integration_compression_gzips_large_response() {
-    use rust_webx_host::compression::{CompressionConfig, CompressionMiddleware};
+    use webx_host::compression::{CompressionConfig, CompressionMiddleware};
 
     let port = find_free_port();
     spawn_test_host_with(port, |b| {
         b.use_middleware_with(|| {
             Arc::new(CompressionMiddleware::with_config(
                 CompressionConfig::default().min_size(10),
-            )) as Arc<dyn rust_webx_core::middleware::IMiddleware>
+            )) as Arc<dyn webx_core::middleware::IMiddleware>
         })
     })
     .await;
@@ -511,7 +511,7 @@ async fn integration_compression_gzips_large_response() {
 async fn integration_compression_skips_small_response() {
     let port = find_free_port();
     spawn_test_host_with(port, |b| {
-        b.use_middleware::<rust_webx_host::compression::CompressionMiddleware>()
+        b.use_middleware::<webx_host::compression::CompressionMiddleware>()
     })
     .await;
 
@@ -533,7 +533,7 @@ async fn integration_compression_skips_small_response() {
 async fn integration_compression_skips_without_accept_encoding() {
     let port = find_free_port();
     spawn_test_host_with(port, |b| {
-        b.use_middleware::<rust_webx_host::compression::CompressionMiddleware>()
+        b.use_middleware::<webx_host::compression::CompressionMiddleware>()
     })
     .await;
 

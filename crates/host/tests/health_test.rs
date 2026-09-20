@@ -3,8 +3,8 @@
 //! Tests the HealthCheckRegistry API: snapshot, overall_status, and
 //! the build_health_response helper for RFC 8407 compliance.
 
-use rust_webx_host::health::{HealthCheckRegistry, HealthStatus};
 use std::sync::Arc;
+use webx_host::health::{HealthCheckRegistry, HealthStatus};
 
 #[test]
 fn registry_snapshot_returns_registered_checks() {
@@ -68,16 +68,16 @@ fn registry_all_healthy_false_when_any_fail() {
 
 #[test]
 fn health_http_status_maps_fail_to_503() {
-    assert_eq!(rust_webx_host::health::health_http_status("fail"), 503);
-    assert_eq!(rust_webx_host::health::health_http_status("pass"), 200);
-    assert_eq!(rust_webx_host::health::health_http_status("warn"), 200);
+    assert_eq!(webx_host::health::health_http_status("fail"), 503);
+    assert_eq!(webx_host::health::health_http_status("pass"), 200);
+    assert_eq!(webx_host::health::health_http_status("warn"), 200);
 }
 
 #[test]
 fn build_health_response_empty_registry() {
     let registry = HealthCheckRegistry::new();
     let body: serde_json::Value =
-        serde_json::from_slice(&rust_webx_host::health::build_health_response(&registry)).unwrap();
+        serde_json::from_slice(&webx_host::health::build_health_response(&registry)).unwrap();
     assert_eq!(body["status"], "pass");
 }
 

@@ -1,119 +1,130 @@
-// rust-webx —Umbrella crate for the Rust WebApi framework.
-// Re-exports all types for a unified `use rust_webx::*` experience.
+//! Umbrella crate for the rust-webx framework (package `rust-webx`, imported as
+//! `webx`).
+//!
+//! Re-exports the whole framework so applications need a single dependency:
+//!
+//! ```toml
+//! [dependencies]
+//! rust-webx = "0.5"
+//! ```
+//!
+//! ```ignore
+//! use webx::*;
+//! ```
+//!
+//! The dependency name is `rust-webx`; the import name is `webx`. The same
+//! applies to the sub-crates (`rust-webx-core` → `webx_core`,
+//! `rust-webx-host` → `webx_host`, `rust-webx-macros` → `webx_macros`,
+//! `rust-webx-spa` → `webx_spa`, `rust-webx-openapi` → `webx_openapi`).
 
 // --- Core traits ---
-pub use rust_webx_core::app::IHost;
-pub use rust_webx_core::auth::{
+pub use webx_core::app::IHost;
+pub use webx_core::auth::{
     IAuthenticationHandler, IAuthorizationPolicy, IClaims, IDynamicAuthorizer,
 };
-pub use rust_webx_core::cache::{
+pub use webx_core::cache::{
     cache_ext::DistributedCacheExtensions,
     options::DistributedCacheEntryOptions,
     trait_def::{CacheError, IDistributedCache},
 };
-pub use rust_webx_core::config::{
+pub use webx_core::config::{
     bind_config, bind_root, load_appsettings, AppOptions, AppSection, CorsSection, IAppOptions,
     JwtSection, MetricsSection, RateLimitSection, TlsSection,
 };
-pub use rust_webx_core::dispatch_runtime::{dispatch_provider, DispatchRuntime};
-pub use rust_webx_core::error::{Error, Result};
-pub use rust_webx_core::form::{
+pub use webx_core::dispatch_runtime::{dispatch_provider, DispatchRuntime};
+pub use webx_core::error::{Error, Result};
+pub use webx_core::form::{
     sanitize_file_name, set_spool_root, spool_root, FormDeserializer, FormError, FormField,
     FormFile, FormFileBuilder, MultipartForm, SPOOL_FILE_PREFIX,
 };
-pub use rust_webx_core::handler::{IClaimsCarrier, IEventHandler, IHostedService, IRequestHandler};
-pub use rust_webx_core::http::{
+pub use webx_core::handler::{IClaimsCarrier, IEventHandler, IHostedService, IRequestHandler};
+pub use webx_core::http::{
     content_disposition_value, read_json_body, write_json_response, ByteRange, Disposition,
     FileBody, FileSource, FromHttpContext, HttpStatus, IClaimsExt, IHttpContext, IHttpRequest,
     IHttpResponse, Json, ResponseBody, SeekableReader, STREAM_BUF_SIZE,
 };
-pub use rust_webx_core::mediator::build_pipeline_chain;
-pub use rust_webx_core::mediator::{IEventRequest, IMediator, IRequest};
-pub use rust_webx_core::middleware::IMiddleware;
-pub use rust_webx_core::mode::AppMode;
-pub use rust_webx_core::pagination::{PagedRequest, PagedResponse};
-pub use rust_webx_core::paths::{
+pub use webx_core::mediator::build_pipeline_chain;
+pub use webx_core::mediator::{IEventRequest, IMediator, IRequest};
+pub use webx_core::middleware::IMiddleware;
+pub use webx_core::mode::AppMode;
+pub use webx_core::pagination::{PagedRequest, PagedResponse};
+pub use webx_core::paths::{
     app_base, framework_root, looks_like_app_base, looks_like_framework_root,
 };
-pub use rust_webx_core::pipeline::{BoxedNextFn, BoxedPipelineFuture, IPipelineBehavior};
-pub use rust_webx_core::problem::{FieldError, ProblemDetails};
-pub use rust_webx_core::request_context::RequestContext;
-pub use rust_webx_core::route::diagnostics::{
+pub use webx_core::pipeline::{BoxedNextFn, BoxedPipelineFuture, IPipelineBehavior};
+pub use webx_core::problem::{FieldError, ProblemDetails};
+pub use webx_core::request_context::RequestContext;
+pub use webx_core::route::diagnostics::{
     duplicate_handlers, format_route_diagnostics, orphan_handlers, orphan_route_details,
     orphan_routes, route_snapshots,
 };
-pub use rust_webx_core::routing::{HttpMethod, IEndpoint, IRouter, RouteMeta};
+pub use webx_core::routing::{HttpMethod, IEndpoint, IRouter, RouteMeta};
 
 // --- DI extensions ---
-pub use rust_webx_core::route::bind::bind_form_request;
-pub use rust_webx_core::route::ext::{
-    is_mediator_active, should_scan_endpoints, IServiceCollectionExt,
-};
-pub use rust_webx_core::route::params::try_deserialize_from_params;
+pub use webx_core::route::bind::bind_form_request;
+pub use webx_core::route::ext::{is_mediator_active, should_scan_endpoints, IServiceCollectionExt};
+pub use webx_core::route::params::try_deserialize_from_params;
 #[allow(deprecated)]
-pub use rust_webx_core::route::scan::{
+pub use webx_core::route::scan::{
     global_provider, set_global_provider, HandlerCache, HandlerEntry, HandlerRegistration,
     HandlerRegistry, ParamMeta, RequestParamEntry, ResponseData, RouteDispatch, RouteDispatchFn,
     RouteEntry,
 };
 
 // --- HTTP layer ---
-pub use rust_webx_host::auth_jwt::{
-    init_jwt_secret, jwt_middleware, jwt_secret, JwtAuth, JwtClaims,
-};
-pub use rust_webx_host::authz::{
+pub use webx_host::auth_jwt::{init_jwt_secret, jwt_middleware, jwt_secret, JwtAuth, JwtClaims};
+pub use webx_host::authz::{
     build_resource_policy_from_routes, collect_authorizers, resource_auth_middleware,
     AuthorizerSet, ResourceAuthorization,
 };
-pub use rust_webx_host::compression::{compress_gzip, CompressionConfig, CompressionMiddleware};
-pub use rust_webx_host::context::{HttpContext, HttpRequest, HttpResponse};
-pub use rust_webx_host::cors::{CorsConfig, CorsMiddleware};
-pub use rust_webx_host::diagnostics::log_startup_diagnostics;
-pub use rust_webx_host::endpoint::{
+pub use webx_host::compression::{compress_gzip, CompressionConfig, CompressionMiddleware};
+pub use webx_host::context::{HttpContext, HttpRequest, HttpResponse};
+pub use webx_host::cors::{CorsConfig, CorsMiddleware};
+pub use webx_host::diagnostics::log_startup_diagnostics;
+pub use webx_host::endpoint::{
     ControllerEndpoint, RequestEndpoint, StaticHtmlEndpoint, StaticJsonEndpoint,
 };
-pub use rust_webx_host::health::{
-    HealthCheckEntry, HealthCheckFn, HealthCheckRegistry, HealthStatus,
-};
-pub use rust_webx_host::memory_cache::MemoryCache;
-pub use rust_webx_host::pipeline::{HandlerFn, MiddlewarePipeline};
-pub use rust_webx_host::rate_limit::{RateLimitMiddleware, RateLimiter};
-pub use rust_webx_host::request_id::RequestIdMiddleware;
-pub use rust_webx_host::request_tracing::RequestTracing;
-pub use rust_webx_host::router::Router;
-pub use rust_webx_host::security_headers::SecurityHeadersMiddleware;
-pub use rust_webx_host::server::{Host, HostAppBuilder, HostBuilder, Server, ServerHandle};
+pub use webx_host::health::{HealthCheckEntry, HealthCheckFn, HealthCheckRegistry, HealthStatus};
+pub use webx_host::memory_cache::MemoryCache;
+pub use webx_host::pipeline::{HandlerFn, MiddlewarePipeline};
+pub use webx_host::rate_limit::{RateLimitMiddleware, RateLimiter};
+pub use webx_host::request_id::RequestIdMiddleware;
+pub use webx_host::request_tracing::RequestTracing;
+pub use webx_host::router::Router;
+pub use webx_host::security_headers::SecurityHeadersMiddleware;
+pub use webx_host::server::{Host, HostAppBuilder, HostBuilder, Server, ServerHandle};
 #[cfg(feature = "testing")]
-pub use rust_webx_host::testing::{
-    free_port, spawn, spawn_with_health, wait_until_ready, TestServer,
-};
-pub use rust_webx_host::timing::TimingMiddleware;
+pub use webx_host::testing::{free_port, spawn, spawn_with_health, wait_until_ready, TestServer};
+pub use webx_host::timing::TimingMiddleware;
 
 // --- Mediator ---
-pub use rust_webx_core::mediator::Mediator;
+pub use webx_core::mediator::Mediator;
 
 // --- Web (SPA) ---
-pub use rust_webx_spa::SpaMiddleware;
+pub use webx_spa::SpaMiddleware;
 
 /// Static file hosting, including files compiled into the executable.
 ///
 /// ```ignore
-/// rust_webx::spa::embed_assets!();   // once per binary, after build.rs ran
-///
-/// Host::builder().use_spa("wwwroot").embed().build()
+/// // build.rs: webx::builder().web_root("wwwroot").build()
+/// #[webx::main(embed)]
+/// async fn main() {
+///     Host::builder().use_spa("wwwroot").build()
+/// }
 /// ```
 pub mod spa {
-    pub use rust_webx_spa::{
+    pub use webx_spa::{
         embed_assets, inventory, EmbeddedAsset, EmbeddedAssets, SpaMiddleware, SpaSource, EMBED_ENV,
     };
 }
 
 // --- OpenAPI ---
-pub use rust_webx_openapi::{generate_openapi_spec, APIUI_HTML};
+pub use webx_openapi::{generate_openapi_spec, APIUI_HTML};
 
 // --- Macros ---
-pub use rust_webx_macros::{
-    authorize, claims, delete, endpoint, get, handler, post, put, WebxRequestMeta,
+pub use webx_macros::{
+    authorize, claims, delete, embed_assets, endpoint, get, handler, main, post, put,
+    WebxRequestMeta,
 };
 
 // --- Re-export rust_dix (for manual registration, #[inject] auto-registration, and module blocks) ---

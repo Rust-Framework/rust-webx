@@ -1,7 +1,7 @@
 //! Site configuration contracts — direct migration from docbit/src/contracts/site.rs.
 
-use rust_webx::*;
 use serde::{Deserialize, Serialize};
+use webx::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]

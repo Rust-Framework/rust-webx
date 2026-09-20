@@ -46,7 +46,7 @@ pub struct NotificationService {
 伞 Crate 重新导出 DI 工具：
 
 ```rust
-use rust_webx::{inject, module, Inject};
+use webx::{inject, module, Inject};
 ```
 
 在 Handler 中：

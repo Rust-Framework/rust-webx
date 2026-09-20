@@ -3,8 +3,8 @@
 use bcrypt::{hash, verify, DEFAULT_COST};
 use jsonwebtoken::{encode, EncodingKey, Header};
 use rust_ef::{db_context::DbContext, prelude::*};
-use rust_webx::*;
 use serde::{Deserialize, Serialize};
+use webx::*;
 
 use dmbit_contracts::auth::*;
 use dmbit_domain::entities::User;

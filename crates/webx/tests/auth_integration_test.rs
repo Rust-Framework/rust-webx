@@ -5,8 +5,8 @@
 use std::net::TcpListener;
 
 use jsonwebtoken::{EncodingKey, Header};
-use rust_webx::*;
 use serde::{Deserialize, Serialize};
+use webx::*;
 
 const TEST_SECRET: &[u8] = b"test-secret-key-for-integration";
 

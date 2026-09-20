@@ -1,7 +1,7 @@
 //! Comment contracts — supports reply (`parent_id`) and quote (`quoted_id`).
 
-use rust_webx::*;
 use serde::{Deserialize, Serialize};
+use webx::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommentModel {

@@ -4,9 +4,9 @@
 //! a rich OpenAPI JSON document with parameters, request bodies,
 //! response schemas, and summaries.
 
-use rust_webx_core::route::scan::{ParamMeta, RequestParamEntry, RouteEntry};
 use serde_json::{json, Value as JsonValue};
 use std::collections::{BTreeSet, HashMap};
+use webx_core::route::scan::{ParamMeta, RequestParamEntry, RouteEntry};
 
 /// Generate an OpenAPI 3.0.3 specification from registered routes.
 ///

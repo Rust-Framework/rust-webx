@@ -12,7 +12,11 @@
       {framework}/rust-ef/docs/rust-ef             -> {dest}/rust-ef
       {framework}/rust-agent-framework/docs        -> {dest}/rust-agent-framework
       {framework}/rust-gpui-rml/docs               -> {dest}/rust-gpui-rml
+      {framework}/rust-flow/docs/rust-agent-flow   -> {dest}/rust-agent-flow
       {workspace}/docs/rust-webx                   -> {dest}/rust-webx
+
+    The destination name is the documentation slug, which is not always the
+    repository directory name (`rust-flow` publishes as `rust-agent-flow`).
 
 .PARAMETER DocsDest
     Target docs/ directory (e.g. publish bundle or rust-webx/docs for preview).
@@ -124,6 +128,12 @@ function Copy-EcosystemDocs {
         -Source (Join-Path $FrameworkRoot 'rust-gpui-rml\docs') `
         -Dest (Join-Path $DocsDest 'rust-gpui-rml') `
         -Label 'rust-gpui-rml'
+
+    # rust-flow repo, doc slug `rust-agent-flow`.
+    Copy-DocTree `
+        -Source (Join-Path $FrameworkRoot 'rust-flow\docs\rust-agent-flow') `
+        -Dest (Join-Path $DocsDest 'rust-agent-flow') `
+        -Label 'rust-agent-flow'
 
     Copy-DocTree `
         -Source (Join-Path $WorkspaceRoot 'docs\rust-webx') `

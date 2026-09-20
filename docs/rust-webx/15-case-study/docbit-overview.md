@@ -33,10 +33,12 @@ Docbit 是基于 rust-webx 构建的**开发者作品集全栈站点**，展示�
 
 ## 默认账户
 
-启动后自动种子数据：
+| 环境 | 行为 |
+|------|------|
+| Development | 自动创建 `admin@docbit.local` / `admin123`（启动日志警告） |
+| Production | 不创建内置账号；须设置 `DOCBIT_ADMIN_PASSWORD` 才按该口令创建 |
 
-- 邮箱：`admin@docbit.dev`
-- 密码：`admin123`
+生产不会回落到内置口令，也不会把运维口令写入日志。
 
 ## 文档系统
 

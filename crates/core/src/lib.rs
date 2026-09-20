@@ -1,4 +1,10 @@
-// rust-webx-core — Core traits for the rust-webx framework.
+//! Core traits for the rust-webx framework (package `rust-webx-core`, imported
+//! as `webx_core`).
+//!
+//! This crate defines the framework's contracts — `IRequest`, `IRequestHandler`,
+//! `IMiddleware`, `IHttpContext`, `IMediator`, `IHostedService`, `Error`,
+//! `AppMode` — with **no HTTP engine dependency**. Custom middleware and tests
+//! can depend on `webx_core` alone.
 
 pub mod app;
 pub mod auth;

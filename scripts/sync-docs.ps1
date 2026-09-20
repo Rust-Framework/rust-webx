@@ -12,7 +12,7 @@
 
 .EXAMPLE
     .\scripts\sync-docs.ps1
-    Stage all five doc trees under rust-webx/docs/.
+    Stage all six doc trees under rust-webx/docs/.
 #>
 [CmdletBinding()]
 param(

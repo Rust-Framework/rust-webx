@@ -1,17 +1,56 @@
-// rust-webx-macros — Procedural macros for the Rust WebApi framework.
-// - #[endpoint(HttpMethod, "/path")] — full form
-// - #[get("/path")], #[post("/path")], #[put("/path")], #[delete("/path")] — shortcuts
-// - #[handler] — auto-registration via inventory
-// - #[FromBody], #[FromRoute], #[FromQuery] — parameter binding
-// - #[claims] — authentication claims injection
-// - #[authorize] — declarative authorization
+//! Procedural macros for the rust-webx framework (package `rust-webx-macros`,
+//! imported as `webx_macros`).
+//!
+//! - `#[get]` / `#[post]` / `#[put]` / `#[delete]` / `#[endpoint]` — route registration
+//! - `#[handler]` — handler auto-registration via `inventory`
+//! - `#[webx::main]` / `#[webx::main(embed)]` — application entry + asset embedding
+//! - `#[webx::embed_assets]` — asset table include for integration tests
+//! - `#[derive(WebxRequestMeta)]` — OpenAPI parameter metadata
+//! - `#[claims]` / `#[authorize]` — authentication and authorization
 
+mod app_main;
 mod claims;
 mod endpoint;
 mod handler;
 mod request_meta;
 
 use proc_macro::TokenStream;
+
+/// Application entry — ASP.NET Core `Main` analogue (`#[tokio::main]`).
+///
+/// | Attribute | Baked-in wwwroot |
+/// |-----------|------------------|
+/// | `#[webx::main]` | No — disk SPA only (`.use_spa` / auto-detect) |
+/// | `#[webx::main(embed)]` | Yes — requires `build.rs` `web_root(...).build()` |
+///
+/// ```ignore
+/// // Disk-only (no build.rs embed step)
+/// #[webx::main]
+/// async fn main() {
+///     Host::builder().use_spa("wwwroot").build().run().await.unwrap();
+/// }
+///
+/// // Baked into the binary
+/// // build.rs: webx::builder().web_root("wwwroot").build()?;
+/// #[webx::main(embed)]
+/// async fn main() {
+///     Host::builder().use_spa("wwwroot").build().run().await.unwrap();
+/// }
+/// ```
+///
+/// - **`web_root` (build.rs)** — which files are compiled into the executable  
+/// - **`.use_spa(...)` (runtime)** — disk directory consulted first (operator overrides)  
+/// - Without `build.rs` / without `(embed)` — nothing is baked in
+#[proc_macro_attribute]
+pub fn main(attr: TokenStream, item: TokenStream) -> TokenStream {
+    app_main::main_impl(attr, item)
+}
+
+/// Include the `OUT_DIR` asset table (for integration tests that never run `main`).
+#[proc_macro_attribute]
+pub fn embed_assets(attr: TokenStream, item: TokenStream) -> TokenStream {
+    app_main::embed_assets_impl(attr, item)
+}
 
 // ---------------------------------------------------------------------------
 // Route macros: full form + shortcuts

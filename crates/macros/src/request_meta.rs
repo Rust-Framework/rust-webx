@@ -59,7 +59,7 @@ pub fn derive_request_meta(input: TokenStream) -> TokenStream {
         if let Some(hint) = form_file_hint(&field.ty) {
             let name = field_name.as_str();
             params_tokens.push(quote! {
-                ::rust_webx::ParamMeta {
+                ::webx::ParamMeta {
                     name: #name,
                     source: "form",
                     type_hint: #hint,
@@ -88,7 +88,7 @@ pub fn derive_request_meta(input: TokenStream) -> TokenStream {
         let name = field_name.as_str();
 
         params_tokens.push(quote! {
-            ::rust_webx::ParamMeta {
+            ::webx::ParamMeta {
                 name: #name,
                 source: #source,
                 type_hint: #type_hint,
@@ -98,7 +98,7 @@ pub fn derive_request_meta(input: TokenStream) -> TokenStream {
 
     let expanded = quote! {
         ::inventory::submit! {
-            ::rust_webx::RequestParamEntry {
+            ::webx::RequestParamEntry {
                 request_type: #type_name,
                 params: &[#(#params_tokens),*],
             }

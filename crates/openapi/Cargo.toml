@@ -11,6 +11,10 @@ readme = "../../README.md"
 keywords = ["web", "openapi", "swagger", "api-docs"]
 categories = ["web-programming"]
 
+# Library name used by dependents (`use webx_openapi::...`); package stays `rust-webx-openapi`.
+[lib]
+name = "webx_openapi"
+
 [dependencies]
 rust-webx-core.workspace = true
 serde_json.workspace = true

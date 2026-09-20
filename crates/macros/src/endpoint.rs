@@ -80,7 +80,7 @@ fn emit_endpoint(attr: TokenStream, item: TokenStream) -> TokenStream {
         .into_iter()
         .map(|name| {
             quote! {
-                ::rust_webx::ParamMeta {
+                ::webx::ParamMeta {
                     name: #name,
                     source: "path",
                     type_hint: "string",
@@ -92,7 +92,7 @@ fn emit_endpoint(attr: TokenStream, item: TokenStream) -> TokenStream {
     let is_body_method = method_str == "Post" || method_str == "Put" || method_str == "Patch";
     if is_body_method {
         params_tokens.push(quote! {
-            ::rust_webx::ParamMeta {
+            ::webx::ParamMeta {
                 name: "body",
                 source: "body",
                 type_hint: "object",
@@ -123,15 +123,15 @@ fn emit_endpoint(attr: TokenStream, item: TokenStream) -> TokenStream {
         #dispatch_fn
 
         ::inventory::submit! {
-            ::rust_webx::RouteDispatch {
+            ::webx::RouteDispatch {
                 handler_type: #req_type_name,
                 dispatch: #dispatch_fn_name,
             }
         }
 
         ::inventory::submit! {
-            ::rust_webx::RouteEntry::new(
-                ::rust_webx::HttpMethod::#method_ident,
+            ::webx::RouteEntry::new(
+                ::webx::HttpMethod::#method_ident,
                 #path_str,
                 #req_type_name,
                 #rsp_type_str,
@@ -184,13 +184,13 @@ fn generate_dispatch_fn(
             .collect();
         quote! {{
             let mut req: #ty = ::serde_json::from_slice(&body_bytes)
-                .map_err(|e| ::rust_webx::Error::Serialization(e))?;
+                .map_err(|e| ::webx::Error::Serialization(e))?;
             req = #ty { #(#overrides)* ..req };
             req
         }}
     } else if is_body {
         quote! {
-            ::serde_json::from_slice(&body_bytes).map_err(|e| ::rust_webx::Error::Serialization(e))?
+            ::serde_json::from_slice(&body_bytes).map_err(|e| ::webx::Error::Serialization(e))?
         }
     } else if !path_params.is_empty() {
         let field_assignments: Vec<proc_macro2::TokenStream> = path_params
@@ -205,7 +205,7 @@ fn generate_dispatch_fn(
             .collect();
         quote! {
             {
-                if let Some(req) = ::rust_webx::try_deserialize_from_params::<#ty>(
+                if let Some(req) = ::webx::try_deserialize_from_params::<#ty>(
                     &route_params,
                     &_query_params,
                 ) {
@@ -218,7 +218,7 @@ fn generate_dispatch_fn(
     } else {
         quote! {
             {
-                if let Some(req) = ::rust_webx::try_deserialize_from_params::<#ty>(
+                if let Some(req) = ::webx::try_deserialize_from_params::<#ty>(
                     &route_params,
                     &_query_params,
                 ) {
@@ -233,19 +233,19 @@ fn generate_dispatch_fn(
     let response_expr = if is_raw_response {
         quote! { ::std::result::Result::Ok(result) }
     } else if is_unit_response {
-        quote! { ::std::result::Result::Ok(::rust_webx::ResponseData::no_content()) }
+        quote! { ::std::result::Result::Ok(::webx::ResponseData::no_content()) }
     } else {
-        quote! { ::rust_webx::ResponseData::json(&result) }
+        quote! { ::webx::ResponseData::json(&result) }
     };
 
     quote! {
         #[allow(clippy::needless_update)]
         fn #fn_name<'__webx_dispatch>(
-            ctx: &'__webx_dispatch mut dyn ::rust_webx::IHttpContext,
+            ctx: &'__webx_dispatch mut dyn ::webx::IHttpContext,
         ) -> ::std::pin::Pin<
             Box<
                 dyn ::std::future::Future<
-                        Output = ::rust_webx::Result<::rust_webx::ResponseData>,
+                        Output = ::webx::Result<::webx::ResponseData>,
                     > + Send
                     + '__webx_dispatch,
             >,
@@ -254,7 +254,7 @@ fn generate_dispatch_fn(
                 // A multipart body must be bound before anything else touches it,
                 // because binding consumes the live request stream.
                 let bound: ::std::option::Option<#ty> =
-                    ::rust_webx::bind_form_request::<#ty>(&mut *ctx).await?;
+                    ::webx::bind_form_request::<#ty>(&mut *ctx).await?;
 
                 let mut request: #ty = match bound {
                     ::std::option::Option::Some(request) => request,
@@ -273,21 +273,21 @@ fn generate_dispatch_fn(
                     }
                 };
 
-                let claims: ::std::option::Option<Box<dyn ::rust_webx::IClaims>> =
+                let claims: ::std::option::Option<Box<dyn ::webx::IClaims>> =
                     ctx.claims().map(|c| c.clone_box());
                 let operator_id = claims.as_ref().map(|c| c.subject().to_string());
 
                 // Inject claims into the request *before* dispatch (no-op if the
                 // request type has no inherent `set_claims`).
                 {
-                    use ::rust_webx::IClaimsCarrier;
+                    use ::webx::IClaimsCarrier;
                     request.set_claims(claims);
                 }
 
-                ::rust_webx::RequestContext::run(operator_id, async move {
+                ::webx::RequestContext::run(operator_id, async move {
                     // HTTP adapter: construct request, then dispatch via IMediator
                     // (same path as in-process calls).
-                    let mediator = ::rust_webx::Mediator::new(::rust_webx::dispatch_provider());
+                    let mediator = ::webx::Mediator::new(::webx::dispatch_provider());
                     let result: #rsp_type = mediator.send(request).await?;
                     #response_expr
                 })
@@ -300,7 +300,7 @@ fn generate_dispatch_fn(
 /// Whether the declared response type is the framework's raw response envelope.
 ///
 /// Matches `ResponseData` and any qualified path ending in `ResponseData`, so
-/// `rust_webx::ResponseData` and `::rust_webx::ResponseData` both work.
+/// `webx::ResponseData` and `::webx::ResponseData` both work.
 fn is_response_data(rsp_type: &str) -> bool {
     rsp_type
         .rsplit("::")

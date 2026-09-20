@@ -12,6 +12,22 @@
 
 `core` 是金字塔顶端（最抽象），`host` 是运行时实现层，应用代码在最上层。
 
+### 包名与导入名
+
+Cargo **包名**带连字符，Rust **导入名**用下划线库名。两者不是一回事：
+
+| 包名（`Cargo.toml`） | 导入名（`use`） | 职责 |
+|----------------------|-----------------|------|
+| `rust-webx` | `webx` | 伞 crate，统一 re-export |
+| `rust-webx-core` | `webx_core` | 契约与配置 |
+| `rust-webx-host` | `webx_host` | Host / 路由 / 中间件 |
+| `rust-webx-macros` | `webx_macros` | 过程宏（`#[get]`、`#[handler]`…） |
+| `rust-webx-spa` | `webx_spa` | 静态文件 / SPA |
+| `rust-webx-openapi` | `webx_openapi` | OpenAPI 生成 + UI |
+| `rust-webx-build` | `webx` | 构建期（`build-dependencies`） |
+
+对照 `rust-dix` / `rust-ef`：包名与导入名同样分别是 `rust-dix`→`rust_dix`、`rust-ef`→`rust_ef`。
+
 ## core — 契约层
 
 `rust-webx-core` 定义所有公开 trait，**不依赖** hyper、tokio 或任何 HTTP 实现。
@@ -77,14 +93,20 @@
 
 `rust-webx-build` 只在 `build.rs` 中运行，**不依赖任何框架 crate**（无 `core`，
 也就不会把 tokio/hyper 拖进构建期）。它扫描目录、生成 `EmbeddedAsset` 表写入
-`OUT_DIR`，由 `rust-webx-spa` 的 `embed_assets!()` 引入、`HostBuilder::embed()` 启用：
+`OUT_DIR`，由 `webx::spa::embed_assets!()`（经 `#[webx::main(embed)]`）引入；
+`Host::build` 若发现已注册的表，会自动叠到 SPA 源上：
 
 ```rust
-// build.rs — 编译期
-fn main() -> Result<(), rust_webx_build::Error> {
-    rust_webx_build::embed_assets("wwwroot")
+// build.rs — 编译期源树（库名 `webx`）
+fn main() -> Result<(), webx::Error> {
+    webx::builder()
+        .web_root("wwwroot")
+        .build()
 }
 ```
+
+应用入口用 `#[webx::main(embed)]` 显式链接该表；`.use_spa("wwwroot")` 只表示
+运行期磁盘覆盖目录。不写 `(embed)` 则不烤进二进制。
 
 它属于**编译期**层：文件集、MIME、内容 `ETag` 在编译时确定。运行期配置
 （`appsettings.json`、端口、密钥、TLS）不在此列，否则每次改配置都要重新编译。
@@ -96,17 +118,17 @@ build.rs ──> rust-webx-build          （只读目录 + 写 OUT_DIR）
 src/ ──────> rust-webx (伞) ──> host / macros / spa / openapi ──> core
 ```
 
-## webapp — 伞 Crate
+## webx — 伞 Crate
 
 统一 re-export，应用只需：
 
 ```toml
 [dependencies]
-rust-webx = "0.2"
+rust-webx = "0.5"
 ```
 
 ```rust
-use rust_webx::*;
+use webx::*;
 ```
 
 同时 re-export `rust_dix`、`async_trait`、`serde` 等常用依赖，减少 `Cargo.toml` 条目。

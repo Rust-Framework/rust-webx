@@ -33,8 +33,9 @@ rust-webx-build.workspace = true
 
 [dev-dependencies]
 rust-webx = { workspace = true, features = ["testing"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart"] }
 tempfile = "3"
+zip.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
 serde_json.workspace = true

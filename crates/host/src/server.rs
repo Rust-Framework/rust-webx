@@ -82,27 +82,6 @@ fn log_spa_source(spa: &SpaMiddleware) {
     }
 }
 
-/// The single compiled-in asset table registered by `#[webx::main(embed)]`
-/// (or `embed_assets!()`), if any.
-///
-/// # Panics
-///
-/// When more than one table is registered — that is always a wiring mistake
-/// (e.g. both `#[webx::main(embed)]` and a second `#[webx::embed_assets]`
-/// in the same binary).
-fn registered_embedded_assets() -> Option<EmbeddedAssets> {
-    let mut found = inventory::iter::<EmbeddedAssets>();
-    match (found.next(), found.next()) {
-        (Some(assets), None) => Some(*assets),
-        (None, _) => None,
-        (Some(_), Some(_)) => panic!(
-            "more than one compiled-in asset table is registered; \
-             use `#[webx::main(embed)]` (or `#[webx::embed_assets]`) \
-             exactly once per binary"
-        ),
-    }
-}
-
 /// Layer a compiled-in table under `source` when one was registered.
 ///
 /// Opt-in is `#[webx::main(embed)]` (plus `build.rs` `web_root`).
@@ -544,7 +523,7 @@ impl HostBuilder {
                     None
                 }
             });
-            with_embedded_assets(base, registered_embedded_assets())
+            with_embedded_assets(base, EmbeddedAssets::registered().copied())
         };
         if let Some(ref source) = spa_source {
             let spa = SpaMiddleware::from_source(source.clone());
@@ -1446,7 +1425,7 @@ fn build_tls_acceptor(cert_path: &str, key_path: &str) -> Result<TlsAcceptor> {
 
 #[cfg(test)]
 mod embedded_attach_tests {
-    use super::{registered_embedded_assets, with_embedded_assets};
+    use super::with_embedded_assets;
     use webx_spa::{ContentEncoding, EmbeddedAsset, EmbeddedAssets, SpaSource};
 
     const FILES: &[EmbeddedAsset] = &[EmbeddedAsset {
@@ -1495,6 +1474,6 @@ mod embedded_attach_tests {
 
     #[test]
     fn host_crate_registers_no_asset_table() {
-        assert!(registered_embedded_assets().is_none());
+        assert!(EmbeddedAssets::registered().is_none());
     }
 }

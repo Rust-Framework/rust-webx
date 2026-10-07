@@ -119,6 +119,15 @@ pub mod spa {
     };
 }
 
+/// Files compiled into the executable by `#[webx::main(embed)]`, read by path.
+///
+/// ```ignore
+/// let config = webx::assets::read_str("config/default.json");
+/// ```
+pub mod assets {
+    pub use webx_spa::assets::{read, read_str};
+}
+
 // --- OpenAPI ---
 pub use webx_openapi::{generate_openapi_spec, APIUI_HTML};
 

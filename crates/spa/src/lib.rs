@@ -5,6 +5,7 @@
 //! or both (disk wins), with history fallback to `index.html`. Embedded files
 //! are streamed with `ETag`, `Range`, and `HEAD` support.
 
+pub mod assets;
 mod embed;
 mod spa;
 

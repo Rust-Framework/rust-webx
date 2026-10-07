@@ -392,8 +392,9 @@ fn header_allows(value: &str, token: &str) -> bool {
 ///
 /// The bytes are leaked so they can be handed to the response as a
 /// `&'static [u8]`. The cost is bounded by the size of the embedded tree and is
-/// only paid for assets that a client without `br` actually requests.
-fn decoded_once(asset: &'static EmbeddedAsset) -> Option<&'static [u8]> {
+/// only paid for assets that a client without `br` actually requests, or that
+/// the application reads through [`EmbeddedAssets::read`].
+pub(crate) fn decoded_once(asset: &'static EmbeddedAsset) -> Option<&'static [u8]> {
     static DECODED: OnceLock<Mutex<HashMap<&'static str, &'static [u8]>>> = OnceLock::new();
 
     let cache = DECODED.get_or_init(|| Mutex::new(HashMap::new()));

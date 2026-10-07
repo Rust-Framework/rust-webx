@@ -105,7 +105,9 @@ fn main() -> Result<(), webx::Error> {
 ```
 
 应用入口用 `#[webx::main(embed)]` 显式链接该表；`.use_spa("wwwroot")` 只表示
-运行期磁盘覆盖目录。不写 `(embed)` 则不烤进二进制。
+运行期磁盘覆盖目录。不写 `(embed)` 则不烤进二进制。应用代码也可以用
+`webx::assets::read_str("…")` 在运行期直接读取表里的文件，见
+[在代码里读取内嵌文件](../11-production/openapi-spa.md#在代码里读取内嵌文件)。
 
 它属于**编译期**层：文件集、MIME、内容 `ETag` 与压缩表示都在编译时确定。运行期配置
 （`appsettings.json`、端口、密钥、TLS）不在此列，否则每次改配置都要重新编译。

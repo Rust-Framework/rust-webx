@@ -148,6 +148,37 @@ async fn main() {
 `br` 的客户端拿到的静态资源也是压缩传输的——磁盘文件本身没有被压缩过，这是内嵌表
 额外带来的收益。
 
+### 在代码里读取内嵌文件
+
+内嵌表不只给 SPA 中间件用。运行期任何地方都能按路径直接读取，不需要经过 `Host`，
+用法对标 `std::fs::read`：
+
+```rust
+// 文本：模板、默认配置、SQL 脚本……
+let config: Option<&'static str> = webx::assets::read_str("config/default.json");
+
+// 二进制
+let logo: Option<&'static [u8]> = webx::assets::read("images/logo.png");
+```
+
+| API | 返回 | 说明 |
+|-----|------|------|
+| `webx::assets::read(path)` | `Option<&'static [u8]>` | 原文件内容，压缩存储的会先解压 |
+| `webx::assets::read_str(path)` | `Option<&'static str>` | 同上并按 UTF-8 解码；不是 UTF-8 时为 `None` |
+
+文件不在表里、或二进制根本没有嵌入（没写 `(embed)`）时都返回 `None`。需要表本身（遍历
+`files()`、统计体积等）时，用底层的 `webx::spa::EmbeddedAssets::registered()`，它上面
+的 `read` / `read_str` 与上面两个函数完全相同。
+
+* **零拷贝 / 只解压一次**：原样存储的文件直接返回二进制里的那段字节；brotli 存储的在
+  首次读取时解压并缓存到进程结束，这份缓存与中间件共用，同一个文件不会解压两次。
+* **路径**：相对 `web_root`，`/` 分隔、区分大小写；开头的 `/` 可写可不写，所以请求路径能
+  直接拿来用。
+* **只读内嵌副本**：磁盘覆盖目录里的同名文件不参与，`WEBX_EMBED=off` 也不影响读取。
+  需要「磁盘优先」语义时请自己先查磁盘。
+* **单表约束**：同一个二进制里注册了多张表（例如同时写了 `#[webx::main(embed)]` 和
+  `#[webx::embed_assets]`）时，`registered()` 会 panic，与 `Host::build` 的行为一致。
+
 ### 必须知道的取舍
 
 * **僵尸覆盖（stale override）**：磁盘上的同名文件**永远**赢。如果某次更新改了 exe 内的

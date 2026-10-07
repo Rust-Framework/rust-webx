@@ -47,6 +47,19 @@
 //! keep the two fields consistent: `raw_len` is the decoded length, and
 //! `bytes.len() == raw_len` whenever `encoding` is `Identity`.
 //!
+//! # Reading files at runtime
+//!
+//! [`crate::assets`] reads the registered table by path, anywhere and without a
+//! `Host`, returning the original contents — decoded once if the file is
+//! stored compressed:
+//!
+//! ```ignore
+//! let template = webx::assets::read_str("templates/mail.html");
+//! ```
+//!
+//! [`EmbeddedAssets::registered`] with [`EmbeddedAssets::read`] /
+//! [`EmbeddedAssets::read_str`] is the same lookup on an explicit table.
+//!
 //! # Requirements on a hand-written table
 //!
 //! [`EmbeddedAssets::get`] binary-searches, so `files` **must be sorted by
@@ -203,6 +216,52 @@ impl EmbeddedAssets {
             .binary_search_by(|file| file.path.cmp(path))
             .ok()
             .map(|index| &self.files[index])
+    }
+
+    /// The table linked by `#[webx::main(embed)]` (or `#[webx::embed_assets]`),
+    /// if any — the same one the host serves, reachable without a `Host`.
+    ///
+    /// To read a file by path, [`crate::assets::read`] is the shorter form.
+    ///
+    /// # Panics
+    ///
+    /// When more than one table is registered — that is always a wiring mistake
+    /// (e.g. both `#[webx::main(embed)]` and a second `#[webx::embed_assets]`
+    /// in the same binary).
+    pub fn registered() -> Option<&'static EmbeddedAssets> {
+        let mut found = inventory::iter::<EmbeddedAssets>();
+        match (found.next(), found.next()) {
+            (Some(assets), None) => Some(assets),
+            (None, _) => None,
+            (Some(_), Some(_)) => panic!(
+                "more than one compiled-in asset table is registered; \
+                 use `#[webx::main(embed)]` (or `#[webx::embed_assets]`) \
+                 exactly once per binary"
+            ),
+        }
+    }
+
+    /// The original contents of `path`, decoded when stored compressed.
+    ///
+    /// `path` is relative to the embedded root; a leading `/` is accepted so a
+    /// request path works as-is. Verbatim entries are returned without a copy;
+    /// compressed ones are decoded on first use and cached for the life of the
+    /// process, shared with the middleware. `None` when the file is not
+    /// embedded or its payload fails to decode.
+    ///
+    /// Only the compiled-in copy is read: a same-named file in the disk overlay
+    /// and [`EMBED_ENV`](crate::EMBED_ENV) play no part.
+    pub fn read(&self, path: &str) -> Option<&'static [u8]> {
+        let asset = self.get(path.trim_start_matches('/'))?;
+        match asset.encoding {
+            ContentEncoding::Identity => Some(asset.bytes),
+            ContentEncoding::Brotli => crate::spa::decoded_once(asset),
+        }
+    }
+
+    /// [`read`](Self::read) as UTF-8 text; also `None` when it is not UTF-8.
+    pub fn read_str(&self, path: &str) -> Option<&'static str> {
+        std::str::from_utf8(self.read(path)?).ok()
     }
 
     /// Panic in debug builds when the table is not sorted by `path`, which would
@@ -387,6 +446,52 @@ mod tests {
         assert!(assets.get("assets/nope.css").is_none());
         assert!(assets.get("index.htm").is_none());
         assert!(assets.get("").is_none());
+    }
+
+    #[test]
+    fn read_returns_verbatim_entries_without_a_copy() {
+        let assets = EmbeddedAssets::new("wwwroot", FILES);
+        let bytes = assets.read("index.html").unwrap();
+        assert!(std::ptr::eq(bytes, FILES[1].bytes));
+        // A request path works as-is.
+        assert_eq!(assets.read("/assets/app.css").unwrap(), b"a{}");
+        assert_eq!(assets.read_str("only-embedded.txt"), Some("embedded"));
+        assert!(assets.read("missing.txt").is_none());
+    }
+
+    #[test]
+    fn read_decodes_compressed_entries_once() {
+        let source = "p { margin: 0; }".repeat(64);
+        let encoded: &'static EmbeddedAsset = Box::leak(Box::new(EmbeddedAsset {
+            path: "read-decoded.css",
+            bytes: Box::leak(brotli(&source).into_boxed_slice()),
+            raw_len: source.len(),
+            encoding: ContentEncoding::Brotli,
+            content_type: "text/css",
+            etag: "\"sha256-r\"",
+        }));
+        let assets = EmbeddedAssets::new("wwwroot", std::slice::from_ref(encoded));
+
+        let first = assets.read_str("read-decoded.css").unwrap();
+        assert_eq!(first, source);
+        let second = assets.read_str("read-decoded.css").unwrap();
+        assert!(std::ptr::eq(first.as_ptr(), second.as_ptr()));
+    }
+
+    #[test]
+    fn read_str_rejects_non_utf8() {
+        let binary = EmbeddedAsset {
+            path: "logo.bin",
+            bytes: &[0xff, 0xfe],
+            raw_len: 2,
+            encoding: ContentEncoding::Identity,
+            content_type: "application/octet-stream",
+            etag: "\"sha256-b\"",
+        };
+        let files: &'static [EmbeddedAsset] = Box::leak(Box::new([binary]));
+        let assets = EmbeddedAssets::new("wwwroot", files);
+        assert_eq!(assets.read("logo.bin"), Some(&[0xff, 0xfe][..]));
+        assert!(assets.read_str("logo.bin").is_none());
     }
 
     #[test]

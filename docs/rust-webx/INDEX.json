@@ -413,8 +413,8 @@
             {
               "id": "openapi-spa",
               "title": "OpenAPI 与 SPA 托管",
-              "summary": "API 文档生成与静态站点",
-              "readingTime": 10,
+              "summary": "API 文档生成、静态站点与内嵌文件读取",
+              "readingTime": 11,
               "difficulty": "intermediate"
             },
             {

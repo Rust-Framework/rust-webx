@@ -3,6 +3,36 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [0.5.1] — 2026-10-07
+
+### Added
+
+- **`webx::assets` — read embedded files by path**: `webx::assets::read(path)`
+  and `webx::assets::read_str(path)` return a file's original contents from the
+  table linked by `#[webx::main(embed)]`, anywhere and without a `Host` —
+  `std::fs::read` for the binary itself. Verbatim entries come back without a
+  copy; brotli entries are decoded once and cached for the life of the process
+  (the cache is shared with the SPA middleware). A leading `/` is accepted.
+  Only the compiled-in copy is read — the disk overlay and `WEBX_EMBED` play no
+  part. `None` when the file is not embedded, or nothing is.
+
+  ```rust
+  let config: Option<&'static str> = webx::assets::read_str("config/default.json");
+  let logo: Option<&'static [u8]> = webx::assets::read("images/logo.png");
+  ```
+
+  The table-level form is `EmbeddedAssets::registered()` (`&'static`) with
+  `read` / `read_str` on it, for code that needs the table itself.
+
+  See [`docs/rust-webx/11-production/openapi-spa.md`](docs/rust-webx/11-production/openapi-spa.md#在代码里读取内嵌文件).
+
+### Changed
+
+- `Host::build` looks the table up through `EmbeddedAssets::registered()`, so
+  the host and application code share one lookup (including the panic when
+  more than one table is registered).
+
+
 ## [0.5.0] — 2026-09-20
 
 > Upgrading from 0.4 or earlier: see

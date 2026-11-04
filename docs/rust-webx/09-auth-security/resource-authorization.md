@@ -1,4 +1,8 @@
-# 基于资源的授权
+# 基于资源的授权（自定义策略）
+
+> 日常端点的静态授权（`#[authorize]`）见 [authorize 宏](authorize-macro.md)；运行时按 DB/cache
+> 数据决定的授权见 [IDynamicAuthorizer](authorize-macro.md#动态授权idynamicauthorizer)。本页讲
+> 自定义策略对象 `ResourceAuthorization` / `IAuthorizationPolicy` 及其旧式中间件用法。
 
 ## 核心概念
 
@@ -26,23 +30,28 @@ let policy = ResourceAuthorization::new()
 
 ```rust
 Host::builder()
-    .add_authentication()
-    .use_resource_authorization()  // 从 #[authorize] 元数据构建策略
+    .add_authentication()  // JWT；#[authorize] 规则由端点自己执行
     .build()
 ```
 
-`use_resource_authorization()` 在 **endpoint 层**执行策略（路由匹配后、`route_pattern()` 可用），而非 pipeline 中间件层。这避免了 `resource_auth_middleware` 在路由匹配前无法获知 pattern 的问题。
+`add_authentication()` 注册 JWT 中间件，让受保护端点拿到 claims。`#[authorize]` 的规则是端点
+声明的一部分，由 `StubEndpoint` 在路由匹配后逐条执行（规则之间 AND，规则内 any-of），不需要
+构建额外策略，也没有第二个开关。
+
+> 旧写法 `.use_resource_authorization()` 已过时且不再产生任何效果；端点直接执行规则。
+> `build_resource_policy_from_routes()` 同样已过时——策略按 path 存一组角色/权限，无法忠实
+> 表示同一端点的多条规则。
 
 当前 HTTP 应用的常见做法：
 
 - `add_authentication()` → JWT 中间件
-- `#[authorize]` / `#[authorize(role = "…")]` / `#[authorize(permission = "…")]` → endpoint 内检查
-- `.use_resource_authorization()` → 可选，从编译期元数据构建 `ResourceAuthorization`
-- `IDynamicAuthorizer` → docbit 等应用的自定义策略（如 `RoleAuthorizer`）
+- `#[authorize]` / `#[authorize(role = "…")]` / `#[authorize(permission = "…")]` → 端点规则，由 endpoint 执行
+- `IDynamicAuthorizer` → 应用自定义的动态路由授权（如 docbit `RoleAuthorizer`），详见[动态授权](authorize-macro.md#动态授权idynamicauthorizer)
+- `ResourceAuthorization` + `resource_auth_middleware` → 仅用于自定义 `IAuthorizationPolicy`
 
 ## 手动 middleware（高级）
 
-`resource_auth_middleware` 仍可用于自定义 `IAuthorizationPolicy`，但须在路由匹配之后才能读取 `route_pattern()`。框架内置的 `.use_resource_authorization()` 已在 endpoint 层处理此场景。
+`resource_auth_middleware` 仍可用于自定义 `IAuthorizationPolicy`，但须在路由匹配之后才能读取 `route_pattern()`。内置的路由授权已在 endpoint 层处理此场景。
 
 ## 资源键的匹配方式
 
@@ -54,6 +63,7 @@ Host::builder()
 
 ## 小结
 
-资源授权将路由模式与用户身份关联，实现声明式访问控制。通过 `.use_resource_authorization()` 可从 `#[authorize]` 元数据自动构建策略。
+资源授权将路由模式与用户身份关联，实现声明式访问控制。端点直接执行 `#[authorize]` 规则；
+`Host::endpoints()` 返回的 `IEndpointCatalog` 可把这些端点及其规则组导出给权限系统。
 
 下一节：[authorize 宏与声明式授权](authorize-macro.md)

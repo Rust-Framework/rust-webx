@@ -61,7 +61,9 @@ rust-webx **不是** 全栈 UI 框架（可搭配任意前端）、**不是** OR
 - **编译时路由快捷键** — `#[get("/path")]`、`#[post("/path")]`、`#[put("/path")]`、`#[delete("/path")]` 一行定义完整端点。
 - **编译时自动扫描** — 通过 `inventory` 在编译时收集路由元数据，在 `Host::build()` 时自动注册。
 - **零配置 Handler 注册** — `#[handler]` 属性宏自动向 DI 容器注册 Handler。
-- **认证与授权** — JWT Bearer 认证 + 基于路由模式的资源授权（`#[authorize]`、`#[claims]`）。
+- **认证与授权** — JWT Bearer 认证 + 声明式规则组授权（`#[authorize]`、`#[claims]`）。
+- **端点元数据服务** — `IEndpointCatalog` 在运行时暴露全部端点（`all()` / `localized()`），权限同步、管理导航与 OpenAPI 共用一份元数据。
+- **本地化** — `#[display]` / `#[description]` / `#[category]` 存资源键，全局 `Culture.Default` 决定语言；支持 JSON 资源文件或 `include_str!` 嵌入。
 - **开箱即用的生产能力** — 优雅关闭、动态健康检查、安全响应头、请求 ID、CORS、TLS、速率限制、压缩、OpenAPI + SPA 托管。
 - **文件上传与下载** — `multipart/form-data` 以类型化 `FormFile` 绑定（流式接收、按阈值落盘、大小受控）；下载提供对齐 ASP.NET Core 的 `File(...)` 家族（`file` / `file_stream` / `file_seekable_stream`），自带 `Content-Disposition`、`ETag`、`Last-Modified` 与 `Range`。
 - **ORM 无关** — 框架不依赖 `rust-ef`；`docbit` 参考应用用极少量胶水代码接入。
@@ -98,7 +100,7 @@ rust-webx **不是** 全栈 UI 框架（可搭配任意前端）、**不是** OR
 
 ```
 rust-webx/
-├── Cargo.toml                 # workspace 根 (v0.5.1)
+├── Cargo.toml                 # workspace 根 (v0.6.0)
 ├── crates/
 │   ├── core/                  # rust-webx-core  — trait 与配置
 │   ├── host/                  # rust-webx-host  — Host 构建器、中间件管道
@@ -166,7 +168,10 @@ async fn main() {
 | `IEventHandler<T>` | 事件处理器；通过 `publish()` 广播到所有已注册的 handler。 |
 | `Error` | 统一错误类型，自动映射到 HTTP 状态码。 |
 | `IClaims` / `IAuthenticationHandler` | JWT 认证接口，从 Bearer Token 提取身份。 |
-| `IAuthorizationPolicy` | 授权策略接口；基于路由模式检查角色/权限。 |
+| `IAuthorizationPolicy` | 旧式自定义策略接口；按路由模式检查角色/权限。 |
+| `IDynamicAuthorizer` | 路由级运行时授权（DB/cache/功能开关），在静态 `#[authorize]` 规则之后执行。 |
+| `IEndpointCatalog` | 运行时端点元数据（`all()` / `localized()`）；DI 注入或 `host.endpoints()`。 |
+| `IStringLocalizer` | 端点文本/OpenAPI 的资源键查找；默认 culture 来自 `Culture.Default`。 |
 
 ### 请求处理流程
 

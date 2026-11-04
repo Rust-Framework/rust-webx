@@ -28,8 +28,8 @@ pub use webx_core::cache::{
     trait_def::{CacheError, IDistributedCache},
 };
 pub use webx_core::config::{
-    bind_config, bind_root, load_appsettings, AppOptions, AppSection, CorsSection, IAppOptions,
-    JwtSection, MetricsSection, RateLimitSection, TlsSection,
+    bind_config, bind_root, load_appsettings, AppOptions, AppSection, CorsSection, CultureSection,
+    IAppOptions, JwtSection, MetricsSection, RateLimitSection, TlsSection,
 };
 pub use webx_core::dispatch_runtime::{dispatch_provider, DispatchRuntime};
 pub use webx_core::error::{Error, Result};
@@ -43,6 +43,9 @@ pub use webx_core::http::{
     FileBody, FileSource, FromHttpContext, HttpStatus, IClaimsExt, IHttpContext, IHttpRequest,
     IHttpResponse, Json, ResponseBody, SeekableReader, STREAM_BUF_SIZE,
 };
+pub use webx_core::localization::{
+    IStringLocalizer, LocalizationOptions, LocalizedString, StringLocalizer, TextRef,
+};
 pub use webx_core::mediator::build_pipeline_chain;
 pub use webx_core::mediator::{IEventRequest, IMediator, IRequest};
 pub use webx_core::middleware::IMiddleware;
@@ -54,6 +57,9 @@ pub use webx_core::paths::{
 pub use webx_core::pipeline::{BoxedNextFn, BoxedPipelineFuture, IPipelineBehavior};
 pub use webx_core::problem::{FieldError, ProblemDetails};
 pub use webx_core::request_context::RequestContext;
+pub use webx_core::route::catalog::{
+    EndpointCatalog, EndpointDescriptor, EndpointInfo, IEndpointCatalog,
+};
 pub use webx_core::route::diagnostics::{
     duplicate_handlers, format_route_diagnostics, orphan_handlers, orphan_route_details,
     orphan_routes, route_snapshots,
@@ -66,13 +72,14 @@ pub use webx_core::route::ext::{is_mediator_active, should_scan_endpoints, IServ
 pub use webx_core::route::params::try_deserialize_from_params;
 #[allow(deprecated)]
 pub use webx_core::route::scan::{
-    global_provider, set_global_provider, HandlerCache, HandlerEntry, HandlerRegistration,
-    HandlerRegistry, ParamMeta, RequestParamEntry, ResponseData, RouteDispatch, RouteDispatchFn,
-    RouteEntry,
+    global_provider, set_global_provider, AuthorizeRule, HandlerCache, HandlerEntry,
+    HandlerRegistration, HandlerRegistry, ParamMeta, RequestParamEntry, ResponseData,
+    RouteDispatch, RouteDispatchFn, RouteEntry,
 };
 
 // --- HTTP layer ---
 pub use webx_host::auth_jwt::{init_jwt_secret, jwt_middleware, jwt_secret, JwtAuth, JwtClaims};
+#[allow(deprecated)]
 pub use webx_host::authz::{
     build_resource_policy_from_routes, collect_authorizers, resource_auth_middleware,
     AuthorizerSet, ResourceAuthorization,
@@ -132,9 +139,11 @@ pub mod assets {
 pub use webx_openapi::{generate_openapi_spec, APIUI_HTML};
 
 // --- Macros ---
+#[doc(hidden)]
+pub use webx_macros::{__webx_category, __webx_description, __webx_display};
 pub use webx_macros::{
-    authorize, claims, delete, embed_assets, endpoint, get, handler, main, post, put,
-    WebxRequestMeta,
+    authorize, category, claims, delete, description, display, embed_assets, endpoint, get,
+    handler, main, post, put, WebxRequestMeta,
 };
 
 // --- Re-export rust_dix (for manual registration, #[inject] auto-registration, and module blocks) ---

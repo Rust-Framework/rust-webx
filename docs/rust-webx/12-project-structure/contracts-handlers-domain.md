@@ -32,8 +32,8 @@ impl IRequest<DocIndex> for GetDocIndexRequest {}
 特点：
 
 - Request、Response DTO、共享 enum、`I…Service` trait 均在此层
-- 路由宏、`#[authorize]` 等元数据在此声明
-- 是 OpenAPI 生成的数据源；团队讨论 API 时**只看 contracts**
+- 路由宏、`#[authorize]`、`#[display]` / `#[description]` / `#[category]` 等元数据在此声明
+- 是 OpenAPI 与 `IEndpointCatalog` 的共同数据源；团队讨论 API 时**只看 contracts**
 - **不含** `async fn` 业务实现、数据库访问
 
 > `IDocumentService` 是 docbit 抽取的唯一服务接口；博客等模块由 mediator 直接操作 `DbContext`，见 [可复用的模式提炼](../15-case-study/docbit-patterns.md)。

@@ -36,8 +36,10 @@
 
 ## 授权安全
 
-- 最小权限原则：默认 `#[authorize]`，公开端点显式标记
-- 敏感操作要求特定 role/permission
+- 最小权限原则：受保护端点显式 `#[authorize]`，公开端点不标注
+- 敏感操作要求特定 role/permission；需要任一角色时用 `roles = ["a", "b"]`（多个 `#[authorize]` 之间是 AND）
+- 动态授权用 `IDynamicAuthorizer`，按 `(method, route_pattern)` 缓存授权结果；不要每次请求查库
+- `IDynamicAuthorizer` 只做路由级判断；资源所有权/租户实例隔离在 Handler 内完成
 - 不在客户端存储 Secret
 
 ## 响应头

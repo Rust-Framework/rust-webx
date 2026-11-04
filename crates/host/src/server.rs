@@ -14,12 +14,14 @@ use webx_core::config::{self, AppOptions};
 use webx_core::error::Result;
 use webx_core::handler::IHostedService;
 use webx_core::http::IHttpContext;
+use webx_core::localization::{IStringLocalizer, LocalizationOptions, StringLocalizer};
 use webx_core::middleware::IMiddleware;
 use webx_core::mode::AppMode;
+use webx_core::route::catalog::{EndpointCatalog, IEndpointCatalog};
 use webx_core::routing::{HttpMethod, IEndpoint, IRouter};
 
 use crate::auth_jwt::{init_jwt_secret, jwt_middleware, JwtAuth};
-use crate::authz::{build_resource_policy_from_routes, collect_authorizers};
+use crate::authz::collect_authorizers;
 use crate::context::{BodyLimits, HttpContext, RespBody};
 use crate::cors::{CorsConfig, CorsMiddleware};
 use crate::endpoint::{StaticHtmlEndpoint, StaticJsonEndpoint, StubEndpoint};
@@ -109,6 +111,10 @@ pub struct Host {
     provider: Arc<ServiceProvider>,
     dispatch_runtime: Arc<DispatchRuntime>,
     pub options: AppOptions,
+    /// Endpoint metadata for this host, built once from the compile-time routes.
+    endpoints: Arc<dyn IEndpointCatalog>,
+    /// Resolves endpoint resource keys for the host's configured culture.
+    localizer: Arc<dyn IStringLocalizer>,
     /// Body and upload limits, derived from `App` + `Form` configuration.
     body_limits: BodyLimits,
     pipeline: Arc<MiddlewarePipeline>,
@@ -136,7 +142,7 @@ pub struct HostBuilder {
     options_modifiers: Vec<Box<dyn FnOnce(&mut AppOptions) + Send>>,
     cors_config: Option<CorsConfig>,
     auth_enabled: bool,
-    resource_auth_enabled: bool,
+    localization: Option<LocalizationOptions>,
     health_registry: Arc<HealthCheckRegistry>,
 }
 
@@ -173,7 +179,7 @@ impl HostBuilder {
             options_modifiers: Vec::new(),
             cors_config: None,
             auth_enabled: false,
-            resource_auth_enabled: false,
+            localization: None,
             health_registry: HealthCheckRegistry::new(),
         }
     }
@@ -275,11 +281,13 @@ impl HostBuilder {
         self
     }
 
-    /// Register JWT authentication service and middleware.
+    /// Register the JWT authentication service and middleware.
     ///
-    /// 参考 ASP.NET Core 的 `services.AddAuthentication()` + `app.UseAuthentication()`：
-    /// 启用 JWT Bearer Token 认证，中间件自动添加到管道。授权（`#[authorize]`）
-    /// 由框架通过编译期元数据自动收集，无需显式调用。
+    /// The ASP.NET Core `AddAuthentication()` + `UseAuthentication()` pair: it
+    /// enables JWT bearer authentication so endpoints that declare
+    /// `#[authorize]` receive claims. Route authorization itself is part of each
+    /// endpoint's compile-time metadata and is always enforced after routing —
+    /// there is no second switch to turn it on.
     ///
     /// ```ignore
     /// Host::builder()
@@ -291,14 +299,56 @@ impl HostBuilder {
         self
     }
 
-    /// Enable resource-based authorization using compile-time `#[authorize]` metadata.
+    /// Enable localization with the conventional resource layout.
     ///
-    /// Builds a [`ResourceAuthorization`](crate::authz::ResourceAuthorization)
-    /// policy from route inventory and enforces it
-    /// at the endpoint layer (after routing, when `route_pattern()` is available).
-    /// Requires `add_authentication()` for JWT claims.
-    pub fn use_resource_authorization(mut self) -> Self {
-        self.resource_auth_enabled = true;
+    /// Reads `<culture>.json` files from `locales/` under the application base
+    /// (for example `locales/zh-CN.json`, `locales/en.json`). The active culture
+    /// is `Culture.Default` from appsettings (or `APP__Culture__Default`); it
+    /// decides the language of endpoint names, OpenAPI, and the endpoint
+    /// catalog.
+    ///
+    /// ```ignore
+    /// Host::builder().add_localization().build()
+    /// ```
+    ///
+    /// A missing `locales/` directory is not an error; keys then fall back to
+    /// their literal or the key itself. For a single-file deployment, register
+    /// compiled-in resources with [`Self::add_localization_with`].
+    pub fn add_localization(mut self) -> Self {
+        self.localization = Some(LocalizationOptions::new());
+        self
+    }
+
+    /// Enable localization with explicit options.
+    ///
+    /// Use this for compiled-in resources (`include_str!`) or a non-conventional
+    /// resource directory. Explicit resources override files with the same
+    /// culture and key.
+    ///
+    /// ```ignore
+    /// Host::builder()
+    ///     .add_localization_with(
+    ///         LocalizationOptions::none()
+    ///             .resources("zh-CN", include_str!("../locales/zh-CN.json"))
+    ///             .resources("en", include_str!("../locales/en.json")),
+    ///     )
+    ///     .build()
+    /// ```
+    pub fn add_localization_with(mut self, options: LocalizationOptions) -> Self {
+        self.localization = Some(options);
+        self
+    }
+
+    /// Deprecated: route authorization is enforced from endpoint metadata.
+    ///
+    /// Every endpoint that declares `#[authorize]` is checked by the endpoint
+    /// itself, after routing; there is no separate policy switch. This method
+    /// does nothing and will be removed in a future major release.
+    #[deprecated(
+        since = "0.6.0",
+        note = "Route authorization is enforced from endpoint metadata; remove this call"
+    )]
+    pub fn use_resource_authorization(self) -> Self {
         self
     }
 
@@ -404,6 +454,27 @@ impl HostBuilder {
                 .try_init();
         }
 
+        // Load configuration first: the localizer and endpoint catalog need the
+        // host-wide culture, and both are registered in DI.
+        let appsettings =
+            config::load_appsettings(self.mode).unwrap_or_else(|| serde_json::json!({}));
+        let mut options: AppOptions = config::bind_root(&appsettings);
+        for modifier in self.options_modifiers {
+            modifier(&mut options);
+        }
+
+        let default_culture = if options.culture.default.trim().is_empty() {
+            "en".to_string()
+        } else {
+            options.culture.default.clone()
+        };
+        let localization = self.localization.unwrap_or_else(LocalizationOptions::none);
+        let localizer: Arc<dyn IStringLocalizer> = Arc::new(
+            StringLocalizer::new(default_culture, &localization)
+                .unwrap_or_else(|error| panic!("Invalid localization resources: {error}")),
+        );
+        let endpoints: Arc<dyn IEndpointCatalog> = Arc::new(EndpointCatalog::from_inventory());
+
         let mut svc = ServiceCollection::from_injected();
         for cfg in self.service_configs {
             svc = cfg(svc);
@@ -412,6 +483,12 @@ impl HostBuilder {
         // Register HealthCheckRegistry as a singleton for handler injection.
         let health_registry = Arc::clone(&self.health_registry);
         svc = svc.instance(health_registry);
+
+        // Endpoint metadata and localization are host services, not globals.
+        let endpoints_for_di = Arc::clone(&endpoints);
+        svc = svc.singleton::<dyn IEndpointCatalog>(move |_| Arc::clone(&endpoints_for_di));
+        let localizer_for_di = Arc::clone(&localizer);
+        svc = svc.singleton::<dyn IStringLocalizer>(move |_| Arc::clone(&localizer_for_di));
 
         let provider = svc.build().unwrap_or_else(|e| {
             panic!(
@@ -423,13 +500,6 @@ impl HostBuilder {
         // Per-host dispatch runtime (provider + handler registry).
         let handler_cache = Arc::new(webx_core::route::scan::HandlerCache::build());
         let dispatch_runtime = Arc::new(DispatchRuntime::new(Arc::clone(&provider), handler_cache));
-
-        let appsettings =
-            config::load_appsettings(self.mode).unwrap_or_else(|| serde_json::json!({}));
-        let mut options: AppOptions = config::bind_root(&appsettings);
-        for modifier in self.options_modifiers {
-            modifier(&mut options);
-        }
 
         // Upload spooling and body limits come from the same merged config.
         let body_limits = BodyLimits::from_options(&options);
@@ -569,13 +639,6 @@ impl HostBuilder {
             dispatch_map.insert(dispatch.handler_type, dispatch.dispatch);
         }
 
-        let resource_policy: Option<Arc<crate::authz::ResourceAuthorization>> =
-            if self.resource_auth_enabled {
-                Some(Arc::new(build_resource_policy_from_routes()))
-            } else {
-                None
-            };
-
         for entry in inventory::iter::<RouteEntry> {
             route_count += 1;
             let stub = Arc::new(StubEndpoint {
@@ -583,15 +646,17 @@ impl HostBuilder {
                 path: entry.path,
                 handler_type: entry.handler_type,
                 dispatch_fn: dispatch_map.get(entry.handler_type).copied(),
-                auth_required_role: entry.required_role,
-                auth_required_permission: entry.required_permission,
-                resource_policy: resource_policy.clone(),
+                authorization: entry.authorization,
                 authorizers: collect_authorizers(provider.as_ref()),
             });
             router.register(entry.method, entry.path, stub);
         }
 
-        let openapi_spec = generate_openapi_spec("Rust WebX API", env!("CARGO_PKG_VERSION"));
+        let openapi_spec = generate_openapi_spec(
+            "Rust WebX API",
+            env!("CARGO_PKG_VERSION"),
+            localizer.as_ref(),
+        );
         if self.mode == AppMode::Development {
             let openapi_bytes = serde_json::to_vec(&openapi_spec).unwrap_or_default();
             router.register(
@@ -697,6 +762,8 @@ impl HostBuilder {
             provider,
             dispatch_runtime,
             options,
+            endpoints,
+            localizer,
             body_limits,
             pipeline,
             router,
@@ -777,6 +844,20 @@ impl Host {
     /// Instance-scoped dispatch runtime (provider + handler cache).
     pub fn dispatch_runtime(&self) -> &Arc<DispatchRuntime> {
         &self.dispatch_runtime
+    }
+
+    /// Endpoint metadata for this host.
+    ///
+    /// Built once from the compile-time route table; use it instead of reading
+    /// `inventory` directly. Resolve names through [`Self::localizer`] or the
+    /// DI-registered `IStringLocalizer`.
+    pub fn endpoints(&self) -> &dyn IEndpointCatalog {
+        &*self.endpoints
+    }
+
+    /// Localizer for this host's configured `Culture.Default`.
+    pub fn localizer(&self) -> &dyn IStringLocalizer {
+        &*self.localizer
     }
 
     /// Start the server on all URLs configured in AppOptions.app.Urls.

@@ -15,7 +15,7 @@
     "demoUrl": "",
     "featured": true,
     "sortOrder": 1,
-    "version": "0.5.1",
+    "version": "0.6.0",
     "language": "zh-CN",
     "author": "Start",
     "logo": "logo.svg",
@@ -583,6 +583,13 @@
           "title": "迁移指南",
           "subtitle": "版本升级、ASP.NET Core 与 Axum / Actix 迁移",
           "sections": [
+            {
+              "id": "upgrade-to-0.6",
+              "title": "升级到 0.6（破坏性变更）",
+              "summary": "端点目录、授权规则组、资源键本地化与 Culture",
+              "readingTime": 18,
+              "difficulty": "intermediate"
+            },
             {
               "id": "upgrade-to-0.5",
               "title": "升级到 0.5（破坏性变更）",

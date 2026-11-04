@@ -10,7 +10,7 @@ Host::builder().add_authentication().build().run().await?;
 1. 从 `appsettings.json` 读取 `Jwt.Secret`
 2. 注册 `jwt_middleware`
 
-资源级授权不由 `add_authentication()` 注册；需要时显式调用 `.use_resource_authorization()`（见[基于资源的授权](resource-authorization.md)）。
+`add_authentication()` 只负责 JWT 认证；`#[authorize]` 规则由端点自己执行，未满足时返回 401/403（见 [authorize 宏](authorize-macro.md)）。旧的 `.use_resource_authorization()` 已过时，无需调用。
 
 ## 配置
 

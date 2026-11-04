@@ -17,7 +17,7 @@ pub trait IEndpoint: Send + Sync {
 | `ControllerEndpoint` | 自定义函数式 endpoint（接受闭包） |
 | `StaticJsonEndpoint` | 返回固定 JSON |
 | `StaticHtmlEndpoint` | 返回固定 HTML |
-| `StubEndpoint` | 由路由宏在编译期注册，绑定请求并调用 Handler |
+| `StubEndpoint` | `Host::build()` 根据 `RouteEntry` 创建的路由端点，执行授权、参数绑定并调用 Handler |
 
 ## 自定义 Endpoint 示例
 

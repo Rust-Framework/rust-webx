@@ -12,7 +12,7 @@ Phased plan to address findings from the rust-webx architectural review. **Phase
 | P2 | Deprecate `register_handlers!` for HTTP | **Done** | `#[deprecated]` on macro; docs updated |
 | P2 | Doc accuracy: authorize / query / Resource Auth | **Done** | Query binding, permission parse, Resource Auth wiring documented |
 | P3 | Unify handler registration model | **Done** | Inventory canonical; `register_handlers!` deprecated for HTTP |
-| P3 | Query binding / `authorize(permission)` / Resource Auth wiring | **Done** | Query binding, permission parse, `use_resource_authorization()` |
+| P3 | Query binding / `authorize(permission)` / Resource Auth wiring | **Done** | Query binding, permission parse, `#[authorize]` rules executed by the endpoint |
 | P4 | Reduce global state (`ServiceProvider` / `HandlerCache`) | **Done** | `DispatchRuntime` on `Host`; globals deprecated shim only |
 | P4 | OpenAPI query param metadata | **Done** | `#[derive(WebxRequestMeta)]` + merge in `generate_openapi_spec` |
 | P4 | Duplicate handler diagnostics | **Done** | `duplicate_handlers()` in `--doctor` and startup warnings |
@@ -91,8 +91,8 @@ Docs previously described `dyn IRequestHandler` DI lookup as the primary path. T
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Query binding | **Done** | GET/DELETE merges route + query params via `Deserialize` |
-| `#[authorize(permission = "…")]` | **Done** | Parsed into `RouteEntry.required_permission` |
-| Resource Auth wiring | **Done** | `HostBuilder::use_resource_authorization()` builds policy at endpoint layer |
+| `#[authorize(permission = "…")]` | **Done** | Parsed into `RouteEntry.authorization` |
+| Resource Auth wiring | **Done** | StubEndpoint enforces `RouteEntry.authorization`; policy helper deprecated |
 
 ---
 

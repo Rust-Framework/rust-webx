@@ -9,6 +9,7 @@
 //! macro output to runtime routing.
 
 use crate::http::ResponseBody;
+use crate::localization::TextRef;
 use crate::routing::HttpMethod;
 use std::any::Any;
 use std::collections::HashMap;
@@ -79,6 +80,53 @@ pub struct ParamMeta {
     pub type_hint: &'static str,
 }
 
+/// One `#[authorize]` declaration on an endpoint.
+///
+/// Every rule on an endpoint must be satisfied (AND). Within a rule, a non-empty
+/// `roles` list means "the user has any of these roles" and a non-empty
+/// `permissions` list means "the user has any of these permissions"; the two
+/// dimensions are ANDed. Empty lists leave a dimension unconstrained, so a rule
+/// with both empty means "any authenticated user".
+///
+/// Multiple values in one declaration
+/// (`#[authorize(roles = ["admin", "auditor"])]`) express alternatives; multiple
+/// `#[authorize]` attributes express requirements that all have to hold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct AuthorizeRule {
+    /// Any-of role names; empty = no role constraint.
+    pub roles: &'static [&'static str],
+
+    /// Any-of permission names; empty = no permission constraint.
+    pub permissions: &'static [&'static str],
+}
+
+impl AuthorizeRule {
+    /// A rule that only requires a valid authenticated principal.
+    pub const fn authenticated() -> Self {
+        Self {
+            roles: &[],
+            permissions: &[],
+        }
+    }
+
+    /// Whether this rule is satisfied by the given claims.
+    ///
+    /// The `"authenticated"` sentinel is accepted in `roles` for hand-written
+    /// metadata; a rule with no constraints has the same meaning.
+    pub fn matches(&self, roles: &[String], permissions: &[String]) -> bool {
+        let role_ok = self.roles.is_empty()
+            || self.roles.iter().any(|required| {
+                *required == "authenticated" || roles.iter().any(|actual| actual == required)
+            });
+        let permission_ok = self.permissions.is_empty()
+            || self
+                .permissions
+                .iter()
+                .any(|required| permissions.iter().any(|actual| actual == required));
+        role_ok && permission_ok
+    }
+}
+
 /// A route entry registered at compile time via `#[endpoint]` (or its shortcuts `#[get]`/`#[post]`/...).
 ///
 /// Collected by the `inventory` crate and read at application startup.
@@ -97,20 +145,29 @@ pub struct RouteEntry {
     /// OpenAPI response type name (e.g., `"UserModel"`, `"Vec<UserModel>"`, `"String"`).
     pub rsp_type: &'static str,
 
-    /// Human-readable summary for OpenAPI docs (e.g., "Get user by ID").
-    pub summary: &'static str,
+    /// Human-readable endpoint name, as a resource reference.
+    ///
+    /// From `#[display]`, else the first line of the impl block's `///` doc
+    /// comment, else a name generated from the request type.
+    pub name: TextRef,
 
-    /// Optional long-form description from `///` doc comments on the impl block.
-    pub description: &'static str,
+    /// Long-form description, as a resource reference.
+    ///
+    /// From `#[description]`, else the impl block's `///` doc comment.
+    pub description: TextRef,
+
+    /// Optional grouping label, as a resource reference.
+    ///
+    /// From `#[category]`; empty when the endpoint is uncategorized. Categories
+    /// are for display grouping only — they do not affect routing or
+    /// authorization.
+    pub category: TextRef,
 
     /// OpenAPI parameter metadata: path params, body params, etc.
     pub params: &'static [ParamMeta],
 
-    /// "" = public, "authenticated" = any valid JWT, otherwise specific role name.
-    pub required_role: &'static str,
-
-    /// Non-empty when `#[authorize(permission = "...")]` is declared.
-    pub required_permission: &'static str,
+    /// Authorization rules from `#[authorize]`; empty = public endpoint.
+    pub authorization: &'static [AuthorizeRule],
 }
 
 // Collect RouteEntry instances at compile time using `inventory`.
@@ -418,22 +475,22 @@ impl RouteEntry {
         path: &'static str,
         handler_type: &'static str,
         rsp_type: &'static str,
-        summary: &'static str,
-        description: &'static str,
+        name: TextRef,
+        description: TextRef,
+        category: TextRef,
         params: &'static [ParamMeta],
-        required_role: &'static str,
-        required_permission: &'static str,
+        authorization: &'static [AuthorizeRule],
     ) -> Self {
         Self {
             method,
             path,
             handler_type,
             rsp_type,
-            summary,
+            name,
             description,
+            category,
             params,
-            required_role,
-            required_permission,
+            authorization,
         }
     }
 }

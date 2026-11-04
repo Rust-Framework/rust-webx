@@ -2,16 +2,25 @@
 //!
 //! Scans the inventory for all registered routes and builds
 //! a rich OpenAPI JSON document with parameters, request bodies,
-//! response schemas, and summaries.
+//! response schemas, names, and descriptions.
 
 use serde_json::{json, Value as JsonValue};
 use std::collections::{BTreeSet, HashMap};
+use webx_core::localization::IStringLocalizer;
 use webx_core::route::scan::{ParamMeta, RequestParamEntry, RouteEntry};
 
 /// Generate an OpenAPI 3.0.3 specification from registered routes.
 ///
+/// Endpoint names and descriptions are resolved through `localizer` using the
+/// host's configured default culture; OpenAPI has no multi-language operation
+/// text, so one document is produced per hosted language.
+///
 /// Returns a `serde_json::Value` that can be serialized to JSON.
-pub fn generate_openapi_spec(title: &str, version: &str) -> JsonValue {
+pub fn generate_openapi_spec(
+    title: &str,
+    version: &str,
+    localizer: &dyn IStringLocalizer,
+) -> JsonValue {
     let request_params = collect_request_params();
     let mut paths = serde_json::Map::new();
     let mut tags_set = BTreeSet::new();
@@ -19,7 +28,14 @@ pub fn generate_openapi_spec(title: &str, version: &str) -> JsonValue {
     for entry in inventory::iter::<RouteEntry> {
         let entry = entry.clone();
         let method = entry.method.as_str().to_lowercase();
-        let tag = extract_tag(entry.path);
+        // `#[category]` is the explicit grouping; fall back to the path-derived
+        // tag so uncategorized endpoints keep their documentation grouping.
+        let category = localizer.resolve(entry.category).value;
+        let tag = if category.is_empty() {
+            extract_tag(entry.path)
+        } else {
+            category
+        };
         tags_set.insert(tag.clone());
 
         let mut parameters = Vec::new();
@@ -45,16 +61,18 @@ pub fn generate_openapi_spec(title: &str, version: &str) -> JsonValue {
         }
 
         let operation_id = to_operation_id(entry.handler_type);
+        let summary = localizer.resolve(entry.name).value;
 
         let mut operation = json!({
             "operationId": operation_id,
-            "summary": entry.summary,
+            "summary": summary,
             "responses": build_responses(entry.rsp_type),
             "tags": [tag],
         });
 
-        if !entry.description.is_empty() {
-            operation["description"] = json!(entry.description);
+        let description = localizer.resolve(entry.description).value;
+        if !description.is_empty() {
+            operation["description"] = json!(description);
         }
 
         if !parameters.is_empty() {

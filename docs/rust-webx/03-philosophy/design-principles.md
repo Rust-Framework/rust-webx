@@ -54,7 +54,7 @@ graph LR
 
 - **新端点**：添加 Request + Handler 文件，不修改 `main.rs` 路由表
 - **新中间件**：`impl IMiddleware` + 注册，不修改管道源码
-- **新授权策略**：实现 `IAuthorizationPolicy` 或扩展 `ResourceAuthorization`
+- **新授权策略**：实现 `IDynamicAuthorizer`（路由级运行时策略）；自定义 `IAuthorizationPolicy` 用于旧式/特殊策略
 
 ## 依赖倒置（DIP）
 

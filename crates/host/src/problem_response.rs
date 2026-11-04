@@ -60,7 +60,7 @@ pub async fn write_problem(ctx: &mut dyn IHttpContext, status: u16, detail: impl
     write_problem_response(ctx, build_problem(status, detail)).await;
 }
 
-/// 403 with optional extension fields (e.g. `required_role`).
+/// 403 with optional extension fields (e.g. `required_roles`).
 pub async fn write_forbidden(
     ctx: &mut dyn IHttpContext,
     detail: impl Into<String>,

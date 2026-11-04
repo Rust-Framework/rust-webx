@@ -3,6 +3,146 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [0.6.0] — 2026-11-04
+
+### Added
+
+- **Global `Culture` configuration** — `Culture.Default` in `appsettings.json`
+  (or `APP__Culture__Default`) is the host-wide UI culture. Endpoint names,
+  OpenAPI, and the endpoint catalog use it; request headers do not change
+  administrative output, so permission/menu records cannot drift with the
+  caller's browser language. Default: `"en"`.
+
+  ```json
+  { "Culture": { "Default": "zh-CN" } }
+  ```
+
+- **`#[display]` / `#[description]` take resource references, not translations** —
+  `#[display("literal")]`, `#[display(key = "...")]`, or
+  `#[display(key = "...", text = "literal")]`. Translations live in per-culture
+  resource files; the active culture resolves them. When no `#[display]` is
+  present, the first line of a `///` doc comment is used, and the request type
+  name is the last fallback for the name.
+
+  ```rust
+  #[post("/api/blog")]
+  #[display(key = "endpoint.blog.create.name", text = "博客模块-创建博客")]
+  #[description(key = "endpoint.blog.create.description")]
+  #[category("博客模块")]
+  #[authorize(permission = "blog:create")]
+  impl IRequest<BlogPostModel> for CreateBlogPostRequest {}
+  ```
+
+- **`#[category]` — optional grouping label** — accepted by the route macros and
+  carried by `RouteEntry.category` / `EndpointDescriptor.category` /
+  `EndpointInfo.category` (resolved like name/description). It is display-only
+  metadata: it does not affect routing or authorization, and OpenAPI uses it as
+  the operation tag when set. Localization/resource-key forms match
+  `#[display]`.
+
+- **`IStringLocalizer` / `StringLocalizer` / `LocalizationOptions`** — the .NET
+  model in Rust: resources are JSON objects, either read from
+  `locales/<culture>.json` at startup or embedded with `include_str!`; lookup
+  falls back from the exact culture to parent cultures, the default culture, the
+  literal fallback, then the key itself. `LocalizedString.resource_not_found`
+  marks missing keys.
+
+  ```rust
+  // Conventional layout: locales/<culture>.json
+  Host::builder().add_localization().build();
+
+  // Single-file deployment: compile resources into the binary
+  Host::builder().add_localization_with(
+      LocalizationOptions::none()
+          .resources("zh-CN", include_str!("../locales/zh-CN.json"))
+          .resources("en", include_str!("../locales/en.json")),
+  )
+  ```
+
+- **`IEndpointCatalog` — the runtime endpoint metadata service** — built once in
+  `Host::build()`, registered in DI as `Arc<dyn IEndpointCatalog>`, and exposed
+  as `Host::endpoints()` (the `EndpointDataSource` analogue). `all()` returns the
+  language-neutral `&[EndpointDescriptor]` (also `Serialize`), `get(method, path)`
+  looks one up, and `localized()` / `localized_for(culture)` produce
+  `EndpointInfo` rows sorted by `path` then `method`.
+
+  ```rust
+  #[derive(Inject)]
+  struct ListEndpointsHandler {
+      #[inject]
+      catalog: Arc<dyn IEndpointCatalog>,
+  }
+
+  // In handle:
+  let all = self.catalog.all(); // &[EndpointDescriptor]
+  ```
+
+  See [`docs/rust-webx/05-request-pattern/route-macros.md`](docs/rust-webx/05-request-pattern/route-macros.md#在-handler-中返回所有路由).
+
+### Changed
+
+- **`#[display]` / `#[description]` / `#[category]` may be declared before or
+  after the route macro.** The text macro carries its arguments on an internal
+  attribute so the route macro reads them in either order; there is no ordering
+  constraint.
+
+- **`RouteEntry.summary` is now `RouteEntry.name`**, and both `name` and
+  `description` are `TextRef` resource references instead of strings. OpenAPI
+  still publishes the resolved name as `summary`, resolved through the host
+  localizer.
+
+- **`generate_openapi_spec(title, version)` is now
+  `generate_openapi_spec(title, version, &dyn IStringLocalizer)`**. The document
+  uses the localizer's default culture (the configured `Culture.Default`), not a
+  per-request locale.
+
+- **`RouteEntry.required_role` / `required_permission` are now
+  `RouteEntry.authorization: &[AuthorizeRule]`**. Every `#[authorize]` is kept as
+  one rule (no longer collapsed into two scalars), which is what makes multiple
+  declarations representable:
+
+  ```rust
+  pub struct AuthorizeRule {
+      pub roles: &'static [&'static str],        // any-of; empty = unconstrained
+      pub permissions: &'static [&'static str],  // any-of; empty = unconstrained
+  }
+  ```
+
+  All rules must be satisfied (AND); within a rule the two dimensions are ANDed,
+  and `roles` / `permissions` accept arrays (`#[authorize(roles = ["admin",
+  "auditor"])]`). The 403 problem response now reports `required_roles` /
+  `required_permissions` arrays instead of `required_role` / `required_permission`
+  strings.
+
+### Deprecated
+
+- **`HostBuilder::use_resource_authorization()`** — endpoints enforce their
+  `#[authorize]` rules directly after routing, so there is no policy switch. The
+  method is a no-op and will be removed in a future major release.
+
+- **`build_resource_policy_from_routes()`** — a `ResourceAuthorization` policy
+  stores one role/permission set per path and cannot faithfully represent several
+  rules on one endpoint. Use an `IDynamicAuthorizer` for custom policies.
+
+### Breaking
+
+- Route metadata field renames and type changes above; `RouteEntry::new` now
+  takes `name` / `description` (`TextRef`), `category`, and `authorization`
+  instead of `summary` / `description` strings and required role/permission
+  scalars. Code that read `RouteEntry.summary` / `required_role` must migrate to
+  `RouteEntry.name` / `authorization`.
+- **`generate_openapi_spec(title, version)` is now
+  `generate_openapi_spec(title, version, &dyn IStringLocalizer)`** — pass
+  `host.localizer()` or a custom localizer.
+- **`StubEndpoint` fields** (host crate) — `auth_required_role`,
+  `auth_required_permission`, and `resource_policy` are replaced by
+  `authorization: &'static [AuthorizeRule]`. Custom endpoint construction must
+  read the rule list instead of two scalars.
+
+See [`docs/rust-webx/16-migration/upgrade-to-0.6.md`](docs/rust-webx/16-migration/upgrade-to-0.6.md)
+for the step-by-step migration.
+
+
 ## [0.5.1] — 2026-10-07
 
 ### Added

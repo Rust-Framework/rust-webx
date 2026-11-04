@@ -9,7 +9,7 @@
 | SecurityHeaders | 自动 | X-Frame-Options 等 |
 | CORS | `use_cors(config)` | 跨域 |
 | JWT Auth | `add_authentication()` | Bearer Token 认证 |
-| Resource Auth | `use_resource_authorization()` | 基于路由元数据的授权 |
+| Resource Auth | 自动（端点上的 `#[authorize]`） | 基于端点元数据的授权 |
 | RateLimit | 配置 `RateLimit.enabled` | 请求速率限制 |
 | SPA | `use_spa("wwwroot")` | 静态文件托管 |
 | RequestTracing | 需手动 `use_middleware::<RequestTracing>()` | 请求日志、注入 `x-trace-id` |

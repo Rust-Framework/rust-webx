@@ -9,10 +9,20 @@ use std::sync::Arc;
 use webx_core::auth::{IClaims, IDynamicAuthorizer};
 use webx_core::error::{Error, Result as LrwfResult};
 use webx_core::http::{IClaimsExt, IHttpContext};
-use webx_core::route::scan::ResponseData;
+use webx_core::route::scan::{AuthorizeRule, ResponseData};
 use webx_core::routing::IEndpoint;
 use webx_host::authz::AuthorizerSet;
 use webx_host::endpoint::StubEndpoint;
+
+const ADMIN_RULE: &[AuthorizeRule] = &[AuthorizeRule {
+    roles: &["admin"],
+    permissions: &[],
+}];
+const AUTHENTICATED_RULE: &[AuthorizeRule] = &[AuthorizeRule::authenticated()];
+const SETTINGS_WRITE_RULE: &[AuthorizeRule] = &[AuthorizeRule {
+    roles: &[],
+    permissions: &["settings:write"],
+}];
 
 // â”€â”€ Mock IClaims â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -95,9 +105,7 @@ async fn endpoint_normal_dispatch_returns_200() {
         path: "/test",
         handler_type: "TestRequest",
         dispatch_fn: Some(mock_dispatch_ok),
-        auth_required_role: "",
-        auth_required_permission: "",
-        resource_policy: None,
+        authorization: &[],
         authorizers: None,
     };
 
@@ -119,9 +127,7 @@ async fn endpoint_no_dispatch_fn_returns_not_implemented() {
         path: "/stub",
         handler_type: "MissingHandler",
         dispatch_fn: None,
-        auth_required_role: "",
-        auth_required_permission: "",
-        resource_policy: None,
+        authorization: &[],
         authorizers: None,
     };
 
@@ -143,9 +149,7 @@ async fn endpoint_auth_required_with_valid_claims_succeeds() {
         path: "/admin",
         handler_type: "AdminRequest",
         dispatch_fn: Some(mock_dispatch_ok),
-        auth_required_role: "admin",
-        auth_required_permission: "",
-        resource_policy: None,
+        authorization: ADMIN_RULE,
         authorizers: None,
     };
 
@@ -169,9 +173,7 @@ async fn endpoint_auth_required_without_claims_returns_401() {
         path: "/admin",
         handler_type: "AdminRequest",
         dispatch_fn: Some(mock_dispatch_ok),
-        auth_required_role: "admin",
-        auth_required_permission: "",
-        resource_policy: None,
+        authorization: ADMIN_RULE,
         authorizers: None,
     };
 
@@ -193,9 +195,7 @@ async fn endpoint_auth_required_wrong_role_returns_403() {
         path: "/admin",
         handler_type: "AdminRequest",
         dispatch_fn: Some(mock_dispatch_ok),
-        auth_required_role: "admin",
-        auth_required_permission: "",
-        resource_policy: None,
+        authorization: ADMIN_RULE,
         authorizers: None,
     };
 
@@ -212,7 +212,7 @@ async fn endpoint_auth_required_wrong_role_returns_403() {
     let (status, _, body) = ctx.into_response_parts();
     assert_eq!(status, 403);
     let body_json: serde_json::Value = serde_json::from_slice(body.as_ref().unwrap()).unwrap();
-    assert_eq!(body_json["required_role"], "admin");
+    assert_eq!(body_json["required_roles"], serde_json::json!(["admin"]));
 }
 
 #[tokio::test]
@@ -222,9 +222,7 @@ async fn endpoint_auth_with_authenticated_role_allows_any_valid_jwt() {
         path: "/profile",
         handler_type: "ProfileRequest",
         dispatch_fn: Some(mock_dispatch_ok),
-        auth_required_role: "authenticated",
-        auth_required_permission: "",
-        resource_policy: None,
+        authorization: AUTHENTICATED_RULE,
         authorizers: None,
     };
 
@@ -249,9 +247,7 @@ async fn endpoint_dynamic_authorizer_denies_access() {
         path: "/secret",
         handler_type: "SecretRequest",
         dispatch_fn: Some(mock_dispatch_ok),
-        auth_required_role: "admin",
-        auth_required_permission: "",
-        resource_policy: None,
+        authorization: ADMIN_RULE,
         authorizers: Some(authorizers),
     };
 
@@ -277,9 +273,7 @@ async fn endpoint_dynamic_authorizer_allows_access() {
         path: "/allowed",
         handler_type: "AllowedRequest",
         dispatch_fn: Some(mock_dispatch_ok),
-        auth_required_role: "admin",
-        auth_required_permission: "",
-        resource_policy: None,
+        authorization: ADMIN_RULE,
         authorizers: Some(authorizers),
     };
 
@@ -305,9 +299,7 @@ async fn endpoint_no_authorizer_skips_dynamic_check() {
         path: "/public-admin",
         handler_type: "AdminRequest",
         dispatch_fn: Some(mock_dispatch_ok),
-        auth_required_role: "admin",
-        auth_required_permission: "",
-        resource_policy: None,
+        authorization: ADMIN_RULE,
         authorizers: None,
     };
 
@@ -332,9 +324,7 @@ async fn endpoint_permission_required_with_valid_permission_succeeds() {
         path: "/settings",
         handler_type: "SettingsRequest",
         dispatch_fn: Some(mock_dispatch_ok),
-        auth_required_role: "",
-        auth_required_permission: "settings:write",
-        resource_policy: None,
+        authorization: SETTINGS_WRITE_RULE,
         authorizers: None,
     };
 
@@ -358,9 +348,7 @@ async fn endpoint_permission_required_missing_permission_returns_403() {
         path: "/settings",
         handler_type: "SettingsRequest",
         dispatch_fn: Some(mock_dispatch_ok),
-        auth_required_role: "",
-        auth_required_permission: "settings:write",
-        resource_policy: None,
+        authorization: SETTINGS_WRITE_RULE,
         authorizers: None,
     };
 
@@ -376,5 +364,79 @@ async fn endpoint_permission_required_missing_permission_returns_403() {
     let (status, _, body) = ctx.into_response_parts();
     assert_eq!(status, 403);
     let body_json: serde_json::Value = serde_json::from_slice(body.as_ref().unwrap()).unwrap();
-    assert_eq!(body_json["required_permission"], "settings:write");
+    assert_eq!(
+        body_json["required_permissions"],
+        serde_json::json!(["settings:write"])
+    );
+}
+
+const ADMIN_AND_EXPORT: &[AuthorizeRule] = &[
+    AuthorizeRule {
+        roles: &["admin"],
+        permissions: &[],
+    },
+    AuthorizeRule {
+        roles: &[],
+        permissions: &["reports:export"],
+    },
+];
+
+const ADMIN_OR_AUDITOR: &[AuthorizeRule] = &[AuthorizeRule {
+    roles: &["admin", "auditor"],
+    permissions: &[],
+}];
+
+#[tokio::test]
+async fn multiple_authorize_rules_must_all_pass() {
+    let endpoint = StubEndpoint {
+        method: "POST",
+        path: "/reports/export",
+        handler_type: "ExportRequest",
+        dispatch_fn: Some(mock_dispatch_ok),
+        authorization: ADMIN_AND_EXPORT,
+        authorizers: None,
+    };
+
+    let mut ctx = test_utils::TestHttpContext::new("POST", "/reports/export");
+    ctx.set_claims(Box::new(MockClaims {
+        sub: "user-1".into(),
+        roles: vec!["admin".into()],
+        permissions: vec![],
+    }));
+
+    let (status, _, body) = {
+        let result = endpoint.handle(&mut ctx).await;
+        assert!(result.is_ok());
+        ctx.into_response_parts()
+    };
+    assert_eq!(status, 403);
+    let body_json: serde_json::Value = serde_json::from_slice(body.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        body_json["required_permissions"],
+        serde_json::json!(["reports:export"])
+    );
+}
+
+#[tokio::test]
+async fn roles_list_is_any_of() {
+    let endpoint = StubEndpoint {
+        method: "GET",
+        path: "/reports",
+        handler_type: "ReportsRequest",
+        dispatch_fn: Some(mock_dispatch_ok),
+        authorization: ADMIN_OR_AUDITOR,
+        authorizers: None,
+    };
+
+    let mut ctx = test_utils::TestHttpContext::new("GET", "/reports");
+    ctx.set_claims(Box::new(MockClaims {
+        sub: "user-1".into(),
+        roles: vec!["auditor".into()],
+        permissions: vec![],
+    }));
+
+    let result = endpoint.handle(&mut ctx).await;
+    assert!(result.is_ok());
+    let (status, _, _) = ctx.into_response_parts();
+    assert_eq!(status, 200);
 }

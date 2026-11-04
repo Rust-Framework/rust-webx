@@ -7,7 +7,7 @@
 | 小节 | 内容 |
 |------|------|
 | [IRequest 与 IRequestHandler](irequest-irequesthandler.md) | 双类型参数模式 |
-| [路由宏详解](route-macros.md) | get/post/put/delete/authorize |
+| [路由宏详解](route-macros.md) | get/post/put/delete、端点名称/分类、端点目录 |
 | [Handler 注册策略](handler-registration.md) | handler 宏、手动注册、inject |
 | [参数绑定与序列化](parameter-binding.md) | 路径参数、Body、Query |
 | [文件上传与下载](file-upload-download.md) | multipart 表单、FormFile、文件响应与 Range |

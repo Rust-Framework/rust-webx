@@ -15,28 +15,33 @@
 ```rust
 // 宏展开后大致等价于：
 inventory::submit! {
-    RouteEntry {
-        method: HttpMethod::Get,
-        path: "/hello",
-        request_type: TypeId::of::<HelloRequest>(),
-        response_type: ...,
-        ...
-    }
+    RouteEntry::new(
+        HttpMethod::Get,
+        "/hello",
+        "HelloRequest",       // handler_type
+        "String",             // rsp_type
+        TextRef::text("hello"), // name: 资源引用
+        TextRef::text(""),      // description
+        TextRef::text(""),      // category
+        &[],                    // params
+        &[],                    // authorization
+    )
 }
 ```
 
-每个 `#[get]`、`#[post]` 等宏在展开时向 `inventory` 提交一条 `RouteEntry`。
+每个 `#[get]`、`#[post]` 等宏在展开时向 `inventory` 提交一条 `RouteEntry`。这同一份元数据随后被
+`IEndpointCatalog` 与 OpenAPI 消费，不需要再维护第二张路由表。
 
 ## Host::build() 扫描流程
 
 ```mermaid
 graph TD
-    A[Host::build] --> B[inventory::iter 遍历 RouteEntry]
-    B --> C[构建 Trie Router + RouteDispatch]
-    C --> D[inventory::iter 遍历 HandlerRegistration]
-    D --> E[构建 HandlerCache]
+    A[Host::build] --> B[加载 AppOptions / Culture]
+    B --> C[构建 StringLocalizer + EndpointCatalog]
+    C --> D[构建 ServiceProvider 并注册两个服务]
+    D --> E[构建 HandlerCache / DispatchRuntime]
     E --> F[assert_route_configuration_valid]
-    F --> G[构建 ServiceProvider]
+    F --> G[inventory 遍历 RouteEntry 构建 StubEndpoint + Router]
     G --> H[生成 OpenAPI spec]
 ```
 
@@ -50,7 +55,9 @@ graph TD
 | Path Pattern | `/api/users/{id}` |
 | Request Type | `GetUserRequest` |
 | Response Type | `UserDto` |
-| Authorize | 可选的角色/权限要求 |
+| Name / Description | `#[display]` / `#[description]` 资源引用（`TextRef`），回退到 `///` |
+| Category | `#[category]` 分组标签（可选，`TextRef`） |
+| Authorization | `#[authorize]` 规则列表（`AuthorizeRule`） |
 
 ## Handler 收集
 
@@ -85,9 +92,17 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler { ... }
 
 ## 授权元数据收集
 
-`#[authorize(role = "admin")]` 在编译期收集授权要求；`build_resource_policy_from_routes()` 依据路由元数据构建 `ResourceAuthorization` 策略对象，`collect_authorizers()` 则从 DI 收集 `IDynamicAuthorizer` 并返回 `Option<Arc<AuthorizerSet>>`。
+每个 `#[authorize]` 在编译期收集为一条 `AuthorizeRule`（`roles` / `permissions` 列表），
+`RouteEntry.authorization` 保存完整规则组。`StubEndpoint` 在 dispatch 前逐条执行：规则之间 AND，
+规则内 any-of；没有规则表示公开。`IEndpointCatalog` 把同一份规则组暴露给权限系统，OpenAPI 与
+权限同步不需要再解析宏文本。
 
-> **注意：** `add_authentication()` 仅注册 JWT 中间件，**不会**自动挂载 `resource_auth_middleware`。路由级授权在 `StubEndpoint` 内执行；全局 Resource Auth 中间件需手动添加。详见 [资源授权](../09-auth-security/resource-authorization.md)。
+旧 `build_resource_policy_from_routes()` 已过时，不再参与 HTTP 分发；`collect_authorizers()` 仍从 DI
+收集 `IDynamicAuthorizer`，作为端点的额外动态检查。
+
+> **注意：** `add_authentication()` 仅注册 JWT 中间件，让受保护端点拿到 claims；`#[authorize]` 规则
+> 由端点自己执行，不需要额外的策略开关。`resource_auth_middleware` 仅用于自定义
+> `IAuthorizationPolicy`，需在路由匹配后使用。详见 [资源授权](../09-auth-security/resource-authorization.md)。
 
 ## 注意事项
 
@@ -97,6 +112,8 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler { ... }
 
 ## 小结
 
-编译时扫描是 rust-webx「零配置」体验的技术基石。你写 `#[get]` + `#[handler]`，框架在 `build()` 时自动完成路由表、HandlerCache 关联与文档生成；配置不一致时启动即 panic。
+编译时扫描是 rust-webx「零配置」体验的技术基石。你写 `#[get]` + `#[handler]`，框架在 `build()`
+时自动完成路由表、HandlerCache、`IEndpointCatalog`、本地化资源与 OpenAPI 的关联；配置不一致时
+启动即 panic。
 
 下一章：[请求即端点](../05-request-pattern/INDEX.md)

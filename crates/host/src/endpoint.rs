@@ -2,7 +2,6 @@
 
 use serde_json;
 use std::sync::Arc;
-use webx_core::auth::IAuthorizationPolicy;
 use webx_core::error::Result;
 use webx_core::http::IHttpContext;
 use webx_core::routing::IEndpoint;
@@ -59,13 +58,11 @@ pub struct StubEndpoint {
     pub path: &'static str,
     pub handler_type: &'static str,
     pub dispatch_fn: Option<webx_core::route::scan::RouteDispatchFn>,
-    pub auth_required_role: &'static str,
-    pub auth_required_permission: &'static str,
-    /// Optional route policy built from compile-time `#[authorize]` metadata when
-    /// `HostBuilder::use_resource_authorization()` is enabled.
-    pub resource_policy: Option<Arc<crate::authz::ResourceAuthorization>>,
+    /// Rules collected from `#[authorize]`; empty means the endpoint is public.
+    /// Every rule must be satisfied.
+    pub authorization: &'static [webx_core::route::scan::AuthorizeRule],
     /// Dynamic authorizers (from `IDynamicAuthorizer` DI registrations).
-    /// Checked after static `#[authorize]` and before handler dispatch.
+    /// Checked after the declarative rules and before handler dispatch.
     /// When `None`, no dynamic authorization checks run (pass-through).
     pub authorizers: Option<Arc<AuthorizerSet>>,
 }
@@ -74,74 +71,32 @@ pub struct StubEndpoint {
 impl IEndpoint for StubEndpoint {
     async fn handle(&self, ctx: &mut dyn IHttpContext) -> Result<()> {
         if let Some(dispatch) = self.dispatch_fn {
-            // ── Authorization check (declared on route via #[authorize]) ──
-            let auth_required =
-                !self.auth_required_role.is_empty() || !self.auth_required_permission.is_empty();
-            if auth_required {
-                match ctx.claims() {
+            // ── Declarative authorization from `#[authorize]` ──
+            if !self.authorization.is_empty() {
+                let denied = match ctx.claims() {
                     None => {
                         write_problem(ctx, 401, "Authentication required").await;
                         return Ok(());
                     }
-                    Some(claims) => {
-                        if !self.auth_required_role.is_empty()
-                            && self.auth_required_role != "authenticated"
-                            && !claims
-                                .roles()
-                                .iter()
-                                .any(|r| r.as_str() == self.auth_required_role)
-                        {
-                            let mut ext = HashMap::new();
-                            ext.insert(
-                                "required_role".into(),
-                                serde_json::Value::String(self.auth_required_role.to_string()),
-                            );
-                            write_forbidden(ctx, "Forbidden: insufficient permissions", ext).await;
-                            return Ok(());
-                        }
+                    Some(claims) => self
+                        .authorization
+                        .iter()
+                        .find(|rule| !rule.matches(claims.roles(), claims.permissions()))
+                        .map(|rule| (rule.roles, rule.permissions)),
+                };
 
-                        if !self.auth_required_permission.is_empty()
-                            && !claims
-                                .permissions()
-                                .iter()
-                                .any(|p| p.as_str() == self.auth_required_permission)
-                        {
-                            let mut ext = HashMap::new();
-                            ext.insert(
-                                "required_permission".into(),
-                                serde_json::Value::String(
-                                    self.auth_required_permission.to_string(),
-                                ),
-                            );
-                            write_forbidden(ctx, "Forbidden: insufficient permissions", ext).await;
-                            return Ok(());
-                        }
-                    }
+                if let Some((roles, permissions)) = denied {
+                    let mut ext = HashMap::new();
+                    ext.insert("required_roles".into(), serde_json::json!(roles));
+                    ext.insert(
+                        "required_permissions".into(),
+                        serde_json::json!(permissions),
+                    );
+                    write_forbidden(ctx, "Forbidden: insufficient permissions", ext).await;
+                    return Ok(());
                 }
-            }
 
-            if auth_required {
-                if let Some(ref policy) = self.resource_policy {
-                    if let Some(claims) = ctx.claims() {
-                        let resource_key = ctx.request().route_pattern().unwrap_or(self.path);
-                        if policy.covers_route(resource_key) {
-                            let method = ctx.request().method();
-                            if let Err(err) = policy.authorize(claims, resource_key, method).await {
-                                let mut ext = HashMap::new();
-                                ext.insert(
-                                    "resource".into(),
-                                    serde_json::Value::String(resource_key.to_string()),
-                                );
-                                write_forbidden(ctx, &err.to_string(), ext).await;
-                                return Ok(());
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ── Dynamic authorization via IDynamicAuthorizer ──
-            if auth_required {
+                // ── Dynamic authorization via IDynamicAuthorizer ──
                 if let Some(ref authorizers) = self.authorizers {
                     if !authorizers.is_empty() {
                         if let Some(claims) = ctx.claims() {

@@ -53,6 +53,7 @@ impl IRequestHandler<MyRequest, MyResponse> for MyHandler {
 ```rust
 Host::builder()
     .add_authentication()
+    .add_localization()   // 可选：locales/<culture>.json
     .use_cors(config)
     .add_memory_cache()
     .configure(|app| app.useOptions(|o| { ... }))
@@ -65,7 +66,8 @@ Host::builder()
 - 自定义 `IMiddleware`
 - 自定义 `IEndpoint`
 - 实现 `IPipelineBehavior`
-- 实现 `IAuthorizationPolicy`
+- 实现 `IDynamicAuthorizer`（运行时路由级授权）
+- 实现 `IAuthorizationPolicy`（旧式自定义策略）
 
 仅在默认能力不够时披露。
 

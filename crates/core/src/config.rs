@@ -137,6 +137,31 @@ fn default_max_age() -> u32 {
     86400
 }
 
+/// Culture / localization section.
+///
+/// The default UI culture is a host-wide setting: endpoint names, OpenAPI, and
+/// permission synchronization use it unless a caller explicitly passes another
+/// culture. Request-header negotiation is deliberately not part of this:
+/// administrative output must not change with the caller's browser language.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CultureSection {
+    /// Default BCP-47 culture, e.g. `"zh-CN"` or `"en"`. Default: `"en"`.
+    #[serde(default = "default_culture", rename = "Default")]
+    pub default: String,
+}
+
+impl Default for CultureSection {
+    fn default() -> Self {
+        Self {
+            default: default_culture(),
+        }
+    }
+}
+
+fn default_culture() -> String {
+    "en".to_string()
+}
+
 /// Per-IP rate limiting (token bucket).
 #[derive(Debug, Clone, Deserialize)]
 pub struct RateLimitSection {
@@ -289,6 +314,9 @@ pub struct AppOptions {
     /// `multipart/form-data` upload settings.
     #[serde(default, rename = "Form")]
     pub form: FormSection,
+    /// Default culture for endpoint text and OpenAPI.
+    #[serde(default, rename = "Culture")]
+    pub culture: CultureSection,
 }
 
 // ---------------------------------------------------------------------------
@@ -510,6 +538,16 @@ mod tests {
         assert!(opts.cors.allow_credentials);
         assert_eq!(opts.cors.max_age, 3600);
         assert!(!opts.cors.origins.iter().any(|o| o == "*"));
+    }
+
+    #[test]
+    fn culture_section_binds_default_and_falls_back_to_en() {
+        let json = serde_json::json!({ "Culture": { "Default": "zh-CN" } });
+        let opts: AppOptions = bind_root(&json);
+        assert_eq!(opts.culture.default, "zh-CN");
+
+        let opts: AppOptions = bind_root(&serde_json::json!({}));
+        assert_eq!(opts.culture.default, "en");
     }
 
     #[test]

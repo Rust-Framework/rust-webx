@@ -62,7 +62,9 @@ rust-webx is **not** a full-stack UI framework (pair it with any frontend), **no
 - **Compile-time route shortcuts** — `#[get("/path")]`, `#[post("/path")]`, `#[put("/path")]`, `#[delete("/path")]` define a full endpoint in one line.
 - **Compile-time scanning** — route metadata is collected at compile time via `inventory`; registered automatically in `Host::build()`.
 - **Zero-config handler registration** — the `#[handler]` attribute macro registers a handler with the DI container automatically.
-- **Authentication & authorization** — JWT Bearer auth + route-pattern-based resource authorization (`#[authorize]`, `#[claims]`).
+- **Authentication & authorization** — JWT Bearer auth + declarative, grouped route authorization (`#[authorize]`, `#[claims]`).
+- **Endpoint metadata service** — `IEndpointCatalog` exposes every endpoint at runtime (`all()` / `localized()`), so permission sync, admin navigation and OpenAPI share one source.
+- **Localization** — `#[display]` / `#[description]` / `#[category]` store resource keys; a host-wide `Culture.Default` selects the language, with `.json` resources or `include_str!` embedding.
 - **Production capabilities out of the box** — graceful shutdown, live health checks, security headers, request IDs, CORS, TLS, rate limiting, compression, OpenAPI + SPA hosting.
 - **File upload & download** — typed `FormFile` binding for `multipart/form-data` (streamed, spooled to disk, size-limited) and ASP.NET Core-shaped file responses (`file` / `file_stream` / `file_seekable_stream`) with `Content-Disposition`, `ETag`, `Last-Modified` and `Range`.
 - **ORM-agnostic** — the framework does not depend on `rust-ef`; the `docbit` reference app wires it in with minimal glue.
@@ -99,7 +101,7 @@ The framework is split into a small set of focused crates, re-exported through t
 
 ```
 rust-webx/
-├── Cargo.toml                 # workspace root (v0.5.1)
+├── Cargo.toml                 # workspace root (v0.6.0)
 ├── crates/
 │   ├── core/                  # rust-webx-core  — traits, configuration
 │   ├── host/                  # rust-webx-host  — Host builder, middleware
@@ -168,7 +170,10 @@ Routing discovery, handler resolution, middleware orchestration, and graceful sh
 | `IEventHandler<T>` | Event handler; broadcast to all registered handlers via `publish()`. |
 | `Error` | Unified error type automatically mapped to HTTP status codes. |
 | `IClaims` / `IAuthenticationHandler` | JWT auth interfaces that extract identity from the Bearer token. |
-| `IAuthorizationPolicy` | Authorization-policy interface; checks roles/permissions against route patterns. |
+| `IAuthorizationPolicy` | Legacy custom-policy interface; route-pattern authorization. |
+| `IDynamicAuthorizer` | Route-level runtime authorization (DB/cache/feature flags) after static `#[authorize]` rules. |
+| `IEndpointCatalog` | Runtime endpoint metadata (`all()` / `localized()`); DI-injected or `host.endpoints()`. |
+| `IStringLocalizer` | Resource-key lookup for endpoint text and OpenAPI; default culture from `Culture.Default`. |
 
 ### Request lifecycle
 

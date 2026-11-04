@@ -61,7 +61,7 @@ graph BT
 | `http` | `IHttpContext`, `IHttpRequest`, `IHttpResponse`, `IClaimsExt` |
 | `middleware` | `IMiddleware` |
 | `routing` | `IRouter`, `IEndpoint`, `RouteMeta`, `HttpMethod` |
-| `auth` | `IClaims`, `IAuthenticationHandler`, `IAuthorizationPolicy` |
+| `auth` | `IClaims`, `IAuthenticationHandler`, `IAuthorizationPolicy`, `IDynamicAuthorizer` |
 | `error` | `Error`, `Result` |
 | `config` | `AppOptions`, `appsettings` 加载 |
 | `cache` | `IDistributedCache` |

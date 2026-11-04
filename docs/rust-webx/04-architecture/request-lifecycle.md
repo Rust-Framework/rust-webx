@@ -61,10 +61,12 @@ sequenceDiagram
 
 `#[get]` / `#[post]` 等宏生成的 `RouteDispatch` 负责：
 
-1. 从 `route_params`、query、body 构建 Request struct
-2. 注入 claims，进入 `RequestContext`
-3. 调用 `Mediator::send(request)`（与进程内调用同一路径）
-4. 将响应序列化为 JSON 写入 `HttpResponse`
+1. 先执行静态 `#[authorize]` 规则，再运行已注册的 `IDynamicAuthorizer`（仅限有 `#[authorize]`
+   的路由）；全部通过才继续
+2. 从 `route_params`、query、body 构建 Request struct
+3. 注入 claims，进入 `RequestContext`
+4. 调用 `Mediator::send(request)`（与进程内调用同一路径）
+5. 将响应序列化为 JSON 写入 `HttpResponse`
 
 ### 5. 错误处理
 

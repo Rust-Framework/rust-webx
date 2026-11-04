@@ -171,7 +171,7 @@ async fn auth_wrong_role_returns_403() {
     assert_eq!(resp.status().as_u16(), 403);
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["status"], 403);
-    assert_eq!(body["required_role"], "admin");
+    assert_eq!(body["required_roles"], serde_json::json!(["admin"]));
 }
 
 #[tokio::test]

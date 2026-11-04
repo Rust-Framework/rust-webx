@@ -48,7 +48,7 @@ struct DocHandler {
 
 #[handler(inject)]
 #[async_trait]
-impl IRequestHandler<GetBlogRequest, BlogModel> for BlogHandler { ... }
+impl IRequestHandler<GetBlogRequest, BlogModel> for DocHandler { ... }
 ```
 
 ## 诊断

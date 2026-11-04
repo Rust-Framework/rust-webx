@@ -56,6 +56,42 @@ svc.singleton::<dyn IRequestHandler<HelloRequest, String>>(
 - JWT Secret 是否一致？
 - `#[authorize(role = "...")]` 的 role 是否与 token 中的 roles 匹配？
 
+## 7. 多个 `#[authorize]` 不是 OR
+
+多个 `#[authorize]` 是 **AND**：每个规则都必须满足。要表达「任一角色即可」：
+
+```rust
+#[authorize(roles = ["admin", "auditor"])]
+```
+
+`roles` / `permissions` 数组内部是 any-of；同时写 role 和 permission 时两者是 AND。
+
+## 8. 端点文本没有生效
+
+- 是否调用了 `.add_localization()`（约定读取 `locales/<culture>.json`）或
+  `.add_localization_with(...)`？
+- `Culture.Default` 是否与资源文件名匹配？
+- 资源键是否在 JSON 中？缺失时按 `text` → key 回退；
+- `#[display]` / `#[description]` / `#[category]` 写在路由宏前后都可以；写在 struct 上无效。
+
+## 9. 找不到「所有路由」的 API
+
+`webx::endpoints()` 已移除。使用：
+
+```rust
+let catalog = host.endpoints();                 // &dyn IEndpointCatalog
+let all = catalog.all();                        // &[EndpointDescriptor]
+```
+
+或在 Handler / hosted service 中注入 `Arc<dyn IEndpointCatalog>`。`all()` 是语言中立元数据；
+需要解析后的名称/描述/分类时用 `catalog.localized(&*localizer)`。
+
+## 10. OpenAPI 名称/分组不对
+
+- 名称/描述来自 `#[display]` / `#[description]`，其次 `///`，最后类型名；
+- 语言来自全局 `Culture.Default`，不跟随请求头；
+- `#[category]` 会成为 OpenAPI `tag`；未设置时按路径推导 tag。
+
 ## 排查流程
 
 ```

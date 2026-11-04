@@ -30,9 +30,10 @@
 
 ## 认证与授权
 
-`add_authentication()` 注册 **JWT 中间件**（位于 SPA 之前）。路由级授权通过 `#[authorize]`
-在 endpoint 内检查；基于路由元数据的资源授权用 `.use_resource_authorization()` 启用，
-构建期生成 `ResourceAuthorization` 策略。授权语义详见 [资源授权](../09-auth-security/resource-authorization.md)。
+`add_authentication()` 注册 **JWT 中间件**（位于 SPA 之前）。路由级 `#[authorize]` 授权在
+endpoint 内执行——路由匹配后规则可用，不需要额外的策略开关；旧的
+`.use_resource_authorization()` 已过时。授权语义详见
+[资源授权](../09-auth-security/resource-authorization.md)。
 
 ## 小结
 

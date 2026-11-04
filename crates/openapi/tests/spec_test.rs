@@ -1,8 +1,21 @@
 //! OpenAPI spec generation tests.
 
-use webx_core::route::scan::{ParamMeta, RequestParamEntry, RouteEntry};
+use webx_core::localization::{LocalizationOptions, StringLocalizer, TextRef};
+use webx_core::route::scan::{AuthorizeRule, ParamMeta, RequestParamEntry, RouteEntry};
 use webx_core::routing::HttpMethod;
 use webx_openapi::generate_openapi_spec;
+
+const RESOURCES_ZH: &str = r#"{
+    "endpoint.blog.name": "博客模块-列表",
+    "endpoint.blog.description": "返回博客列表",
+    "endpoint.blog.category": "博客模块"
+}"#;
+
+const RESOURCES_EN: &str = r#"{
+    "endpoint.blog.name": "Blog - List",
+    "endpoint.blog.description": "Returns blog posts",
+    "endpoint.blog.category": "Blog"
+}"#;
 
 inventory::submit! {
     RouteEntry::new(
@@ -10,11 +23,25 @@ inventory::submit! {
         "/api/search",
         "SearchRequest",
         "String",
-        "search",
-        "",
+        TextRef::text("搜索"),
+        TextRef::text("全文搜索"),
+        TextRef::text(""),
         &[],
-        "",
-        "",
+        &[],
+    )
+}
+
+inventory::submit! {
+    RouteEntry::new(
+        HttpMethod::Get,
+        "/api/blog",
+        "BlogRequest",
+        "String",
+        TextRef::key("endpoint.blog.name"),
+        TextRef::key("endpoint.blog.description"),
+        TextRef::key("endpoint.blog.category"),
+        &[],
+        &[AuthorizeRule { roles: &["admin"], permissions: &[] }],
     )
 }
 
@@ -36,9 +63,16 @@ inventory::submit! {
     }
 }
 
+fn localizer(default_culture: &str) -> StringLocalizer {
+    let options = LocalizationOptions::none()
+        .resources("zh-CN", RESOURCES_ZH)
+        .resources("en", RESOURCES_EN);
+    StringLocalizer::new(default_culture, &options).unwrap()
+}
+
 #[test]
 fn openapi_spec_has_required_top_level_fields() {
-    let spec = generate_openapi_spec("Test API", "1.0.0");
+    let spec = generate_openapi_spec("Test API", "1.0.0", &localizer("zh-CN"));
     assert_eq!(spec["openapi"], "3.0.3");
     assert_eq!(spec["info"]["title"], "Test API");
     assert_eq!(spec["info"]["version"], "1.0.0");
@@ -47,7 +81,7 @@ fn openapi_spec_has_required_top_level_fields() {
 
 #[test]
 fn openapi_spec_includes_query_params_from_request_meta() {
-    let spec = generate_openapi_spec("Test API", "1.0.0");
+    let spec = generate_openapi_spec("Test API", "1.0.0", &localizer("zh-CN"));
     let params = &spec["paths"]["/api/search"]["get"]["parameters"];
     assert!(params.is_array());
     let names: Vec<&str> = params
@@ -65,4 +99,46 @@ fn openapi_spec_includes_query_params_from_request_meta() {
         .find(|p| p["name"] == "q")
         .unwrap();
     assert_eq!(q["in"], "query");
+}
+
+#[test]
+fn operation_text_uses_the_localizer_default_culture() {
+    let zh = generate_openapi_spec("Test API", "1.0.0", &localizer("zh-CN"));
+    assert_eq!(zh["paths"]["/api/blog"]["get"]["summary"], "博客模块-列表");
+    assert_eq!(
+        zh["paths"]["/api/blog"]["get"]["description"],
+        "返回博客列表"
+    );
+
+    // A host configured with an English default produces an English document.
+    let en = generate_openapi_spec("Test API", "1.0.0", &localizer("en-US"));
+    assert_eq!(en["paths"]["/api/blog"]["get"]["summary"], "Blog - List");
+    assert_eq!(
+        en["paths"]["/api/blog"]["get"]["description"],
+        "Returns blog posts"
+    );
+
+    // Literal metadata is unaffected by the culture.
+    assert_eq!(zh["paths"]["/api/search"]["get"]["summary"], "搜索");
+}
+
+#[test]
+fn category_becomes_the_openapi_tag() {
+    let zh = generate_openapi_spec("Test API", "1.0.0", &localizer("zh-CN"));
+    assert_eq!(
+        zh["paths"]["/api/blog"]["get"]["tags"],
+        serde_json::json!(["博客模块"])
+    );
+
+    let en = generate_openapi_spec("Test API", "1.0.0", &localizer("en-US"));
+    assert_eq!(
+        en["paths"]["/api/blog"]["get"]["tags"],
+        serde_json::json!(["Blog"])
+    );
+
+    // No category → the path-derived tag is kept.
+    assert_eq!(
+        zh["paths"]["/api/search"]["get"]["tags"],
+        serde_json::json!(["Search"])
+    );
 }

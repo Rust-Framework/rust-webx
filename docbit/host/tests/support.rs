@@ -14,7 +14,6 @@ pub fn build_host() -> Host {
         .register(|svc| svc.add_mediator())
         .add_options::<SiteConfig>("Site")
         .add_authentication()
-        .use_resource_authorization()
         .add_memory_cache()
         .use_spa("wwwroot");
 

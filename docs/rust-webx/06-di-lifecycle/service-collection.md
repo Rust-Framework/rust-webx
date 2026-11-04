@@ -70,7 +70,10 @@ svc.add_hosted_service::<DbInitService>()
 `Host::build()` 在构建时自动：
 
 - 把 `#[handler]` 提交的 `HandlerRegistration` 收集进 inventory `HandlerCache`（不做 DI 注册）
+- `ServiceCollection::from_injected()` 收集 `#[inject] impl`，包括 `IDynamicAuthorizer` 实现
+- 构建并注册 `Arc<dyn IEndpointCatalog>`（端点元数据）与 `Arc<dyn IStringLocalizer>`（资源解析）
 - `add_authentication()` 时构建 JWT 中间件并加入管道
+- `add_localization()` / `add_localization_with(...)` 时加载资源并构建 localizer
 - `add_memory_cache()` 时把 `Arc<MemoryCache>` 注册为具体实例
 
 需要显式调用的：

@@ -29,10 +29,16 @@
 
 ## 安全
 
-- [ ] 敏感端点有 `#[authorize]`
+- [ ] 敏感端点有 `#[authorize]`；多规则 AND 语义符合预期（any-of 用 `roles = [...]`）
 - [ ] 密码不明文存储
 - [ ] JWT Secret 不在代码中硬编码（使用 appsettings 或环境变量）
 - [ ] 输入有校验
+
+## 端点元数据与国际化
+
+- [ ] 端点名称/描述用 `#[display]` / `#[description]`，分组用 `#[category]`；不在别处复制一份
+- [ ] 权限同步/管理菜单通过 `IEndpointCatalog` 读取，不静态复制路由表
+- [ ] 需要多语言时 `Culture.Default` 与 `locales/<culture>.json` 匹配，且资源键已补齐
 
 ## 测试
 

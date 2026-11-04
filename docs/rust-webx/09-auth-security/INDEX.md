@@ -5,8 +5,8 @@
 | 小节 | 内容 |
 |------|------|
 | [JWT Bearer 认证](jwt-authentication.md) | Token 认证流程 |
-| [基于资源的授权](resource-authorization.md) | 角色/权限策略 |
-| [authorize 宏与声明式授权](authorize-macro.md) | 编译时授权声明 |
+| [基于资源的授权](resource-authorization.md) | 自定义策略/旧式中间件 |
+| [authorize 宏与声明式授权](authorize-macro.md) | 静态规则 + IDynamicAuthorizer 动态授权 |
 | [安全最佳实践](security-best-practices.md) | 生产安全清单 |
 
 ## 下一步

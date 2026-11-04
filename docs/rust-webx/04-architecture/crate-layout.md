@@ -47,8 +47,9 @@ Cargo **包名**带连字符，Rust **导入名**用下划线库名。两者不�
 | `http` | `IHttpContext`, `IHttpRequest`, `IHttpResponse` |
 | `middleware` | `IMiddleware` |
 | `routing` | `IRouter`, `IEndpoint`, `RouteMeta` |
-| `auth` | `IClaims`, `IAuthenticationHandler`, `IAuthorizationPolicy` |
-| `route` | 扫描类型、`HandlerCache`、`RouteEntry` |
+| `auth` | `IClaims`, `IAuthenticationHandler`, `IAuthorizationPolicy`, `IDynamicAuthorizer` |
+| `route` | 扫描类型、`HandlerCache`、`RouteEntry`、`IEndpointCatalog` / `EndpointCatalog` |
+| `localization` | `TextRef`, `IStringLocalizer`, `StringLocalizer`, `LocalizationOptions` |
 
 ## host — 运行时层
 
@@ -61,8 +62,8 @@ Cargo **包名**带连字符，Rust **导入名**用下划线库名。两者不�
 | 上下文 | `HttpContext`, `HttpRequest`, `HttpResponse` |
 | 管道 | `MiddlewarePipeline` |
 | 认证 | `JwtAuth`, `jwt_middleware` |
-| 授权 | `ResourceAuthorization`, `resource_auth_middleware` |
-| 端点 | `RequestEndpoint`, `ControllerEndpoint`, `StaticJsonEndpoint`, `StaticHtmlEndpoint` |
+| 授权 | 端点执行 `#[authorize]` 规则；`ResourceAuthorization` / `resource_auth_middleware` 仅用于自定义策略 |
+| 端点 | `StubEndpoint`（路由宏端点）, `RequestEndpoint`, `ControllerEndpoint`, `StaticJsonEndpoint`, `StaticHtmlEndpoint` |
 | 宿主 | `Host`, `HostBuilder`, `Server` |
 
 ## macros — 编译时层
@@ -71,7 +72,7 @@ Cargo **包名**带连字符，Rust **导入名**用下划线库名。两者不�
 
 - 路由注册代码（写入 `inventory`）
 - Handler 注册代码（向 `inventory` 提交 `HandlerRegistration`）
-- 授权元数据收集
+- 授权规则与端点文本元数据（`#[authorize]`、`#[display]`、`#[description]`、`#[category]`）
 
 应用开发者通过 `#[get]`、`#[handler]` 等使用，无需直接接触宏展开代码。
 

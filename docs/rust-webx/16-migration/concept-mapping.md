@@ -18,7 +18,11 @@
 | `IPipelineBehavior` | `IPipelineBehavior` | 管道拦截 |
 | `[HttpGet]` | `#[get]` | GET 路由 |
 | `[HttpPost]` | `#[post]` | POST 路由 |
-| `[Authorize]` | `#[authorize]` | 授权 |
+| `[Authorize]` | `#[authorize]` | 授权（可多条规则，规则间 AND） |
+| `EndpointDataSource` | `IEndpointCatalog` | Host 构建、DI 注入的端点元数据 |
+| `IStringLocalizer<T>` | `IStringLocalizer` | 资源键查找，默认 culture 来自 `Culture.Default` |
+| `AddLocalization()` | `add_localization()` | 约定读取 `locales/<culture>.json` |
+| `[Display]` / XML docs | `#[display]` / `#[description]` / `#[category]` | 标题、描述、分组；回退到 `///` |
 | `[FromBody]` | `#[derive(Deserialize)]` | Body 绑定 |
 | `[FromRoute]` | 路径同名字段 | 路径参数 |
 | `[FromForm]` + `IFormFile` | 请求结构体字段声明为 `FormFile` | multipart 上传 |
@@ -35,7 +39,8 @@
 | `ProblemDetails` | `ProblemDetails` | RFC 7807 |
 | `UseMiddleware<T>()` | `use_middleware::<T>()` | 中间件注册 |
 | `UseAuthentication()` | `add_authentication()` | 认证 |
-| `UseAuthorization()` | 自动（`#[authorize]` 宏编译期收集） | 授权 |
+| `UseAuthorization()` | 自动（`#[authorize]` 规则组在 endpoint 执行） | 授权 |
+| `UseRequestLocalization()` | 未实现请求级协商；用全局 `Culture.Default` | 国际化 |
 | `UseCors()` | `use_cors()` | CORS |
 | `UseStaticFiles()` | `use_spa()` | 静态文件 |
 | `Controller` | 无（Request 即端点） | 路由处理 |

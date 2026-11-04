@@ -10,9 +10,22 @@ GET /api/openapi.json    → OpenAPI 规范 JSON
 GET /api/openapi.html    → 内置 API 文档页
 ```
 
+每个操作的 `summary` / `description` 来自端点元数据：`#[display]` / `#[description]` 优先
+（资源键缺失时用 `text` 或 key 兜底）；没有声明时回退到 `impl` 块的 `///` 文档注释，名称再
+回退到类型名。语言由全局 `Culture.Default` 决定——OpenAPI 是管理型产物，不跟随请求的
+`Accept-Language`。设置了 `#[category]` 时，它作为 OpenAPI `tag`；未设置时沿用按路径推导的 tag。
+
 ```rust
 use webx::{generate_openapi_spec, APIUI_HTML};
+
+let spec = generate_openapi_spec("My API", "1.0.0", host.localizer());
 ```
+
+OpenAPI 标准没有多语言 operation 文本；需要在另一种语言下发布时，用该语言作为
+`Culture.Default` 的 Host 构建，或直接用 `localizer.get_in(culture, ..)` 生成自定义规范。
+
+资源注册、`#[display]` / `#[description]` / `#[category]` 的写法与回退链见
+[路由宏](../05-request-pattern/route-macros.md#端点名称与描述资源键)。
 
 ## SPA 静态托管
 

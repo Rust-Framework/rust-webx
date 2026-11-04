@@ -26,6 +26,34 @@ impl IRequestHandler<GetDocContentRequest, DocContent> for GetDocContentHandler 
 字段只有标注 `#[inject]` 时才从容器解析（`Arc<T>` / `Option<Arc<T>>` / `Vec<Arc<T>>`，
 或用 `#[inject(owned)]` 解析 bare `T`）；未标注的字段一律取 `Default::default()`。
 
+## 框架内置可注入服务
+
+Host 构建时注册以下服务，Handler / `IHostedService` 直接注入：
+
+| 服务 | 用途 |
+|------|------|
+| `Arc<dyn IEndpointCatalog>` | 运行时端点元数据：`all()` / `get()` / `localized()` |
+| `Arc<dyn IStringLocalizer>` | 资源键查找，默认 culture 来自 `Culture.Default` |
+
+```rust
+#[derive(Inject)]
+pub struct ListEndpointsHandler {
+    #[inject]
+    catalog: Arc<dyn IEndpointCatalog>,
+    #[inject]
+    localizer: Arc<dyn IStringLocalizer>,
+}
+
+// handle 中：
+// let all = self.catalog.all();                 // &[EndpointDescriptor]
+// let rows = self.catalog.localized(&*self.localizer); // Vec<EndpointInfo>
+```
+
+`Host::endpoints()` 与 `Host::localizer()` 也可直接取得同一对象，用于 `main` 或测试代码。
+
+`IDynamicAuthorizer` 也是由 `#[inject] impl` 自动收集的单例，但它是路由授权器、不是普通注入
+依赖；用法见 [动态授权](../09-auth-security/authorize-macro.md#动态授权idynamicauthorizer)。
+
 ## 业务服务：接口在 contracts，实现在 handlers
 
 Handler 和 `IHostedService` **只依赖 trait**，不依赖具体实现类型。

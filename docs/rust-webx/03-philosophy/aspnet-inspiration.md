@@ -22,6 +22,10 @@ rust-webx 不是简单移植，而是**提取设计精髓并用 Rust 类型系�
 | `IRequestHandler<T,R>` | `IRequestHandler<T,R>` | 双泛型参数一致 |
 | `[HttpGet("/path")]` | `#[get("/path")]` | 标注在 impl 块 |
 | `[Authorize]` | `#[authorize]` | 编译时元数据 |
+| `EndpointDataSource` | `IEndpointCatalog` | Host 构建、DI 注入的端点元数据 |
+| `[Display]` / XML docs | `#[display]` / `#[description]` / `#[category]` | 资源键 + 文档注释回退 |
+| `IStringLocalizer<T>` | `IStringLocalizer` | 资源键查找，默认 culture 来自 Host |
+| `RequestLocalizationOptions` | `Culture.Default`（appsettings） | 当前是全局 culture，不做请求级协商 |
 | `IHostedService` | `IHostedService` | start/stop 生命周期 |
 | `appsettings.json` | `appsettings.json` | 相同文件名与节结构 |
 | `UseMiddleware<T>()` | `svc.add_middleware::<T>()` | 注册方式类似 |
@@ -97,6 +101,10 @@ Rust 没有 GC，DI 容器使用 `Arc<T>` 共享所有权。ASP.NET Core 的 Sco
 | EF Core 内置 | ORM 由用户自选 |
 | SignalR | WebSocket 非当前重点 |
 | 过滤器（Filters） | 由 `IPipelineBehavior` + 中间件替代 |
+| `UseRequestLocalization` / `Accept-Language` 协商 | 当前用全局 `Culture.Default` 决定语言；需要请求级切换时显式使用 `localizer.get_in(culture, key)`，避免管理型数据随访问者语言漂移 |
+
+> 端点元数据与本地化的对应关系是**投影**：`RouteEntry` 只保存一次 name/description/category
+> （`TextRef` 资源引用 + 授权规则），OpenAPI、`IEndpointCatalog` 与权限同步消费同一份元数据。
 
 ## 小结
 

@@ -126,7 +126,10 @@ pub fn extract_zip(archive: &Path, dest: &Path) -> Result<ExtractReport> {
             .by_index(index)
             .map_err(|e| Error::Validation(format!("Corrupt archive entry {index}: {e}")))?;
 
-        let raw_name = entry.name().to_string();
+        let raw_name = entry
+            .name()
+            .map_err(|e| Error::Validation(format!("Corrupt archive entry {index}: {e}")))?
+            .to_string();
         if raw_name.contains('\\') || raw_name.contains(':') {
             return Err(Error::Validation(format!(
                 "archive entry '{raw_name}' is not a plain relative path"

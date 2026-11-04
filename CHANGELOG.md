@@ -3,6 +3,22 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [0.6.1] — 2026-11-04
+
+### Fixed
+
+- **CI on Rust 1.99** — `async-trait` updated to 0.1.92, which no longer emits the
+  `#[must_use]` attribute that triggered `clippy::double_must_use`. No API change.
+- **Security audit** — updated `rustls` 0.23.46, `rustls-webpki` 0.103.16,
+  `webpki-roots` 1.0.10, `quinn-proto` 0.11.18, and `zip` 9.3.0. `cargo audit`
+  now reports 0 vulnerabilities. The four allowed warnings (unmaintained
+  `rustls-pemfile`, unsound `anyhow`/`tokio`, yanked `chacha20`) are dependency
+  advisories, not vulnerabilities.
+- **Docbit zip extraction on zip 9** — `ZipFile::name()` now returns a `Result`;
+  the extractor maps the error to a validation error instead of unwrapping.
+- **Coverage job** — replaced `cargo-tarpaulin` (segfaulted on the upload/download
+  test binary) with `cargo-llvm-cov`, which produces `coverage/lcov.info`.
+
 ## [0.6.0] — 2026-11-04
 
 ### Added

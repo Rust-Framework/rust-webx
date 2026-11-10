@@ -28,6 +28,7 @@ pub struct UpdateUserRequest {
 | `#[fromfile]` / `#[fromfile("avatar")]` | multipart 文件分段 | 只能用于 `FormFile` 系列类型 |
 | `#[fromheader("X-Name")]` | 请求头 | 省略参数时按字段名转 `-` 小写 |
 | `#[fromclaim("key")]` | 认证声明 | `sub`/`roles`/`permissions` 走专用槽位 |
+| `#[fromclaim]` + `CurrentUser` | 认证主体 | 统一身份对象，见下文「用户身份」 |
 | 无标记 | 按方法推断 | 见下一节 |
 
 `FormFile`、`Option<FormFile>`、`Vec<FormFile>` 来自表单；未标注时按字段名取分段，标注 `#[fromfile]` 可改名。
@@ -90,6 +91,57 @@ pub struct SearchRequest {
 `#[serde(rename)]` / `rename_all` / `alias` 决定 body 的 JSON 键；`#[serde(flatten)]` 字段没有独立键，
 只从 body 绑定。`#[serde(deny_unknown_fields)]` 在 body 上生效（存在 flatten 字段时无法判定）。
 body 字段类型错误、`null` 赋给非 `Option` 字段都按该字段返回 400，不会被当作“缺失”回退到 query。
+
+## 用户身份：`CurrentUser`
+
+需要登录的接口不用再手动读 claims、拼 `sub` 和 `tenant`：把身份声明成普通字段，绑定器会从认证主体填充。
+
+```rust
+#[derive(WebxRequestMeta)]
+pub struct CreateOrderRequest {
+    #[fromclaim]
+    pub user: CurrentUser,     // 未登录 → 401
+    pub sku: String,           // JSON body
+    pub quantity: u32,
+}
+```
+
+Handler 直接使用，不接触 token、`IHttpContext` 或 claims map：
+
+```rust
+async fn handle(&mut self, req: CreateOrderRequest) -> Result<OrderView> {
+    let user = req.require_user()?;          // &CurrentUser
+    self.orders
+        .create(CreateOrder {
+            tenant_id: user.tenant_id.clone(),
+            created_by: user.id.clone(),
+            sku: req.sku,
+            quantity: req.quantity,
+        })
+        .await
+}
+```
+
+| 字段 | 来源 claim | 说明 |
+|------|-----------|------|
+| `id` | `sub` | 用户唯一标识 |
+| `name` | `name` | 显示名，缺失时为空串 |
+| `email` | `email` | 邮箱，缺失时为空串 |
+| `tenant_id` | `tenant_id` / `tenant` | 租户标识，单租户应用为空串 |
+| `roles` | `roles` | 角色数组 |
+| `permissions` | `permissions` | 权限数组 |
+
+辅助方法：`is_in_role("admin")`、`has_permission("order:write")`、`display_name()`。
+
+- `Option<CurrentUser>`：匿名可访问的端点；未登录为 `None`，不会 401。
+- 派生宏在结构体含该字段时自动实现 `RequestUser`，可直接 `req.user_id()`、`req.user_name()`、
+  `req.tenant_id()`、`req.is_in_role("admin")`、`req.require_user()?`。
+- 身份字段不进入 OpenAPI 参数表，避免把认证信息暴露成普通参数。
+- 一个请求只应有一个 `CurrentUser` 字段；身份是单数。
+
+**省掉了什么**：以前每个需要身份的 handler 都要注入 `IHttpContext`、取 `ctx.claims()`、逐个解析
+`subject()`/`tenant`/`roles`，并在每个 handler 重复一遍空值与类型处理；现在这些集中在绑定层，
+业务代码只写 `req.user`。
 
 ## 优先级
 

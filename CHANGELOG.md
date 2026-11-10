@@ -3,6 +3,17 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [0.7.2] — 2026-11-10
+
+### Added
+
+- **`CurrentUser` in requests** — `#[fromclaim] user: CurrentUser` binds the authenticated
+  identity (`id`, `name`, `email`, `tenant_id`, `roles`, `permissions`) as an ordinary
+  field; `Option<CurrentUser>` keeps an endpoint usable by anonymous callers. The derive
+  also implements `RequestUser` (`user_id()`, `user_name()`, `tenant_id()`,
+  `is_in_role("admin")`, `require_user()`), so handlers no longer reach into
+  `IHttpContext` or parse claim strings by hand.
+
 ## [0.7.1] — 2026-11-10
 
 ### Fixed

@@ -5,7 +5,7 @@
 //! - `IAuthenticationHandler`: Authenticate an HTTP request and produce claims.
 //! - `IAuthorizationPolicy`: Check if authenticated claims can access a resource.
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::http::IHttpContext;
 use std::collections::HashMap;
 
@@ -57,6 +57,12 @@ pub trait IClaims: Send + Sync {
             .get("tenant_id")
             .or_else(|| self.claims().get("tenant"))
             .map(|s| s.as_str())
+    }
+
+    /// Read the email address from the raw claims map (key `"email"`).
+    /// Returns `None` when absent.
+    fn get_email(&self) -> Option<&str> {
+        self.claims().get("email").map(|s| s.as_str())
     }
 }
 
@@ -123,4 +129,123 @@ pub trait IDynamicAuthorizer: Send + Sync {
         route_pattern: &str,
         method: &str,
     ) -> Result<()>;
+}
+
+/// The standard identity a request can carry.
+///
+/// Put it in a request with `#[fromclaim]` and the binder fills it from the
+/// authenticated principal:
+///
+/// ```ignore
+/// #[derive(WebxRequestMeta)]
+/// pub struct CreateOrderRequest {
+///     #[fromclaim]
+///     pub user: CurrentUser,
+///     pub sku: String,
+/// }
+/// ```
+///
+/// The handler then reads `req.user.id`, `req.user.tenant_id` or
+/// `req.user.is_in_role("admin")` without touching the token or the context.
+/// `Option<CurrentUser>` makes the endpoint work for anonymous callers too.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct CurrentUser {
+    /// The subject (`sub`) — the stable user identifier.
+    pub id: String,
+    /// Display name (`name` claim), empty when the token has none.
+    pub name: String,
+    /// Email address (`email` claim), empty when the token has none.
+    pub email: String,
+    /// Tenant identifier (`tenant_id` / `tenant`), empty for single-tenant apps.
+    pub tenant_id: String,
+    /// Roles assigned to the user.
+    pub roles: Vec<String>,
+    /// Fine-grained permissions assigned to the user.
+    pub permissions: Vec<String>,
+}
+
+impl CurrentUser {
+    /// Build the identity from an authenticated principal.
+    pub fn from_claims(claims: &dyn IClaims) -> Self {
+        Self {
+            id: claims.subject().to_string(),
+            name: claims.get_username().unwrap_or_default().to_string(),
+            email: claims.get_email().unwrap_or_default().to_string(),
+            tenant_id: claims.get_tenantid().unwrap_or_default().to_string(),
+            roles: claims.roles().to_vec(),
+            permissions: claims.permissions().to_vec(),
+        }
+    }
+
+    /// Whether the user has `role`.
+    pub fn is_in_role(&self, role: &str) -> bool {
+        self.roles.iter().any(|assigned| assigned == role)
+    }
+
+    /// Whether the user has `permission`.
+    pub fn has_permission(&self, permission: &str) -> bool {
+        self.permissions
+            .iter()
+            .any(|assigned| assigned == permission)
+    }
+
+    /// The display name, falling back to the identifier.
+    pub fn display_name(&self) -> &str {
+        if self.name.is_empty() {
+            &self.id
+        } else {
+            &self.name
+        }
+    }
+}
+
+/// Convenience accessors for a request that carries a [`CurrentUser`].
+///
+/// `#[derive(WebxRequestMeta)]` implements this automatically when the struct
+/// has a `#[fromclaim]` field of type `CurrentUser` or `Option<CurrentUser>`.
+pub trait RequestUser {
+    /// The authenticated identity, or `None` for an anonymous request.
+    fn current_user(&self) -> Option<&CurrentUser>;
+
+    /// The subject identifier, or `None` when anonymous.
+    fn user_id(&self) -> Option<&str> {
+        self.current_user().map(|user| user.id.as_str())
+    }
+
+    /// The display name, or `None` when anonymous.
+    fn user_name(&self) -> Option<&str> {
+        self.current_user().map(|user| user.name.as_str())
+    }
+
+    /// The email address, or `None` when anonymous.
+    fn user_email(&self) -> Option<&str> {
+        self.current_user().map(|user| user.email.as_str())
+    }
+
+    /// The tenant identifier, or `None` when anonymous.
+    fn tenant_id(&self) -> Option<&str> {
+        self.current_user().map(|user| user.tenant_id.as_str())
+    }
+
+    /// The roles of the authenticated user (empty when anonymous).
+    fn roles(&self) -> &[String] {
+        match self.current_user() {
+            Some(user) => &user.roles,
+            None => &[],
+        }
+    }
+
+    /// Whether the authenticated user has `role`.
+    fn is_in_role(&self, role: &str) -> bool {
+        self.current_user()
+            .map(|user| user.is_in_role(role))
+            .unwrap_or(false)
+    }
+
+    /// The identity, or `401 Unauthorized` when the request is anonymous.
+    fn require_user(&self) -> Result<&CurrentUser> {
+        self.current_user().ok_or_else(|| {
+            Error::Unauthorized("authentication required for this endpoint".to_string())
+        })
+    }
 }

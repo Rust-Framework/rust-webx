@@ -20,7 +20,8 @@
 // --- Core traits ---
 pub use webx_core::app::IHost;
 pub use webx_core::auth::{
-    IAuthenticationHandler, IAuthorizationPolicy, IClaims, IDynamicAuthorizer,
+    CurrentUser, IAuthenticationHandler, IAuthorizationPolicy, IClaims, IDynamicAuthorizer,
+    RequestUser,
 };
 pub use webx_core::cache::{
     cache_ext::DistributedCacheExtensions,

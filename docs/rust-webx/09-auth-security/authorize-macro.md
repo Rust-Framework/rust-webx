@@ -67,6 +67,27 @@ pub struct AuthorizeRule {
 由 endpoint 自己执行，不依赖额外开关。未启用认证时，受保护路由因无 claims 返回 401，规则
 并非只收集不执行。旧的 `.use_resource_authorization()` 已过时，端点直接执行规则。
 
+## 在 Handler 里读取身份
+
+授权通过后，身份可以直接作为 Request 字段出现，不必再注入 `IHttpContext` 或手动解析 claims：
+
+```rust
+#[derive(WebxRequestMeta)]
+pub struct UpdateProfileRequest {
+    #[fromclaim]
+    pub user: CurrentUser,       // 未登录 → 401
+    pub display_name: String,    // JSON body
+}
+
+#[put("/api/profile")]
+#[authorize]
+impl IRequest<ProfileView> for UpdateProfileRequest {}
+```
+
+Handler 里 `req.user.id`、`req.user.tenant_id`、`req.user.is_in_role("admin")` 随取随用；
+匿名可访问的端点用 `Option<CurrentUser>`。详见
+[参数绑定 · 用户身份](../05-request-pattern/parameter-binding.md#用户身份currentuser)。
+
 ## 动态授权：IDynamicAuthorizer
 
 `#[authorize]` 适合**编译期固定**的角色/权限要求。如果授权依赖运行时数据（数据库里的

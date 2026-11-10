@@ -113,6 +113,63 @@ impl IRequestHandler<ClaimRequest, serde_json::Value> for ClaimHandler {
 }
 
 // ---------------------------------------------------------------------------
+// Standard identity (`CurrentUser`)
+// ---------------------------------------------------------------------------
+
+#[derive(Default, WebxRequestMeta)]
+struct CurrentUserRequest {
+    #[fromclaim]
+    user: CurrentUser,
+}
+
+#[get("/bind/user")]
+impl IRequest<serde_json::Value> for CurrentUserRequest {}
+
+#[derive(Default)]
+struct CurrentUserHandler;
+
+#[handler]
+#[async_trait::async_trait]
+impl IRequestHandler<CurrentUserRequest, serde_json::Value> for CurrentUserHandler {
+    async fn handle(&mut self, req: CurrentUserRequest) -> Result<serde_json::Value> {
+        Ok(serde_json::json!({
+            "id": req.user.id,
+            "name": req.user.name,
+            "email": req.user.email,
+            "tenant": req.user.tenant_id,
+            "roles": req.user.roles,
+            "user_id": req.user_id(),
+            "user_name": req.user_name(),
+            "is_admin": req.is_in_role("admin"),
+            "requires_ok": req.require_user().is_ok(),
+        }))
+    }
+}
+
+#[derive(Default, WebxRequestMeta)]
+struct OptionalCurrentUserRequest {
+    #[fromclaim]
+    user: Option<CurrentUser>,
+}
+
+#[get("/bind/user-optional")]
+impl IRequest<serde_json::Value> for OptionalCurrentUserRequest {}
+
+#[derive(Default)]
+struct OptionalCurrentUserHandler;
+
+#[handler]
+#[async_trait::async_trait]
+impl IRequestHandler<OptionalCurrentUserRequest, serde_json::Value> for OptionalCurrentUserHandler {
+    async fn handle(&mut self, req: OptionalCurrentUserRequest) -> Result<serde_json::Value> {
+        Ok(serde_json::json!({
+            "user_id": req.user_id(),
+            "anonymous": req.current_user().is_none(),
+        }))
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Mixed path + body + header
 // ---------------------------------------------------------------------------
 
@@ -311,6 +368,8 @@ impl IRequestHandler<CustomScalarRequest, serde_json::Value> for CustomScalarHan
 #[derive(Serialize)]
 struct TokenClaims {
     sub: String,
+    name: String,
+    email: String,
     roles: Vec<String>,
     permissions: Vec<String>,
     exp: usize,
@@ -326,6 +385,8 @@ fn token(tenant: Option<&str>) -> String {
         + 3600;
     let claims = TokenClaims {
         sub: "user-42".to_string(),
+        name: "Ada Lovelace".to_string(),
+        email: "ada@example.com".to_string(),
         roles: vec!["admin".to_string(), "auditor".to_string()],
         permissions: Vec::new(),
         exp,
@@ -524,6 +585,62 @@ async fn claims_are_optional_when_the_field_is() {
 
     assert_eq!(body["user"], "user-42");
     assert_eq!(body["tenant"], serde_json::Value::Null);
+}
+
+#[tokio::test]
+async fn current_user_is_bound_from_claims() {
+    let base = spawn_host().await;
+    let body: serde_json::Value = reqwest::Client::new()
+        .get(format!("{base}/bind/user"))
+        .bearer_auth(token(Some("acme")))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(body["id"], "user-42");
+    assert_eq!(body["name"], "Ada Lovelace");
+    assert_eq!(body["email"], "ada@example.com");
+    assert_eq!(body["tenant"], "acme");
+    assert_eq!(body["roles"][0], "admin");
+    assert_eq!(body["user_id"], "user-42");
+    assert_eq!(body["user_name"], "Ada Lovelace");
+    assert_eq!(body["is_admin"], true);
+    assert_eq!(body["requires_ok"], true);
+}
+
+#[tokio::test]
+async fn current_user_required_is_unauthorized_without_a_principal() {
+    let base = spawn_host().await;
+    let response = reqwest::get(format!("{base}/bind/user")).await.unwrap();
+    assert_eq!(response.status().as_u16(), 401);
+}
+
+#[tokio::test]
+async fn optional_current_user_is_none_for_anonymous_requests() {
+    let base = spawn_host().await;
+    let body: serde_json::Value = reqwest::get(format!("{base}/bind/user-optional"))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(body["user_id"], serde_json::Value::Null);
+    assert_eq!(body["anonymous"], true);
+
+    let body: serde_json::Value = reqwest::Client::new()
+        .get(format!("{base}/bind/user-optional"))
+        .bearer_auth(token(None))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(body["user_id"], "user-42");
+    assert_eq!(body["anonymous"], false);
 }
 
 #[tokio::test]

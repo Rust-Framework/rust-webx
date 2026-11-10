@@ -13,7 +13,7 @@ use webx::*;
 
 /// Upload one media file. Images and attachments are told apart by
 /// `Content-Type`, so the client sends a single plain file part.
-#[derive(Deserialize)]
+#[derive(WebxRequestMeta)]
 pub struct UploadMediaRequest {
     pub file: FormFile,
 }
@@ -37,7 +37,7 @@ pub struct MediaAsset {
 /// Serve a stored media file by its path relative to `uploads/`.
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct GetMediaRequest {
-    #[from_route]
+    #[frompath]
     pub path: String,
 }
 

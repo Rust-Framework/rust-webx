@@ -6,7 +6,7 @@
 
 | 能力 | 用什么 |
 |------|--------|
-| 接收 `multipart/form-data` | 请求结构体加 `FormFile` 字段，照常 `#[derive(Deserialize)]` |
+| 接收 `multipart/form-data` | 请求结构体加 `FormFile` 字段，并派生 `#[derive(WebxRequestMeta)]` |
 | 返回文件（流式） | 响应类型写 `ResponseData`，返回 `ResponseData::file(...)` |
 | 返回内存字节 | 响应类型写 `ResponseData`，返回 `ResponseData::bytes(...)` / `::text(...)` |
 
@@ -21,9 +21,10 @@
 ```rust
 use webx::*;
 
-#[derive(Deserialize)]
+#[derive(WebxRequestMeta)]
 pub struct UploadAvatarRequest {
-    /// 普通文本字段
+    /// 路由参数（路径里的 `{user_id}`）
+    #[frompath]
     pub user_id: String,
     /// 文件字段
     pub avatar: FormFile,
@@ -65,14 +66,15 @@ impl IRequestHandler<UploadAvatarRequest, AvatarDto> for UploadAvatarHandler {
 
 要点：
 
-* **不需要额外派生**。请求结构体仍然只写 `#[derive(Deserialize)]`，`FormFile` 自己知道怎么从表单里取自己。
-* **路由参数和表单字段可以混用**，`{user_id}` 会照常绑定。
-* **`Content-Type` 决定绑定方式**：`multipart/form-data` 走表单绑定，其它情况走原有的 JSON / 路径参数绑定。
+* **请求结构体要派生 `WebxRequestMeta`**：`FormFile` 字段自动成为表单分段，文本字段按未标注字段的规则
+  从表单取值（见[参数绑定](parameter-binding.md)）。
+* **路由参数和表单字段可以混用**：`{user_id}` 字段名优先匹配路由，其余文本字段走表单。
+* **`Content-Type` 决定能不能绑定**：端点声明了表单字段却收到 JSON 时返回 `415`，不会再尝试按 JSON 解析。
 
 ### 1.2 可选、多值字段
 
 ```rust
-#[derive(Deserialize)]
+#[derive(WebxRequestMeta)]
 pub struct UploadRequest {
     pub title: String,
     /// 可选：客户端没传时为 None
@@ -84,8 +86,8 @@ pub struct UploadRequest {
 }
 ```
 
-文本字段支持 `String`、`bool`、整数与浮点数、`char`、`Option<T>`、`Vec<T>`，以及单元枚举
-（例如把 `"disk"` 绑到 `enum Kind { Disk, Ssd }`）。同名文本字段重复出现时，标量取第一个值。
+文本字段支持 `String`、`bool`、整数与浮点数、`char`、`Option<T>`、`Vec<T>`，以及任何实现了
+`FromStr` 的类型。同名字段重复出现时，标量取第一个值，`Vec<T>` 取全部值（逗号分隔也会展开）。
 
 ### 1.3 `FormFile` API
 
@@ -141,8 +143,9 @@ pub struct UploadRequest {
 `multipart/form-data`，而不是错误的 JSON body：
 
 ```rust
-#[derive(Deserialize, WebxRequestMeta)]
+#[derive(WebxRequestMeta)]
 pub struct UploadAvatarRequest {
+    #[frompath]
     pub user_id: String,
     pub avatar: FormFile,
     pub gallery: Vec<FormFile>,
@@ -170,8 +173,18 @@ pub struct UploadAvatarRequest {
 ```
 
 规则很简单：**结构体里出现 `FormFile` 字段时，未标注的字段都视为表单字段**
-（与 `#[webx_request(query_all)]` 把未标注字段视为 query 参数同理）。
-也可以用 `#[from_form]` 显式标注。
+（与 `#[request(queryall)]` 把未标注字段视为 query 参数同理）。
+文件与文本分段都可以显式指定分段名：
+
+```rust
+#[derive(WebxRequestMeta)]
+pub struct UploadRequest {
+    #[fromfile("avatar")]
+    pub picture: FormFile,       // 客户端上传的分段名是 avatar
+    #[fromform("title")]
+    pub caption: String,         // 客户端上传的分段名是 title
+}
+```
 
 ---
 
@@ -185,8 +198,9 @@ pub struct UploadAvatarRequest {
 ```rust
 use webx::*;
 
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct DownloadReportRequest {
+    #[frompath]
     pub id: String,
 }
 
@@ -549,7 +563,7 @@ socket ──▶ hyper Incoming ──▶ multer 逐块解析 ──▶ FormFile
 
 ## 小结
 
-* 上传：请求结构体里写 `FormFile`，照常 `#[derive(Deserialize)]`，不需要额外派生或中间件。
+* 上传：请求结构体里写 `FormFile` 并派生 `WebxRequestMeta`，不需要额外中间件。
 * 文件流式接收、按阈值落盘、自动清理，内存占用与文件大小无关。
 * 下载：响应类型写 `ResponseData`；按手上有的东西选 `file` / `file_stream` /
   `file_seekable_stream`。

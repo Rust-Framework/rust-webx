@@ -140,7 +140,7 @@ impl HttpContext {
             }
         }
 
-        let query_params = parts
+        let (query_params, query_multi) = parts
             .uri
             .query()
             .map(parse_query_string)
@@ -176,6 +176,7 @@ impl HttpContext {
             path: parts.uri.path().to_string(),
             headers,
             query_params,
+            query_multi,
             route_params: HashMap::new(),
             route_pattern: None,
             body: Mutex::new(RequestBody::Pending(Some(body))),
@@ -244,6 +245,7 @@ pub struct HttpRequest {
     path: String,
     headers: HashMap<String, String>,
     query_params: HashMap<String, String>,
+    query_multi: HashMap<String, Vec<String>>,
     route_params: HashMap<String, String>,
     route_pattern: Option<String>,
     body: Mutex<RequestBody>,
@@ -260,12 +262,21 @@ impl IHttpRequest for HttpRequest {
         &self.path
     }
 
+    /// Header values are looked up case-insensitively, as HTTP requires.
     fn header(&self, name: &str) -> Option<&str> {
-        self.headers.get(name).map(|s| s.as_str())
+        if let Some(value) = self.headers.get(name) {
+            return Some(value.as_str());
+        }
+        let lower = name.to_ascii_lowercase();
+        self.headers.get(&lower).map(|s| s.as_str())
     }
 
     fn query(&self) -> &HashMap<String, String> {
         &self.query_params
+    }
+
+    fn query_all(&self) -> Option<&HashMap<String, Vec<String>>> {
+        Some(&self.query_multi)
     }
 
     fn route_params(&self) -> &HashMap<String, String> {
@@ -1322,37 +1333,56 @@ fn guess_content_type(path: &Path) -> Option<String> {
 // Query string helpers
 // ---------------------------------------------------------------------------
 
-/// Parse a query string like "key1=val1&key2=val2" into a HashMap.
-fn parse_query_string(query: &str) -> HashMap<String, String> {
-    let mut params = HashMap::new();
+/// Parse a query string like "key1=val1&key2=val2" into both views.
+///
+/// Returns the last value per key (the compatibility view used by
+/// `IHttpRequest::query`) and every value per key (used for `Vec<T>` fields).
+/// Repeated keys keep their order; empty pairs are ignored.
+fn parse_query_string(query: &str) -> (HashMap<String, String>, HashMap<String, Vec<String>>) {
+    let mut flat = HashMap::new();
+    let mut multi: HashMap<String, Vec<String>> = HashMap::new();
     for pair in query.split('&') {
         if pair.is_empty() {
             continue;
         }
         let mut parts = pair.splitn(2, '=');
         if let (Some(key), Some(value)) = (parts.next(), parts.next()) {
-            params.insert(percent_decode(key), percent_decode(value));
+            let key = percent_decode(key);
+            let value = percent_decode(value);
+            flat.insert(key.clone(), value.clone());
+            multi.entry(key).or_default().push(value);
         }
     }
-    params
+    (flat, multi)
 }
 
+/// Decode `%XX` escapes and `+` into a UTF-8 string.
+///
+/// Escapes are decoded as bytes and then validated as UTF-8, so multi-byte
+/// characters (`%E4%B8%AD` → `中`) survive; the previous byte-per-char loop
+/// mangled anything outside ASCII.
 fn percent_decode(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut chars = s.chars();
-    while let Some(c) = chars.next() {
-        if c == '%' {
-            let hex: String = chars.by_ref().take(2).collect();
-            if let Ok(byte) = u8::from_str_radix(&hex, 16) {
-                result.push(byte as char);
+    if !s.contains('%') && !s.contains('+') {
+        return s.to_string();
+    }
+
+    let mut bytes = Vec::with_capacity(s.len());
+    let mut chars = s.bytes();
+    while let Some(byte) = chars.next() {
+        match byte {
+            b'%' => {
+                let hi = chars.next().and_then(|c| (c as char).to_digit(16));
+                let lo = chars.next().and_then(|c| (c as char).to_digit(16));
+                match (hi, lo) {
+                    (Some(hi), Some(lo)) => bytes.push((hi * 16 + lo) as u8),
+                    _ => bytes.push(b'%'),
+                }
             }
-        } else if c == '+' {
-            result.push(' ');
-        } else {
-            result.push(c);
+            b'+' => bytes.push(b' '),
+            other => bytes.push(other),
         }
     }
-    result
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 #[cfg(test)]
@@ -1483,9 +1513,32 @@ mod tests {
 
     #[test]
     fn parses_query_strings() {
-        let params = parse_query_string("a=1&b=hello+world&c=%2Ftmp");
+        let (params, multi) = parse_query_string("a=1&b=hello+world&c=%2Ftmp");
         assert_eq!(params.get("a").map(String::as_str), Some("1"));
         assert_eq!(params.get("b").map(String::as_str), Some("hello world"));
         assert_eq!(params.get("c").map(String::as_str), Some("/tmp"));
+        assert_eq!(
+            multi.get("a").map(Vec::as_slice),
+            Some(&["1".to_string()][..])
+        );
+    }
+
+    #[test]
+    fn keeps_every_query_value_for_repeated_keys() {
+        let (params, multi) = parse_query_string("id=1&id=2&id=3");
+        assert_eq!(params.get("id").map(String::as_str), Some("3"));
+        assert_eq!(
+            multi.get("id").map(Vec::as_slice),
+            Some(&["1".to_string(), "2".to_string(), "3".to_string()][..])
+        );
+    }
+
+    #[test]
+    fn percent_decodes_utf8() {
+        // Multi-byte characters must survive: the byte-per-char loop turned
+        // `%E4%B8%AD` into mojibake.
+        let (params, _) = parse_query_string("q=%E4%B8%AD%E6%96%87&x=%2B");
+        assert_eq!(params.get("q").map(String::as_str), Some("中文"));
+        assert_eq!(params.get("x").map(String::as_str), Some("+"));
     }
 }

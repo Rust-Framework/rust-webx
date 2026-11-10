@@ -35,7 +35,7 @@ Error::Internal(format!("SQL error: {}", db_err))
 
 ```rust
 // 请求 DTO：只包含输入字段
-#[derive(Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct CreateUserRequest {
     pub name: String,
     pub email: String,

@@ -80,6 +80,7 @@ async fn main() {
 ### 1. 编译时路由与 Handler 注册
 
 ```rust
+#[derive(WebxRequestMeta)]
 struct HelloRequest;
 
 #[get("/hello")]

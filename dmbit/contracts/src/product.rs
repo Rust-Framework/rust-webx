@@ -21,7 +21,7 @@ pub struct ProductModel {
 }
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct ListProductsRequest;
 
 #[get("/api/products")]
@@ -29,7 +29,7 @@ pub struct ListProductsRequest;
 impl IRequest<Vec<ProductModel>> for ListProductsRequest {}
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct GetProductRequest {
     pub id: String,
 }
@@ -39,7 +39,7 @@ pub struct GetProductRequest {
 impl IRequest<ProductModel> for GetProductRequest {}
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct CreateProductRequest {
     pub name: String,
     pub code: String,
@@ -60,8 +60,9 @@ fn default_category() -> String {
 impl IRequest<ProductModel> for CreateProductRequest {}
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct UpdateProductRequest {
+    #[frompath]
     #[serde(default)]
     pub id: String,
     pub name: Option<String>,
@@ -76,7 +77,7 @@ pub struct UpdateProductRequest {
 impl IRequest<ProductModel> for UpdateProductRequest {}
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct DeleteProductRequest {
     pub id: String,
 }

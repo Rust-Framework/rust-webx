@@ -20,25 +20,25 @@
 //!
 //! # Binding
 //!
-//! Request structs bind form data through ordinary `serde`:
+//! Request structs declare form fields with `#[derive(WebxRequestMeta)]`:
+//! `FormFile` fields become file parts, unmarked text fields (or fields marked
+//! `#[fromform]`) become text parts, and route parameters still bind by name.
 //!
 //! ```ignore
-//! #[derive(Deserialize)]
+//! #[derive(WebxRequestMeta)]
 //! struct UploadRequest {
-//!     title: String,          // text field
+//!     title: String,          // text part
 //!     avatar: FormFile,       // file part
 //!     gallery: Vec<FormFile>, // repeated file parts
 //! }
 //! ```
 //!
-//! `FormFile` deliberately only deserializes from the framework's own spool
-//! directory, so a client cannot make the server read arbitrary paths by
-//! posting JSON.
+//! `FormFile` has no `Deserialize` implementation: a file handle can only come
+//! from a parsed multipart body, so a client cannot make the server read an
+//! arbitrary path by posting JSON.
 
-mod de;
 mod spool;
 
-pub use de::{FormDeserializer, FormError};
 pub use spool::{sanitize_file_name, set_spool_root, spool_root, SPOOL_FILE_PREFIX};
 
 use crate::error::{Error, Result};
@@ -50,35 +50,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
-
-tokio::task_local! {
-    /// The form currently being bound, used to hand `FormFile` values to
-    /// `serde` while preserving their reference-counted ownership.
-    static ACTIVE_FORM: Arc<MultipartForm>;
-}
-
-/// Task-local access to the form being deserialized.
-///
-/// `serde` cannot move an `Arc` through a `Visitor`, so file parts are passed
-/// as an index into the active form instead. Binding runs inside
-/// [`ActiveForm::run`], which makes the lookup safe: a `FormFile` can only ever
-/// be produced while the framework is deserializing a real parsed form.
-pub(crate) struct ActiveForm;
-
-impl ActiveForm {
-    /// Run `f` with `form` available to `FormFile::deserialize`.
-    pub(crate) fn run<R>(form: Arc<MultipartForm>, f: impl FnOnce() -> R) -> R {
-        ACTIVE_FORM.sync_scope(form, f)
-    }
-
-    /// Resolve a file index produced by [`FormDeserializer`].
-    pub(crate) fn resolve(position: usize) -> Option<FormFile> {
-        ACTIVE_FORM
-            .try_with(|form| form.files.get(position).cloned())
-            .ok()
-            .flatten()
-    }
-}
 
 /// One file part of a `multipart/form-data` request.
 ///

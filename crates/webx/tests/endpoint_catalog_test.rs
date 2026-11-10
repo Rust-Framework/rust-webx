@@ -20,7 +20,7 @@ const RESOURCES_EN: &str = r#"{
     "endpoint.blog.category": "Blog"
 }"#;
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize, WebxRequestMeta)]
 struct CreateBlogRequest;
 
 #[post("/api/endpoints/blog")]
@@ -42,7 +42,7 @@ impl IRequestHandler<CreateBlogRequest, String> for CreateBlogHandler {
     }
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize, WebxRequestMeta)]
 struct GetBlogRequest {
     slug: String,
 }
@@ -64,7 +64,7 @@ impl IRequestHandler<GetBlogRequest, String> for GetBlogHandler {
     }
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize, WebxRequestMeta)]
 struct PingRequest;
 
 #[endpoint(Get, "/api/endpoints/ping")]
@@ -81,7 +81,7 @@ impl IRequestHandler<PingRequest, String> for PingHandler {
     }
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize, WebxRequestMeta)]
 struct OrderRequest;
 
 // Text attributes above the route macro: the `#[display]`-family macros carry

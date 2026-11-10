@@ -8,6 +8,7 @@
 use webx::*;
 
 // ── 第一步：定义 Request ──
+#[derive(WebxRequestMeta)]
 struct HelloRequest;
 
 // ── 第二步：标注路由 ──
@@ -44,10 +45,13 @@ async fn main() {
 ### 第一步：定义 Request
 
 ```rust
+#[derive(WebxRequestMeta)]
 struct HelloRequest;
 ```
 
 `HelloRequest` 是**零大小类型（ZST）**，承载「这是一个获取问候语的请求」的语义。无路径参数、无 Body 时，struct 可以为空。
+
+`#[derive(WebxRequestMeta)]` 是每个请求类型的必需派生：它生成运行时绑定代码与 OpenAPI 参数元数据。
 
 Request 结构体的字段将在有参数时发挥作用（路径参数、Query、Body）。
 

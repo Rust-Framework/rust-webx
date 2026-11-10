@@ -44,11 +44,25 @@ impl ProblemDetails {
         }
     }
 
+    /// Build a 400 validation problem from field-level failures.
+    ///
+    /// `errors` is serialized as ASP.NET Core does — an object keyed by field
+    /// name, each holding every message for that field:
+    ///
+    /// ```json
+    /// { "errors": { "page": ["The `page` field must be a valid integer (got `x`)."] } }
+    /// ```
     pub fn validation(errors: Vec<FieldError>) -> Self {
+        let mut grouped: std::collections::BTreeMap<String, Vec<String>> =
+            std::collections::BTreeMap::new();
+        for error in errors {
+            grouped.entry(error.field).or_default().push(error.message);
+        }
+
         let mut ext = HashMap::new();
         ext.insert(
             "errors".into(),
-            serde_json::to_value(errors).unwrap_or_default(),
+            serde_json::to_value(grouped).unwrap_or_default(),
         );
         Self {
             typ: Some("https://httpstatuses.com/400".into()),
@@ -70,10 +84,12 @@ impl ProblemDetails {
         self
     }
 
+    /// Carry this problem through the error pipeline unchanged.
+    ///
+    /// The host writes it verbatim (status, `application/problem+json`, and the
+    /// `errors` extension), so binding failures keep their per-field detail.
     pub fn to_error(self) -> crate::error::Error {
-        let title = self.title.clone();
-        let fallback = serde_json::to_string(&self).unwrap_or(title);
-        crate::error::Error::Status(self.status, fallback)
+        crate::error::Error::Problem(Box::new(self))
     }
 }
 

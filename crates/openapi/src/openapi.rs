@@ -8,6 +8,7 @@ use serde_json::{json, Value as JsonValue};
 use std::collections::{BTreeSet, HashMap};
 use webx_core::localization::IStringLocalizer;
 use webx_core::route::scan::{ParamMeta, RequestParamEntry, RouteEntry};
+use webx_core::routing::HttpMethod;
 
 /// Generate an OpenAPI 3.0.3 specification from registered routes.
 ///
@@ -42,17 +43,33 @@ pub fn generate_openapi_spec(
         let mut has_body = false;
         let mut form_params: Vec<ParamMeta> = Vec::new();
 
+        // An unmarked field (`source == ""`) is a body field on a method that
+        // carries a body, and a query field everywhere else — the same rule the
+        // runtime binder applies.
+        let body_method = matches!(
+            entry.method,
+            HttpMethod::Post | HttpMethod::Put | HttpMethod::Patch
+        );
+
         for param in merge_params(entry.handler_type, entry.params, &request_params) {
-            match param.source {
+            let source = match param.source {
+                "" if body_method => "body",
+                "" => "query",
+                other => other,
+            };
+
+            match source {
                 // An upload endpoint describes its fields as multipart parts;
                 // the generic JSON body is not applicable.
                 "form" => form_params.push(param),
                 "body" => has_body = true,
+                // Claims come from the principal, not from the request.
+                "claim" => {}
                 _ => {
-                    let required = param.source == "path";
+                    let required = param.required || source == "path";
                     parameters.push(json!({
                         "name": param.name,
-                        "in": param.source,
+                        "in": source,
                         "required": required,
                         "schema": { "type": param.type_hint },
                     }));
@@ -139,21 +156,33 @@ fn collect_request_params() -> HashMap<&'static str, &'static [ParamMeta]> {
     map
 }
 
-/// Merge route-level params (path/body from endpoint macro) with struct-level metadata.
+/// Merge route-level params (path from the route template) with the request
+/// struct's own metadata.
+///
+/// The struct is the richer source: it knows real types and requiredness, while
+/// the template only knows that a `{name}` segment exists. On a collision the
+/// struct's type hint wins, so `{id}` documents as `integer` when the field is
+/// an integer.
 fn merge_params(
     request_type: &'static str,
     route_params: &'static [ParamMeta],
     request_params: &HashMap<&'static str, &'static [ParamMeta]>,
 ) -> Vec<ParamMeta> {
     let mut merged: Vec<ParamMeta> = route_params.to_vec();
-    let mut seen: HashMap<(&str, &str), ()> =
-        merged.iter().map(|p| ((p.name, p.source), ())).collect();
 
     if let Some(extra) = request_params.get(request_type) {
         for param in *extra {
-            let key = (param.name, param.source);
-            if seen.insert(key, ()).is_none() {
-                merged.push(param.clone());
+            match merged
+                .iter_mut()
+                .find(|seen| seen.name == param.name && seen.source == param.source)
+            {
+                Some(existing) => {
+                    if existing.type_hint == "string" && param.type_hint != "string" {
+                        existing.type_hint = param.type_hint;
+                    }
+                    existing.required = existing.required || param.required;
+                }
+                None => merged.push(param.clone()),
             }
         }
     }
@@ -179,7 +208,9 @@ fn form_schema(params: &[ParamMeta]) -> JsonValue {
             other => json!({ "type": other }),
         };
         properties.insert(param.name.to_string(), schema);
-        required.push(json!(param.name));
+        if param.required {
+            required.push(json!(param.name));
+        }
     }
 
     json!({

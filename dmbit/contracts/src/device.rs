@@ -32,7 +32,7 @@ pub struct DeviceFilter {
 }
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct ListDevicesRequest;
 
 #[get("/api/devices")]
@@ -40,7 +40,7 @@ pub struct ListDevicesRequest;
 impl IRequest<Vec<DeviceModel>> for ListDevicesRequest {}
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct ListSpecDevicesRequest {
     pub id: String,
 }
@@ -50,7 +50,7 @@ pub struct ListSpecDevicesRequest {
 impl IRequest<Vec<DeviceModel>> for ListSpecDevicesRequest {}
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct GetDeviceRequest {
     pub id: String,
 }
@@ -60,7 +60,7 @@ pub struct GetDeviceRequest {
 impl IRequest<DeviceModel> for GetDeviceRequest {}
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct CreateDeviceRequest {
     pub spec_id: String,
     #[serde(default = "default_device_status")]
@@ -83,8 +83,9 @@ fn default_device_status() -> String {
 impl IRequest<DeviceModel> for CreateDeviceRequest {}
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct GenerateDevicesRequest {
+    #[frompath]
     pub id: String,
     #[serde(default)]
     pub spec_id: String,
@@ -113,8 +114,9 @@ pub struct GenerateDevicesResult {
 impl IRequest<GenerateDevicesResult> for GenerateDevicesRequest {}
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct UpdateDeviceRequest {
+    #[frompath]
     #[serde(default)]
     pub id: String,
     pub spec_id: Option<String>,
@@ -130,7 +132,7 @@ pub struct UpdateDeviceRequest {
 impl IRequest<DeviceModel> for UpdateDeviceRequest {}
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct DeleteDeviceRequest {
     pub id: String,
 }

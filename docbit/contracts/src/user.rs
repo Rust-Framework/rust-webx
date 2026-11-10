@@ -19,14 +19,14 @@ pub struct UserModel {
     pub created_at: i64,
 }
 
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct InfoRequest;
 
 /// Get API server information including version and endpoint count
 #[get("/api/info")]
 impl IRequest<String> for InfoRequest {}
 
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct ListUsersRequest;
 
 /// Returns a list of all registered users
@@ -34,7 +34,7 @@ pub struct ListUsersRequest;
 #[authorize(role = "admin")]
 impl IRequest<Vec<UserModel>> for ListUsersRequest {}
 
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct GetUserRequest {
     pub id: String,
 }
@@ -45,7 +45,7 @@ pub struct GetUserRequest {
 impl IRequest<UserModel> for GetUserRequest {}
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct CreateUserRequest {
     pub name: String,
     pub email: String,
@@ -57,8 +57,9 @@ pub struct CreateUserRequest {
 impl IRequest<UserModel> for CreateUserRequest {}
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct UpdateUserRequest {
+    #[frompath]
     #[serde(default)]
     pub id: String,
     pub name: Option<String>,
@@ -71,7 +72,7 @@ pub struct UpdateUserRequest {
 impl IRequest<UserModel> for UpdateUserRequest {}
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct DeleteUserRequest {
     pub id: String,
 }

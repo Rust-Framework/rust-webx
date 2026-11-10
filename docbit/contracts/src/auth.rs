@@ -11,7 +11,7 @@ use webx::*;
 
 // ── Register ──
 
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct RegisterRequest {
     pub name: String,
     pub email: String,
@@ -39,7 +39,7 @@ impl IRequest<AuthResponse> for RegisterRequest {}
 
 // ── Login ──
 
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct LoginRequest {
     pub email: String,
     pub password: String,
@@ -51,7 +51,7 @@ impl IRequest<AuthResponse> for LoginRequest {}
 // ── Auth Me (get current user from token) ──
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct AuthMeRequest;
 
 /// Returns the current user's info based on the JWT token claims.
@@ -61,7 +61,7 @@ impl IRequest<UserView> for AuthMeRequest {}
 
 // ── Forgot / reset password ──
 
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct ForgotPasswordRequest {
     pub email: String,
 }
@@ -76,7 +76,7 @@ pub struct ForgotPasswordResponse {
 #[post("/api/auth/forgot-password")]
 impl IRequest<ForgotPasswordResponse> for ForgotPasswordRequest {}
 
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct ResetPasswordRequest {
     pub token: String,
     pub password: String,

@@ -32,7 +32,7 @@ async fn spawn_host(port: u16) {
 // GET with path parameter
 // ---------------------------------------------------------------------------
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize, WebxRequestMeta)]
 struct GetUserRequest {
     id: String,
 }
@@ -79,7 +79,7 @@ async fn get_with_path_param_returns_200() {
 // POST with JSON body
 // ---------------------------------------------------------------------------
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize, WebxRequestMeta)]
 struct CreateUserRequest {
     name: String,
     email: String,
@@ -156,8 +156,9 @@ async fn post_with_invalid_json_returns_400() {
 // PUT with path param + body
 // ---------------------------------------------------------------------------
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize, WebxRequestMeta)]
 struct UpdateUserRequest {
+    #[frompath]
     #[serde(default)]
     id: String,
     name: String,
@@ -211,7 +212,7 @@ async fn put_with_path_and_body_returns_200() {
 // DELETE → 204 No Content
 // ---------------------------------------------------------------------------
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize, WebxRequestMeta)]
 struct DeleteUserRequest {
     id: String,
 }
@@ -292,7 +293,7 @@ async fn oversized_body_returns_413() {
 // Multiple path parameters
 // ---------------------------------------------------------------------------
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize, WebxRequestMeta)]
 struct GetPostRequest {
     user_id: String,
     post_id: String,
@@ -385,7 +386,7 @@ async fn missing_request_id_generates_one() {
 // GET with query parameters
 // ---------------------------------------------------------------------------
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize, WebxRequestMeta)]
 struct SearchRequest {
     q: String,
     page: String,
@@ -433,7 +434,7 @@ async fn get_with_query_params_returns_200() {
 // Error status code mapping
 // ---------------------------------------------------------------------------
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize, WebxRequestMeta)]
 struct FailRequest {
     code: String,
 }

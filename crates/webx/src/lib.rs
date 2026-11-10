@@ -5,7 +5,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! rust-webx = "0.5"
+//! rust-webx = "0.7"
 //! ```
 //!
 //! ```ignore
@@ -34,14 +34,14 @@ pub use webx_core::config::{
 pub use webx_core::dispatch_runtime::{dispatch_provider, DispatchRuntime};
 pub use webx_core::error::{Error, Result};
 pub use webx_core::form::{
-    sanitize_file_name, set_spool_root, spool_root, FormDeserializer, FormError, FormField,
-    FormFile, FormFileBuilder, MultipartForm, SPOOL_FILE_PREFIX,
+    sanitize_file_name, set_spool_root, spool_root, FormField, FormFile, FormFileBuilder,
+    MultipartForm, SPOOL_FILE_PREFIX,
 };
 pub use webx_core::handler::{IClaimsCarrier, IEventHandler, IHostedService, IRequestHandler};
 pub use webx_core::http::{
     content_disposition_value, read_json_body, write_json_response, ByteRange, Disposition,
-    FileBody, FileSource, FromHttpContext, HttpStatus, IClaimsExt, IHttpContext, IHttpRequest,
-    IHttpResponse, Json, ResponseBody, SeekableReader, STREAM_BUF_SIZE,
+    FileBody, FileSource, HttpStatus, IClaimsExt, IHttpContext, IHttpRequest, IHttpResponse, Json,
+    ResponseBody, SeekableReader, STREAM_BUF_SIZE,
 };
 pub use webx_core::localization::{
     IStringLocalizer, LocalizationOptions, LocalizedString, StringLocalizer, TextRef,
@@ -67,9 +67,9 @@ pub use webx_core::route::diagnostics::{
 pub use webx_core::routing::{HttpMethod, IEndpoint, IRouter, RouteMeta};
 
 // --- DI extensions ---
-pub use webx_core::route::bind::bind_form_request;
+pub use webx_core::route::binding;
+pub use webx_core::route::binding::RequestModel;
 pub use webx_core::route::ext::{is_mediator_active, should_scan_endpoints, IServiceCollectionExt};
-pub use webx_core::route::params::try_deserialize_from_params;
 #[allow(deprecated)]
 pub use webx_core::route::scan::{
     global_provider, set_global_provider, AuthorizeRule, HandlerCache, HandlerEntry,
@@ -156,6 +156,8 @@ pub use rust_dix_macros::{module, Inject};
 // --- Re-export common dependencies ---
 pub use async_trait::async_trait;
 pub use hyper;
+/// Compile-time registration used by the derive macros.
+pub use inventory;
 pub use serde;
 pub use serde_json;
 pub use tokio;

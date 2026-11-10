@@ -9,7 +9,7 @@
 | [IRequest 与 IRequestHandler](irequest-irequesthandler.md) | 双类型参数模式 |
 | [路由宏详解](route-macros.md) | get/post/put/delete、端点名称/分类、端点目录 |
 | [Handler 注册策略](handler-registration.md) | handler 宏、手动注册、inject |
-| [参数绑定与序列化](parameter-binding.md) | 路径参数、Body、Query |
+| [参数绑定与序列化](parameter-binding.md) | 路径、Query、Body、表单、Header、Claim 的来源声明与错误聚合 |
 | [文件上传与下载](file-upload-download.md) | multipart 表单、FormFile、文件响应与 Range |
 | [错误处理与 ProblemDetails](error-handling.md) | Error 变体与 RFC 7807 |
 

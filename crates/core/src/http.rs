@@ -11,7 +11,9 @@
 //! - [`IHttpRequest`] — Read-only access to the incoming HTTP request.
 //! - [`IHttpResponse`] — Mutable access to the outgoing HTTP response.
 //! - [`IClaimsExt`] — Extension for storing/retrieving authentication claims.
-//! - [`FromHttpContext`] — Build a request struct from HTTP request data.
+//!
+//! Request structs are bound by `webx_core::route::binding::RequestModel`,
+//! which `#[derive(WebxRequestMeta)]` implements.
 //!
 //! # Helpers
 //!
@@ -436,6 +438,17 @@ pub trait IHttpRequest: Send {
     fn path(&self) -> &str;
     fn header(&self, name: &str) -> Option<&str>;
     fn query(&self) -> &HashMap<String, String>;
+
+    /// Every value per query key, in the order they appeared.
+    ///
+    /// `?id=1&id=2` yields two values for `id`, which is what `Vec<T>` query
+    /// fields bind from. The default implementation reports no multi-value
+    /// support, so a host that does not override this still binds the
+    /// single-value [`IHttpRequest::query`] view.
+    fn query_all(&self) -> Option<&HashMap<String, Vec<String>>> {
+        None
+    }
+
     fn route_params(&self) -> &HashMap<String, String>;
     fn route_params_mut(&mut self) -> &mut HashMap<String, String>;
 
@@ -612,29 +625,3 @@ pub async fn read_json_body<T: serde::de::DeserializeOwned>(
 
 /// Type alias for JSON responses in controller methods.
 pub type Json<T> = T;
-
-/// Trait for constructing a request struct from the HTTP context.
-///
-/// Implemented automatically by the `#[get]`, `#[post]`, `#[put]`, `#[delete]`
-/// proc macros for request types. Custom implementations are also supported.
-///
-/// # Automatic implementation
-///
-/// For POST/PUT/PATCH routes, the macro will attempt `serde_json::from_slice`
-/// on the request body. For GET/DELETE routes with path parameters, the macro
-/// will extract parameters from `ctx.request().route_params()` by field name.
-///
-/// # Manual implementation
-///
-/// ```ignore
-/// #[async_trait::async_trait]
-/// impl FromHttpContext for MyRequest {
-///     async fn from_http_context(ctx: &dyn IHttpContext) -> Result<Self> {
-///         // custom construction logic
-///     }
-/// }
-/// ```
-#[async_trait::async_trait]
-pub trait FromHttpContext: Sized + Send + 'static {
-    async fn from_http_context(ctx: &dyn IHttpContext) -> Result<Self>;
-}

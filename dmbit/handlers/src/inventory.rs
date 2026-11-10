@@ -763,7 +763,7 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
         }
 
         if (!conflict_product_codes.is_empty() || !conflict_spec_codes.is_empty())
-            && !req.confirm_update
+            && !req.confirm_update.unwrap_or(false)
         {
             let n_p = conflict_product_codes.len();
             let n_s = conflict_spec_codes.len();

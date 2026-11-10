@@ -53,11 +53,13 @@ inventory::submit! {
                 name: "q",
                 source: "query",
                 type_hint: "string",
+                required: false,
             },
             ParamMeta {
                 name: "page",
                 source: "query",
                 type_hint: "integer",
+                required: false,
             },
         ],
     }

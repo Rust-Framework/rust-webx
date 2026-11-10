@@ -2,7 +2,8 @@
 
 ## 基本用法
 
-路由宏标注在 `impl IRequest<T>` 块上：
+路由宏标注在 `impl IRequest<T>` 块上。每个 `impl` 对应的请求结构体都必须派生
+`WebxRequestMeta`（绑定与 OpenAPI 元数据都由它生成）；下面的路由片段省略了结构体定义：
 
 ```rust
 #[get("/api/users")]
@@ -152,7 +153,7 @@ struct PermissionSync {
 只返回 `EndpointDescriptor`（`name` / `description` / `category` 是 `TextRef { key, text }`）：
 
 ```rust
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 struct ListEndpointsRequest;
 
 #[get("/api/endpoints")]
@@ -285,6 +286,7 @@ impl IRequestHandler<ListEndpointsRequest, Vec<EndpointDescriptor>> for ListEndp
 `{name}` 语法定义动态段：
 
 ```rust
+#[derive(WebxRequestMeta)]
 struct GetUserRequest {
     pub id: String,       // 绑定 {id}
 }
@@ -298,6 +300,7 @@ impl IRequest<UserDto> for GetUserRequest {}
 ### 通配符路径
 
 ```rust
+#[derive(WebxRequestMeta)]
 struct GetDocContentRequest {
     pub work: String,
     pub any: String,      // 绑定 {*any} 剩余路径

@@ -3,6 +3,71 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [0.7.0] — 2026-11-10
+
+### Breaking
+
+- **Every request type must derive `WebxRequestMeta`** — the endpoint macros
+  bind through `RequestModel`, which the derive implements. A missing derive is
+  a compile error with an `add #[derive(WebxRequestMeta)]` hint.
+- **Binding failures are 400s** — a value that cannot be parsed, a required
+  field that is missing, or an unknown key under `deny_unknown_fields` returns
+  `application/problem+json` with `errors: { "field": ["message"] }` keyed by
+  **field name**.
+- **A form endpoint rejects a non-multipart body with 415.**
+- **Field markers are written without underscores**: `#[frompath]`,
+  `#[fromquery]`, `#[frombody]`, `#[fromform]`, `#[fromfile]`,
+  `#[fromheader]`, `#[fromclaim]`, and `#[request(queryall)]`. The previous
+  snake_case spellings are gone.
+
+### Added
+
+- **`#[fromfile("avatar")]`** — binds a file part, and every marker except
+  `#[frombody]` now accepts an optional source key (`#[fromquery("q")]`,
+  `#[frompath("id")]`, `#[fromform("title")]`).
+- **`#[fromheader("X-Tenant")]`** — binds a header, case-insensitively; the bare
+  form derives the name from the field (`x_request_id` → `x-request-id`).
+- **`#[fromclaim("tenant_id")]`** — binds a claim. `sub`, `roles` and
+  `permissions` use their dedicated slots; a required claim on an
+  unauthenticated request is 401.
+- **`Vec<T>` query fields** — repeated keys (`?id=1&id=2`) and comma lists
+  (`?id=1,2`) both bind; the host keeps every query value.
+- **Type coercion for every non-body source** — each scalar is parsed with
+  `FromStr`, so `page: u32` binds from `?page=2`.
+- **One declaration for binding and OpenAPI** — `#[derive(WebxRequestMeta)]`
+  emits both `RequestModel::bind` and `param_meta()`, so the spec and the runtime
+  cannot disagree; `required` flags mirror the runtime exactly.
+- **UTF-8 query decoding** — `%E4%B8%AD` decodes to `中`.
+
+### Changed
+
+- Unmarked fields follow the **request method**: `GET`/`HEAD`/`DELETE`/`OPTIONS`
+  bind from the query string, then the route; `POST`/`PUT`/`PATCH` bind from the
+  JSON body, then the form, then the query string. Header and claim values are
+  never implicit.
+- **Body fields bind one at a time** from the JSON object: presence is exact,
+  so an absent key falls through to the next source while an explicitly `null`
+  or mistyped value is a 400 for that field. `rename`, `rename_all`, `alias`,
+  `default`, `flatten`, `deny_unknown_fields` and custom deserializers keep
+  their serde meaning; defaults apply only after the fallback chain finds
+  nothing.
+- Composite fields (`ComponentModel`, `Option<ComponentModel>`,
+  `Vec<ComponentModel>`, `#[serde(flatten)]`) bind from the JSON body; custom
+  scalars (`Uuid`, enums) bind from query/path/header/claim only when marked
+  explicitly.
+- `Option<Vec<T>>` distinguishes "absent" (`None`) from "present, empty"
+  (`Some([])`).
+- `Error::Problem` carries a complete `ProblemDetails` through the pipeline so
+  the `errors` extension reaches the client instead of a stringified `detail`.
+
+### Removed
+
+- `FromHttpContext`, `bind_form_request`, `try_deserialize_from_params`,
+  `FormDeserializer` and `FormError` — the old single-pass binding helpers.
+- `FormFile` no longer implements `Deserialize`. A file handle can only come
+  from a parsed multipart body, so upload request structs derive
+  `WebxRequestMeta` only (no `Deserialize`).
+
 ## [0.6.1] — 2026-11-04
 
 ### Fixed

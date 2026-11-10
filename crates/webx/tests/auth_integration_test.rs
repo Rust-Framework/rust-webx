@@ -64,7 +64,7 @@ fn create_expired_token(secret: &[u8]) -> String {
     .unwrap()
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize, WebxRequestMeta)]
 struct ProtectedRequest;
 
 #[get("/protected")]
@@ -82,7 +82,7 @@ impl IRequestHandler<ProtectedRequest, String> for ProtectedHandler {
     }
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize, WebxRequestMeta)]
 struct MeRequest;
 
 #[get("/me")]

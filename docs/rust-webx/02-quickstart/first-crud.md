@@ -18,13 +18,16 @@ pub struct UserDto {
 }
 
 // ── List ──
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct ListUsersRequest;
 
 #[get("/api/users")]
 impl IRequest<Vec<UserDto>> for ListUsersRequest {}
 
 // ── Get by ID ──
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct GetUserRequest {
+    #[frompath]
     pub id: String,
 }
 
@@ -32,7 +35,7 @@ pub struct GetUserRequest {
 impl IRequest<UserDto> for GetUserRequest {}
 
 // ── Create ──
-#[derive(Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct CreateUserRequest {
     pub name: String,
     pub email: String,
@@ -42,8 +45,9 @@ pub struct CreateUserRequest {
 impl IRequest<UserDto> for CreateUserRequest {}
 
 // ── Update ──
-#[derive(Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct UpdateUserRequest {
+    #[frompath]
     pub id: String,
     pub name: String,
     pub email: String,
@@ -53,7 +57,9 @@ pub struct UpdateUserRequest {
 impl IRequest<UserDto> for UpdateUserRequest {}
 
 // ── Delete ──
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct DeleteUserRequest {
+    #[frompath]
     pub id: String,
 }
 
@@ -187,8 +193,9 @@ async fn handle(&mut self, req: GetUserRequest) -> Result<UserDto> {
 |------|------|
 | Request 放 contracts | 路由元数据与 DTO 定义集中，便于查阅 API 契约 |
 | Handler 放 handlers | 纯业务逻辑，通过 DI 获取依赖 |
-| 路径参数同名字段 | `{id}` 自动绑定到 `GetUserRequest.id` |
-| Body 字段 Deserialize | POST/PUT 的 Request 需 `#[derive(Deserialize)]` |
+| 请求类型派生 | 每个 Request 都必须派生 `WebxRequestMeta`（绑定 + OpenAPI 元数据） |
+| 路径参数 | 用 `#[frompath]` 显式声明；GET 的未标记字段先查 query，再回退到路径 |
+| Body 字段 | POST/PUT/PATCH 的未标记字段从 JSON body 绑定；`Option<T>` 表示可选 |
 
 ## 小结
 

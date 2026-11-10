@@ -73,11 +73,16 @@ pub struct ParamMeta {
     /// Field name (e.g., "id", "body").
     pub name: &'static str,
 
-    /// Parameter location: "path", "query", or "body".
+    /// Parameter location: "path", "query", "header", "form", "body",
+    /// "claim", or "" for an unmarked field that the route method resolves.
     pub source: &'static str,
 
     /// Type hint for OpenAPI schema (e.g., "string", "integer", "object").
     pub type_hint: &'static str,
+
+    /// Whether the parameter must be present (`Option<T>` and `Vec<T>` are
+    /// not required; path parameters always are).
+    pub required: bool,
 }
 
 /// One `#[authorize]` declaration on an endpoint.

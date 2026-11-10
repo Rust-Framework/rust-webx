@@ -36,6 +36,7 @@ public class UsersController : ControllerBase
 
 ```rust
 // contracts/user.rs
+#[derive(WebxRequestMeta)]
 pub struct GetUserRequest { pub id: String }
 
 #[get("/api/users/{id}")]

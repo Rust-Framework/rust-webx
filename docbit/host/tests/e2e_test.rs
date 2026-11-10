@@ -991,3 +991,150 @@ async fn e2e_docs_upload_rejects_anonymous_and_traversing_archives() {
 
     fx.teardown().await;
 }
+
+#[tokio::test]
+#[serial]
+async fn e2e_media_upload_and_serve() {
+    let fx = spawn_docbit().await;
+    let base = fx.base();
+    let client = reqwest::Client::new();
+    let token = admin_token(&client, &base).await;
+
+    // The server stores the bytes; it does not decode the image.
+    let png: Vec<u8> = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0];
+    let part = reqwest::multipart::Part::bytes(png.clone())
+        .file_name("pixel.png")
+        .mime_str("image/png")
+        .unwrap();
+    let upload = client
+        .post(format!("{base}/api/media"))
+        .header("Authorization", format!("Bearer {}", token))
+        .multipart(reqwest::multipart::Form::new().part("file", part))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(upload.status().as_u16(), 200, "upload failed");
+
+    let asset: serde_json::Value = upload.json().await.unwrap();
+    let url = asset["url"].as_str().expect("url").to_string();
+    assert!(url.starts_with("/api/media/images/"), "url: {url}");
+    assert_eq!(asset["content_type"], "image/png");
+    assert_eq!(asset["size"], png.len() as u64);
+    assert!(asset["markdown"]
+        .as_str()
+        .unwrap_or_default()
+        .starts_with("!["));
+
+    let served = client.get(format!("{base}{url}")).send().await.unwrap();
+    assert_eq!(served.status().as_u16(), 200);
+    assert_eq!(served.headers()["content-type"], "image/png");
+    assert_eq!(served.bytes().await.unwrap().as_ref(), png.as_slice());
+
+    // Uploading requires authentication.
+    let anon_part = reqwest::multipart::Part::bytes(png.clone())
+        .file_name("pixel.png")
+        .mime_str("image/png")
+        .unwrap();
+    let anon = client
+        .post(format!("{base}/api/media"))
+        .multipart(reqwest::multipart::Form::new().part("file", anon_part))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(anon.status().as_u16(), 401);
+
+    fx.teardown().await;
+}
+
+#[tokio::test]
+#[serial]
+async fn e2e_comments_roundtrip() {
+    let fx = spawn_docbit().await;
+    let base = fx.base();
+    let client = reqwest::Client::new();
+    let token = admin_token(&client, &base).await;
+    let suffix = unique_suffix();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+
+    let post: serde_json::Value = client
+        .post(format!("{base}/api/blog"))
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({
+            "slug": format!("e2e-comments-{suffix}"),
+            "title": "Comments Post",
+            "summary": "Summary",
+            "content": "Body",
+            "tags": [],
+            "category_id": "00000000-0000-4000-8000-000000000003",
+            "published_at": now
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let blog_id = post["id"].as_str().expect("blog id").to_string();
+
+    let comment: serde_json::Value = client
+        .post(format!("{base}/api/comments"))
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({ "blog_id": blog_id, "content": "First!" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let comment_id = comment["id"].as_str().expect("comment id").to_string();
+    assert_eq!(comment["content"], "First!");
+
+    let reply: serde_json::Value = client
+        .post(format!("{base}/api/comments"))
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({
+            "blog_id": blog_id,
+            "content": "Reply",
+            "parent_id": comment_id
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(reply["parent_id"], comment_id);
+
+    let listed: Vec<serde_json::Value> = client
+        .get(format!("{base}/api/comments/{blog_id}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(listed.len(), 2);
+
+    let deleted = client
+        .delete(format!("{base}/api/comments/{comment_id}"))
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(deleted.status().as_u16(), 200);
+
+    let listed: Vec<serde_json::Value> = client
+        .get(format!("{base}/api/comments/{blog_id}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(listed.len(), 1);
+
+    fx.teardown().await;
+}

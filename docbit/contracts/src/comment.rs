@@ -17,7 +17,7 @@ pub struct CommentModel {
 
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct ListCommentsRequest {
-    #[from_route]
+    #[frompath]
     pub blog_id: String,
 }
 
@@ -25,7 +25,7 @@ pub struct ListCommentsRequest {
 impl IRequest<Vec<CommentModel>> for ListCommentsRequest {}
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct CreateCommentRequest {
     pub blog_id: String,
     pub content: String,
@@ -38,7 +38,7 @@ pub struct CreateCommentRequest {
 impl IRequest<CommentModel> for CreateCommentRequest {}
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct DeleteCommentRequest {
     pub id: String,
 }

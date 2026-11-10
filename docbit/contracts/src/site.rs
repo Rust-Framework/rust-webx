@@ -121,7 +121,7 @@ impl Default for SiteConfig {
     }
 }
 
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct SiteInfoRequest;
 
 #[get("/api/site")]

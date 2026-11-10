@@ -21,14 +21,14 @@ pub struct CategoryTreeNode {
     pub level: u32,
 }
 
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct ListCategoriesRequest;
 
 #[get("/api/categories")]
 impl IRequest<Vec<CategoryTreeNode>> for ListCategoriesRequest {}
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct CreateCategoryRequest {
     pub name: String,
     pub slug: String,
@@ -41,8 +41,9 @@ pub struct CreateCategoryRequest {
 impl IRequest<CategoryModel> for CreateCategoryRequest {}
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct UpdateCategoryRequest {
+    #[frompath]
     #[serde(default)]
     pub id: String,
     pub name: Option<String>,
@@ -54,7 +55,7 @@ pub struct UpdateCategoryRequest {
 impl IRequest<CategoryModel> for UpdateCategoryRequest {}
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct DeleteCategoryRequest {
     pub id: String,
 }

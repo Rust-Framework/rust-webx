@@ -27,7 +27,7 @@ pub struct SpecModel {
 }
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct ListSpecsRequest;
 
 #[get("/api/specs")]
@@ -35,7 +35,7 @@ pub struct ListSpecsRequest;
 impl IRequest<Vec<SpecModel>> for ListSpecsRequest {}
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct ListProductSpecsRequest {
     pub id: String,
 }
@@ -45,7 +45,7 @@ pub struct ListProductSpecsRequest {
 impl IRequest<Vec<SpecModel>> for ListProductSpecsRequest {}
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct GetSpecRequest {
     pub id: String,
 }
@@ -55,7 +55,7 @@ pub struct GetSpecRequest {
 impl IRequest<SpecModel> for GetSpecRequest {}
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct CreateSpecRequest {
     pub product_id: String,
     pub code: String,
@@ -80,8 +80,9 @@ fn default_unit() -> String {
 impl IRequest<SpecModel> for CreateSpecRequest {}
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct UpdateSpecRequest {
+    #[frompath]
     #[serde(default)]
     pub id: String,
     pub product_id: Option<String>,
@@ -100,7 +101,7 @@ pub struct UpdateSpecRequest {
 impl IRequest<SpecModel> for UpdateSpecRequest {}
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct DeleteSpecRequest {
     pub id: String,
 }

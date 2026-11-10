@@ -90,8 +90,10 @@ fn expand_endpoint(
     let rsp_type: syn::Type =
         syn::parse_str(&rsp_type_str).unwrap_or_else(|_| syn::parse_str("()").unwrap());
 
-    // Parameter metadata for OpenAPI
-    let mut params_tokens: Vec<proc_macro2::TokenStream> = extract_path_params(path_str)
+    // Parameter metadata for OpenAPI. Path parameters come from the route
+    // template; every other source is declared on the request struct by
+    // `#[derive(WebxRequestMeta)]`, so the two can never disagree.
+    let params_tokens: Vec<proc_macro2::TokenStream> = extract_path_params(path_str)
         .into_iter()
         .map(|name| {
             quote! {
@@ -99,36 +101,16 @@ fn expand_endpoint(
                     name: #name,
                     source: "path",
                     type_hint: "string",
+                    required: true,
                 }
             }
         })
         .collect();
 
-    let is_body_method = method_str == "Post" || method_str == "Put" || method_str == "Patch";
-    if is_body_method {
-        params_tokens.push(quote! {
-            ::webx::ParamMeta {
-                name: "body",
-                source: "body",
-                type_hint: "object",
-            }
-        });
-    }
-
-    // Generate FromHttpContext impl for the request type
-    let path_params: Vec<String> = extract_path_params(path_str);
-
     // Generate dispatch function
     let is_raw_response = is_response_data(&rsp_type_str);
-    let dispatch_fn = generate_dispatch_fn(
-        self_ty,
-        &rsp_type,
-        &req_type_name,
-        &path_params,
-        is_body_method,
-        rsp_type_str == "()",
-        is_raw_response,
-    );
+    let dispatch_fn =
+        generate_dispatch_fn(self_ty, &rsp_type, rsp_type_str == "()", is_raw_response);
 
     let dispatch_fn_name = format_ident!("__lrwf_dispatch_{}", req_type_name.replace("::", "_"));
 
@@ -164,12 +146,11 @@ fn expand_endpoint(
 
 /// Generate the dispatch function that runs the full request lifecycle.
 ///
-/// The function receives the live [`IHttpContext`], so it can:
-///
-/// * bind a `multipart/form-data` body — including uploaded files — through
-///   `bind_form_request`, which streams the body rather than buffering it;
-/// * fall back to JSON body or route/query parameter binding;
-/// * forward authentication claims to the handler.
+/// Binding is delegated to `webx::RequestModel`, which
+/// `#[derive(WebxRequestMeta)]` implements from the fields' `#[from*]`
+/// markers. One declaration therefore drives binding, validation errors and
+/// OpenAPI metadata, and a request can mix path, query, header, claim, form and
+/// body values without the method-based heuristics the dispatch used to apply.
 ///
 /// When the response type is `ResponseData` the handler's value is used as the
 /// response verbatim, which is how an endpoint streams a file or sets custom
@@ -177,73 +158,10 @@ fn expand_endpoint(
 fn generate_dispatch_fn(
     ty: &Type,
     rsp_type: &syn::Type,
-    type_name: &str,
-    path_params: &[String],
-    is_body: bool,
     is_unit_response: bool,
     is_raw_response: bool,
 ) -> proc_macro2::TokenStream {
-    let fn_name = format_ident!("__lrwf_dispatch_{}", type_name.replace("::", "_"));
-
-    // Generate request construction code for the non-multipart path.
-    let build_request = if is_body && !path_params.is_empty() {
-        let overrides: Vec<proc_macro2::TokenStream> = path_params
-            .iter()
-            .map(|name| {
-                let ident = format_ident!("{}", name);
-                let name_str = name.as_str();
-                quote! {
-                    #ident: route_params.get(#name_str).cloned().unwrap_or(req.#ident),
-                }
-            })
-            .collect();
-        quote! {{
-            let mut req: #ty = ::serde_json::from_slice(&body_bytes)
-                .map_err(|e| ::webx::Error::Serialization(e))?;
-            req = #ty { #(#overrides)* ..req };
-            req
-        }}
-    } else if is_body {
-        quote! {
-            ::serde_json::from_slice(&body_bytes).map_err(|e| ::webx::Error::Serialization(e))?
-        }
-    } else if !path_params.is_empty() {
-        let field_assignments: Vec<proc_macro2::TokenStream> = path_params
-            .iter()
-            .map(|name| {
-                let ident = format_ident!("{}", name);
-                let name_str = name.as_str();
-                quote! {
-                    #ident: route_params.get(#name_str).cloned().unwrap_or_default()
-                }
-            })
-            .collect();
-        quote! {
-            {
-                if let Some(req) = ::webx::try_deserialize_from_params::<#ty>(
-                    &route_params,
-                    &_query_params,
-                ) {
-                    req
-                } else {
-                    #ty { #(#field_assignments,)* ..::std::default::Default::default() }
-                }
-            }
-        }
-    } else {
-        quote! {
-            {
-                if let Some(req) = ::webx::try_deserialize_from_params::<#ty>(
-                    &route_params,
-                    &_query_params,
-                ) {
-                    req
-                } else {
-                    <#ty as ::std::default::Default>::default()
-                }
-            }
-        }
-    };
+    let fn_name = format_ident!("__lrwf_dispatch_{}", type_to_string(ty).replace("::", "_"));
 
     let response_expr = if is_raw_response {
         quote! { ::std::result::Result::Ok(result) }
@@ -254,7 +172,6 @@ fn generate_dispatch_fn(
     };
 
     quote! {
-        #[allow(clippy::needless_update)]
         fn #fn_name<'__webx_dispatch>(
             ctx: &'__webx_dispatch mut dyn ::webx::IHttpContext,
         ) -> ::std::pin::Pin<
@@ -266,27 +183,10 @@ fn generate_dispatch_fn(
             >,
         > {
             Box::pin(async move {
-                // A multipart body must be bound before anything else touches it,
-                // because binding consumes the live request stream.
-                let bound: ::std::option::Option<#ty> =
-                    ::webx::bind_form_request::<#ty>(&mut *ctx).await?;
-
-                let mut request: #ty = match bound {
-                    ::std::option::Option::Some(request) => request,
-                    ::std::option::Option::None => {
-                        #[allow(unused_variables)]
-                        let route_params = ctx.request().route_params().clone();
-                        #[allow(unused_variables)]
-                        let _query_params = ctx.request().query().clone();
-                        #[allow(unused_variables)]
-                        let body_bytes: Vec<u8> = if #is_body {
-                            ctx.request_mut().body_bytes().await?
-                        } else {
-                            Vec::new()
-                        };
-                        #build_request
-                    }
-                };
+                // One declaration on the request struct decides every field's
+                // source; failures come back as a 400 with `errors` per field.
+                let mut request: #ty =
+                    <#ty as ::webx::RequestModel>::bind(&mut *ctx).await?;
 
                 let claims: ::std::option::Option<Box<dyn ::webx::IClaims>> =
                     ctx.claims().map(|c| c.clone_box());

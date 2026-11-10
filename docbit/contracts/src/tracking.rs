@@ -23,14 +23,14 @@ pub struct TrackingSummary {
     pub today_visits: i64,
 }
 
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct GetTrackingSummaryRequest;
 
 #[get("/api/tracking/summary")]
 #[authorize(role = "admin")]
 impl IRequest<TrackingSummary> for GetTrackingSummaryRequest {}
 
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct ListTrackingRequest;
 
 #[get("/api/tracking")]

@@ -68,7 +68,7 @@ pub struct DashboardModel {
     pub devices: Vec<DeviceOverviewRow>,
 }
 
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct GetDashboardRequest;
 
 #[get("/api/dashboard")]

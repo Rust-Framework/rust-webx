@@ -51,6 +51,13 @@ pub enum Error {
     /// Request content type is not supported by the target endpoint.
     #[error("{0}")]
     UnsupportedMediaType(String),
+
+    /// A fully-formed problem response (validation, binding failure).
+    ///
+    /// Carried as-is instead of being flattened into a message so the host can
+    /// write the status and the extension members (`errors`) verbatim.
+    #[error("request problem details")]
+    Problem(Box<crate::problem::ProblemDetails>),
 }
 
 impl Error {
@@ -74,6 +81,7 @@ impl Error {
             Error::Conflict(_) => 409,
             Error::PayloadTooLarge(_) => 413,
             Error::UnsupportedMediaType(_) => 415,
+            Error::Problem(problem) => problem.status,
         }
     }
 }

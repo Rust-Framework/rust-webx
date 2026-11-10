@@ -27,3 +27,12 @@ serde_json.workspace = true
 tracing.workspace = true
 bcrypt = "0.16"
 inventory.workspace = true
+
+[dev-dependencies]
+rust-webx = { workspace = true, features = ["testing"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart"] }
+tempfile = "3"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tracing-subscriber = { version = "0.3", features = ["fmt"] }
+serde_json.workspace = true
+serial_test = "3"

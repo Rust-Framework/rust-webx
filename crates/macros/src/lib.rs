@@ -150,19 +150,25 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
 // Parameter binding (OpenAPI metadata via WebxRequestMeta derive helpers)
 // ---------------------------------------------------------------------------
 //
-// `from_query`, `from_route`, and `from_body` are helper attributes for
-// `#[derive(WebxRequestMeta)]` — not standalone attribute macros (avoids
-// rustc conflicts on struct fields).
+// `frompath`, `fromquery`, `frombody`, `fromform`, `fromfile`, `fromheader`
+// and `fromclaim` are helper attributes for `#[derive(WebxRequestMeta)]` — not
+// standalone attribute macros (avoids rustc conflicts on struct fields).
 
-/// Registers OpenAPI parameter metadata from `#[from_query]` / `#[from_route]` / `#[from_body]` / `#[from_form]` fields.
+/// Registers parameter metadata and the request binder from `#[from*]` fields.
 ///
-/// `FormFile` fields are recognised automatically and reported as
-/// `multipart/form-data` binary parts.
+/// Markers: `#[frompath]`, `#[fromquery]`, `#[frombody]`, `#[fromform]`,
+/// `#[fromfile]`, `#[fromheader("Name")]`, `#[fromclaim("key")]`. Every marker
+/// except `#[frombody]` accepts an optional source key.
 ///
-/// Add `#[webx_request(query_all)]` to treat all non-skipped fields as query parameters.
+/// Unmarked fields follow the request method: `GET`/`HEAD`/`DELETE`/`OPTIONS`
+/// bind from the query string, then the route; `POST`/`PUT`/`PATCH` bind from
+/// the JSON body, then the form, then the query string. Headers and claims are
+/// opt-in only. `#[request(queryall)]` forces unmarked fields to the query.
 #[proc_macro_derive(
     WebxRequestMeta,
-    attributes(from_query, from_route, from_body, from_form, webx_request)
+    attributes(
+        frompath, fromquery, frombody, fromform, fromfile, fromheader, fromclaim, request
+    )
 )]
 pub fn webx_request_meta(input: TokenStream) -> TokenStream {
     request_meta::derive_request_meta(input)

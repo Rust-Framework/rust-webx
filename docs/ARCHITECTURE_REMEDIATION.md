@@ -90,7 +90,7 @@ Docs previously described `dyn IRequestHandler` DI lookup as the primary path. T
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Query binding | **Done** | GET/DELETE merges route + query params via `Deserialize` |
+| Query binding | **Done** | `RequestModel` binds GET/DELETE route + query through the derive |
 | `#[authorize(permission = "…")]` | **Done** | Parsed into `RouteEntry.authorization` |
 | Resource Auth wiring | **Done** | StubEndpoint enforces `RouteEntry.authorization`; policy helper deprecated |
 
@@ -123,8 +123,8 @@ Docs previously described `dyn IRequestHandler` DI lookup as the primary path. T
 ### 4.3 OpenAPI query param metadata
 
 **Done:**
-- `#[derive(WebxRequestMeta)]` on request structs collects `#[from_query]` / `#[from_route]` / `#[from_body]` fields
-- `#[webx_request(query_all)]` treats unmarked fields as query params (except `claims` / `#[serde(skip)]`)
+- `#[derive(WebxRequestMeta)]` on request structs declares each field's source (`#[frompath]` / `#[fromquery]` / `#[frombody]` / `#[fromform]` / `#[fromheader]` / `#[fromclaim]`) and emits the runtime binder plus the OpenAPI metadata
+- `#[request(queryall)]` treats unmarked fields as query params (except `claims` / `#[serde(skip)]`)
 - `generate_openapi_spec` merges route-level path/body params with struct metadata
 - Docbit: `GetBlogPostRequest`, `GetExhibitionRequest`, docs GET requests, `ListCommentsRequest`
 

@@ -4,8 +4,8 @@
 
 - [ ] `#[get]` 等标注在 `impl IRequest<T>` 块上
 - [ ] `IRequest<T>` 的 T 与 Handler 返回类型一致
-- [ ] 路径参数名与 Request 字段名匹配
-- [ ] POST/PUT Request 实现了 `Deserialize`
+- [ ] 请求类型派生了 `WebxRequestMeta`
+- [ ] 写方法的路径参数用 `#[frompath]` 显式声明
 - [ ] 响应类型实现了 `Serialize`
 - [ ] Response DTO 定义在 `contracts/`，非 `domain/`
 

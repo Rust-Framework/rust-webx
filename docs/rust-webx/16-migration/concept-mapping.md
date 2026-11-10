@@ -23,8 +23,11 @@
 | `IStringLocalizer<T>` | `IStringLocalizer` | 资源键查找，默认 culture 来自 `Culture.Default` |
 | `AddLocalization()` | `add_localization()` | 约定读取 `locales/<culture>.json` |
 | `[Display]` / XML docs | `#[display]` / `#[description]` / `#[category]` | 标题、描述、分组；回退到 `///` |
-| `[FromBody]` | `#[derive(Deserialize)]` | Body 绑定 |
-| `[FromRoute]` | 路径同名字段 | 路径参数 |
+| `[FromBody]` | `#[frombody]`（未标注字段在 POST/PUT/PATCH 上默认按 body 绑定） | Body 绑定 |
+| `[FromRoute]` | `#[frompath]`（字段名与 `{name}` 一致；未标注字段也优先匹配路径） | 路径参数 |
+| `[FromQuery]` | `#[fromquery]`（未标注字段在非 body 方法上按 query 绑定） | 查询参数 |
+| `[FromHeader]` | `#[fromheader("X-Name")]` | 请求头 |
+| `User.FindFirst(...)` | `#[fromclaim("key")]` | 认证声明 |
 | `[FromForm]` + `IFormFile` | 请求结构体字段声明为 `FormFile` | multipart 上传 |
 | `List<IFormFile>` | `Vec<FormFile>` | 多文件上传 |
 | `IFormFile.CopyToAsync()` | `FormFile::save_as()` / `copy_to()` | 落盘 |

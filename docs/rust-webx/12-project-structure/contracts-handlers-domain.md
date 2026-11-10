@@ -21,7 +21,7 @@ pub trait IDocumentService: Send + Sync {
 
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct GetDocIndexRequest {
-    #[from_route]
+    #[frompath]
     pub work: String,
 }
 
@@ -32,6 +32,9 @@ impl IRequest<DocIndex> for GetDocIndexRequest {}
 特点：
 
 - Request、Response DTO、共享 enum、`I…Service` trait 均在此层
+- 每个请求结构体都派生 `WebxRequestMeta`；字段用 `#[frompath]` / `#[fromquery]` /
+  `#[frombody]` / `#[fromform]` / `#[fromheader]` / `#[fromclaim]` 声明来源，
+  绑定与 OpenAPI 共用这一处声明
 - 路由宏、`#[authorize]`、`#[display]` / `#[description]` / `#[category]` 等元数据在此声明
 - 是 OpenAPI 与 `IEndpointCatalog` 的共同数据源；团队讨论 API 时**只看 contracts**
 - **不含** `async fn` 业务实现、数据库访问

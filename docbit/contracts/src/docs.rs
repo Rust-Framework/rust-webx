@@ -60,7 +60,7 @@ pub trait IDocumentService: Send + Sync {
     }
 }
 
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct ListDocWorksRequest;
 
 #[get("/api/docs")]
@@ -68,7 +68,7 @@ impl IRequest<Vec<String>> for ListDocWorksRequest {}
 
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct GetDocIndexRequest {
-    #[from_route]
+    #[frompath]
     pub work: String,
 }
 
@@ -77,11 +77,11 @@ impl IRequest<DocIndex> for GetDocIndexRequest {}
 
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct GetDocContentRequest {
-    #[from_route]
+    #[frompath]
     pub work: String,
     /// Remaining document path (slashes allowed via `{*path}`).
     /// Legacy colon encoding (`01-introduction:hello.md`) is still accepted.
-    #[from_route]
+    #[frompath]
     pub path: String,
 }
 
@@ -106,9 +106,9 @@ pub struct ResyncSummary {
 ///
 /// The archive root must contain `INDEX.json` (and the markdown tree it
 /// describes). Extraction is sandboxed; see `docbit_handlers::works`.
-#[derive(Deserialize, WebxRequestMeta)]
+#[derive(WebxRequestMeta)]
 pub struct UploadWorkDocsRequest {
-    #[from_route]
+    #[frompath]
     pub slug: String,
     /// The `docs.zip` body part.
     pub archive: FormFile,

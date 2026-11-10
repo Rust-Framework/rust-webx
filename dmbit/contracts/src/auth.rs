@@ -18,7 +18,7 @@ pub struct UserView {
     pub created_at: i64,
 }
 
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct LoginRequest {
     pub email: String,
     pub password: String,
@@ -28,7 +28,7 @@ pub struct LoginRequest {
 impl IRequest<AuthResponse> for LoginRequest {}
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct AuthMeRequest;
 
 #[get("/api/auth/me")]
@@ -36,7 +36,7 @@ pub struct AuthMeRequest;
 impl IRequest<UserView> for AuthMeRequest {}
 
 #[claims]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct ChangePasswordRequest {
     pub old_password: String,
     pub new_password: String,

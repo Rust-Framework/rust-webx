@@ -66,12 +66,11 @@ async fn spawn(configure: impl Fn(&mut HostAppBuilder) + Send + Sync + 'static) 
 // Routes under test
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Deserialize, WebxRequestMeta)]
+#[derive(Debug, WebxRequestMeta)]
 struct UploadRequest {
     title: String,
     confirm: bool,
     avatar: FormFile,
-    #[serde(default)]
     gallery: Vec<FormFile>,
 }
 
@@ -113,7 +112,7 @@ impl IRequestHandler<UploadRequest, UploadSummary> for UploadHandler {
 
 static DOWNLOAD_DIR: OnceLock<PathBuf> = OnceLock::new();
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, WebxRequestMeta)]
 struct DownloadRequest {
     name: String,
 }
@@ -134,7 +133,7 @@ impl IRequestHandler<DownloadRequest, ResponseData> for DownloadHandler {
 }
 
 /// A download whose file does not exist, to check the error path.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, WebxRequestMeta)]
 struct MissingDownloadRequest;
 
 #[get("/test/download-missing")]
@@ -154,7 +153,7 @@ impl IRequestHandler<MissingDownloadRequest, ResponseData> for MissingDownloadHa
 
 /// An in-memory body with a download name, to check `Content-Disposition`
 /// on non-file responses.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, WebxRequestMeta)]
 struct InlineCsvRequest;
 
 #[get("/test/inline-csv")]
@@ -174,7 +173,7 @@ impl IRequestHandler<InlineCsvRequest, ResponseData> for InlineCsvHandler {
 }
 
 /// A response streamed from a reader of unknown length (`File(Stream, ...)`).
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, WebxRequestMeta)]
 struct StreamDownloadRequest;
 
 #[get("/test/download-stream")]
@@ -204,14 +203,14 @@ impl IRequestHandler<StreamDownloadRequest, ResponseData> for StreamDownloadHand
 
 /// A response streamed from a reader that knows its length and can seek
 /// (`File(Stream, ...)` with range processing enabled).
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, WebxRequestMeta)]
 struct SeekableDownloadRequest;
 
 #[get("/test/download-seekable")]
 impl IRequest<ResponseData> for SeekableDownloadRequest {}
 
 /// The same seekable source, but with `Range` processing switched off.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, WebxRequestMeta)]
 struct NonRangeDownloadRequest;
 
 #[get("/test/download-nonrange")]
@@ -405,9 +404,11 @@ async fn json_body_cannot_bind_a_file_field() {
         .await
         .unwrap();
 
+    // The endpoint binds `multipart/form-data`, so a JSON body is the wrong
+    // media type: 415, not a validation error.
     assert_eq!(
         resp.status().as_u16(),
-        400,
+        415,
         "JSON must not satisfy a FormFile"
     );
 }

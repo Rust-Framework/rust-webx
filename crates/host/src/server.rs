@@ -1092,8 +1092,18 @@ async fn handle_request(
             .run(async { pipeline.execute(&mut ctx, router_handler).await })
             .await;
         if let Err(e) = result {
-            let status = e.status_code();
-            write_error_response(&mut ctx, status, &e.to_string()).await;
+            match e {
+                // A binding/validation failure already carries its full
+                // ProblemDetails (including the `errors` extension); write it
+                // verbatim instead of flattening it into a detail string.
+                webx_core::error::Error::Problem(problem) => {
+                    write_problem_response(&mut ctx, *problem).await
+                }
+                other => {
+                    let status = other.status_code();
+                    write_error_response(&mut ctx, status, &other.to_string()).await;
+                }
+            }
         }
     }
 

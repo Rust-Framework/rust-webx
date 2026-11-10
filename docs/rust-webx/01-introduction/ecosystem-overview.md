@@ -88,7 +88,7 @@ graph BT
 | `#[get("/path")]` 等 | 路由注册 + HTTP 方法 |
 | `#[handler]` | Handler 编译时注册（提交 `HandlerRegistration` 到 `inventory`） |
 | `#[authorize]` | 声明式授权元数据 |
-| `#[derive(WebxRequestMeta)]` + `#[from_query]` / `#[from_route]` / `#[from_body]` | OpenAPI 参数元数据（字段级属性，非独立宏） |
+| `#[derive(WebxRequestMeta)]` + `#[fromquery]` / `#[frompath]` / `#[frombody]` / `#[fromform]` / `#[fromfile]` / `#[fromheader]` / `#[fromclaim]` | 请求字段来源声明：编译期生成绑定代码与 OpenAPI 参数元数据（字段级属性，非独立宏） |
 
 ### rust-webx-spa
 
@@ -104,7 +104,7 @@ graph BT
 
 ```toml
 [dependencies]
-rust-webx = "0.5"
+rust-webx = "0.7"
 ```
 
 ```rust

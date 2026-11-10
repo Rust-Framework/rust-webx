@@ -213,7 +213,7 @@ async fn handle(&mut self, req: UpdateProfileRequest) -> Result<UserDto> {
 }
 ```
 
-如果端点允许游客访问（例如商品详情要显示「是否已收藏」），把字段写成 `Option<IdentityUser>`，
+如果端点允许游客访问（例如商品详情要显示「是否已收藏」），把字段写成 `#[fromclaim(optional)] viewer: Option<IdentityUser>`（匿名必须显式声明），
 未登录时就是 `None`，不会 401。完整场景见[用户身份与多租户](../05-request-pattern/user-identity.md)。
 
 ## 设计要点

@@ -63,7 +63,7 @@ rust-webx is **not** a full-stack UI framework (pair it with any frontend), **no
 - **Compile-time scanning** — route metadata is collected at compile time via `inventory`; registered automatically in `Host::build()`.
 - **Zero-config handler registration** — the `#[handler]` attribute macro registers a handler with the DI container automatically.
 - **Authentication & authorization** — JWT Bearer auth + declarative, grouped route authorization (`#[authorize]`).
-- **Identity on the request** — `#[fromclaim] user: IdentityUser` binds the authenticated identity (id, name, email, tenant, roles) as a plain request field; handlers stop parsing tokens, and `Option<IdentityUser>` covers anonymous endpoints.
+- **Identity on the request** — `#[fromclaim] user: IdentityUser` binds the authenticated identity (id, name, email, tenant, roles) as a plain request field; handlers stop parsing tokens. `#[fromclaim(optional)] viewer: Option<IdentityUser>` covers anonymous endpoints (anonymous access must be declared explicitly).
 - **Endpoint metadata service** — `IEndpointCatalog` exposes every endpoint at runtime (`all()` / `localized()`), so permission sync, admin navigation and OpenAPI share one source.
 - **Localization** — `#[display]` / `#[description]` / `#[category]` store resource keys; a host-wide `Culture.Default` selects the language, with `.json` resources or `include_str!` embedding.
 - **Production capabilities out of the box** — graceful shutdown, live health checks, security headers, request IDs, CORS, TLS, rate limiting, compression, OpenAPI + SPA hosting.

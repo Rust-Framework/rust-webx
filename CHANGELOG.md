@@ -5,7 +5,28 @@ All notable changes to **rust-webx** are documented in this file.
 
 ## [Unreleased] — 0.9.0 (in progress)
 
+### Breaking
+
+- **Anonymous identity must be declared explicitly.** `Option<IdentityUser>` now
+  requires `#[fromclaim(optional)]`; a plain `#[fromclaim]` on an optional identity
+  is a compile error that names the fix. A request may carry only one identity
+  field (`user: IdentityUser` plus `viewer: Option<IdentityUser>` is rejected).
+  Rationale: an "optional login" endpoint used to be completely public by
+  accident, so forgetting `require_user()` silently exposed it.
+- **`RequestContext::run` takes an identity.** The signature is now
+  `run(Option<Arc<IdentityUser>>, future)`; `operator_id()` keeps working and is
+  derived from the identity. The HTTP adapter builds the identity before binding,
+  so the binder, handler and audit helpers all observe the same `Arc`.
+
 ### Added
+
+- **Identity accessors**: `IdentityUser::{tenant, require_tenant}` (empty
+  `tenant_id` means “no tenant claim”, not a tenant called `""`) and
+  `RequestUser::{permissions, has_permission, require_role, require_tenant}`, so
+  generic helpers can distinguish 401 (anonymous) from 403 (authenticated but
+  missing the role/tenant).
+- **`RequestContext::identity()`** — the request-scoped `Arc<IdentityUser>`, for
+  audit columns and persistence callbacks outside the handler.
 
 - **`IHttpRequest::remote_addr()`** — a defaulted accessor for the client peer
   address (`None` by default so test contexts and alternative hosts keep

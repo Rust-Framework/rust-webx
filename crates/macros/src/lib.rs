@@ -159,6 +159,21 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// `#[fromfile]`, `#[fromheader("Name")]`, `#[fromclaim("key")]`. Every marker
 /// except `#[frombody]` accepts an optional source key.
 ///
+/// # Identity fields (fail-closed)
+///
+/// The authenticated identity is a normal request field of type `IdentityUser`.
+/// Anonymous access must be declared explicitly, so a request that silently
+/// works for anonymous callers cannot happen by accident:
+///
+/// | Field | Declaration | Anonymous callers |
+/// |-------|-------------|-------------------|
+/// | `user: IdentityUser` | `#[fromclaim]` | rejected with `401` |
+/// | `user: Option<IdentityUser>` | `#[fromclaim(optional)]` | allowed, filled with `None` |
+///
+/// A bare `#[fromclaim]` on `Option<IdentityUser>` is a compile error, and so is
+/// `#[fromclaim(optional)]` on anything else. A request may carry at most one
+/// identity field. The derive also implements `RequestUser` for that field.
+///
 /// Unmarked fields follow the request method: `GET`/`HEAD`/`DELETE`/`OPTIONS`
 /// bind from the query string, then the route; `POST`/`PUT`/`PATCH` bind from
 /// the JSON body, then the form, then the query string. Headers and claims are

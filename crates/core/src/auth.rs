@@ -153,7 +153,8 @@ pub trait IDynamicAuthorizer: Send + Sync {
 ///
 /// The handler then reads `req.user.id`, `req.user.tenant_id` or
 /// `req.user.is_in_role("admin")` without touching the token or the context.
-/// `Option<IdentityUser>` makes the endpoint work for anonymous callers too.
+/// `#[fromclaim(optional)] viewer: Option<IdentityUser>` makes the endpoint work
+/// for anonymous callers too; anonymous access must be declared explicitly.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct IdentityUser {
     /// The subject (`sub`) — the stable user identifier.
@@ -162,7 +163,13 @@ pub struct IdentityUser {
     pub name: String,
     /// Email address (`email` claim), empty when the token has none.
     pub email: String,
-    /// Tenant identifier (`tenant_id` / `tenant`), empty for single-tenant apps.
+    /// Tenant identifier (`tenant_id` / `tenant`).
+    ///
+    /// The **empty string means "no tenant claim"** — tokens from single-tenant
+    /// apps and tokens without the claim leave it empty. Use
+    /// [`IdentityUser::tenant`] when the difference between "no tenant claim"
+    /// and "declared empty" matters, or [`IdentityUser::require_tenant`] to
+    /// reject a principal without a tenant.
     pub tenant_id: String,
     /// Roles assigned to the user.
     pub roles: Vec<String>,
@@ -172,6 +179,10 @@ pub struct IdentityUser {
 
 impl IdentityUser {
     /// Build the identity from an authenticated principal.
+    ///
+    /// Absent `name` / `email` / `tenant_id` claims become empty strings, so an
+    /// empty [`IdentityUser::tenant_id`] means "the principal carries no tenant
+    /// claim" rather than a tenant literally named `""`.
     pub fn from_claims(claims: &dyn IClaims) -> Self {
         Self {
             id: claims.subject().to_string(),
@@ -183,7 +194,36 @@ impl IdentityUser {
         }
     }
 
+    /// The tenant identifier, or `None` when the principal carries no tenant
+    /// claim.
+    ///
+    /// [`IdentityUser::tenant_id`] stores "no claim" as the empty string for
+    /// backwards compatibility; this accessor makes that distinction explicit.
+    pub fn tenant(&self) -> Option<&str> {
+        if self.tenant_id.is_empty() {
+            None
+        } else {
+            Some(self.tenant_id.as_str())
+        }
+    }
+
+    /// The tenant identifier, or `Error::Forbidden` when the principal carries
+    /// no tenant claim.
+    ///
+    /// A missing tenant is **not** an authentication failure — the principal
+    /// already proved who it is — it is a scope problem: the token simply does
+    /// not reach any tenant. Reporting 403 instead of 401 keeps clients from
+    /// retrying with the same valid credentials.
+    pub fn require_tenant(&self) -> Result<&str> {
+        self.tenant().ok_or_else(|| {
+            Error::Forbidden("the authenticated principal has no tenant claim".to_string())
+        })
+    }
+
     /// Whether the user has `role`.
+    ///
+    /// Boolean check only — for a 401/403 decision use
+    /// [`RequestUser::require_role`] instead.
     pub fn is_in_role(&self, role: &str) -> bool {
         self.roles.iter().any(|assigned| assigned == role)
     }
@@ -208,7 +248,8 @@ impl IdentityUser {
 /// Convenience accessors for a request that carries an [`IdentityUser`].
 ///
 /// `#[derive(WebxRequestMeta)]` implements this automatically when the struct
-/// has a `#[fromclaim]` field of type `IdentityUser` or `Option<IdentityUser>`.
+/// has a `#[fromclaim]` field of type `IdentityUser` (or
+/// `#[fromclaim(optional)]` of type `Option<IdentityUser>`).
 pub trait RequestUser {
     /// The authenticated identity, or `None` for an anonymous request.
     fn current_user(&self) -> Option<&IdentityUser>;
@@ -229,6 +270,11 @@ pub trait RequestUser {
     }
 
     /// The tenant identifier, or `None` when anonymous.
+    ///
+    /// Returns `Some("")` for an authenticated principal without a tenant claim
+    /// (that is how [`IdentityUser::tenant_id`] represents "no claim"); use
+    /// [`IdentityUser::tenant`] or [`RequestUser::require_tenant`] when the
+    /// difference matters.
     fn tenant_id(&self) -> Option<&str> {
         self.current_user().map(|user| user.tenant_id.as_str())
     }
@@ -241,10 +287,29 @@ pub trait RequestUser {
         }
     }
 
+    /// The permissions of the authenticated user (empty when anonymous).
+    fn permissions(&self) -> &[String] {
+        match self.current_user() {
+            Some(user) => &user.permissions,
+            None => &[],
+        }
+    }
+
     /// Whether the authenticated user has `role`.
+    ///
+    /// Boolean branch only (anonymous → `false`); it cannot tell "not signed in"
+    /// from "signed in without the role". Use [`RequestUser::require_role`] for
+    /// a 401/403 decision.
     fn is_in_role(&self, role: &str) -> bool {
         self.current_user()
             .map(|user| user.is_in_role(role))
+            .unwrap_or(false)
+    }
+
+    /// Whether the authenticated user has `permission` (anonymous → `false`).
+    fn has_permission(&self, permission: &str) -> bool {
+        self.current_user()
+            .map(|user| user.has_permission(permission))
             .unwrap_or(false)
     }
 
@@ -252,5 +317,150 @@ pub trait RequestUser {
     fn require_user(&self) -> Result<&IdentityUser> {
         self.current_user()
             .ok_or_else(|| Error::Unauthorized("authentication required".to_string()))
+    }
+
+    /// Require `role`, separating "not signed in" from "not allowed".
+    ///
+    /// * anonymous → `401 Unauthorized` (`authentication required`)
+    /// * authenticated without the role → `403 Forbidden` (`{role} role required`)
+    ///
+    /// The 401/403 split lets clients react correctly: acquire a token, or stop
+    /// retrying because the token lacks the role.
+    fn require_role(&self, role: &str) -> Result<()> {
+        let user = self.require_user()?;
+        if user.is_in_role(role) {
+            Ok(())
+        } else {
+            Err(Error::Forbidden(format!("{role} role required")))
+        }
+    }
+
+    /// Require a tenant claim, separating "not signed in" from "no tenant
+    /// scope".
+    ///
+    /// * anonymous → `401 Unauthorized`
+    /// * authenticated without a tenant claim → delegates to
+    ///   [`IdentityUser::require_tenant`] (`403 Forbidden`)
+    fn require_tenant(&self) -> Result<&str> {
+        self.require_user()?.require_tenant()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Minimal `RequestUser` carrier: a request struct with
+    /// `#[fromclaim(optional)] viewer: Option<IdentityUser>` reduces to this.
+    struct TestRequest<'a>(Option<&'a IdentityUser>);
+
+    impl RequestUser for TestRequest<'_> {
+        fn current_user(&self) -> Option<&IdentityUser> {
+            self.0
+        }
+    }
+
+    fn multi_tenant_admin() -> IdentityUser {
+        IdentityUser {
+            id: "user-1".into(),
+            name: "Ada".into(),
+            roles: vec!["admin".into(), "user".into()],
+            permissions: vec!["orders:read".into()],
+            tenant_id: "acme".into(),
+            ..Default::default()
+        }
+    }
+
+    /// Authenticated principal from a token without a tenant claim.
+    fn single_tenant_user() -> IdentityUser {
+        IdentityUser {
+            id: "user-2".into(),
+            roles: Vec::new(),
+            permissions: Vec::new(),
+            tenant_id: String::new(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn identity_tenant_is_none_when_claim_is_empty() {
+        assert_eq!(multi_tenant_admin().tenant(), Some("acme"));
+        assert_eq!(
+            single_tenant_user().tenant(),
+            None,
+            "empty tenant_id means 'no tenant claim', not a tenant named \"\""
+        );
+    }
+
+    #[test]
+    fn identity_require_tenant_is_forbidden_without_claim() {
+        let user = single_tenant_user();
+        let err = user.require_tenant().unwrap_err();
+        assert!(
+            matches!(&err, Error::Forbidden(detail) if detail.contains("no tenant claim")),
+            "expected Forbidden(no tenant claim), got {err:?}"
+        );
+        assert_eq!(err.status_code(), 403, "missing tenant scope is not 401");
+
+        assert_eq!(multi_tenant_admin().require_tenant().unwrap(), "acme");
+    }
+
+    #[test]
+    fn anonymous_request_user_is_empty_and_unauthorized() {
+        let anonymous = TestRequest(None);
+
+        assert!(anonymous.permissions().is_empty());
+        assert!(!anonymous.has_permission("orders:read"));
+        assert!(!anonymous.is_in_role("admin"));
+        assert!(anonymous.current_user().is_none());
+
+        let role_err = anonymous.require_role("admin").unwrap_err();
+        assert!(
+            matches!(&role_err, Error::Unauthorized(detail) if detail == "authentication required"),
+            "anonymous must be 401, got {role_err:?}"
+        );
+        assert_eq!(role_err.status_code(), 401);
+
+        let tenant_err = anonymous.require_tenant().unwrap_err();
+        assert_eq!(tenant_err.status_code(), 401);
+    }
+
+    #[test]
+    fn authenticated_request_user_exposes_roles_permissions_and_tenant() {
+        let user = multi_tenant_admin();
+        let request = TestRequest(Some(&user));
+
+        assert_eq!(request.permissions().len(), 1);
+        assert_eq!(request.permissions()[0], "orders:read");
+        assert!(request.has_permission("orders:read"));
+        assert!(!request.has_permission("orders:write"));
+        assert!(request.is_in_role("admin"));
+        assert!(request.require_role("admin").is_ok());
+        assert_eq!(request.require_tenant().unwrap(), "acme");
+    }
+
+    #[test]
+    fn require_role_is_forbidden_when_role_is_missing() {
+        let user = multi_tenant_admin();
+        let request = TestRequest(Some(&user));
+
+        let err = request.require_role("auditor").unwrap_err();
+        assert!(
+            matches!(&err, Error::Forbidden(detail) if detail == "auditor role required"),
+            "expected Forbidden(auditor role required), got {err:?}"
+        );
+        assert_eq!(err.status_code(), 403);
+    }
+
+    #[test]
+    fn require_tenant_is_forbidden_for_authenticated_principal_without_claim() {
+        let user = single_tenant_user();
+        let request = TestRequest(Some(&user));
+
+        // Still signed in: this is a scope problem, not a credentials problem.
+        assert!(request.current_user().is_some());
+        let err = request.require_tenant().unwrap_err();
+        assert!(matches!(&err, Error::Forbidden(_)), "got {err:?}");
+        assert_eq!(err.status_code(), 403);
     }
 }

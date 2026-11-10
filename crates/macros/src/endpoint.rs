@@ -184,14 +184,19 @@ fn generate_dispatch_fn(
             >,
         > {
             Box::pin(async move {
-                // One declaration on the request struct decides every field's
-                // source; failures come back as a 400 with `errors` per field.
-                let request: #ty =
-                    <#ty as ::webx::RequestModel>::bind(&mut *ctx).await?;
+                // One identity for the whole request: the binder, the handler and
+                // anything reading RequestContext (audit helpers, persistence
+                // callbacks) share this Arc instead of re-reading claims.
+                let identity = ctx.claims().map(|claims| {
+                    ::std::sync::Arc::new(::webx::IdentityUser::from_claims(claims))
+                });
 
-                let operator_id = ctx.claims().map(|c| c.subject().to_string());
+                ::webx::RequestContext::run(identity, async move {
+                    // One declaration on the request struct decides every field's
+                    // source; failures come back as a 400 with `errors` per field.
+                    let request: #ty =
+                        <#ty as ::webx::RequestModel>::bind(&mut *ctx).await?;
 
-                ::webx::RequestContext::run(operator_id, async move {
                     // HTTP adapter: construct request, then dispatch via IMediator
                     // (same path as in-process calls).
                     let mediator = ::webx::Mediator::new(::webx::dispatch_provider());

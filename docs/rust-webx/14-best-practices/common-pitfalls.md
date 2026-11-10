@@ -98,7 +98,7 @@ let all = catalog.all();                        // &[EndpointDescriptor]
 |--------|------|----------|
 | 每个 Handler 里 `ctx.claims()` 再解析 `sub`/`tenant` | 样板重复，容易漏租户条件 | `#[fromclaim] user: IdentityUser` |
 | 租户取自 query/body | 客户端可自选租户，数据越权 | `user.tenant_id` |
-| 匿名接口用 `IdentityUser` | 未登录直接 401 | `Option<IdentityUser>` |
+| 匿名接口用 `IdentityUser` | 未登录直接 401 | `#[fromclaim(optional)] Option<IdentityUser>` |
 
 完整的登录、匿名、角色、多租户场景见[用户身份与多租户](../05-request-pattern/user-identity.md)。
 

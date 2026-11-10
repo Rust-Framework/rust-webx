@@ -107,7 +107,7 @@ pub struct CreateOrderRequest {
 ```
 
 Handler 里直接用 `req.user.id`、`req.user.tenant_id`、`req.user.is_in_role("admin")`，
-或 `req.require_user()?`。匿名可访问的端点用 `Option<IdentityUser>`。
+或 `req.require_user()?`。匿名可访问的端点用 `#[fromclaim(optional)] viewer: Option<IdentityUser>`（只写 `#[fromclaim]` 会编译失败）。
 完整场景与收益对照见[用户身份与多租户](user-identity.md)。
 
 ## 优先级

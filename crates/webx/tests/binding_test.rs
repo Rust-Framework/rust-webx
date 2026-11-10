@@ -148,7 +148,7 @@ impl IRequestHandler<IdentityUserRequest, serde_json::Value> for IdentityUserHan
 
 #[derive(Default, WebxRequestMeta)]
 struct OptionalIdentityUserRequest {
-    #[fromclaim]
+    #[fromclaim(optional)]
     user: Option<IdentityUser>,
 }
 

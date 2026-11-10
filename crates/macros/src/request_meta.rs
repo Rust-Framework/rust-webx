@@ -23,10 +23,17 @@ use syn::{
 /// | `#[fromfile("avatar")]` | a `multipart/form-data` file part |
 /// | `#[fromheader("X-Name")]` | an HTTP header (case-insensitive) |
 /// | `#[fromclaim("tenant")]` | a claim of the authenticated principal |
+/// | `#[fromclaim(optional)]` | an `Option<IdentityUser>` identity that may stay anonymous |
 ///
-/// Every marker except `#[frombody]` takes an optional source key; the field
-/// name is used when it is omitted (`x_request_id` → `x-request-id` for
-/// headers). `#[fromfile]` requires a `FormFile`-shaped field.
+/// Every marker except `#[frombody]` takes an optional source key, defaulting to
+/// the field name (with `_` → `-` for headers); `#[fromclaim]` additionally
+/// accepts the bare keywords `optional` and `identity`.
+///
+/// `#[fromclaim(optional)]` is the explicit opt-in for anonymous access to an
+/// `Option<IdentityUser>` field (**fail-closed**): declaring the field with a
+/// bare `#[fromclaim]` is a compile error, and so is `optional` on a required
+/// `IdentityUser` or on a plain claim. A request may carry at most one identity
+/// field. `#[fromfile]` requires a `FormFile`-shaped field.
 ///
 /// Unmarked fields follow the request method:
 ///
@@ -500,9 +507,102 @@ fn query_all_option(input: &DeriveInput) -> syn::Result<bool> {
     Ok(query_all)
 }
 
+/// A `#[from*]` declaration on a field.
+#[derive(Clone)]
+struct SourceDecl {
+    /// Where the value comes from.
+    src: Src,
+    /// The explicit source key; `None` falls back to the field name.
+    key: Option<String>,
+    /// `#[fromclaim(optional)]`: anonymous callers are explicitly allowed.
+    ///
+    /// Only meaningful on an `Option<IdentityUser>` identity field, where it is
+    /// the fail-closed opt-in for anonymous access.
+    optional: bool,
+    /// `#[fromclaim(identity)]`: reserved identity marker.
+    ///
+    /// An `IdentityUser` field already binds from the principal; the keyword is
+    /// parsed now so the syntax stays stable, and it is rejected elsewhere.
+    identity: bool,
+}
+
+impl SourceDecl {
+    fn new(src: Src) -> Self {
+        Self {
+            src,
+            key: None,
+            optional: false,
+            identity: false,
+        }
+    }
+}
+
+/// The parsed arguments of `#[fromclaim(...)]`.
+///
+/// A claim declaration accepts one optional string key plus the bare keywords
+/// `optional` and `identity`, separated by commas:
+/// `#[fromclaim("sub")]`, `#[fromclaim(optional)]`, `#[fromclaim(optional, identity)]`.
+struct ClaimArgs {
+    key: Option<String>,
+    optional: bool,
+    identity: bool,
+}
+
+impl syn::parse::Parse for ClaimArgs {
+    fn parse(input: syn::parse::ParseStream<'_>) -> syn::Result<Self> {
+        let mut args = Self {
+            key: None,
+            optional: false,
+            identity: false,
+        };
+
+        while !input.is_empty() {
+            if input.peek(LitStr) {
+                let lit: LitStr = input.parse()?;
+                let value = lit.value();
+                if value.is_empty() {
+                    return Err(syn::Error::new_spanned(
+                        &lit,
+                        "a source key must not be empty",
+                    ));
+                }
+                if args.key.is_some() {
+                    return Err(syn::Error::new_spanned(
+                        &lit,
+                        "`#[fromclaim]` takes at most one claim key",
+                    ));
+                }
+                args.key = Some(value);
+            } else {
+                let keyword: Ident = input.parse()?;
+                match keyword.to_string().as_str() {
+                    "optional" => args.optional = true,
+                    "identity" => args.identity = true,
+                    other => {
+                        return Err(syn::Error::new_spanned(
+                            &keyword,
+                            format!(
+                                "unknown `#[fromclaim]` option `{other}`; expected \
+                                 `optional`, `identity`, or a string claim key"
+                            ),
+                        ))
+                    }
+                }
+            }
+
+            if input.is_empty() {
+                break;
+            }
+            input.parse::<Token![,]>()?;
+        }
+
+        Ok(args)
+    }
+}
+
 /// The source declared on `field`, if any.
-fn declared_source(field: &Field) -> syn::Result<Option<(Src, Option<String>)>> {
-    let mut found: Option<(Src, Option<String>)> = None;
+fn declared_source(field: &Field) -> syn::Result<Option<SourceDecl>> {
+    let mut found: Option<SourceDecl> = None;
 
     for attr in &field.attrs {
         let src = if attr.path().is_ident("frompath") {
@@ -530,15 +630,22 @@ fn declared_source(field: &Field) -> syn::Result<Option<(Src, Option<String>)>> 
             ));
         }
 
-        let name = match (&attr.meta, src) {
-            (Meta::Path(_), _) => None,
-            (Meta::List(list), Src::Body) => {
+        let mut decl = SourceDecl::new(src);
+        match &attr.meta {
+            Meta::Path(_) => {}
+            Meta::List(list) if src == Src::Body => {
                 return Err(syn::Error::new_spanned(
                     list,
                     "`#[frombody]` takes no key; control the JSON key with `#[serde(rename)]`",
                 ))
             }
-            (Meta::List(list), _) => {
+            Meta::List(list) if src == Src::Claim => {
+                let args: ClaimArgs = list.parse_args()?;
+                decl.key = args.key;
+                decl.optional = args.optional;
+                decl.identity = args.identity;
+            }
+            Meta::List(list) => {
                 let lit: LitStr = list.parse_args()?;
                 let value = lit.value();
                 if value.is_empty() {
@@ -547,17 +654,17 @@ fn declared_source(field: &Field) -> syn::Result<Option<(Src, Option<String>)>> 
                         "a source key must not be empty",
                     ));
                 }
-                Some(value)
+                decl.key = Some(value);
             }
-            (Meta::NameValue(_), _) => {
+            Meta::NameValue(_) => {
                 return Err(syn::Error::new_spanned(
                     attr,
                     "pass the source key as an argument: `#[fromquery(\"q\")]`",
                 ))
             }
-        };
+        }
 
-        found = Some((src, name));
+        found = Some(decl);
     }
 
     Ok(found)
@@ -668,8 +775,8 @@ fn build_fields(
         let declared = declared_source(field)?;
 
         let has_declared = declared.is_some();
-        let (src, extra) = match declared {
-            Some((src, arg)) => (src, arg),
+        let (src, extra) = match &declared {
+            Some(decl) => (decl.src, decl.key.clone()),
             None if query_all => (Src::Query, None),
             None if shape.is_file() => (Src::File, None),
             None => (Src::Auto, None),
@@ -677,18 +784,51 @@ fn build_fields(
 
         let skipped = !has_declared && serde.skip;
         if is_current_user(&field.ty) {
-            if src != Src::Claim {
+            let Some(decl) = declared.as_ref().filter(|decl| decl.src == Src::Claim) else {
                 return Err(syn::Error::new_spanned(
                     field,
                     "a `IdentityUser` field carries the authenticated identity; mark it \
                      `#[fromclaim]`",
                 ));
-            }
-            if extra.is_some() {
+            };
+            if decl.key.is_some() {
                 return Err(syn::Error::new_spanned(
                     field,
                     "`#[fromclaim]` on a `IdentityUser` field takes no key; the whole \
                      identity is bound from the principal",
+                ));
+            }
+            // Fail-closed: an optional identity lets anonymous callers through,
+            // so the endpoint must declare that explicitly.
+            if matches!(&shape, Shape::Optional(_)) {
+                if !decl.optional {
+                    return Err(syn::Error::new_spanned(
+                        field,
+                        "`Option<IdentityUser>` allows anonymous access, so the declaration \
+                         must be explicit: write `#[fromclaim(optional)]` — anonymous access \
+                         must be declared explicitly (fail-closed)",
+                    ));
+                }
+            } else if decl.optional {
+                return Err(syn::Error::new_spanned(
+                    field,
+                    "`optional` applies only to `Option<IdentityUser>`; a required \
+                     `IdentityUser` field rejects anonymous requests",
+                ));
+            }
+        } else if let Some(decl) = declared.as_ref() {
+            if decl.optional {
+                return Err(syn::Error::new_spanned(
+                    field,
+                    "`Option<T>` claims are already optional; `optional` applies only to \
+                     `Option<IdentityUser>`",
+                ));
+            }
+            if decl.identity {
+                return Err(syn::Error::new_spanned(
+                    field,
+                    "`identity` applies only to an `IdentityUser` field; bind a claim with \
+                     `#[fromclaim(\"key\")]`",
                 ));
             }
         }
@@ -796,6 +936,23 @@ fn build_fields(
             custom: serde.custom,
             helper,
         });
+    }
+
+    // `RequestUser` reads the one identity field; more than one would make the
+    // generated `current_user()` ambiguous and the authorization story unclear.
+    let identity_fields: Vec<&str> = specs
+        .iter()
+        .filter(|spec| is_current_user(&spec.ty))
+        .map(|spec| spec.name.as_str())
+        .collect();
+    if identity_fields.len() > 1 {
+        return Err(syn::Error::new_spanned(
+            type_ident,
+            format!(
+                "a request can carry only one identity field; found `{}` and `{}`",
+                identity_fields[0], identity_fields[1]
+            ),
+        ));
     }
 
     Ok(specs)
@@ -1759,13 +1916,130 @@ mod tests {
     }
 
     #[test]
-    fn accepts_the_standard_identity_field() {
+    fn accepts_a_required_identity_field() {
         ok(r#"
             struct Req {
                 #[fromclaim] user: IdentityUser,
-                #[fromclaim] viewer: Option<IdentityUser>,
             }
         "#);
+    }
+
+    #[test]
+    fn accepts_an_optional_identity_field() {
+        ok(r#"
+            struct Req {
+                #[fromclaim(optional)] user: Option<IdentityUser>,
+            }
+        "#);
+        // The reserved `identity` keyword parses too, and can be combined.
+        ok(r#"
+            struct Req {
+                #[fromclaim(optional, identity)] viewer: Option<IdentityUser>,
+            }
+        "#);
+        ok(r#"
+            struct Req {
+                #[fromclaim(identity)] user: IdentityUser,
+            }
+        "#);
+    }
+
+    #[test]
+    fn rejects_two_identity_fields() {
+        // The previous `accepts_the_standard_identity_field` case: one required
+        // and one optional identity are no longer allowed.
+        let message = err(r#"
+            struct Req {
+                #[fromclaim] user: IdentityUser,
+                #[fromclaim(optional)] viewer: Option<IdentityUser>,
+            }
+        "#);
+        assert!(
+            message.contains("a request can carry only one identity field"),
+            "{message}"
+        );
+        assert!(
+            message.contains("user") && message.contains("viewer"),
+            "{message}"
+        );
+
+        // Two required identities are rejected by the same rule.
+        let message = err(r#"
+            struct Req {
+                #[fromclaim] user: IdentityUser,
+                #[fromclaim] other: IdentityUser,
+            }
+        "#);
+        assert!(
+            message.contains("a request can carry only one identity field"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn rejects_an_undeclared_optional_identity() {
+        // Fail-closed: anonymous access must be visible in the declaration.
+        let message = err(r#"
+            struct Req {
+                #[fromclaim] user: Option<IdentityUser>,
+            }
+        "#);
+        assert!(message.contains("#[fromclaim(optional)]"), "{message}");
+        assert!(
+            message.contains("anonymous access must be declared explicitly"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn rejects_optional_on_a_required_identity() {
+        let message = err(r#"
+            struct Req {
+                #[fromclaim(optional)] user: IdentityUser,
+            }
+        "#);
+        assert!(
+            message.contains("`optional` applies only to `Option<IdentityUser>`"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn rejects_optional_on_a_plain_claim() {
+        let message = err(r#"
+            struct Req {
+                #[fromclaim(optional)] sub: String,
+            }
+        "#);
+        assert!(message.contains("already optional"), "{message}");
+        assert!(message.contains("Option<IdentityUser>"), "{message}");
+    }
+
+    #[test]
+    fn rejects_identity_on_a_plain_claim() {
+        let message = err(r#"
+            struct Req {
+                #[fromclaim(identity)] sub: String,
+            }
+        "#);
+        assert!(
+            message.contains("`identity` applies only to an `IdentityUser` field"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_fromclaim_options() {
+        let message = err(r#"
+            struct Req {
+                #[fromclaim(bogus)] user: IdentityUser,
+            }
+        "#);
+        assert!(
+            message.contains("unknown `#[fromclaim]` option"),
+            "{message}"
+        );
+        assert!(message.contains("optional"), "{message}");
     }
 
     #[test]

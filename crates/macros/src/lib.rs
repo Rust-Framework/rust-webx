@@ -178,6 +178,11 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// bind from the query string, then the route; `POST`/`PUT`/`PATCH` bind from
 /// the JSON body, then the form, then the query string. Headers and claims are
 /// opt-in only. `#[request(queryall)]` forces unmarked fields to the query.
+///
+/// The derive also registers the request type's `TypeId`, so OpenAPI resolves
+/// its parameter metadata unambiguously — a qualified `self_ty`
+/// (`contracts::ListOrdersRequest`) or two same-named request types in
+/// different modules/crates never lose or share parameters.
 #[proc_macro_derive(
     WebxRequestMeta,
     attributes(

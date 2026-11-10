@@ -35,15 +35,17 @@ sequenceDiagram
     alt 有效
         JWT->>JWT: ctx.set_claims(JwtClaims)
         JWT->>Handler: 继续处理
-    else 缺失
-        JWT->>Handler: 匿名继续（是否 401 由 #[authorize] / 必填身份字段决定）
-    else 无效或过期
-        JWT->>Client: 401 Unauthorized + WWW-Authenticate: Bearer
+    else 缺失或无效/过期
+        JWT->>Handler: 匿名继续（坏 token 只代表"未认证"，不拒绝请求）
     end
 ```
 
+是否返回 `401` 由**端点保护**决定：`#[authorize]` 或必填 `#[fromclaim] user: IdentityUser`
+在认证失败时统一 401；公开端点（登录、健康检查、配置）即使客户端带着过期 token 也能正常处理——
+否则登录接口会被旧 token 锁死。
+
 所有 `401` 由 host 统一写出：`application/problem+json` + `WWW-Authenticate: Bearer realm="rust-webx"`（RFC 7235 要求 401 必须带挑战）。
-`detail` 面向客户端：缺凭证是 `authentication required`，token 被拒是 `invalid or expired token`（解码器的具体原因只进日志）。
+`detail` 面向客户端：未认证统一为 `authentication required`；token 解码器的具体原因（`InvalidToken`、过期、签名）只进 `tracing::debug!` 日志。
 
 ## 在 Handler 中读取身份
 

@@ -34,6 +34,7 @@ const AUTHENTICATED_ONLY: &[AuthorizeRule] = &[AuthorizeRule::authenticated()];
 const AUTHZ_PATH: &str = "/test/protocol/authorized";
 const BINDING_PATH: &str = "/test/protocol/binding";
 const FAILING_PATH: &str = "/test/protocol/failing";
+const PUBLIC_PATH: &str = "/test/protocol/public";
 
 /// Return type every route dispatch function uses (`RouteDispatchFn` is the
 /// function-pointer type that wraps it).
@@ -72,6 +73,12 @@ fn dispatch_failing(_ctx: &mut dyn IHttpContext) -> DispatchFuture<'_> {
         ));
         failed
     })
+}
+
+/// Public endpoint: no `#[authorize]`, no identity field. It never looks at the
+/// claims, so a stale/invalid token must be irrelevant to it.
+fn dispatch_public(_ctx: &mut dyn IHttpContext) -> DispatchFuture<'_> {
+    Box::pin(async { ResponseData::json(&"public") })
 }
 
 // ---------------------------------------------------------------------------
@@ -120,6 +127,15 @@ inventory::submit! {
     }
 }
 
+inventory::submit! {
+    HandlerRegistration {
+        req_type_id: std::any::TypeId::of::<u64>(),
+        req_type_name: "ProtocolPublicRequest",
+        factory: noop_factory,
+        call: noop_call,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
@@ -142,6 +158,13 @@ inventory::submit! {
     RouteDispatch {
         handler_type: "ProtocolFailingRequest",
         dispatch: dispatch_failing,
+    }
+}
+
+inventory::submit! {
+    RouteDispatch {
+        handler_type: "ProtocolPublicRequest",
+        dispatch: dispatch_public,
     }
 }
 
@@ -181,6 +204,20 @@ inventory::submit! {
         "String",
         TextRef::text("Protocol failing endpoint"),
         TextRef::text("test-only endpoint that fails with an internal error"),
+        TextRef::text("protocol"),
+        &[],
+        &[],
+    )
+}
+
+inventory::submit! {
+    RouteEntry::new(
+        HttpMethod::Get,
+        PUBLIC_PATH,
+        "ProtocolPublicRequest",
+        "String",
+        TextRef::text("Protocol public endpoint"),
+        TextRef::text("test-only public endpoint with no authorization rules"),
         TextRef::text("protocol"),
         &[],
         &[],
@@ -371,6 +408,61 @@ async fn valid_token_reaches_protected_endpoint() {
 
     assert_eq!(resp.status().as_u16(), 200);
     assert_eq!(resp.text().await.unwrap(), "\"authorized\"");
+}
+
+// ── #18: a bad token means "anonymous", not "reject the request" ──
+//
+// A client that still holds an expired token must be able to call public
+// endpoints (login, health, docs); authentication is a downgrade to anonymous,
+// and only the endpoint's own authorization turns that into a 401.
+
+/// Public endpoint + invalid token → 200 (the token is ignored).
+#[tokio::test]
+async fn public_endpoint_ignores_an_invalid_token() {
+    let port = find_free_port();
+    spawn_auth_host(port).await;
+
+    let resp = reqwest::Client::new()
+        .get(format!("http://127.0.0.1:{}{}", port, PUBLIC_PATH))
+        .header("authorization", "Bearer definitely-not-a-jwt")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status().as_u16(),
+        200,
+        "an invalid token must not lock a public endpoint (e.g. login) out"
+    );
+    assert_eq!(resp.text().await.unwrap(), "\"public\"");
+}
+
+/// Protected endpoint + invalid token → 401 with the challenge: the endpoint's
+/// `#[authorize]` rule sees no principal and the single unauthorized writer
+/// answers, exactly as for a request that never sent a token.
+#[tokio::test]
+async fn protected_endpoint_with_invalid_token_is_401_with_challenge() {
+    let port = find_free_port();
+    spawn_auth_host(port).await;
+
+    let resp = reqwest::Client::new()
+        .get(format!("http://127.0.0.1:{}{}", port, AUTHZ_PATH))
+        .header("authorization", "Bearer definitely-not-a-jwt")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status().as_u16(), 401);
+    let challenge = challenge_of(resp.headers());
+    assert!(
+        challenge.to_ascii_lowercase().contains("bearer"),
+        "got {challenge}"
+    );
+
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["status"], 401);
+    assert_eq!(body["title"], "Unauthorized");
+    assert_eq!(body["detail"], "authentication required");
 }
 
 /// 5xx responses are logged, not echoed: the internal message stays server-side.

@@ -22,7 +22,7 @@ pub fn generate_openapi_spec(
     version: &str,
     localizer: &dyn IStringLocalizer,
 ) -> JsonValue {
-    let request_params = collect_request_params();
+    let request_index = RequestParams::collect();
     let mut paths = serde_json::Map::new();
     let mut tags_set = BTreeSet::new();
 
@@ -51,7 +51,8 @@ pub fn generate_openapi_spec(
             HttpMethod::Post | HttpMethod::Put | HttpMethod::Patch
         );
 
-        for param in merge_params(entry.handler_type, entry.params, &request_params) {
+        let request_params = request_index.for_route(entry.req_type_id, entry.handler_type);
+        for param in merge_params(entry.params, request_params) {
             let source = match param.source {
                 "" if body_method => "body",
                 "" => "query",
@@ -149,12 +150,45 @@ pub fn generate_openapi_spec(
     })
 }
 
-fn collect_request_params() -> HashMap<&'static str, &'static [ParamMeta]> {
-    let mut map = HashMap::new();
-    for entry in inventory::iter::<RequestParamEntry> {
-        map.insert(entry.request_type, entry.params);
+/// Request type → parameter metadata, indexed by `TypeId` first and by bare
+/// name only as a fallback for hand-written entries.
+struct RequestParams {
+    by_type: HashMap<std::any::TypeId, &'static [ParamMeta]>,
+    by_name: HashMap<&'static str, &'static [ParamMeta]>,
+}
+
+impl RequestParams {
+    fn collect() -> Self {
+        let mut by_type = HashMap::new();
+        let mut by_name = HashMap::new();
+        for entry in inventory::iter::<RequestParamEntry> {
+            by_name.insert(entry.request_type, entry.params);
+            // `TypeId::of::<()>()` is the "no type id" sentinel of hand-written
+            // entries (`RouteEntry::new`); it must not shadow a real type.
+            if entry.req_type_id != std::any::TypeId::of::<()>() {
+                by_type.insert(entry.req_type_id, entry.params);
+            }
+        }
+        Self { by_type, by_name }
     }
-    map
+
+    /// The parameter metadata for one route's request type.
+    ///
+    /// The `TypeId` is authoritative: a qualified `self_ty`
+    /// (`contracts::ListOrdersRequest`) and two same-named request types in
+    /// different modules or crates can never resolve to the wrong entry. The
+    /// request type name is a compatibility fallback for hand-written entries,
+    /// whose route entry carries the `()` sentinel instead of a real type id.
+    fn for_route(
+        &self,
+        req_type_id: std::any::TypeId,
+        request_type: &'static str,
+    ) -> Option<&'static [ParamMeta]> {
+        self.by_type
+            .get(&req_type_id)
+            .copied()
+            .or_else(|| self.by_name.get(request_type).copied())
+    }
 }
 
 /// Merge route-level params (path from the route template) with the request
@@ -165,14 +199,13 @@ fn collect_request_params() -> HashMap<&'static str, &'static [ParamMeta]> {
 /// struct's type hint wins, so `{id}` documents as `integer` when the field is
 /// an integer.
 fn merge_params(
-    request_type: &'static str,
     route_params: &'static [ParamMeta],
-    request_params: &HashMap<&'static str, &'static [ParamMeta]>,
+    request_params: Option<&'static [ParamMeta]>,
 ) -> Vec<ParamMeta> {
     let mut merged: Vec<ParamMeta> = route_params.to_vec();
 
-    if let Some(extra) = request_params.get(request_type) {
-        for param in *extra {
+    if let Some(extra) = request_params {
+        for param in extra {
             match merged
                 .iter_mut()
                 .find(|seen| seen.name == param.name && seen.source == param.source)

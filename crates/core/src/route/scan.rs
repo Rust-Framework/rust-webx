@@ -154,6 +154,15 @@ pub struct RouteEntry {
     /// Route path pattern (e.g., "/users/{id}").
     pub path: &'static str,
 
+    /// Compile-time identity of the request type this route dispatches to.
+    ///
+    /// OpenAPI looks the request type's parameter metadata up by this identity,
+    /// so a qualified `self_ty` (`contracts::ListOrdersRequest`) and two
+    /// same-named request types in different modules/crates stay distinct.
+    /// `TypeId::of::<()>()` is the "not provided" sentinel written by
+    /// [`RouteEntry::new`]; [`RouteEntry::with_type_id`] fills it in.
+    pub req_type_id: std::any::TypeId,
+
     /// Type name of the request handler.
     /// Used to dispatch to the correct handler at runtime.
     pub handler_type: &'static str,
@@ -193,7 +202,19 @@ inventory::collect!(RouteEntry);
 /// `#[derive(WebxRequestMeta)]` on the request struct.
 #[derive(Debug, Clone)]
 pub struct RequestParamEntry {
+    /// Request type name, kept for diagnostics and for the legacy name lookup.
+    ///
+    /// The bare name is not unique (qualified paths, same-named types in
+    /// different modules), so consumers must prefer [`Self::req_type_id`].
     pub request_type: &'static str,
+
+    /// Compile-time identity of the request type — the authoritative key.
+    ///
+    /// The derive is the only producer of real values. Hand-written entries can
+    /// use `TypeId::of::<()>()` as the "unknown" sentinel and fall back to the
+    /// name.
+    pub req_type_id: std::any::TypeId,
+
     pub params: &'static [ParamMeta],
 }
 
@@ -492,7 +513,11 @@ impl ResponseData {
 inventory::collect!(RouteDispatch);
 
 impl RouteEntry {
-    /// Create a new route entry.
+    /// Create a new route entry without a request type identity.
+    ///
+    /// Kept for hand-written entries and fixtures; [`RouteEntry::with_type_id`]
+    /// records the request type's `TypeId` so OpenAPI can index its parameter
+    /// metadata unambiguously.
     #[allow(clippy::too_many_arguments)]
     pub const fn new(
         method: HttpMethod,
@@ -508,6 +533,38 @@ impl RouteEntry {
         Self {
             method,
             path,
+            req_type_id: std::any::TypeId::of::<()>(),
+            handler_type,
+            rsp_type,
+            name,
+            description,
+            category,
+            params,
+            authorization,
+        }
+    }
+
+    /// Create a new route entry carrying its request type's `TypeId`.
+    ///
+    /// The endpoint macros use this so OpenAPI resolves parameter metadata by
+    /// type instead of by a name string.
+    #[allow(clippy::too_many_arguments)]
+    pub const fn with_type_id(
+        method: HttpMethod,
+        path: &'static str,
+        req_type_id: std::any::TypeId,
+        handler_type: &'static str,
+        rsp_type: &'static str,
+        name: TextRef,
+        description: TextRef,
+        category: TextRef,
+        params: &'static [ParamMeta],
+        authorization: &'static [AuthorizeRule],
+    ) -> Self {
+        Self {
+            method,
+            path,
+            req_type_id,
             handler_type,
             rsp_type,
             name,

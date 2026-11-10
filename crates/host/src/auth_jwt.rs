@@ -129,7 +129,9 @@ impl IClaims for JwtClaims {
 /// JWT-based authentication handler.
 ///
 /// Reads the `Authorization: Bearer <token>` header, decodes and validates
-/// the JWT, and returns the resulting claims.
+/// the JWT, and returns the resulting claims. Only a **valid** token produces
+/// claims: a missing header, a non-`Bearer` scheme or a token that fails
+/// validation all yield `Ok(None)` — the request simply continues as anonymous.
 pub struct JwtAuth {
     decoding_key: DecodingKey,
     validation: Validation,
@@ -166,15 +168,23 @@ impl IAuthenticationHandler for JwtAuth {
             return Ok(None);
         }
 
-        let token_data = decode::<RawClaims>(&token, &self.decoding_key, &self.validation)
-            .map_err(|e| {
-                // The decoder's message is for operators, not for the client:
-                // it names the failure mode (InvalidToken, ExpiredSignature,
-                // InvalidAlgorithm, ...). Log it and return a static detail so
-                // 401 responses never leak token-parsing internals.
-                tracing::debug!(reason = %e, "JWT validation failed");
-                webx_core::error::Error::Unauthorized("invalid or expired token".to_string())
-            })?;
+        // A rejected token means "not authenticated", not "reject the request":
+        // the request continues as anonymous and the endpoint decides. This is
+        // what keeps a public endpoint (login, health, docs) reachable while a
+        // client still holds an expired token, instead of dead-locking it with a
+        // 401 on every call. Protected endpoints respond 401 further down the
+        // pipeline (`#[authorize]` rules or a required `#[fromclaim]` identity),
+        // through the single unauthorized writer (detail "authentication
+        // required" + `WWW-Authenticate`).
+        let token_data = match decode::<RawClaims>(&token, &self.decoding_key, &self.validation) {
+            Ok(data) => data,
+            Err(e) => {
+                // The decoder's message is for operators, not for the client
+                // (it names InvalidToken/ExpiredSignature/InvalidAlgorithm/...).
+                tracing::debug!(reason = %e, "JWT rejected");
+                return Ok(None);
+            }
+        };
 
         let claims: JwtClaims = token_data.claims.into();
         Ok(Some(Box::new(claims)))

@@ -128,9 +128,10 @@ fn expand_endpoint(
         }
 
         ::webx::inventory::submit! {
-            ::webx::RouteEntry::new(
+            ::webx::RouteEntry::with_type_id(
                 ::webx::HttpMethod::#method_ident,
                 #path_str,
+                ::std::any::TypeId::of::<#self_ty>(),
                 #req_type_name,
                 #rsp_type_str,
                 #name,

@@ -9,9 +9,13 @@
 //! * `HEAD`,
 //! * upload limits (`Form.MaxFileSize`, `Form.MaxRequestSize`, `Form.MaxFieldSize`).
 
+// rust-dix `#[derive(Inject)]` generates `__rdi_construct_*` symbols named after
+// the handler type (same reason docbit/handlers and docbit/host allow this).
+#![allow(non_snake_case)]
+
 use std::net::TcpListener;
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -39,9 +43,14 @@ async fn spawn(configure: impl Fn(&mut HostAppBuilder) + Send + Sync + 'static) 
         let base = format!("http://{addr}");
 
         let configure = std::sync::Arc::clone(&configure);
+        // A fresh download fixture directory per spawned host (i.e. per test),
+        // injected into the download handlers through DI. No test depends on
+        // another test having run first.
+        let download_root = Arc::new(DownloadRoot::new());
         let host = Host::builder()
             .mode(AppMode::Development)
             .no_spa()
+            .register(move |svc| svc.instance(Arc::clone(&download_root)))
             .configure(move |builder| configure(builder))
             .build();
         tokio::spawn(async move {
@@ -110,7 +119,27 @@ impl IRequestHandler<UploadRequest, UploadSummary> for UploadHandler {
     }
 }
 
-static DOWNLOAD_DIR: OnceLock<PathBuf> = OnceLock::new();
+/// The directory the download handlers serve from.
+///
+/// It is built per spawned host and registered in that host's DI container by
+/// [`spawn`], so **every test gets its own fixture directory**. Previously a
+/// process-wide `static DOWNLOAD_DIR` was initialised lazily by whichever test
+/// ran first, which made tests fail when run alone or in a different order
+/// (`resumable_download_reassembles_the_file`, the range tests, ...).
+struct DownloadRoot(PathBuf);
+
+impl DownloadRoot {
+    fn new() -> Self {
+        static NEXT_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir =
+            std::env::temp_dir().join(format!("webx-download-test-{}-{id}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("data.csv"), b"col_a,col_b\n1,2\n").unwrap();
+        std::fs::write(dir.join("big.bin"), big_body()).unwrap();
+        Self(dir)
+    }
+}
 
 #[derive(Debug, Default, Deserialize, WebxRequestMeta)]
 struct DownloadRequest {
@@ -120,15 +149,17 @@ struct DownloadRequest {
 #[get("/test/download/{name}")]
 impl IRequest<ResponseData> for DownloadRequest {}
 
-#[derive(Default)]
-struct DownloadHandler;
+#[derive(Inject)]
+struct DownloadHandler {
+    #[inject]
+    root: Arc<DownloadRoot>,
+}
 
-#[handler]
+#[handler(inject)]
 #[async_trait::async_trait]
 impl IRequestHandler<DownloadRequest, ResponseData> for DownloadHandler {
     async fn handle(&mut self, req: DownloadRequest) -> Result<ResponseData> {
-        let dir = DOWNLOAD_DIR.get().expect("download dir is initialised");
-        Ok(ResponseData::file(dir.join(&req.name)).download_name("report.csv"))
+        Ok(ResponseData::file(self.root.0.join(&req.name)).download_name("report.csv"))
     }
 }
 
@@ -139,15 +170,17 @@ struct MissingDownloadRequest;
 #[get("/test/download-missing")]
 impl IRequest<ResponseData> for MissingDownloadRequest {}
 
-#[derive(Default)]
-struct MissingDownloadHandler;
+#[derive(Inject)]
+struct MissingDownloadHandler {
+    #[inject]
+    root: Arc<DownloadRoot>,
+}
 
-#[handler]
+#[handler(inject)]
 #[async_trait::async_trait]
 impl IRequestHandler<MissingDownloadRequest, ResponseData> for MissingDownloadHandler {
     async fn handle(&mut self, _req: MissingDownloadRequest) -> Result<ResponseData> {
-        let dir = DOWNLOAD_DIR.get().expect("download dir is initialised");
-        Ok(ResponseData::file(dir.join("does-not-exist.csv")))
+        Ok(ResponseData::file(self.root.0.join("does-not-exist.csv")))
     }
 }
 
@@ -258,19 +291,6 @@ const BIG_LEN: usize = 64 * 1024 + 7;
 
 fn big_body() -> Vec<u8> {
     (0..BIG_LEN).map(|index| (index % 251) as u8).collect()
-}
-
-fn download_dir() -> PathBuf {
-    DOWNLOAD_DIR
-        .get_or_init(|| {
-            let dir =
-                std::env::temp_dir().join(format!("webx-download-test-{}", std::process::id()));
-            std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(dir.join("data.csv"), b"col_a,col_b\n1,2\n").unwrap();
-            std::fs::write(dir.join("big.bin"), big_body()).unwrap();
-            dir
-        })
-        .clone()
 }
 
 // ---------------------------------------------------------------------------
@@ -532,7 +552,6 @@ async fn oversized_text_field_is_rejected_with_413() {
 
 #[tokio::test]
 async fn file_download_sets_headers_and_streams_the_body() {
-    let _ = download_dir();
     let base = spawn(|_| {}).await;
 
     let resp = reqwest::Client::new()
@@ -575,7 +594,6 @@ async fn file_download_sets_headers_and_streams_the_body() {
 
 #[tokio::test]
 async fn range_request_returns_partial_content() {
-    let _ = download_dir();
     let base = spawn(|_| {}).await;
     let client = reqwest::Client::new();
 
@@ -619,7 +637,6 @@ async fn range_request_returns_partial_content() {
 
 #[tokio::test]
 async fn unsatisfiable_range_returns_416_with_content_range() {
-    let _ = download_dir();
     let base = spawn(|_| {}).await;
 
     let resp = reqwest::Client::new()
@@ -642,7 +659,6 @@ async fn unsatisfiable_range_returns_416_with_content_range() {
 
 #[tokio::test]
 async fn conditional_get_returns_304() {
-    let _ = download_dir();
     let base = spawn(|_| {}).await;
     let client = reqwest::Client::new();
     let url = format!("{base}/test/download/data.csv");
@@ -678,7 +694,6 @@ async fn conditional_get_returns_304() {
 
 #[tokio::test]
 async fn head_request_reports_headers_without_a_body() {
-    let _ = download_dir();
     let base = spawn(|_| {}).await;
 
     let resp = reqwest::Client::new()
@@ -701,7 +716,6 @@ async fn head_request_reports_headers_without_a_body() {
 
 #[tokio::test]
 async fn missing_download_target_returns_404() {
-    let _ = download_dir();
     let base = spawn(|_| {}).await;
 
     let resp = reqwest::Client::new()
@@ -830,7 +844,6 @@ async fn resumable_download_reassembles_the_file() {
 
 #[tokio::test]
 async fn if_range_with_a_stale_validator_restarts_from_the_whole_file() {
-    let _ = download_dir();
     let base = spawn(|_| {}).await;
     let url = format!("{base}/test/download/data.csv");
 
@@ -851,7 +864,6 @@ async fn if_range_with_a_stale_validator_restarts_from_the_whole_file() {
 
 #[tokio::test]
 async fn if_range_rejects_weak_validators() {
-    let _ = download_dir();
     let base = spawn(|_| {}).await;
     let url = format!("{base}/test/download/data.csv");
 
@@ -870,7 +882,6 @@ async fn if_range_rejects_weak_validators() {
 
 #[tokio::test]
 async fn if_range_with_a_matching_validator_serves_the_range() {
-    let _ = download_dir();
     let base = spawn(|_| {}).await;
     let client = reqwest::Client::new();
     let url = format!("{base}/test/download/data.csv");
@@ -923,7 +934,6 @@ async fn if_range_with_a_matching_validator_serves_the_range() {
 #[tokio::test]
 async fn multi_range_returns_multipart_byteranges() {
     let body = big_body();
-    let _ = download_dir();
     let base = spawn(|_| {}).await;
 
     let resp = reqwest::Client::new()
@@ -980,7 +990,6 @@ async fn multi_range_returns_multipart_byteranges() {
 
 #[tokio::test]
 async fn duplicate_ranges_are_coalesced_into_one_part() {
-    let _ = download_dir();
     let base = spawn(|_| {}).await;
 
     let resp = reqwest::Client::new()
@@ -1007,7 +1016,6 @@ async fn duplicate_ranges_are_coalesced_into_one_part() {
 #[tokio::test]
 async fn excessive_range_count_falls_back_to_the_whole_file() {
     let body = big_body();
-    let _ = download_dir();
     let base = spawn(|_| {}).await;
 
     // Nine disjoint parts is past the cap; all of them are satisfiable, so the
@@ -1031,7 +1039,6 @@ async fn excessive_range_count_falls_back_to_the_whole_file() {
 
 #[tokio::test]
 async fn unsatisfiable_members_are_dropped_from_a_range_set() {
-    let _ = download_dir();
     let base = spawn(|_| {}).await;
 
     // Only the first member overlaps the representation; the rest must not turn

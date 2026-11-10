@@ -63,24 +63,26 @@ impl CorsMiddleware {
 #[async_trait::async_trait]
 impl IMiddleware for CorsMiddleware {
     async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
-        let origin = ctx.request().header("origin");
+        // Owned, because the response is mutated below while the Origin value
+        // is still needed for the preflight decision.
+        let origin = ctx.request().header("origin").map(str::to_string);
 
         // Determine allowed origin
         let allowed = self
             .config
             .origins
             .iter()
-            .find(|o| *o == "*" || origin.is_some_and(|orig| *o == orig))
+            .find(|o| *o == "*" || origin.as_deref().is_some_and(|orig| *o == orig))
             .cloned();
 
         if let Some(ref origin_value) = allowed {
             // When allow_credentials is true, "*" cannot be used per CORS spec;
             // echo the request's Origin header instead.
             let header_value = if origin_value == "*" && self.config.allow_credentials {
-                origin.unwrap_or("*").to_string()
+                origin.as_deref().unwrap_or("*").to_string()
             } else if origin_value == "*" {
                 "*".to_string()
-            } else if let Some(o) = origin {
+            } else if let Some(o) = origin.as_deref() {
                 o.to_string()
             } else {
                 origin_value.clone()
@@ -95,8 +97,19 @@ impl IMiddleware for CorsMiddleware {
             }
         }
 
-        // Handle preflight OPTIONS
-        if ctx.request().method().to_uppercase() == "OPTIONS" {
+        // Only a real CORS preflight is short-circuited here: it must be an
+        // OPTIONS request that carries both `Origin` and
+        // `Access-Control-Request-Method`. A plain `OPTIONS` (curl, method
+        // discovery) belongs to the router, which answers with `Allow` or 404 —
+        // answering 204 for any OPTIONS made nonexistent paths look like
+        // existing ones.
+        let is_preflight = ctx.request().method().eq_ignore_ascii_case("OPTIONS")
+            && origin.is_some()
+            && ctx
+                .request()
+                .header("access-control-request-method")
+                .is_some();
+        if is_preflight {
             ctx.response_mut().set_status(204);
             ctx.response_mut().set_header(
                 "access-control-allow-methods",

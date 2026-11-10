@@ -3,10 +3,11 @@
 //! Controls framework behavior such as startup banner verbosity
 //! and built-in request logging.
 //!
-//! 环境识别遵循 ASP.NET Core 约定：
+//! 环境识别遵循 ASP.NET Core 约定，但**默认值偏向安全**：
 //! 1. 环境变量 `APP_ENV`（不区分大小写）显式指定，取值 `Production`/`Prod` 或
 //!    `Development`/`Dev`；
-//! 2. 未设置时默认 `Development`，并输出**一次**警告提醒生产环境显式设置。
+//! 2. 未设置或值非法时默认 `Production`，并输出**一次**警告 —— 安全开关不能
+//!    取决于“环境变量忘了写”；本机开发必须显式 `APP_ENV=Development`。
 //!
 //! 框架据此自动加载 `appsettings.{Environment}.json` overlay。
 
@@ -16,9 +17,15 @@ use std::sync::Once;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AppMode {
     /// Full startup banner, per-request console logging, verbose diagnostics.
-    #[default]
+    ///
+    /// Opt-in only (`APP_ENV=Development`): local development must say so
+    /// explicitly.
     Development,
     /// Minimal one-line startup message, no framework-initiated console logging.
+    ///
+    /// The default: a forgotten `APP_ENV` keeps the production guards on instead
+    /// of silently weakening them.
+    #[default]
     Production,
 }
 
@@ -31,11 +38,11 @@ impl AppMode {
         }
     }
 
-    /// 从环境变量 `APP_ENV` 解析运行模式；未设置或值非法时返回 `Development`。
+    /// 从环境变量 `APP_ENV` 解析运行模式；未设置或值非法时返回 `Production`。
     ///
     /// 接受（不区分大小写）：`Production` / `Prod` / `Development` / `Dev`。
-    /// 未设置或值非法时输出一次 `tracing::warn!`：静默回退会让生产部署忘记
-    /// `APP_ENV=Production`，从而绕过弱 JWT / CORS 等生产守卫。
+    /// 未设置或值非法时输出一次 `tracing::warn!`：安全默认值必须显式关掉，
+    /// 本机开发设置 `APP_ENV=Development` 即可。
     pub fn from_env() -> Self {
         Self::from_env_var("APP_ENV")
     }
@@ -47,12 +54,12 @@ impl AppMode {
                 Some(mode) => mode,
                 None => {
                     warn_invalid_once(var, &raw);
-                    AppMode::Development
+                    AppMode::Production
                 }
             },
             Err(_) => {
                 warn_unset_once(var);
-                AppMode::Development
+                AppMode::Production
             }
         }
     }
@@ -73,8 +80,8 @@ fn warn_unset_once(var: &str) {
     static WARNED: Once = Once::new();
     WARNED.call_once(|| {
         tracing::warn!(
-            "{var} is not set; defaulting to Development. \
-             Set APP_ENV=Production in production deployments."
+            "{var} is not set; defaulting to Production. \
+             Set APP_ENV=Development for local development."
         );
     });
 }
@@ -85,7 +92,7 @@ fn warn_invalid_once(var: &str, raw: &str) {
     WARNED.call_once(|| {
         tracing::warn!(
             "Invalid {var}={raw:?}; expected Production/Prod or Development/Dev. \
-             Falling back to Development."
+             Falling back to Production."
         );
     });
 }
@@ -93,6 +100,12 @@ fn warn_invalid_once(var: &str, raw: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_mode_is_production() {
+        // Safe default: a missing APP_ENV keeps the production guards armed.
+        assert_eq!(AppMode::default(), AppMode::Production);
+    }
 
     #[test]
     fn parse_accepts_known_values_case_insensitively() {
@@ -111,19 +124,19 @@ mod tests {
     }
 
     #[test]
-    fn from_env_var_unset_falls_back_to_development() {
+    fn from_env_var_unset_falls_back_to_production() {
         // A variable name that is never set: no `set_var`, so no cross-test
         // environment pollution (the warning is emitted once per process).
         let mode = AppMode::from_env_var("WEBX_TEST_APP_ENV_THAT_IS_NEVER_SET");
-        assert_eq!(mode, AppMode::Development);
+        assert_eq!(mode, AppMode::Production);
     }
 
     #[test]
-    fn from_env_var_invalid_falls_back_to_development() {
+    fn from_env_var_invalid_falls_back_to_production() {
         std::env::set_var("WEBX_TEST_APP_ENV_INVALID", "staging");
         let mode = AppMode::from_env_var("WEBX_TEST_APP_ENV_INVALID");
         std::env::remove_var("WEBX_TEST_APP_ENV_INVALID");
-        assert_eq!(mode, AppMode::Development);
+        assert_eq!(mode, AppMode::Production);
     }
 
     #[test]
@@ -132,5 +145,13 @@ mod tests {
         let mode = AppMode::from_env_var("WEBX_TEST_APP_ENV_PRODUCTION");
         std::env::remove_var("WEBX_TEST_APP_ENV_PRODUCTION");
         assert_eq!(mode, AppMode::Production);
+    }
+
+    #[test]
+    fn from_env_var_explicit_development_opts_out() {
+        std::env::set_var("WEBX_TEST_APP_ENV_DEVELOPMENT", "dev");
+        let mode = AppMode::from_env_var("WEBX_TEST_APP_ENV_DEVELOPMENT");
+        std::env::remove_var("WEBX_TEST_APP_ENV_DEVELOPMENT");
+        assert_eq!(mode, AppMode::Development);
     }
 }

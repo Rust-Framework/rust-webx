@@ -7,6 +7,10 @@ All notable changes to **rust-webx** are documented in this file.
 
 ### Breaking
 
+- **`APP_ENV` unset now means Production.** The safe default protects deployments
+  that forget the variable: weak/placeholder JWT secrets and CORS `*` are rejected
+  at build time instead of warned about. Local development must set
+  `APP_ENV=Development` explicitly (the warning says so).
 - **Anonymous identity must be declared explicitly.** `Option<IdentityUser>` now
   requires `#[fromclaim(optional)]`; a plain `#[fromclaim]` on an optional identity
   is a compile error that names the fix. A request may carry only one identity
@@ -47,6 +51,22 @@ All notable changes to **rust-webx** are documented in this file.
 
 ### Changed
 
+- **Invalid or expired tokens no longer fail the request.** A bad `Authorization`
+  header is treated as "unauthenticated": the request continues anonymously and
+  protected endpoints answer 401 through `#[authorize]` or a required
+  `#[fromclaim] user: IdentityUser`. Public endpoints (login, health, config) keep
+  working when a client sends a stale token — previously such a request was
+  rejected everywhere, which could lock users out of the login endpoint. The 401
+  detail is the stable `authentication required`; decoder reasons go to
+  `tracing::debug!`.
+- **`405` carries `Allow`, and plain `OPTIONS` reports methods.** Only a real CORS
+  preflight (`Origin` + `Access-Control-Request-Method`) is short-circuited by the
+  CORS middleware; a plain `OPTIONS` answers 204 + `Allow` for a known path and 404
+  for an unknown one, instead of 204 for every path.
+- **OpenAPI parameter metadata is keyed by `TypeId`.** Qualified request paths
+  (`impl IRequest<T> for contracts::ListOrdersRequest`) and same-named request types
+  in different modules no longer lose or mix up their parameter documentation;
+  string keys remain only as a fallback for hand-written `RouteEntry::new` entries.
 - **`after` hooks run on error paths.** The middleware pipeline now unwinds the
   middlewares that entered when a later `invoke` or the final handler returns an
   error, then returns the first error. Metrics, tracing, compression and cleanup

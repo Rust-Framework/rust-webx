@@ -428,6 +428,63 @@ impl IRequestHandler<CustomSerdeModel, serde_json::Value> for CustomSerdeHandler
 }
 
 // ---------------------------------------------------------------------------
+// OpenAPI metadata for a qualified `self_ty` and same-named request types
+// ---------------------------------------------------------------------------
+
+/// Two request types with the *same bare name* in different modules. The OpenAPI
+/// metadata must be keyed by `TypeId`, not by the type name string.
+mod alpha {
+    use super::*;
+
+    #[derive(Default, Deserialize, WebxRequestMeta)]
+    pub struct DetailRequest {
+        #[fromquery]
+        pub alpha_marker: String,
+    }
+}
+
+mod beta {
+    use super::*;
+
+    #[derive(Default, Deserialize, WebxRequestMeta)]
+    pub struct DetailRequest {
+        #[fromquery]
+        pub beta_marker: String,
+    }
+}
+
+// Both endpoints write a *qualified* `self_ty`, so the route records
+// `alpha::DetailRequest` / `beta::DetailRequest` while the derive records the
+// bare `DetailRequest` — a name lookup would miss both.
+#[get("/req/alpha-detail")]
+impl IRequest<serde_json::Value> for alpha::DetailRequest {}
+
+#[derive(Default)]
+struct AlphaDetailHandler;
+
+#[handler]
+#[async_trait::async_trait]
+impl IRequestHandler<alpha::DetailRequest, serde_json::Value> for AlphaDetailHandler {
+    async fn handle(&mut self, req: alpha::DetailRequest) -> Result<serde_json::Value> {
+        Ok(serde_json::json!({ "alpha_marker": req.alpha_marker }))
+    }
+}
+
+#[get("/req/beta-detail")]
+impl IRequest<serde_json::Value> for beta::DetailRequest {}
+
+#[derive(Default)]
+struct BetaDetailHandler;
+
+#[handler]
+#[async_trait::async_trait]
+impl IRequestHandler<beta::DetailRequest, serde_json::Value> for BetaDetailHandler {
+    async fn handle(&mut self, req: beta::DetailRequest) -> Result<serde_json::Value> {
+        Ok(serde_json::json!({ "beta_marker": req.beta_marker }))
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Harness
 // ---------------------------------------------------------------------------
 
@@ -1079,4 +1136,34 @@ async fn openapi_documents_json_body_fields() {
         "object"
     );
     assert!(form_body["content"]["application/json"].is_null());
+}
+
+#[tokio::test]
+async fn openapi_keeps_parameters_for_qualified_and_same_named_requests() {
+    let base = spawn_host().await;
+    let spec: serde_json::Value = reqwest::get(format!("{base}/api/openapi.json"))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let parameter_names = |path: &str| -> Vec<String> {
+        spec["paths"][path]["get"]["parameters"]
+            .as_array()
+            .map(|parameters| {
+                parameters
+                    .iter()
+                    .map(|param| param["name"].as_str().unwrap_or_default().to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+
+    // Qualified `self_ty`: the route name is `alpha::DetailRequest` while the
+    // derive registered the bare `DetailRequest`; TypeId linking keeps it.
+    assert_eq!(parameter_names("/req/alpha-detail"), vec!["alpha_marker"]);
+
+    // Same-named request types in two modules never share their parameters.
+    assert_eq!(parameter_names("/req/beta-detail"), vec!["beta_marker"]);
 }

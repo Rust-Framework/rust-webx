@@ -1096,6 +1096,11 @@ fn make_router_handler(router: Arc<Router>, spa_fallback: Option<Arc<SpaMiddlewa
                 }
                 None => {
                     let path_exists = router.path_exists(ctx.request().path());
+                    let allowed = if path_exists {
+                        router.allowed_methods(ctx.request().path())
+                    } else {
+                        Vec::new()
+                    };
                     drop(router);
                     // Don't overwrite if a middleware (e.g. a static file
                     // response) already wrote a body.
@@ -1108,7 +1113,17 @@ fn make_router_handler(router: Arc<Router>, spa_fallback: Option<Arc<SpaMiddlewa
                             }
                         }
                         if path_exists {
-                            write_plain_error(ctx, 405, "Method Not Allowed").await;
+                            if ctx.request().method().eq_ignore_ascii_case("OPTIONS") {
+                                // Method discovery (RFC 9110 §9.3.7): CORS
+                                // preflights are answered earlier, so this is a
+                                // plain OPTIONS and must report what the path
+                                // actually allows.
+                                ctx.response_mut().set_status(204);
+                                ctx.response_mut().set_header("allow", &allowed.join(", "));
+                            } else {
+                                // RFC 9110 §15.5.6: a 405 must carry `Allow`.
+                                write_method_not_allowed(ctx, &allowed).await;
+                            }
                         } else {
                             write_plain_error(ctx, 404, "Not Found").await;
                         }
@@ -1182,9 +1197,16 @@ async fn write_framework_error(ctx: &mut dyn IHttpContext, error: &webx_core::er
 }
 
 /// Write a framework-generated 4xx that has no [`Error`] value behind it
-/// (404 from an unmatched route, 405 from a path/method mismatch).
+/// (404 from an unmatched route).
 async fn write_plain_error(ctx: &mut dyn IHttpContext, status: u16, message: &str) {
     write_problem_response(ctx, build_problem(status, message)).await;
+}
+
+/// Write a 405 with the `Allow` header RFC 9110 §15.5.6 requires.
+async fn write_method_not_allowed(ctx: &mut dyn IHttpContext, allowed: &[&str]) {
+    let allow = allowed.join(", ");
+    ctx.response_mut().set_header("allow", &allow);
+    write_plain_error(ctx, 405, "Method Not Allowed").await;
 }
 
 // ---------------------------------------------------------------------------

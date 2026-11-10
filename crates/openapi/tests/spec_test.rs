@@ -1,5 +1,7 @@
 //! OpenAPI spec generation tests.
 
+use std::any::TypeId;
+
 use webx_core::localization::{LocalizationOptions, StringLocalizer, TextRef};
 use webx_core::route::scan::{AuthorizeRule, ParamMeta, RequestParamEntry, RouteEntry};
 use webx_core::routing::HttpMethod;
@@ -16,6 +18,23 @@ const RESOURCES_EN: &str = r#"{
     "endpoint.blog.description": "Returns blog posts",
     "endpoint.blog.category": "Blog"
 }"#;
+
+/// Two same-named request types in different modules: only `TypeId`
+/// distinguishes them (the bare type name is identical).
+mod contracts {
+    pub struct ListOrdersRequest;
+}
+
+mod billing {
+    pub struct ListOrdersRequest;
+}
+
+/// Stand-in for a request type whose parameters live in a *qualified* path
+/// (`contracts::ListOrdersRequest`): the endpoint macro records the qualified
+/// name, while the derive records the bare name.
+mod qualified {
+    pub struct QualifierRequest;
+}
 
 inventory::submit! {
     RouteEntry::new(
@@ -91,9 +110,102 @@ inventory::submit! {
     )
 }
 
+// A qualified `self_ty`: the route records `qualified::QualifierRequest`, while
+// the derive records the bare `QualifierRequest` — a name lookup would miss.
+inventory::submit! {
+    RouteEntry::with_type_id(
+        HttpMethod::Get,
+        "/api/qualified",
+        TypeId::of::<qualified::QualifierRequest>(),
+        "qualified::QualifierRequest",
+        "String",
+        TextRef::text("限定路径"),
+        TextRef::text(""),
+        TextRef::text(""),
+        &[],
+        &[],
+    )
+}
+
+// Two routes whose request types share the bare name `ListOrdersRequest`; only
+// the `TypeId` tells them apart.
+inventory::submit! {
+    RouteEntry::with_type_id(
+        HttpMethod::Get,
+        "/api/contracts/orders",
+        TypeId::of::<contracts::ListOrdersRequest>(),
+        "contracts::ListOrdersRequest",
+        "String",
+        TextRef::text("合同订单"),
+        TextRef::text(""),
+        TextRef::text(""),
+        &[],
+        &[],
+    )
+}
+
+inventory::submit! {
+    RouteEntry::with_type_id(
+        HttpMethod::Get,
+        "/api/billing/orders",
+        TypeId::of::<billing::ListOrdersRequest>(),
+        "billing::ListOrdersRequest",
+        "String",
+        TextRef::text("账单订单"),
+        TextRef::text(""),
+        TextRef::text(""),
+        &[],
+        &[],
+    )
+}
+
+inventory::submit! {
+    RequestParamEntry {
+        request_type: "QualifierRequest",
+        req_type_id: TypeId::of::<qualified::QualifierRequest>(),
+        params: &[ParamMeta {
+            name: "term",
+            source: "query",
+            type_hint: "string",
+            required: true,
+            json_key: None,
+        }],
+    }
+}
+
+inventory::submit! {
+    RequestParamEntry {
+        request_type: "ListOrdersRequest",
+        req_type_id: TypeId::of::<contracts::ListOrdersRequest>(),
+        params: &[ParamMeta {
+            name: "contract",
+            source: "query",
+            type_hint: "string",
+            required: false,
+            json_key: None,
+        }],
+    }
+}
+
+inventory::submit! {
+    RequestParamEntry {
+        request_type: "ListOrdersRequest",
+        req_type_id: TypeId::of::<billing::ListOrdersRequest>(),
+        params: &[ParamMeta {
+            name: "invoice",
+            source: "query",
+            type_hint: "string",
+            required: false,
+            json_key: None,
+        }],
+    }
+}
+
 inventory::submit! {
     RequestParamEntry {
         request_type: "SearchRequest",
+        // Hand-written entry without a type identity: falls back to the name.
+        req_type_id: TypeId::of::<()>(),
         params: &[
             ParamMeta {
                 name: "q",
@@ -116,6 +228,7 @@ inventory::submit! {
 inventory::submit! {
     RequestParamEntry {
         request_type: "CreateBlogRequest",
+        req_type_id: TypeId::of::<()>(),
         params: &[
             ParamMeta {
                 name: "title",
@@ -169,6 +282,7 @@ inventory::submit! {
 inventory::submit! {
     RequestParamEntry {
         request_type: "UpdateSettingsRequest",
+        req_type_id: TypeId::of::<()>(),
         params: &[
             ParamMeta {
                 name: "theme",
@@ -191,6 +305,7 @@ inventory::submit! {
 inventory::submit! {
     RequestParamEntry {
         request_type: "LegacyBodyRequest",
+        req_type_id: TypeId::of::<()>(),
         params: &[ParamMeta {
             name: "payload",
             source: "body",
@@ -339,4 +454,47 @@ fn read_methods_do_not_advertise_a_request_body() {
     // body-only fields are documented.
     assert!(operation["requestBody"].is_null());
     assert!(operation["parameters"].is_null());
+}
+
+// ---------------------------------------------------------------------------
+// Parameter metadata is keyed by `TypeId`
+// ---------------------------------------------------------------------------
+
+fn parameter_names(operation: &serde_json::Value) -> Vec<String> {
+    operation["parameters"]
+        .as_array()
+        .map(|parameters| {
+            parameters
+                .iter()
+                .map(|param| param["name"].as_str().unwrap_or_default().to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn qualified_request_types_keep_their_parameter_metadata() {
+    let spec = generate_openapi_spec("Test API", "1.0.0", &localizer("zh-CN"));
+
+    // The derive records the bare name (`QualifierRequest`) while the route
+    // records `qualified::QualifierRequest`: only the `TypeId` resolves it.
+    let operation = &spec["paths"]["/api/qualified"]["get"];
+    assert_eq!(parameter_names(operation), vec!["term"]);
+    assert_eq!(operation["parameters"][0]["required"], true);
+}
+
+#[test]
+fn same_named_request_types_do_not_share_parameters() {
+    let spec = generate_openapi_spec("Test API", "1.0.0", &localizer("zh-CN"));
+
+    // Two different types are both named `ListOrdersRequest`; each route must
+    // keep its own parameters instead of one silently overwriting the other.
+    assert_eq!(
+        parameter_names(&spec["paths"]["/api/contracts/orders"]["get"]),
+        vec!["contract"]
+    );
+    assert_eq!(
+        parameter_names(&spec["paths"]["/api/billing/orders"]["get"]),
+        vec!["invoice"]
+    );
 }

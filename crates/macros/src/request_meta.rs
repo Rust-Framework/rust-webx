@@ -1065,6 +1065,7 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
         ::webx::inventory::submit! {
             ::webx::RequestParamEntry {
                 request_type: ::core::stringify!(#type_ident),
+                req_type_id: ::std::any::TypeId::of::<#type_ident>(),
                 params: &[#(#meta),*],
             }
         }

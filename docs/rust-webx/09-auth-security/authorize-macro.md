@@ -57,7 +57,7 @@ pub struct AuthorizeRule {
 元数据在编译期写入 `RouteEntry`；`StubEndpoint` 在 dispatch 前逐条检查 claims：
 
 - 没有规则（`authorization` 为空）→ 公开端点；
-- 有规则但无 claims → `401 Unauthorized`；
+- 有规则但无 claims → `401 Unauthorized`（统一由 host 写出，带 `WWW-Authenticate: Bearer` 挑战）；
 - 有 claims 但存在未满足的规则 → `403 Forbidden`，problem 扩展字段为
   `required_roles` / `required_permissions`（第一条未满足规则的数组）。
 

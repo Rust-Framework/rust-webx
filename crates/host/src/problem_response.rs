@@ -60,6 +60,33 @@ pub async fn write_problem(ctx: &mut dyn IHttpContext, status: u16, detail: impl
     write_problem_response(ctx, build_problem(status, detail)).await;
 }
 
+/// Realm advertised in the `WWW-Authenticate` challenge of 401 responses.
+///
+/// RFC 7235 §3.1 requires a 401 to carry at least one challenge so clients can
+/// discover how to authenticate; RFC 6750 uses the `Bearer` scheme.
+pub const AUTH_REALM: &str = "rust-webx";
+
+/// Write the single 401 response of the framework.
+///
+/// This is the only place a 401 is produced: every caller (declarative
+/// authorization, dynamic authorization, JWT middleware, identity binding)
+/// funnels its `Error::Unauthorized` through here, so the status, the
+/// `application/problem+json` body and the `WWW-Authenticate` challenge stay
+/// consistent.
+pub async fn write_unauthorized(ctx: &mut dyn IHttpContext, detail: impl Into<String>) {
+    let problem = build_problem(401, detail);
+    let challenge = format!("Bearer realm=\"{AUTH_REALM}\"");
+    ctx.response_mut().set_status(problem.status);
+    ctx.response_mut()
+        .set_header("content-type", "application/problem+json");
+    ctx.response_mut()
+        .set_header("www-authenticate", &challenge);
+    let _ = ctx
+        .response_mut()
+        .write_bytes(problem_to_bytes(&problem))
+        .await;
+}
+
 /// 403 with optional extension fields (e.g. `required_roles`).
 pub async fn write_forbidden(
     ctx: &mut dyn IHttpContext,

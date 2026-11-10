@@ -75,8 +75,14 @@ impl IEndpoint for StubEndpoint {
             if !self.authorization.is_empty() {
                 let denied = match ctx.claims() {
                     None => {
-                        write_problem(ctx, 401, "Authentication required").await;
-                        return Ok(());
+                        // Single 401 write path: bubble the error up to the host
+                        // so every unauthenticated response (declarative
+                        // `#[authorize]`, binding layer, middleware) is written
+                        // by one place — including the `WWW-Authenticate`
+                        // challenge header.
+                        return Err(webx_core::error::Error::Unauthorized(
+                            "authentication required".to_string(),
+                        ));
                     }
                     Some(claims) => self
                         .authorization

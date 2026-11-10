@@ -658,34 +658,14 @@ fn build_fields(
         let Some(ident) = field.ident.clone() else {
             continue;
         };
-        let name = ident.to_string();
+        // A raw identifier (`r#type`) is spelled `type` on the wire; every key
+        // derived from the field name (source, JSON, header, rename_all) must
+        // agree with serde, which unraws too. `ident` keeps the `r#` so the
+        // generated struct literal still compiles.
+        let name = ident.to_string().trim_start_matches("r#").to_string();
         let shape = shape_of(&field.ty);
         let serde = field_serde(&field.attrs)?;
         let declared = declared_source(field)?;
-
-        // The injected `claims` field is filled by the dispatcher, never bound.
-        if name == "claims" {
-            specs.push(FieldSpec {
-                ident,
-                ty: field.ty.clone(),
-                name,
-                shape,
-                src: Src::Auto,
-                source_key: String::new(),
-                json_key: String::new(),
-                aliases: Vec::new(),
-                body_kind: BodyKind::Normal,
-                default: None,
-                container_default: false,
-                skipped: true,
-                flattened: false,
-                required: false,
-                hint: "string",
-                custom: None,
-                helper: format_ident!("__WebxBody_claims"),
-            });
-            continue;
-        }
 
         let has_declared = declared.is_some();
         let (src, extra) = match declared {
@@ -793,12 +773,7 @@ fn build_fields(
             BodyKind::Normal => "Body",
         };
         let helper = Ident::new(
-            &format!(
-                "__WebxBody_{}_{}_{}",
-                type_ident,
-                name.replace("r#", ""),
-                suffix
-            ),
+            &format!("__WebxBody_{}_{}_{}", type_ident, name, suffix),
             ident.span(),
         );
 
@@ -1134,9 +1109,12 @@ fn bind_fn(fields: &[FieldSpec], plan: &BindingPlan) -> TokenStream2 {
         quote! {}
     };
 
+    // Every field that can only come from a JSON body is guarded, including
+    // optional ones: on a bodyless method `Option<NonScalar>` would otherwise
+    // bind as `None` without telling the caller why it is always absent.
     let complex_fields: Vec<&str> = fields
         .iter()
-        .filter(|f| !f.skipped && f.body_only() && f.required)
+        .filter(|f| f.body_only())
         .map(|f| f.name.as_str())
         .collect();
     let complex_guard = if complex_fields.is_empty() {
@@ -1146,8 +1124,9 @@ fn bind_fn(fields: &[FieldSpec], plan: &BindingPlan) -> TokenStream2 {
         quote! {
             if !__is_body_method && !__is_multipart {
                 return ::core::result::Result::Err(::webx::Error::Http(format!(
-                    "composite fields [{}] can only bind from a JSON body; \
-                     mark them `#[fromquery]`/`#[frompath]` or use POST/PUT/PATCH",
+                    "composite fields [{}] can only bind from a JSON body, and this \
+                     request method has no body; use POST/PUT/PATCH, or mark them \
+                     `#[fromquery]`/`#[frompath]` and implement `FromStr`",
                     #names
                 )));
             }
@@ -1308,7 +1287,7 @@ fn bind_field(f: &FieldSpec, plan: &BindingPlan) -> TokenStream2 {
                     }
                     ::core::option::Option::None => {
                         return ::core::result::Result::Err(::webx::Error::Unauthorized(
-                            "authentication required for this endpoint".to_string(),
+                            "authentication required".to_string(),
                         ));
                     }
                 }
@@ -1523,9 +1502,12 @@ fn many_chain(f: &FieldSpec, reads: &[Read]) -> TokenStream2 {
                 let fetch = list_fetch(f, other);
                 let missing = expr;
                 if optional_many {
+                    // "Present but empty" (`?ids=`) binds as `Some(vec![])`;
+                    // only a source without the key at all is "absent" (`None`).
+                    let present = list_present(f, other);
                     quote! {{
                         let __values = #fetch;
-                        if __values.is_empty() {
+                        if __values.is_empty() && !(#present) {
                             #missing
                         } else {
                             ::core::option::Option::Some(
@@ -1584,6 +1566,34 @@ fn list_fetch(f: &FieldSpec, read: &Read) -> TokenStream2 {
         Read::Claim(key) => {
             let key = LitStr::new(key, ident.span());
             quote! { __in.claim_list(#key) }
+        }
+    }
+}
+
+/// Whether the source carries the key, even when its value is empty.
+///
+/// [`list_fetch`] yields no values for an empty source value, so the
+/// `Option<Vec<T>>` path needs to tell "present but empty" from "absent".
+fn list_present(f: &FieldSpec, read: &Read) -> TokenStream2 {
+    let ident = &f.ident;
+    let key = LitStr::new(&f.source_key, ident.span());
+    match read {
+        Read::Body => unreachable!("body values are not string sources"),
+        Read::Query => quote! {
+            __in.query_multi.map_or(false, |__multi| __multi.contains_key(#key))
+                || __in.query.contains_key(#key)
+        },
+        Read::Form => quote! {
+            __in.form.map_or(false, |__form| __form.text(#key).is_some())
+        },
+        Read::Path => quote! { __in.path.contains_key(#key) },
+        Read::Header(lower) => {
+            let lower = LitStr::new(lower, ident.span());
+            quote! { __req.header(#lower).is_some() }
+        }
+        Read::Claim(key) => {
+            let key = LitStr::new(key, ident.span());
+            quote! { __in.claim(#key).is_some() }
         }
     }
 }
@@ -1737,5 +1747,46 @@ mod tests {
             }
         "#);
         assert!(message.contains("multipart"), "{message}");
+    }
+
+    fn code(source: &str) -> String {
+        let input: DeriveInput = syn::parse_str(source).expect("parse");
+        let generated = expand(&input).expect("expand");
+        generated.to_string()
+    }
+
+    #[test]
+    fn a_field_named_claims_is_an_ordinary_field() {
+        // `#[claims]` no longer exists, so the name alone means nothing: an
+        // explicitly marked `claims` field must participate in binding.
+        let marked = code(r#"struct Req { #[frombody] claims: Vec<String> }"#);
+        assert!(marked.contains("__f_claims"), "{marked}");
+
+        // An unmarked `claims` field is inferred from the request method like
+        // any other field instead of being silently defaulted.
+        let inferred = code(r#"struct Req { claims: String }"#);
+        assert!(inferred.contains("__f_claims"), "{inferred}");
+        assert!(inferred.contains("__is_body_method"), "{inferred}");
+    }
+
+    #[test]
+    fn raw_identifiers_use_their_unraw_name() {
+        let body = code(r#"struct Req { #[frombody] r#type: String }"#);
+        assert!(body.contains("\"type\""), "{body}");
+        assert!(!body.contains("\"r#type\""), "{body}");
+
+        let header = code(r#"struct Req { #[fromheader] r#accept: String }"#);
+        assert!(header.contains("\"accept\""), "{header}");
+        assert!(!header.contains("\"r#accept\""), "{header}");
+    }
+
+    #[test]
+    fn optional_composite_fields_are_guarded_without_a_body() {
+        let generated = code(r#"struct Req { payload: Option<Payload> }"#);
+        let guard = generated
+            .split("composite fields")
+            .nth(1)
+            .expect("expected a composite-field guard");
+        assert!(guard.contains("\"payload\""), "{guard}");
     }
 }

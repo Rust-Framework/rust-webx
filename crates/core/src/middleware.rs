@@ -14,6 +14,10 @@ use std::ops::ControlFlow;
 /// On short-circuit, remaining middleware and the final handler are skipped,
 /// but `after` hooks on already-executed middleware still run in reverse order.
 ///
+/// `after` also runs when a middleware's `invoke` or the handler returns an
+/// error: the pipeline unwinds the middleware that already entered, so
+/// metrics, tracing and cleanup never miss a failed request.
+///
 /// Analogous to ASP.NET Core's IMiddleware.
 #[async_trait::async_trait]
 pub trait IMiddleware: Send + Sync {

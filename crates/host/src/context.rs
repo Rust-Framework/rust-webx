@@ -27,6 +27,7 @@ use http_body_util::{combinators::UnsyncBoxBody, BodyExt, Full};
 use hyper::body::{Bytes, Frame, Incoming};
 use hyper::Request;
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -129,8 +130,13 @@ impl HttpContext {
     /// Create a context around `req`.
     ///
     /// No I/O happens here: the body stays a live stream until the endpoint
-    /// asks for it.
-    pub fn new(req: Request<Incoming>, limits: BodyLimits) -> Self {
+    /// asks for it. `remote_addr` is the peer address captured by the accept
+    /// loop; `None` when the host cannot report it.
+    pub fn new(
+        req: Request<Incoming>,
+        limits: BodyLimits,
+        remote_addr: Option<SocketAddr>,
+    ) -> Self {
         let (parts, body) = req.into_parts();
 
         let mut headers = HashMap::new();
@@ -179,6 +185,7 @@ impl HttpContext {
             query_multi,
             route_params: HashMap::new(),
             route_pattern: None,
+            remote_addr,
             body: Mutex::new(RequestBody::Pending(Some(body))),
             limits,
         };
@@ -248,6 +255,7 @@ pub struct HttpRequest {
     query_multi: HashMap<String, Vec<String>>,
     route_params: HashMap<String, String>,
     route_pattern: Option<String>,
+    remote_addr: Option<SocketAddr>,
     body: Mutex<RequestBody>,
     limits: BodyLimits,
 }
@@ -277,6 +285,10 @@ impl IHttpRequest for HttpRequest {
 
     fn query_all(&self) -> Option<&HashMap<String, Vec<String>>> {
         Some(&self.query_multi)
+    }
+
+    fn remote_addr(&self) -> Option<SocketAddr> {
+        self.remote_addr
     }
 
     fn route_params(&self) -> &HashMap<String, String> {
@@ -671,21 +683,23 @@ async fn file_response(
                     return problem_bytes(404, headers, "Not Found")
                 }
                 Err(err) => {
-                    return problem_bytes(
-                        500,
-                        headers,
-                        &format!("cannot open `{}`: {err}", path.display()),
-                    )
+                    tracing::error!(
+                        path = %path.display(),
+                        error = %err,
+                        "cannot open file for download"
+                    );
+                    return problem_bytes(500, headers, "an unexpected error occurred");
                 }
             };
             let metadata = match handle.metadata().await {
                 Ok(metadata) => metadata,
                 Err(err) => {
-                    return problem_bytes(
-                        500,
-                        headers,
-                        &format!("cannot stat `{}`: {err}", path.display()),
-                    )
+                    tracing::error!(
+                        path = %path.display(),
+                        error = %err,
+                        "cannot stat file for download"
+                    );
+                    return problem_bytes(500, headers, "an unexpected error occurred");
                 }
             };
             if !metadata.is_file() {
@@ -814,7 +828,8 @@ async fn file_response(
             }
             if start > 0 {
                 if let Err(err) = handle.seek(SeekFrom::Start(start)).await {
-                    return problem_bytes(500, headers, &format!("cannot seek: {err}"));
+                    tracing::error!(error = %err, "cannot seek file for ranged response");
+                    return problem_bytes(500, headers, "an unexpected error occurred");
                 }
             }
             build_response(status, headers, reader_body(handle.take(count)))
@@ -826,7 +841,8 @@ async fn file_response(
             }
             if start > 0 {
                 if let Err(err) = reader.seek(SeekFrom::Start(start)).await {
-                    return problem_bytes(500, headers, &format!("cannot seek: {err}"));
+                    tracing::error!(error = %err, "cannot seek stream for ranged response");
+                    return problem_bytes(500, headers, "an unexpected error occurred");
                 }
             }
             build_response(status, headers, reader_body(reader.take(count)))

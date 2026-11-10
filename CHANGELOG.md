@@ -3,6 +3,61 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [Unreleased] — 0.9.0 (in progress)
+
+### Added
+
+- **`IHttpRequest::remote_addr()`** — a defaulted accessor for the client peer
+  address (`None` by default so test contexts and alternative hosts keep
+  compiling). The host records it at accept time; rate limiting and audit code
+  use it instead of guessing a constant.
+- **`Error::public_detail()`** — the client-facing message of a 4xx variant,
+  without the operator-facing `Display` prefix (`"Unauthorized: …"`); 5xx
+  variants return `None`, which is what makes detail redaction enforceable.
+- **`Retry-After` on 429** — derived from the bucket refill rate.
+
+### Changed
+
+- **`after` hooks run on error paths.** The middleware pipeline now unwinds the
+  middlewares that entered when a later `invoke` or the final handler returns an
+  error, then returns the first error. Metrics, tracing, compression and cleanup
+  finally observe failed requests (previously a `?` skipped the reverse pass).
+- **One 401 write path.** Declarative authorization no longer writes its own
+  401; it returns `Error::Unauthorized` and the host writes every 401 through
+  `problem_response::write_unauthorized`, which sets `application/problem+json`
+  and `WWW-Authenticate: Bearer realm="rust-webx"` (RFC 7235). Missing
+  credentials and a rejected token keep distinct `detail` text.
+- **Rate limiting keys on the real peer address.** Previously every request was
+  bucketed under a constant `127.0.0.1`, silently turning per-client limits into
+  one global bucket. When the host cannot report a peer address the limiter now
+  passes the request through instead of bucketing everyone together.
+
+### Fixed
+
+- **5xx detail no longer leaks internals.** `Error::Internal` / `Di` / response
+  serialization text and file-system paths were served verbatim; they are logged
+  (`tracing::error!`) and replaced with a stable detail. File-download and
+  ranged-response failures are redacted the same way.
+- **`claims` is an ordinary field name again.** The derive special-cased a field
+  named `claims` and silently skipped it — even when the user wrote
+  `#[frombody] claims: Vec<Claim>` — which also meant a request whose only field
+  was `claims` never read the body. That leftover from the removed `#[claims]`
+  injection is gone.
+- **`r#` identifiers use their unraw wire name.** `#[frombody] r#type: String`
+  now binds the JSON key `type` (previously `r#type`), and query/header names
+  match serde's behaviour.
+- **`#[fromclaim]` reads the raw claim map first.** A token that literally
+  carries `user_id` or `tenant` is no longer silently replaced by `sub` /
+  `tenant_id`; the dedicated accessors are only a fallback.
+- **`Option<composite>` fields on body-less methods are a 400, not a silent
+  `None`.** The complex-type guard only covered required fields, so
+  `Option<Filter>` on a GET never bound and never failed.
+- **`?ids=` (present but empty) binds as `Some(vec![])`.** `Option<Vec<T>>` could
+  not express an explicitly empty list: the empty string became one empty element
+  and failed to parse.
+- **JWT failures no longer echo the decoder's error text** (`InvalidToken`,
+  signature/base64 details) into the 401 body.
+
 ## [0.8.0] — 2026-11-10
 
 ### Breaking

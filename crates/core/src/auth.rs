@@ -250,8 +250,7 @@ pub trait RequestUser {
 
     /// The identity, or `401 Unauthorized` when the request is anonymous.
     fn require_user(&self) -> Result<&IdentityUser> {
-        self.current_user().ok_or_else(|| {
-            Error::Unauthorized("authentication required for this endpoint".to_string())
-        })
+        self.current_user()
+            .ok_or_else(|| Error::Unauthorized("authentication required".to_string()))
     }
 }

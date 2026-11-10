@@ -88,6 +88,17 @@ impl RateLimiter {
     pub async fn tracked_ip_count(&self) -> usize {
         self.buckets.lock().await.len()
     }
+
+    /// Seconds a client should wait before retrying (RFC 6585 `Retry-After`).
+    ///
+    /// A bucket refills one token every `1 / rate` seconds; a whole second is
+    /// the smallest useful hint, and 1s is used when the rate is unset.
+    pub fn retry_after_secs(&self) -> u64 {
+        if self.rate <= 0.0 {
+            return 1;
+        }
+        ((1.0 / self.rate).ceil() as u64).max(1)
+    }
 }
 
 fn evict_oldest(buckets: &mut HashMap<IpAddr, TokenBucket>) {
@@ -135,9 +146,18 @@ impl RateLimitMiddleware {
 #[async_trait::async_trait]
 impl IMiddleware for RateLimitMiddleware {
     async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
-        let ip = extract_client_ip(ctx, self.trust_proxy);
+        // No peer address means the host cannot tell clients apart. Falling
+        // back to a constant would turn per-client limiting into one global
+        // bucket, so the limiter passes the request through and the host is
+        // expected to expose `IHttpRequest::remote_addr`.
+        let Some(ip) = extract_client_ip(ctx, self.trust_proxy) else {
+            tracing::debug!("rate limit skipped: request has no peer address");
+            return Ok(ControlFlow::Continue(()));
+        };
 
         if !self.limiter.allow(ip).await {
+            let retry_after = self.limiter.retry_after_secs().to_string();
+            ctx.response_mut().set_header("retry-after", &retry_after);
             write_problem(ctx, 429, "Too Many Requests").await;
             return Ok(ControlFlow::Break(()));
         }
@@ -146,23 +166,30 @@ impl IMiddleware for RateLimitMiddleware {
     }
 }
 
-fn extract_client_ip(ctx: &dyn IHttpContext, trust_proxy: bool) -> IpAddr {
+/// Resolve the client IP the token bucket is keyed by.
+///
+/// The connection's peer address is authoritative. `trust_proxy` additionally
+/// accepts `X-Forwarded-For` / `X-Real-IP`, which is only sound behind a proxy
+/// that overwrites those headers; a deployment exposed directly to clients
+/// must keep it `false` (a client can otherwise rotate the header to bypass
+/// the limiter).
+fn extract_client_ip(ctx: &dyn IHttpContext, trust_proxy: bool) -> Option<IpAddr> {
     if trust_proxy {
         if let Some(fwd) = ctx.request().header("x-forwarded-for") {
             let first = fwd.split(',').next().unwrap_or("").trim();
             if let Ok(ip) = IpAddr::from_str(first) {
-                return ip;
+                return Some(ip);
             }
         }
 
         if let Some(real) = ctx.request().header("x-real-ip") {
             if let Ok(ip) = IpAddr::from_str(real.trim()) {
-                return ip;
+                return Some(ip);
             }
         }
     }
 
-    IpAddr::from_str("127.0.0.1").unwrap()
+    ctx.request().remote_addr().map(|addr| addr.ip())
 }
 
 #[cfg(test)]
@@ -179,5 +206,21 @@ mod tests {
 
         assert!(limiter.allow(IpAddr::V4(Ipv4Addr::new(3, 0, 0, 1))).await);
         assert_eq!(limiter.tracked_ip_count().await, 2);
+    }
+
+    #[tokio::test]
+    async fn retry_after_matches_the_refill_rate() {
+        // 10 requests/s: a token every 0.1s, so the smallest whole-second hint
+        // is still 1s.
+        let fast = RateLimiter::new(10.0, 1, 10);
+        assert_eq!(fast.retry_after_secs(), 1);
+
+        // 0.5 requests/s: one token every 2s.
+        let slow = RateLimiter::new(0.5, 1, 10);
+        assert_eq!(slow.retry_after_secs(), 2);
+
+        // Never report 0 (that would invite an immediate retry storm).
+        let unset = RateLimiter::new(0.0, 1, 10);
+        assert_eq!(unset.retry_after_secs(), 1);
     }
 }

@@ -7,7 +7,7 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use webx_core::error::Result;
+use webx_core::error::{Error, Result};
 use webx_core::http::IHttpContext;
 use webx_core::middleware::IMiddleware;
 
@@ -37,9 +37,16 @@ impl MiddlewarePipeline {
 
     /// Execute middleware onion: invoke forward, final handler, after hooks reverse.
     ///
-    /// Supports short-circuit: if a middleware's `invoke` returns `ControlFlow::Break(())`,
-    /// remaining middleware and the final handler are skipped. `after` hooks on
-    /// already-executed middleware still run in reverse order.
+    /// Supports short-circuit: if a middleware's `invoke` returns
+    /// `ControlFlow::Break(())`, remaining middleware and the final handler are
+    /// skipped.
+    ///
+    /// `after` hooks always run for the middleware whose `invoke` completed,
+    /// including when the request fails: an error raised by a middleware or by
+    /// the final handler must still let metrics, tracing, gzip and cleanup
+    /// observe the response. The first error is returned after the unwind; a
+    /// failure inside an `after` hook is logged and never masks the original
+    /// error.
     pub async fn execute(
         &self,
         ctx: &mut dyn IHttpContext,
@@ -49,29 +56,47 @@ impl MiddlewarePipeline {
 
         let mut executed: Vec<Arc<dyn IMiddleware>> = Vec::new();
         let mut short_circuited = false;
+        let mut failure: Option<Error> = None;
 
         // Forward pass: invoke each middleware, track executed for after hooks
         for middleware in &self.middlewares {
-            match middleware.invoke(ctx).await? {
-                ControlFlow::Continue(()) => executed.push(Arc::clone(middleware)),
-                ControlFlow::Break(()) => {
+            match middleware.invoke(ctx).await {
+                Ok(ControlFlow::Continue(())) => executed.push(Arc::clone(middleware)),
+                Ok(ControlFlow::Break(())) => {
                     short_circuited = true;
+                    break;
+                }
+                Err(err) => {
+                    failure = Some(err);
                     break;
                 }
             }
         }
 
-        // Run the final handler (router) only if not short-circuited
-        if !short_circuited {
-            final_handler(ctx).await?;
+        // Run the final handler (router) only if not short-circuited and the
+        // forward pass did not already fail.
+        if !short_circuited && failure.is_none() {
+            if let Err(err) = final_handler(ctx).await {
+                failure = Some(err);
+            }
         }
 
-        // Reverse pass: after hooks on executed middleware only
+        // Reverse pass: after hooks on executed middleware only, error path
+        // included.
         for middleware in executed.into_iter().rev() {
-            middleware.after(ctx).await?;
+            if let Err(err) = middleware.after(ctx).await {
+                if failure.is_none() {
+                    failure = Some(err);
+                } else {
+                    tracing::error!(error = %err, "middleware after hook failed");
+                }
+            }
         }
 
-        Ok(())
+        match failure {
+            Some(err) => Err(err),
+            None => Ok(()),
+        }
     }
 }
 

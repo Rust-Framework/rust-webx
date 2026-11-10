@@ -439,6 +439,15 @@ pub trait IHttpRequest: Send {
     fn header(&self, name: &str) -> Option<&str>;
     fn query(&self) -> &HashMap<String, String>;
 
+    /// The peer address of the client connection, when the host exposes it.
+    ///
+    /// Rate limiting and audit code use this. The default reports `None` so
+    /// that test contexts and alternative hosts keep compiling; a `None` peer
+    /// must never be treated as "the same client as everyone else".
+    fn remote_addr(&self) -> Option<std::net::SocketAddr> {
+        None
+    }
+
     /// Every value per query key, in the order they appeared.
     ///
     /// `?id=1&id=2` yields two values for `id`, which is what `Vec<T>` query

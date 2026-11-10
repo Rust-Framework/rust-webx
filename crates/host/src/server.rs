@@ -29,7 +29,7 @@ use crate::health::{HealthCheckEndpoint, HealthCheckRegistry, HealthStatus};
 use crate::memory_cache::MemoryCache;
 use crate::metrics::{HttpMetrics, MetricsEndpoint, MetricsMiddleware};
 use crate::pipeline::{HandlerFn, MiddlewarePipeline};
-use crate::problem_response::{build_problem, write_problem_response};
+use crate::problem_response::{build_problem, write_problem_response, write_unauthorized};
 use crate::rate_limit::RateLimitMiddleware;
 use crate::router::Router;
 use jsonwebtoken::{DecodingKey, Validation};
@@ -1064,9 +1064,9 @@ fn make_router_handler(router: Arc<Router>) -> HandlerFn {
                     // wrote a response body (static file, index.html fallback).
                     if !ctx.response().has_body() {
                         if path_exists {
-                            write_error_response(ctx, 405, "Method Not Allowed").await;
+                            write_plain_error(ctx, 405, "Method Not Allowed").await;
                         } else {
-                            write_error_response(ctx, 404, "Not Found").await;
+                            write_plain_error(ctx, 404, "Not Found").await;
                         }
                     }
                     Ok(())
@@ -1082,8 +1082,9 @@ async fn handle_request(
     router_handler: HandlerFn,
     dispatch_runtime: Arc<DispatchRuntime>,
     body_limits: BodyLimits,
+    remote_addr: Option<std::net::SocketAddr>,
 ) -> std::result::Result<hyper::Response<RespBody>, std::convert::Infallible> {
-    let mut ctx = HttpContext::new(req, body_limits);
+    let mut ctx = HttpContext::new(req, body_limits, remote_addr);
 
     // A request rejected during construction (e.g. a declared Content-Length
     // above the limit) already carries its final response.
@@ -1100,8 +1101,7 @@ async fn handle_request(
                     write_problem_response(&mut ctx, *problem).await
                 }
                 other => {
-                    let status = other.status_code();
-                    write_error_response(&mut ctx, status, &other.to_string()).await;
+                    write_framework_error(&mut ctx, &other).await;
                 }
             }
         }
@@ -1110,7 +1110,40 @@ async fn handle_request(
     Ok(ctx.into_response().await)
 }
 
-async fn write_error_response(ctx: &mut dyn IHttpContext, status: u16, message: &str) {
+/// Write an error the framework itself produced (not an `Error::Problem`).
+///
+/// * 401 goes through the single unauthorized writer so every challenge is
+///   identical and carries `WWW-Authenticate`; the variant's own message
+///   ("authentication required" vs "invalid or expired token") is kept so a
+///   client can tell missing credentials from a rejected token.
+/// * 5xx never echoes the internal message: it is logged and replaced with a
+///   stable detail, because database errors and file paths must not reach
+///   clients.
+/// * 4xx keep their (client-facing) detail, taken from the variant without the
+///   operator-facing `Display` prefix.
+async fn write_framework_error(ctx: &mut dyn IHttpContext, error: &webx_core::error::Error) {
+    let status = error.status_code();
+    if status == 401 {
+        write_unauthorized(
+            ctx,
+            error.public_detail().unwrap_or("authentication required"),
+        )
+        .await;
+    } else if status >= 500 {
+        tracing::error!(status, error = %error, "unhandled server error");
+        write_problem_response(ctx, build_problem(status, "an unexpected error occurred")).await;
+    } else {
+        write_problem_response(
+            ctx,
+            build_problem(status, error.public_detail().unwrap_or("request failed")),
+        )
+        .await;
+    }
+}
+
+/// Write a framework-generated 4xx that has no [`Error`] value behind it
+/// (404 from an unmatched route, 405 from a path/method mismatch).
+async fn write_plain_error(ctx: &mut dyn IHttpContext, status: u16, message: &str) {
     write_problem_response(ctx, build_problem(status, message)).await;
 }
 
@@ -1271,7 +1304,7 @@ async fn serve_http(
     loop {
         tokio::select! {
             accept_result = listener.accept() => {
-                let (stream, _) = match accept_result {
+                let (stream, peer_addr) = match accept_result {
                     Ok(v) => v,
                     Err(e) => {
                         tracing::error!("Accept error (will retry): {}", e);
@@ -1279,6 +1312,7 @@ async fn serve_http(
                         continue;
                     }
                 };
+                let remote_addr = Some(peer_addr);
 
                 while join_set.try_join_next().is_some() {}
 
@@ -1301,6 +1335,9 @@ async fn serve_http(
                         let dispatch_runtime = Arc::clone(&dispatch_runtime);
                         let body_limits = body_limits.clone();
                         let mode = mode;
+                        // Peer address for rate limiting and audit; captured per
+                        // connection and carried into the request context.
+                        let remote_addr = remote_addr;
                         async move {
                             let start = Instant::now();
                             let method = req.method().to_string();
@@ -1311,6 +1348,7 @@ async fn serve_http(
                                 router_handler,
                                 dispatch_runtime,
                                 body_limits,
+                                remote_addr,
                             )
                             .await;
                             let elapsed = start.elapsed();
@@ -1374,7 +1412,7 @@ async fn serve_https(
     loop {
         tokio::select! {
             accept_result = listener.accept() => {
-                let (stream, _) = match accept_result {
+                let (stream, peer_addr) = match accept_result {
                     Ok(v) => v,
                     Err(e) => {
                         tracing::error!("Accept error (will retry): {}", e);
@@ -1382,6 +1420,7 @@ async fn serve_https(
                         continue;
                     }
                 };
+                let remote_addr = Some(peer_addr);
 
                 while join_set.try_join_next().is_some() {}
 
@@ -1407,6 +1446,8 @@ async fn serve_https(
                                 let dispatch_runtime = Arc::clone(&dispatch_runtime);
                                 let body_limits = body_limits.clone();
                                 let mode = mode;
+                                // Peer address for rate limiting and audit.
+                                let remote_addr = remote_addr;
                                 async move {
                                     let start = Instant::now();
                                     let method = req.method().to_string();
@@ -1417,6 +1458,7 @@ async fn serve_https(
                                         router_handler,
                                         dispatch_runtime,
                                         body_limits,
+                                        remote_addr,
                                     )
                                     .await;
                                     let elapsed = start.elapsed();

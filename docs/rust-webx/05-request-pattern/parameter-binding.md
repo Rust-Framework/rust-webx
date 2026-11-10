@@ -82,10 +82,11 @@ pub struct SearchRequest {
 | `Option<FormFile>` | 可选 |
 | `Vec<FormFile>` | 可选，缺失 → 空列表 |
 | body 字段 | 非 `Option` 且没有 `#[serde(default)]` 即必填；列表缺失视为空列表 |
-| `#[serde(skip)]`、`claims` | 不参与绑定，用 `Default::default()` 填充 |
+| `#[serde(skip)]` | 不参与绑定，用 `Default::default()` 填充 |
 
 必填 `#[fromclaim]` 字段在请求**未认证**时返回 401；已认证但声明缺失时按普通必填字段返回 400。
-必填的复合类型字段（如 `Address`）在无 body 的方法上返回 400，并提示改用 POST/PUT/PATCH 或显式标注来源。
+复合类型字段（如 `Address`、含 `Option<Address>`）只能从 JSON body 绑定：在无 body 的方法（GET/HEAD/DELETE/OPTIONS）上返回 400，并提示改用 POST/PUT/PATCH，或显式标注 `#[fromquery]`/`#[frompath]` 并为类型实现 `FromStr`。
+`Option<Vec<T>>` 的“存在但为空”可表达：`?ids=`（键存在、值为空）绑定为 `Some(vec![])`，键缺失才是 `None`。
 
 `#[serde(default)]` 在该字段的**所有来源都没有值**时生效（body、query、路由、表单都取不到才用默认值）；
 `#[serde(rename)]` / `rename_all` / `alias` 决定 body 的 JSON 键；`#[serde(flatten)]` 字段没有独立键，

@@ -364,6 +364,57 @@ impl IRequestHandler<CustomScalarRequest, serde_json::Value> for CustomScalarHan
 }
 
 // ---------------------------------------------------------------------------
+// Raw identifiers and a field literally named `claims`
+// ---------------------------------------------------------------------------
+
+/// `r#type` is spelled `type` on the wire: the JSON key, the OpenAPI name and
+/// the error field must all unraw, exactly like `serde` does.
+#[derive(Default, Deserialize, WebxRequestMeta)]
+struct RawIdentRequest {
+    #[frompath]
+    id: String,
+    #[frombody]
+    r#type: String,
+}
+
+#[post("/bind/raw-ident/{id}")]
+impl IRequest<serde_json::Value> for RawIdentRequest {}
+
+#[derive(Default)]
+struct RawIdentHandler;
+
+#[handler]
+#[async_trait::async_trait]
+impl IRequestHandler<RawIdentRequest, serde_json::Value> for RawIdentHandler {
+    async fn handle(&mut self, req: RawIdentRequest) -> Result<serde_json::Value> {
+        Ok(serde_json::json!({ "id": req.id, "type": req.r#type }))
+    }
+}
+
+/// `claims` is not a magic field name: it binds like any other field, here
+/// inferred from the method (a write method reads the JSON body).
+#[derive(Default, Deserialize, WebxRequestMeta)]
+struct ClaimsNamedRequest {
+    #[frompath]
+    id: String,
+    claims: String,
+}
+
+#[post("/bind/claims-field/{id}")]
+impl IRequest<serde_json::Value> for ClaimsNamedRequest {}
+
+#[derive(Default)]
+struct ClaimsNamedHandler;
+
+#[handler]
+#[async_trait::async_trait]
+impl IRequestHandler<ClaimsNamedRequest, serde_json::Value> for ClaimsNamedHandler {
+    async fn handle(&mut self, req: ClaimsNamedRequest) -> Result<serde_json::Value> {
+        Ok(serde_json::json!({ "id": req.id, "claims": req.claims }))
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Harness
 // ---------------------------------------------------------------------------
 
@@ -767,4 +818,38 @@ async fn explicit_custom_scalars_bind_from_path_and_query() {
 
     assert_eq!(body["id"], "abc");
     assert_eq!(body["filter"], "xyz");
+}
+
+#[tokio::test]
+async fn raw_identifiers_bind_by_their_unraw_name() {
+    let base = spawn_host().await;
+    let body: serde_json::Value = reqwest::Client::new()
+        .post(format!("{base}/bind/raw-ident/9"))
+        .json(&serde_json::json!({ "type": "widget" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(body["id"], "9");
+    assert_eq!(body["type"], "widget");
+}
+
+#[tokio::test]
+async fn a_field_named_claims_binds_like_any_other() {
+    let base = spawn_host().await;
+    let body: serde_json::Value = reqwest::Client::new()
+        .post(format!("{base}/bind/claims-field/9"))
+        .json(&serde_json::json!({ "claims": "payload" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(body["id"], "9");
+    assert_eq!(body["claims"], "payload");
 }

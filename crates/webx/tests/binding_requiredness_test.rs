@@ -209,6 +209,28 @@ impl IRequestHandler<CompositeGetModel, serde_json::Value> for CompositeGetHandl
     }
 }
 
+/// An *optional* composite field is just as unbindable on a bodyless method:
+/// it must be a clear 400, never a silent `None`.
+#[derive(Default, Deserialize, WebxRequestMeta)]
+#[allow(dead_code)]
+struct OptionalCompositeGetModel {
+    payload: Option<Payload>,
+}
+
+#[get("/req/composite-optional")]
+impl IRequest<serde_json::Value> for OptionalCompositeGetModel {}
+
+#[derive(Default)]
+struct OptionalCompositeGetHandler;
+
+#[handler]
+#[async_trait::async_trait]
+impl IRequestHandler<OptionalCompositeGetModel, serde_json::Value> for OptionalCompositeGetHandler {
+    async fn handle(&mut self, _req: OptionalCompositeGetModel) -> Result<serde_json::Value> {
+        Ok(serde_json::json!({}))
+    }
+}
+
 // ---------------------------------------------------------------------------
 // serde attributes on body fields
 // ---------------------------------------------------------------------------
@@ -524,6 +546,31 @@ async fn query_invalid_list_element_is_reported() {
     assert!(errors["c"].is_array(), "expected `c`, got {errors}");
 }
 
+#[tokio::test]
+async fn query_present_but_empty_list_is_not_a_parse_error() {
+    let base = spawn_host().await;
+
+    // `?c=` / `?d=` mean "present, no values": an empty list, and
+    // `Option<Vec<T>>` distinguishes that (`Some([])`) from absent (`None`).
+    let empty: serde_json::Value = reqwest::get(format!("{base}/req/query?a=x&c=&d="))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(empty["c"], serde_json::json!([]));
+    assert_eq!(empty["d"], serde_json::json!([]));
+
+    // Repeated keys still bind every occurrence.
+    let repeated: serde_json::Value = reqwest::get(format!("{base}/req/query?a=x&d=1&d=2"))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(repeated["d"], serde_json::json!([1, 2]));
+}
+
 // ---------------------------------------------------------------------------
 // Header
 // ---------------------------------------------------------------------------
@@ -785,6 +832,22 @@ async fn form_falls_back_to_the_query_string() {
 async fn composite_field_without_a_body_is_a_clear_400() {
     let base = spawn_host().await;
     let response = reqwest::get(format!("{base}/req/composite")).await.unwrap();
+
+    assert_eq!(response.status().as_u16(), 400);
+    let problem: serde_json::Value = response.json().await.unwrap();
+    let detail = problem["detail"].as_str().unwrap_or_default();
+    assert!(
+        detail.contains("payload") && detail.contains("composite"),
+        "expected a composite-field explanation, got {problem}"
+    );
+}
+
+#[tokio::test]
+async fn optional_composite_field_without_a_body_is_a_clear_400() {
+    let base = spawn_host().await;
+    let response = reqwest::get(format!("{base}/req/composite-optional"))
+        .await
+        .unwrap();
 
     assert_eq!(response.status().as_u16(), 400);
     let problem: serde_json::Value = response.json().await.unwrap();

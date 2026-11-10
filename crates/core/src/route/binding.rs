@@ -208,30 +208,36 @@ impl<'a> BindInput<'a> {
 
     /// A claim value by key.
     ///
-    /// `sub` / `subject` resolve to the subject, `tenant_id` to the tenant
-    /// helper, and anything else to the raw claims map.
+    /// The raw claim map wins, so a token that literally carries `user_id` or
+    /// `tenant` keeps that value. The dedicated accessors are only a fallback
+    /// when the raw map has no such key: `sub` / `subject` resolve to the
+    /// subject, `tenant_id` / `tenant` to the tenant helper.
     pub fn claim(&self, key: &str) -> Option<&'a str> {
         let claims = self.claims?;
+        if let Some(value) = claims.claims().get(key) {
+            return Some(value.as_str());
+        }
         match key {
             "sub" | "subject" | "user_id" => Some(claims.subject()),
             "tenant_id" | "tenant" => claims.get_tenantid(),
-            other => claims.claims().get(other).map(String::as_str),
+            _ => None,
         }
     }
 
-    /// A claim as a list: `roles` / `permissions` use their dedicated slots,
-    /// anything else is comma-separated.
+    /// A claim as a list: the raw claim map wins (comma-separated);
+    /// `roles` / `permissions` fall back to their dedicated slots when the raw
+    /// map has no such key.
     pub fn claim_list(&self, key: &str) -> Vec<&'a str> {
         let Some(claims) = self.claims else {
             return Vec::new();
         };
+        if let Some(value) = claims.claims().get(key) {
+            return split_one(value);
+        }
         match key {
             "roles" => claims.roles().iter().map(String::as_str).collect(),
             "permissions" => claims.permissions().iter().map(String::as_str).collect(),
-            other => match self.claim(other) {
-                Some(value) => split_one(value),
-                None => Vec::new(),
-            },
+            _ => Vec::new(),
         }
     }
 }
@@ -293,8 +299,13 @@ pub fn take_body_field(
 }
 
 /// Split one raw value on commas, dropping empty segments.
+///
+/// An empty value is an **empty list**, not a list holding one empty string:
+/// `?ids=` means "present, no ids" (`Option<Vec<T>>` binds `Some(vec![])`).
 fn split_one(value: &str) -> Vec<&str> {
-    if value.contains(',') {
+    if value.is_empty() {
+        Vec::new()
+    } else if value.contains(',') {
         value
             .split(',')
             .map(str::trim)
@@ -551,5 +562,146 @@ mod tests {
             errors["b"],
             serde_json::json!(["The `b` field is required."])
         );
+    }
+
+    /// Claims whose dedicated accessors deliberately disagree with the raw map,
+    /// so a test can tell which one a lookup reads.
+    struct FakeClaims {
+        subject: String,
+        roles: Vec<String>,
+        permissions: Vec<String>,
+        tenant: Option<String>,
+        raw: HashMap<String, String>,
+    }
+
+    impl FakeClaims {
+        fn new(raw: &[(&str, &str)]) -> Self {
+            Self {
+                subject: "subject-from-helper".to_string(),
+                roles: vec!["slot-role".to_string()],
+                permissions: vec!["slot-permission".to_string()],
+                tenant: Some("tenant-from-helper".to_string()),
+                raw: raw
+                    .iter()
+                    .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+                    .collect(),
+            }
+        }
+    }
+
+    impl IClaims for FakeClaims {
+        fn subject(&self) -> &str {
+            &self.subject
+        }
+
+        fn roles(&self) -> &[String] {
+            &self.roles
+        }
+
+        fn permissions(&self) -> &[String] {
+            &self.permissions
+        }
+
+        fn claims(&self) -> &HashMap<String, String> {
+            &self.raw
+        }
+
+        fn get_tenantid(&self) -> Option<&str> {
+            self.tenant.as_deref()
+        }
+
+        fn clone_box(&self) -> Box<dyn IClaims> {
+            Box::new(Self {
+                subject: self.subject.clone(),
+                roles: self.roles.clone(),
+                permissions: self.permissions.clone(),
+                tenant: self.tenant.clone(),
+                raw: self.raw.clone(),
+            })
+        }
+    }
+
+    fn claims_input<'a>(
+        path: &'a HashMap<String, String>,
+        claims: &'a FakeClaims,
+    ) -> BindInput<'a> {
+        BindInput {
+            path,
+            query: path,
+            query_multi: None,
+            claims: Some(claims),
+            form: None,
+            is_body: false,
+            is_multipart: false,
+        }
+    }
+
+    #[test]
+    fn claim_prefers_the_raw_map_over_the_dedicated_accessors() {
+        let path = HashMap::new();
+        let claims = FakeClaims::new(&[
+            ("sub", "raw-sub"),
+            ("user_id", "raw-user-id"),
+            ("tenant", "raw-tenant"),
+        ]);
+        let input = claims_input(&path, &claims);
+
+        // A token that literally carries these keys keeps its own values; the
+        // legacy aliases must not silently swap the source.
+        assert_eq!(input.claim("sub"), Some("raw-sub"));
+        assert_eq!(input.claim("user_id"), Some("raw-user-id"));
+        assert_eq!(input.claim("tenant"), Some("raw-tenant"));
+    }
+
+    #[test]
+    fn claim_falls_back_to_the_dedicated_accessors() {
+        let path = HashMap::new();
+        let claims = FakeClaims::new(&[]);
+        let input = claims_input(&path, &claims);
+
+        assert_eq!(input.claim("sub"), Some("subject-from-helper"));
+        assert_eq!(input.claim("subject"), Some("subject-from-helper"));
+        assert_eq!(input.claim("user_id"), Some("subject-from-helper"));
+        assert_eq!(input.claim("tenant_id"), Some("tenant-from-helper"));
+        assert_eq!(input.claim("tenant"), Some("tenant-from-helper"));
+        assert_eq!(input.claim("email"), None);
+    }
+
+    #[test]
+    fn claim_list_prefers_the_raw_map_then_the_dedicated_slots() {
+        let path = HashMap::new();
+        let claims = FakeClaims::new(&[("roles", "raw-admin, raw-auditor")]);
+        let input = claims_input(&path, &claims);
+
+        assert_eq!(input.claim_list("roles"), vec!["raw-admin", "raw-auditor"]);
+        // No raw key: the dedicated slot supplies the values.
+        assert_eq!(input.claim_list("permissions"), vec!["slot-permission"]);
+        assert_eq!(input.claim_list("missing"), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn an_empty_value_is_an_empty_list_not_one_empty_element() {
+        assert_eq!(split_one(""), Vec::<&str>::new());
+        assert_eq!(split_one("a"), vec!["a"]);
+        assert_eq!(split_one("a,, b"), vec!["a", "b"]);
+        assert_eq!(split_csv(Some("")), Vec::<&str>::new());
+        assert_eq!(split_csv(None), Vec::<&str>::new());
+
+        // `?ids=` (present, empty) is an empty list rather than a parse error
+        // or a one-element list holding `""`.
+        let path = HashMap::new();
+        let query = HashMap::new();
+        let mut multi: HashMap<String, Vec<String>> = HashMap::new();
+        multi.insert("ids".into(), vec![String::new()]);
+        let input = BindInput {
+            path: &path,
+            query: &query,
+            query_multi: Some(&multi),
+            claims: None,
+            form: None,
+            is_body: false,
+            is_multipart: false,
+        };
+        assert_eq!(input.query_list("ids"), Vec::<&str>::new());
     }
 }

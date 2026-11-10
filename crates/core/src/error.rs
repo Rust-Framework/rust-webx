@@ -84,6 +84,35 @@ impl Error {
             Error::Problem(problem) => problem.status,
         }
     }
+
+    /// The client-facing detail for a 4xx response.
+    ///
+    /// `Display` is written for operators (`"Unauthorized: …"`,
+    /// `"Internal error: …"`), so serving it verbatim would leak variant names
+    /// and internals. This returns the variant's own message for the errors
+    /// that are safe to show, and `None` for 5xx/internal variants — the host
+    /// then serves a stable detail and logs the original text.
+    pub fn public_detail(&self) -> Option<&str> {
+        match self {
+            Error::Http(detail)
+            | Error::Unauthorized(detail)
+            | Error::Forbidden(detail)
+            | Error::Routing(detail)
+            | Error::Validation(detail)
+            | Error::NotFound(detail)
+            | Error::Conflict(detail)
+            | Error::PayloadTooLarge(detail)
+            | Error::UnsupportedMediaType(detail) => Some(detail),
+            Error::Status(_, detail) => Some(detail),
+            // Internal / DI / response serialization / already-written problem:
+            // nothing here is safe or meaningful for a client.
+            Error::Di(_)
+            | Error::Serialization(_)
+            | Error::Internal(_)
+            | Error::Message(_)
+            | Error::Problem(_) => None,
+        }
+    }
 }
 
 /// Shorthand for Result<T, Error>.

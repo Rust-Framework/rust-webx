@@ -28,9 +28,14 @@ Handler 通过 `Arc<MemoryCache>` 或 `IDistributedCache` trait 注入使用。
 | 字段 | 说明 | 默认 |
 |------|------|------|
 | `Enabled` | 是否启用 | `false` |
-| `RequestsPerSecond` | 每 IP  sustained 速率 | `100` |
+| `RequestsPerSecond` | 每个客户端 IP 的 sustained 速率 | `100` |
 | `BurstSize` | 突发容量 | `200` |
-| `MaxTrackedIps` | 最大跟踪 IP 数（LRU 淘汰） | `10000` |
+| `MaxTrackedIps` | 最大跟踪 IP 数（最旧淘汰） | `10000` |
+| `TrustProxy` | 采信 `X-Forwarded-For` / `X-Real-IP`，仅在反向代理会覆盖这两个头时开启 | `false` |
+
+桶的键来自连接的**对端地址**（`IHttpRequest::remote_addr`，由 host 在 accept 时记录）。
+`TrustProxy=true` 而实际没有受信代理时，客户端可以轮换 `X-Forwarded-For` 绕过限流；
+反之 `false` 且框架拿不到对端地址时，框架不会把所有人放进同一个桶，而是跳过限流并打 `debug` 日志。
 
 环境变量示例：`APP__RateLimit__Enabled=true`
 
@@ -43,7 +48,7 @@ Host::builder()
     })
 ```
 
-超限返回 RFC 7807 `429` + `application/problem+json`。
+超限返回 RFC 7807 `429` + `application/problem+json`，并携带 `Retry-After`（按 `RequestsPerSecond` 推出的整秒等待时间）。
 
 ## 指标
 

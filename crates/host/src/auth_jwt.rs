@@ -168,7 +168,12 @@ impl IAuthenticationHandler for JwtAuth {
 
         let token_data = decode::<RawClaims>(&token, &self.decoding_key, &self.validation)
             .map_err(|e| {
-                webx_core::error::Error::Unauthorized(format!("invalid or expired token: {}", e))
+                // The decoder's message is for operators, not for the client:
+                // it names the failure mode (InvalidToken, ExpiredSignature,
+                // InvalidAlgorithm, ...). Log it and return a static detail so
+                // 401 responses never leak token-parsing internals.
+                tracing::debug!(reason = %e, "JWT validation failed");
+                webx_core::error::Error::Unauthorized("invalid or expired token".to_string())
             })?;
 
         let claims: JwtClaims = token_data.claims.into();

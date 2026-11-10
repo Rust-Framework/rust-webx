@@ -179,7 +179,7 @@ impl IMiddleware for ResourceAuthMiddleware {
                 .await
                 .map(|_| ControlFlow::Continue(())),
             None => Err(webx_core::error::Error::Unauthorized(
-                "no authentication claims found".to_string(),
+                "authentication required".to_string(),
             )),
         }
     }

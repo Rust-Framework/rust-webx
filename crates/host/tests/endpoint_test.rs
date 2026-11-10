@@ -167,7 +167,7 @@ async fn endpoint_auth_required_with_valid_claims_succeeds() {
 }
 
 #[tokio::test]
-async fn endpoint_auth_required_without_claims_returns_401() {
+async fn endpoint_auth_required_without_claims_bubbles_unauthorized_error() {
     let endpoint = StubEndpoint {
         method: "GET",
         path: "/admin",
@@ -179,13 +179,25 @@ async fn endpoint_auth_required_without_claims_returns_401() {
 
     let mut ctx = test_utils::TestHttpContext::new("GET", "/admin");
     let result = endpoint.handle(&mut ctx).await;
-    assert!(result.is_ok());
+
+    // Single 401 write path: the endpoint does not write the 401 itself, it
+    // returns `Error::Unauthorized` so the host writes the status, the
+    // problem+json body and the `WWW-Authenticate` challenge in one place.
+    let err = result.expect_err("missing claims must bubble as Error::Unauthorized");
+    assert!(
+        matches!(&err, Error::Unauthorized(detail) if detail == "authentication required"),
+        "expected Error::Unauthorized(\"authentication required\"), got {err:?}"
+    );
 
     let (status, _, body) = ctx.into_response_parts();
-    assert_eq!(status, 401);
-    let body_json: serde_json::Value = serde_json::from_slice(body.as_ref().unwrap()).unwrap();
-    assert_eq!(body_json["detail"], "Authentication required");
-    assert_eq!(body_json["title"], "Unauthorized");
+    assert_eq!(
+        status, 200,
+        "endpoint must leave the response untouched for the host to write"
+    );
+    assert!(
+        body.is_none(),
+        "endpoint must not write its own 401 body (single write path)"
+    );
 }
 
 #[tokio::test]

@@ -138,6 +138,10 @@ All notable changes to **rust-webx** are documented in this file.
 
 ### Fixed
 
+- **`rust-ef` upgraded to 2.0.1 (`libsqlite3-sys` 0.39).** The example apps pinned
+  rust-ef 1.8.3, which resolved `libsqlite3-sys` 0.28 — affected by
+  RUSTSEC-2026-0459 (CVE-2026-119375). Moving to the documented 2.0.1 baseline
+  updates rusqlite 0.41 / libsqlite3-sys 0.39 and makes `cargo audit` pass.
 - **5xx detail no longer leaks internals.** `Error::Internal` / `Di` / response
   serialization text and file-system paths were served verbatim; they are logged
   (`tracing::error!`) and replaced with a stable detail. File-download and

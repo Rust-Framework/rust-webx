@@ -24,9 +24,10 @@ pub struct ListCommentsRequest {
 #[get("/api/comments/{blog_id}")]
 impl IRequest<Vec<CommentModel>> for ListCommentsRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct CreateCommentRequest {
+    #[fromclaim]
+    pub user: IdentityUser,
     pub blog_id: String,
     pub content: String,
     pub parent_id: Option<String>,
@@ -37,9 +38,10 @@ pub struct CreateCommentRequest {
 #[authorize]
 impl IRequest<CommentModel> for CreateCommentRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct DeleteCommentRequest {
+    #[fromclaim]
+    pub user: IdentityUser,
     pub id: String,
 }
 

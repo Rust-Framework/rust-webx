@@ -50,7 +50,6 @@ impl IRequest<AuthResponse> for LoginRequest {}
 
 // ── Auth Me (get current user from token) ──
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct AuthMeRequest;
 

@@ -46,7 +46,7 @@ pub struct CreateUserRequest {
 #[derive(WebxRequestMeta)]
 pub struct UpdateProfileRequest {
     #[fromclaim]
-    pub user: CurrentUser,
+    pub user: IdentityUser,
     pub display_name: String,
 }
 

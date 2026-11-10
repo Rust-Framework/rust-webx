@@ -172,10 +172,10 @@ fn shape_of(ty: &Type) -> Shape {
     }
 }
 
-/// Whether `ty` is the framework's `CurrentUser` identity (or `Option` of it).
+/// Whether `ty` is the framework's `IdentityUser` identity (or `Option` of it).
 fn is_current_user(ty: &Type) -> bool {
     match shape_of(ty) {
-        Shape::Scalar(inner) | Shape::Optional(inner) => path_ends_with(&inner, "CurrentUser"),
+        Shape::Scalar(inner) | Shape::Optional(inner) => path_ends_with(&inner, "IdentityUser"),
         _ => false,
     }
 }
@@ -700,14 +700,14 @@ fn build_fields(
             if src != Src::Claim {
                 return Err(syn::Error::new_spanned(
                     field,
-                    "a `CurrentUser` field carries the authenticated identity; mark it \
+                    "a `IdentityUser` field carries the authenticated identity; mark it \
                      `#[fromclaim]`",
                 ));
             }
             if extra.is_some() {
                 return Err(syn::Error::new_spanned(
                     field,
-                    "`#[fromclaim]` on a `CurrentUser` field takes no key; the whole \
+                    "`#[fromclaim]` on a `IdentityUser` field takes no key; the whole \
                      identity is bound from the principal",
                 ));
             }
@@ -910,7 +910,7 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
                 impl ::webx::RequestUser for #type_ident {
                     fn current_user(
                         &self,
-                    ) -> ::core::option::Option<&::webx::CurrentUser> {
+                    ) -> ::core::option::Option<&::webx::IdentityUser> {
                         #access
                     }
                 }
@@ -1297,13 +1297,13 @@ fn bind_field(f: &FieldSpec, plan: &BindingPlan) -> TokenStream2 {
 
     if is_current_user(&f.ty) {
         let expr = if f.shape.is_optional() {
-            quote! { __in.claims.map(::webx::CurrentUser::from_claims) }
+            quote! { __in.claims.map(::webx::IdentityUser::from_claims) }
         } else {
             quote! {
                 match __in.claims {
                     ::core::option::Option::Some(__claims) => {
                         ::core::option::Option::Some(
-                            ::webx::CurrentUser::from_claims(__claims),
+                            ::webx::IdentityUser::from_claims(__claims),
                         )
                     }
                     ::core::option::Option::None => {
@@ -1703,8 +1703,8 @@ mod tests {
     fn accepts_the_standard_identity_field() {
         ok(r#"
             struct Req {
-                #[fromclaim] user: CurrentUser,
-                #[fromclaim] viewer: Option<CurrentUser>,
+                #[fromclaim] user: IdentityUser,
+                #[fromclaim] viewer: Option<IdentityUser>,
             }
         "#);
     }
@@ -1713,17 +1713,17 @@ mod tests {
     fn rejects_current_user_without_a_source() {
         let message = err(r#"
             struct Req {
-                user: CurrentUser,
+                user: IdentityUser,
             }
         "#);
-        assert!(message.contains("CurrentUser"), "{message}");
+        assert!(message.contains("IdentityUser"), "{message}");
     }
 
     #[test]
     fn rejects_a_key_on_the_standard_identity() {
         let message = err(r#"
             struct Req {
-                #[fromclaim("sub")] user: CurrentUser,
+                #[fromclaim("sub")] user: IdentityUser,
             }
         "#);
         assert!(message.contains("takes no key"), "{message}");

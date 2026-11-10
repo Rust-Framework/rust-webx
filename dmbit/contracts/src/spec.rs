@@ -26,7 +26,6 @@ pub struct SpecModel {
     pub device_count: i32,
 }
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct ListSpecsRequest;
 
@@ -34,7 +33,6 @@ pub struct ListSpecsRequest;
 #[authorize(role = "admin")]
 impl IRequest<Vec<SpecModel>> for ListSpecsRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct ListProductSpecsRequest {
     pub id: String,
@@ -44,7 +42,6 @@ pub struct ListProductSpecsRequest {
 #[authorize(role = "admin")]
 impl IRequest<Vec<SpecModel>> for ListProductSpecsRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct GetSpecRequest {
     pub id: String,
@@ -54,7 +51,6 @@ pub struct GetSpecRequest {
 #[authorize(role = "admin")]
 impl IRequest<SpecModel> for GetSpecRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct CreateSpecRequest {
     pub product_id: String,
@@ -79,7 +75,6 @@ fn default_unit() -> String {
 #[authorize(role = "admin")]
 impl IRequest<SpecModel> for CreateSpecRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct UpdateSpecRequest {
     #[frompath]
@@ -100,7 +95,6 @@ pub struct UpdateSpecRequest {
 #[authorize(role = "admin")]
 impl IRequest<SpecModel> for UpdateSpecRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct DeleteSpecRequest {
     pub id: String,

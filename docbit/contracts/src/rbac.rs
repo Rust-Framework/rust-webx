@@ -44,7 +44,6 @@ pub struct ListRolesRequest;
 #[authorize(role = "admin")]
 impl IRequest<Vec<RoleModel>> for ListRolesRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct CreateRoleRequest {
     pub name: String,
@@ -55,7 +54,6 @@ pub struct CreateRoleRequest {
 #[authorize(role = "admin")]
 impl IRequest<RoleModel> for CreateRoleRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct UpdateRoleRequest {
     #[frompath]
@@ -69,7 +67,6 @@ pub struct UpdateRoleRequest {
 #[authorize(role = "admin")]
 impl IRequest<RoleModel> for UpdateRoleRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct DeleteRoleRequest {
     pub id: String,
@@ -110,7 +107,6 @@ pub struct ListResourcesRequest;
 #[authorize(role = "admin")]
 impl IRequest<Vec<ResourceModel>> for ListResourcesRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct CreateResourceRequest {
     pub name: String,
@@ -124,7 +120,6 @@ pub struct CreateResourceRequest {
 #[authorize(role = "admin")]
 impl IRequest<ResourceModel> for CreateResourceRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct UpdateResourceRequest {
     #[frompath]
@@ -141,7 +136,6 @@ pub struct UpdateResourceRequest {
 #[authorize(role = "admin")]
 impl IRequest<ResourceModel> for UpdateResourceRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct DeleteResourceRequest {
     pub id: String,
@@ -160,7 +154,6 @@ pub struct ListAuthorizesRequest;
 #[authorize(role = "admin")]
 impl IRequest<Vec<AuthorizeModel>> for ListAuthorizesRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct CreateAuthorizeRequest {
     pub role_id: String,

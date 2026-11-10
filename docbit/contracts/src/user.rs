@@ -44,7 +44,6 @@ pub struct GetUserRequest {
 #[authorize(role = "admin")]
 impl IRequest<UserModel> for GetUserRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct CreateUserRequest {
     pub name: String,
@@ -56,7 +55,6 @@ pub struct CreateUserRequest {
 #[authorize(role = "admin")]
 impl IRequest<UserModel> for CreateUserRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct UpdateUserRequest {
     #[frompath]
@@ -71,7 +69,6 @@ pub struct UpdateUserRequest {
 #[authorize(role = "admin")]
 impl IRequest<UserModel> for UpdateUserRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct DeleteUserRequest {
     pub id: String,

@@ -5,7 +5,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! rust-webx = "0.7"
+//! rust-webx = "0.8"
 //! ```
 //!
 //! ```ignore
@@ -20,7 +20,7 @@
 // --- Core traits ---
 pub use webx_core::app::IHost;
 pub use webx_core::auth::{
-    CurrentUser, IAuthenticationHandler, IAuthorizationPolicy, IClaims, IDynamicAuthorizer,
+    IAuthenticationHandler, IAuthorizationPolicy, IClaims, IDynamicAuthorizer, IdentityUser,
     RequestUser,
 };
 pub use webx_core::cache::{
@@ -38,7 +38,7 @@ pub use webx_core::form::{
     sanitize_file_name, set_spool_root, spool_root, FormField, FormFile, FormFileBuilder,
     MultipartForm, SPOOL_FILE_PREFIX,
 };
-pub use webx_core::handler::{IClaimsCarrier, IEventHandler, IHostedService, IRequestHandler};
+pub use webx_core::handler::{IEventHandler, IHostedService, IRequestHandler};
 pub use webx_core::http::{
     content_disposition_value, read_json_body, write_json_response, ByteRange, Disposition,
     FileBody, FileSource, HttpStatus, IClaimsExt, IHttpContext, IHttpRequest, IHttpResponse, Json,
@@ -143,8 +143,8 @@ pub use webx_openapi::{generate_openapi_spec, APIUI_HTML};
 #[doc(hidden)]
 pub use webx_macros::{__webx_category, __webx_description, __webx_display};
 pub use webx_macros::{
-    authorize, category, claims, delete, description, display, embed_assets, endpoint, get,
-    handler, main, post, put, WebxRequestMeta,
+    authorize, category, delete, description, display, embed_assets, endpoint, get, handler, main,
+    post, put, WebxRequestMeta,
 };
 
 // --- Re-export rust_dix (for manual registration, #[inject] auto-registration, and module blocks) ---

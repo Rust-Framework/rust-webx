@@ -133,6 +133,12 @@ pub trait IDynamicAuthorizer: Send + Sync {
 
 /// The standard identity a request can carry.
 ///
+/// `IdentityUser` is a **read-only projection of [`IClaims`]** for request
+/// handling — not a persistence entity. When an endpoint needs the raw claim
+/// map, read it through [`IClaimsExt`](crate::http::IClaimsExt) in middleware or
+/// infrastructure code; `IdentityUser` covers the identity fields almost every
+/// handler needs.
+///
 /// Put it in a request with `#[fromclaim]` and the binder fills it from the
 /// authenticated principal:
 ///
@@ -140,16 +146,16 @@ pub trait IDynamicAuthorizer: Send + Sync {
 /// #[derive(WebxRequestMeta)]
 /// pub struct CreateOrderRequest {
 ///     #[fromclaim]
-///     pub user: CurrentUser,
+///     pub user: IdentityUser,
 ///     pub sku: String,
 /// }
 /// ```
 ///
 /// The handler then reads `req.user.id`, `req.user.tenant_id` or
 /// `req.user.is_in_role("admin")` without touching the token or the context.
-/// `Option<CurrentUser>` makes the endpoint work for anonymous callers too.
+/// `Option<IdentityUser>` makes the endpoint work for anonymous callers too.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct CurrentUser {
+pub struct IdentityUser {
     /// The subject (`sub`) — the stable user identifier.
     pub id: String,
     /// Display name (`name` claim), empty when the token has none.
@@ -164,7 +170,7 @@ pub struct CurrentUser {
     pub permissions: Vec<String>,
 }
 
-impl CurrentUser {
+impl IdentityUser {
     /// Build the identity from an authenticated principal.
     pub fn from_claims(claims: &dyn IClaims) -> Self {
         Self {
@@ -199,13 +205,13 @@ impl CurrentUser {
     }
 }
 
-/// Convenience accessors for a request that carries a [`CurrentUser`].
+/// Convenience accessors for a request that carries an [`IdentityUser`].
 ///
 /// `#[derive(WebxRequestMeta)]` implements this automatically when the struct
-/// has a `#[fromclaim]` field of type `CurrentUser` or `Option<CurrentUser>`.
+/// has a `#[fromclaim]` field of type `IdentityUser` or `Option<IdentityUser>`.
 pub trait RequestUser {
     /// The authenticated identity, or `None` for an anonymous request.
-    fn current_user(&self) -> Option<&CurrentUser>;
+    fn current_user(&self) -> Option<&IdentityUser>;
 
     /// The subject identifier, or `None` when anonymous.
     fn user_id(&self) -> Option<&str> {
@@ -243,7 +249,7 @@ pub trait RequestUser {
     }
 
     /// The identity, or `401 Unauthorized` when the request is anonymous.
-    fn require_user(&self) -> Result<&CurrentUser> {
+    fn require_user(&self) -> Result<&IdentityUser> {
         self.current_user().ok_or_else(|| {
             Error::Unauthorized("authentication required for this endpoint".to_string())
         })

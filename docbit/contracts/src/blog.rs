@@ -64,7 +64,6 @@ pub struct ListBlogCategoriesRequest;
 #[get("/api/blog/categories")]
 impl IRequest<Vec<BlogCategoryCount>> for ListBlogCategoriesRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct ListMyBlogPostsRequest;
 
@@ -81,7 +80,6 @@ pub struct GetBlogPostRequest {
 #[get("/api/blog/{slug}")]
 impl IRequest<BlogPostModel> for GetBlogPostRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct CreateBlogPostRequest {
     pub slug: String,
@@ -97,12 +95,13 @@ pub struct CreateBlogPostRequest {
 #[authorize]
 impl IRequest<BlogPostModel> for CreateBlogPostRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct UpdateBlogPostRequest {
     #[frompath]
     #[serde(default)]
     pub slug: String,
+    #[fromclaim]
+    pub user: IdentityUser,
     pub title: Option<String>,
     pub summary: Option<String>,
     pub content: Option<String>,
@@ -115,10 +114,11 @@ pub struct UpdateBlogPostRequest {
 #[authorize]
 impl IRequest<BlogPostModel> for UpdateBlogPostRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct DeleteBlogPostRequest {
     pub slug: String,
+    #[fromclaim]
+    pub user: IdentityUser,
 }
 
 #[delete("/api/blog/{slug}")]

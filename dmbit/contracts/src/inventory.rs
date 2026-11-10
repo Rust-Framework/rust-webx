@@ -6,7 +6,6 @@ use webx::*;
 /// Filename offered to the browser when exporting the inventory.
 pub const INVENTORY_EXPORT_FILE_NAME: &str = "智算机房规格清单.csv";
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct ExportInventoryRequest;
 
@@ -14,7 +13,6 @@ pub struct ExportInventoryRequest;
 #[authorize(role = "admin")]
 impl IRequest<ResponseData> for ExportInventoryRequest {}
 
-#[claims]
 #[derive(WebxRequestMeta)]
 pub struct ImportInventoryRequest {
     /// The uploaded CSV. Streamed and spooled by the framework — never

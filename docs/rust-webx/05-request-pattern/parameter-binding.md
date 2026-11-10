@@ -28,7 +28,7 @@ pub struct UpdateUserRequest {
 | `#[fromfile]` / `#[fromfile("avatar")]` | multipart 文件分段 | 只能用于 `FormFile` 系列类型 |
 | `#[fromheader("X-Name")]` | 请求头 | 省略参数时按字段名转 `-` 小写 |
 | `#[fromclaim("key")]` | 认证声明 | `sub`/`roles`/`permissions` 走专用槽位 |
-| `#[fromclaim]` + `CurrentUser` | 认证主体 | 统一身份对象，见下文「用户身份」 |
+| `#[fromclaim]` + `IdentityUser` | 认证主体 | 统一身份对象，见下文「用户身份」 |
 | 无标记 | 按方法推断 | 见下一节 |
 
 `FormFile`、`Option<FormFile>`、`Vec<FormFile>` 来自表单；未标注时按字段名取分段，标注 `#[fromfile]` 可改名。
@@ -100,13 +100,13 @@ body 字段类型错误、`null` 赋给非 `Option` 字段都按该字段返回 
 #[derive(WebxRequestMeta)]
 pub struct CreateOrderRequest {
     #[fromclaim]
-    pub user: CurrentUser,   // 未登录 → 401
+    pub user: IdentityUser,   // 未登录 → 401
     pub sku: String,         // JSON body
 }
 ```
 
 Handler 里直接用 `req.user.id`、`req.user.tenant_id`、`req.user.is_in_role("admin")`，
-或 `req.require_user()?`。匿名可访问的端点用 `Option<CurrentUser>`。
+或 `req.require_user()?`。匿名可访问的端点用 `Option<IdentityUser>`。
 完整场景与收益对照见[用户身份与多租户](user-identity.md)。
 
 ## 优先级

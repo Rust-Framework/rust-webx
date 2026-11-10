@@ -108,7 +108,7 @@ Host::builder()
 | `INotification` | `IEventRequest` + `publish()` |
 | `IPipelineBehavior` | `IPipelineBehavior` |
 
-## 步骤 4：身份获取（ControllerBase.User → CurrentUser）
+## 步骤 4：身份获取（ControllerBase.User → IdentityUser）
 
 ASP.NET Core 里通常这样拿身份：
 
@@ -124,7 +124,7 @@ rust-webx 把身份变成 Request 的字段：
 #[derive(WebxRequestMeta)]
 pub struct CreateOrderRequest {
     #[fromclaim]
-    pub user: CurrentUser,   // 未登录 → 401
+    pub user: IdentityUser,   // 未登录 → 401
     pub sku: String,
 }
 

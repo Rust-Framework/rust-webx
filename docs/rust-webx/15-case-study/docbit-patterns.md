@@ -102,14 +102,14 @@ contracts 不引用 domain；domain 可通过 `use docbit_contracts::…` 复用
 
 ## 模式 7：身份作为请求字段
 
-早期 docbit 端点用 `#[claims]` 字段 + `req.claims` 手动读身份。新端点统一用 `CurrentUser`：
+docbit 的博客/评论端点把身份直接声明为 `IdentityUser`，Handler 不再读 claims：
 
 ```rust
 // contracts/comment.rs
 #[derive(WebxRequestMeta)]
 pub struct CreateCommentRequest {
     #[fromclaim]
-    pub user: CurrentUser,
+    pub user: IdentityUser,
     pub blog_id: String,
     pub content: String,
 }

@@ -43,7 +43,6 @@ pub struct GetExhibitionRequest {
 #[get("/api/exhibitions/{slug}")]
 impl IRequest<ExhibitionModel> for GetExhibitionRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct UpsertExhibitionRequest {
     pub slug: String,
@@ -64,7 +63,6 @@ pub struct UpsertExhibitionRequest {
 #[authorize(role = "admin")]
 impl IRequest<ExhibitionModel> for UpsertExhibitionRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct DeleteExhibitionRequest {
     pub slug: String,

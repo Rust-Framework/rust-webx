@@ -3,6 +3,20 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [0.8.0] — 2026-11-10
+
+### Breaking
+
+- **`CurrentUser` is now `IdentityUser`** — same fields, same binding
+  (`#[fromclaim] user: IdentityUser`, `Option<IdentityUser>`), clearer name: it is a
+  read-only projection of `IClaims`, not a persistence entity. Replace `CurrentUser`
+  with `IdentityUser` in request structs; the `RequestUser` accessors (`user_id()`,
+  `is_in_role()`, `require_user()`) are unchanged.
+- **`#[claims]` and `IClaimsCarrier` removed** — identity now comes from
+  `#[fromclaim] user: IdentityUser` (or `#[fromclaim("key")]` for a single claim).
+  The dispatcher no longer injects a `claims` field; middleware/infrastructure code
+  that needs the raw map reads it through `IClaimsExt`.
+
 ## [0.7.2] — 2026-11-10
 
 ### Added

@@ -113,25 +113,25 @@ impl IRequestHandler<ClaimRequest, serde_json::Value> for ClaimHandler {
 }
 
 // ---------------------------------------------------------------------------
-// Standard identity (`CurrentUser`)
+// Standard identity (`IdentityUser`)
 // ---------------------------------------------------------------------------
 
 #[derive(Default, WebxRequestMeta)]
-struct CurrentUserRequest {
+struct IdentityUserRequest {
     #[fromclaim]
-    user: CurrentUser,
+    user: IdentityUser,
 }
 
 #[get("/bind/user")]
-impl IRequest<serde_json::Value> for CurrentUserRequest {}
+impl IRequest<serde_json::Value> for IdentityUserRequest {}
 
 #[derive(Default)]
-struct CurrentUserHandler;
+struct IdentityUserHandler;
 
 #[handler]
 #[async_trait::async_trait]
-impl IRequestHandler<CurrentUserRequest, serde_json::Value> for CurrentUserHandler {
-    async fn handle(&mut self, req: CurrentUserRequest) -> Result<serde_json::Value> {
+impl IRequestHandler<IdentityUserRequest, serde_json::Value> for IdentityUserHandler {
+    async fn handle(&mut self, req: IdentityUserRequest) -> Result<serde_json::Value> {
         Ok(serde_json::json!({
             "id": req.user.id,
             "name": req.user.name,
@@ -147,21 +147,23 @@ impl IRequestHandler<CurrentUserRequest, serde_json::Value> for CurrentUserHandl
 }
 
 #[derive(Default, WebxRequestMeta)]
-struct OptionalCurrentUserRequest {
+struct OptionalIdentityUserRequest {
     #[fromclaim]
-    user: Option<CurrentUser>,
+    user: Option<IdentityUser>,
 }
 
 #[get("/bind/user-optional")]
-impl IRequest<serde_json::Value> for OptionalCurrentUserRequest {}
+impl IRequest<serde_json::Value> for OptionalIdentityUserRequest {}
 
 #[derive(Default)]
-struct OptionalCurrentUserHandler;
+struct OptionalIdentityUserHandler;
 
 #[handler]
 #[async_trait::async_trait]
-impl IRequestHandler<OptionalCurrentUserRequest, serde_json::Value> for OptionalCurrentUserHandler {
-    async fn handle(&mut self, req: OptionalCurrentUserRequest) -> Result<serde_json::Value> {
+impl IRequestHandler<OptionalIdentityUserRequest, serde_json::Value>
+    for OptionalIdentityUserHandler
+{
+    async fn handle(&mut self, req: OptionalIdentityUserRequest) -> Result<serde_json::Value> {
         Ok(serde_json::json!({
             "user_id": req.user_id(),
             "anonymous": req.current_user().is_none(),

@@ -195,7 +195,7 @@ async fn handle(&mut self, req: GetUserRequest) -> Result<UserDto> {
 #[derive(WebxRequestMeta)]
 pub struct UpdateProfileRequest {
     #[fromclaim]
-    pub user: CurrentUser,       // 未登录 → 401
+    pub user: IdentityUser,       // 未登录 → 401
     pub display_name: String,    // JSON body
 }
 
@@ -213,7 +213,7 @@ async fn handle(&mut self, req: UpdateProfileRequest) -> Result<UserDto> {
 }
 ```
 
-如果端点允许游客访问（例如商品详情要显示「是否已收藏」），把字段写成 `Option<CurrentUser>`，
+如果端点允许游客访问（例如商品详情要显示「是否已收藏」），把字段写成 `Option<IdentityUser>`，
 未登录时就是 `None`，不会 401。完整场景见[用户身份与多租户](../05-request-pattern/user-identity.md)。
 
 ## 设计要点
@@ -225,7 +225,7 @@ async fn handle(&mut self, req: UpdateProfileRequest) -> Result<UserDto> {
 | 请求类型派生 | 每个 Request 都必须派生 `WebxRequestMeta`（绑定 + OpenAPI 元数据） |
 | 路径参数 | 用 `#[frompath]` 显式声明；GET 的未标记字段先查 query，再回退到路径 |
 | Body 字段 | POST/PUT/PATCH 的未标记字段从 JSON body 绑定；`Option<T>` 表示可选 |
-| 身份获取 | 需要登录时用 `#[fromclaim] CurrentUser`，Handler 只读 `req.user` |
+| 身份获取 | 需要登录时用 `#[fromclaim] IdentityUser`，Handler 只读 `req.user` |
 | 序列化派生 | 请求类型只需 `WebxRequestMeta`，不必再派生 `Deserialize` |
 
 ## 小结

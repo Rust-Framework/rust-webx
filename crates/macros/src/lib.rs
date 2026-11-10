@@ -6,7 +6,7 @@
 //! - `#[webx::main]` / `#[webx::main(embed)]` — application entry + asset embedding
 //! - `#[webx::embed_assets]` — asset table include for integration tests
 //! - `#[derive(WebxRequestMeta)]` — OpenAPI parameter metadata
-//! - `#[claims]` / `#[authorize]` — authentication and authorization
+//! - `#[authorize]` — declarative route authorization
 //! - `#[display]` / `#[description]` — endpoint name and description resource
 //!   references
 //! - `#[category]` — optional display grouping for endpoint listings
@@ -21,7 +21,6 @@
 //! `Culture.Default`. `#[display("博客列表")]` stores a literal instead.
 
 mod app_main;
-mod claims;
 mod endpoint;
 mod handler;
 mod request_meta;
@@ -177,33 +176,6 @@ pub fn webx_request_meta(input: TokenStream) -> TokenStream {
 // ---------------------------------------------------------------------------
 // Declaration macros
 // ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Claims attribute
-// ---------------------------------------------------------------------------
-
-/// Marks a request struct as carrying authentication claims.
-///
-/// Appends a `#[serde(skip)] pub claims: Option<Box<dyn IClaims>>` field to
-/// the struct and generates an inherent `set_claims` method that shadows the
-/// blanket no-op `IClaimsCarrier::set_claims`. The dispatcher injects claims
-/// into the request *before* calling `IRequestHandler::handle`.
-///
-/// Must be the outermost attribute so that `#[derive(...)]` sees the injected
-/// field:
-///
-/// ```ignore
-/// #[claims]
-/// #[derive(Default, Deserialize)]
-/// pub struct CreateCommentRequest {
-///     pub blog_id: i32,
-///     pub content: String,
-/// }
-/// ```
-#[proc_macro_attribute]
-pub fn claims(attr: TokenStream, item: TokenStream) -> TokenStream {
-    claims::claims_impl(attr, item)
-}
 
 // ---------------------------------------------------------------------------
 // Authorization attribute (declarative, handled by emit_endpoint)

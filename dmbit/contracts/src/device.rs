@@ -31,7 +31,6 @@ pub struct DeviceFilter {
     pub search: Option<String>,
 }
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct ListDevicesRequest;
 
@@ -39,7 +38,6 @@ pub struct ListDevicesRequest;
 #[authorize(role = "admin")]
 impl IRequest<Vec<DeviceModel>> for ListDevicesRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct ListSpecDevicesRequest {
     pub id: String,
@@ -49,7 +47,6 @@ pub struct ListSpecDevicesRequest {
 #[authorize(role = "admin")]
 impl IRequest<Vec<DeviceModel>> for ListSpecDevicesRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct GetDeviceRequest {
     pub id: String,
@@ -59,7 +56,6 @@ pub struct GetDeviceRequest {
 #[authorize(role = "admin")]
 impl IRequest<DeviceModel> for GetDeviceRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct CreateDeviceRequest {
     pub spec_id: String,
@@ -82,7 +78,6 @@ fn default_device_status() -> String {
 #[authorize(role = "admin")]
 impl IRequest<DeviceModel> for CreateDeviceRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct GenerateDevicesRequest {
     #[frompath]
@@ -113,7 +108,6 @@ pub struct GenerateDevicesResult {
 #[authorize(role = "admin")]
 impl IRequest<GenerateDevicesResult> for GenerateDevicesRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct UpdateDeviceRequest {
     #[frompath]
@@ -131,7 +125,6 @@ pub struct UpdateDeviceRequest {
 #[authorize(role = "admin")]
 impl IRequest<DeviceModel> for UpdateDeviceRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct DeleteDeviceRequest {
     pub id: String,

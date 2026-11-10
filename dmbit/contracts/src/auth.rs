@@ -27,7 +27,6 @@ pub struct LoginRequest {
 #[post("/api/auth/login")]
 impl IRequest<AuthResponse> for LoginRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct AuthMeRequest;
 
@@ -35,7 +34,6 @@ pub struct AuthMeRequest;
 #[authorize]
 impl IRequest<UserView> for AuthMeRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct ChangePasswordRequest {
     pub old_password: String,

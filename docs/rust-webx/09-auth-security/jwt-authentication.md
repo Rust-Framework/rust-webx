@@ -48,7 +48,7 @@ sequenceDiagram
 #[derive(WebxRequestMeta)]
 pub struct MeRequest {
     #[fromclaim]
-    pub user: CurrentUser,   // 未登录 → 401
+    pub user: IdentityUser,   // 未登录 → 401
 }
 
 #[get("/api/me")]
@@ -85,6 +85,6 @@ Docbit 的 `LoginHandler` 是完整示例。
 ## 小结
 
 `add_authentication()` + `Jwt.Secret` 配置即可启用 JWT 认证。业务代码优先通过 Request 的
-`CurrentUser` 字段拿身份，而不是直接操作 `IHttpContext`。
+`IdentityUser` 字段拿身份，而不是直接操作 `IHttpContext`。
 
 下一节：[基于资源的授权](resource-authorization.md)

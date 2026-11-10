@@ -185,19 +185,10 @@ fn generate_dispatch_fn(
             Box::pin(async move {
                 // One declaration on the request struct decides every field's
                 // source; failures come back as a 400 with `errors` per field.
-                let mut request: #ty =
+                let request: #ty =
                     <#ty as ::webx::RequestModel>::bind(&mut *ctx).await?;
 
-                let claims: ::std::option::Option<Box<dyn ::webx::IClaims>> =
-                    ctx.claims().map(|c| c.clone_box());
-                let operator_id = claims.as_ref().map(|c| c.subject().to_string());
-
-                // Inject claims into the request *before* dispatch (no-op if the
-                // request type has no inherent `set_claims`).
-                {
-                    use ::webx::IClaimsCarrier;
-                    request.set_claims(claims);
-                }
+                let operator_id = ctx.claims().map(|c| c.subject().to_string());
 
                 ::webx::RequestContext::run(operator_id, async move {
                     // HTTP adapter: construct request, then dispatch via IMediator

@@ -20,7 +20,6 @@ pub struct ProductModel {
     pub goods: Vec<GoodsModel>,
 }
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct ListProductsRequest;
 
@@ -28,7 +27,6 @@ pub struct ListProductsRequest;
 #[authorize(role = "admin")]
 impl IRequest<Vec<ProductModel>> for ListProductsRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct GetProductRequest {
     pub id: String,
@@ -38,7 +36,6 @@ pub struct GetProductRequest {
 #[authorize(role = "admin")]
 impl IRequest<ProductModel> for GetProductRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct CreateProductRequest {
     pub name: String,
@@ -59,7 +56,6 @@ fn default_category() -> String {
 #[authorize(role = "admin")]
 impl IRequest<ProductModel> for CreateProductRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct UpdateProductRequest {
     #[frompath]
@@ -76,7 +72,6 @@ pub struct UpdateProductRequest {
 #[authorize(role = "admin")]
 impl IRequest<ProductModel> for UpdateProductRequest {}
 
-#[claims]
 #[derive(Default, Deserialize, WebxRequestMeta)]
 pub struct DeleteProductRequest {
     pub id: String,

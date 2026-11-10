@@ -56,10 +56,13 @@ impl IRequestHandler<ListCommentsRequest, Vec<CommentModel>> for ListCommentsHan
 #[async_trait]
 impl IRequestHandler<CreateCommentRequest, CommentModel> for CreateCommentHandler {
     async fn handle(&mut self, req: CreateCommentRequest) -> Result<CommentModel> {
-        let claims = req
-            .claims
-            .as_deref()
-            .ok_or_else(|| Error::Http("Not authenticated".into()))?;
+        let user = req.require_user()?;
+        let user_id = user.id.clone();
+        let user_name = if user.name.is_empty() {
+            "User".to_string()
+        } else {
+            user.name.clone()
+        };
 
         let content = req.content.trim().to_string();
         if content.is_empty() {
@@ -68,13 +71,6 @@ impl IRequestHandler<CreateCommentRequest, CommentModel> for CreateCommentHandle
         if content.len() > 4000 {
             return Err(Error::Http("Comment too long".into()));
         }
-
-        let user_id = claims.subject().to_string();
-        let user_name = claims
-            .get_username()
-            .map(|s| s.to_string())
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "User".to_string());
 
         let now = now_secs();
         let comment_id = new_id();
@@ -112,13 +108,11 @@ impl IRequestHandler<DeleteCommentRequest, String> for DeleteCommentHandler {
             .map_ef()?
             .ok_or_else(|| Error::NotFound("Comment not found".into()))?;
 
-        let claims = req
-            .claims
-            .as_deref()
-            .ok_or_else(|| Error::Http("Not authenticated".into()))?;
-        let uid = claims.subject().to_string();
+        let user = req.require_user()?;
+        let uid = user.id.clone();
+        let is_admin = user.is_in_role("admin");
 
-        if !claims.has_role("admin") && comment.user_id != uid {
+        if !is_admin && comment.user_id != uid {
             return Err(Error::Forbidden("can only delete your own comments".into()));
         }
 

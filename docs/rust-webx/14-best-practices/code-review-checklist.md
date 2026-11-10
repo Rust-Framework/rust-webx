@@ -6,7 +6,7 @@
 - [ ] `IRequest<T>` 的 T 与 Handler 返回类型一致
 - [ ] 请求类型派生了 `WebxRequestMeta`
 - [ ] 写方法的路径参数用 `#[frompath]` 显式声明
-- [ ] 需要登录的端点用 `#[fromclaim] CurrentUser`，不在 Handler 里解析 claims
+- [ ] 需要登录的端点用 `#[fromclaim] IdentityUser`，不在 Handler 里解析 claims
 - [ ] 租户标识取自 `user.tenant_id`，不取自请求参数
 - [ ] 响应类型实现了 `Serialize`
 - [ ] Response DTO 定义在 `contracts/`，非 `domain/`

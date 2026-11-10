@@ -75,7 +75,7 @@ pub struct AuthorizeRule {
 #[derive(WebxRequestMeta)]
 pub struct UpdateProfileRequest {
     #[fromclaim]
-    pub user: CurrentUser,       // 未登录 → 401
+    pub user: IdentityUser,       // 未登录 → 401
     pub display_name: String,    // JSON body
 }
 
@@ -85,7 +85,7 @@ impl IRequest<ProfileView> for UpdateProfileRequest {}
 ```
 
 Handler 里 `req.user.id`、`req.user.tenant_id`、`req.user.is_in_role("admin")` 随取随用；
-匿名可访问的端点用 `Option<CurrentUser>`。详见
+匿名可访问的端点用 `Option<IdentityUser>`。详见
 [用户身份与多租户](../05-request-pattern/user-identity.md)。
 
 ## 动态授权：IDynamicAuthorizer

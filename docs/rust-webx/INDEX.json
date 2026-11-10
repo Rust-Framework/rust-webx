@@ -15,7 +15,7 @@
     "demoUrl": "",
     "featured": true,
     "sortOrder": 1,
-    "version": "0.7.2",
+    "version": "0.8.0",
     "language": "zh-CN",
     "author": "Start",
     "logo": "logo.svg",
@@ -211,7 +211,7 @@
             {
               "id": "user-identity",
               "title": "用户身份与多租户",
-              "summary": "CurrentUser、登录/匿名/角色/租户隔离场景",
+              "summary": "IdentityUser、登录/匿名/角色/租户隔离场景",
               "readingTime": 12,
               "difficulty": "intermediate"
             },

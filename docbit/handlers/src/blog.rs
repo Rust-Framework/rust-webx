@@ -17,10 +17,6 @@ use docbit_domain::{new_id, ApplyTo, ToEntity, ToModel};
 use crate::db::{save_changes, EfResultExt};
 use crate::util::{now_secs, operator_id};
 
-fn roles_from_claims(claims: Option<&dyn IClaims>) -> Vec<String> {
-    claims.map(|c| c.roles().to_vec()).unwrap_or_default()
-}
-
 fn is_admin(roles: &[String]) -> bool {
     roles.iter().any(|r| r == "admin")
 }
@@ -192,8 +188,10 @@ impl IRequestHandler<CreateBlogPostRequest, BlogPostModel> for CreateBlogPostHan
 #[async_trait]
 impl IRequestHandler<UpdateBlogPostRequest, BlogPostModel> for UpdateBlogPostHandler {
     async fn handle(&mut self, req: UpdateBlogPostRequest) -> Result<BlogPostModel> {
-        let uid = operator_id().ok_or_else(|| Error::Http("Not authenticated".into()))?;
-        let roles = roles_from_claims(req.claims.as_deref());
+        let (uid, roles) = {
+            let user = req.require_user()?;
+            (user.id.clone(), user.roles.clone())
+        };
 
         let slug = req.slug.clone();
         let q = slug.clone();
@@ -231,8 +229,10 @@ impl IRequestHandler<UpdateBlogPostRequest, BlogPostModel> for UpdateBlogPostHan
 #[async_trait]
 impl IRequestHandler<DeleteBlogPostRequest, String> for DeleteBlogPostHandler {
     async fn handle(&mut self, req: DeleteBlogPostRequest) -> Result<String> {
-        let uid = operator_id().ok_or_else(|| Error::Http("Not authenticated".into()))?;
-        let roles = roles_from_claims(req.claims.as_deref());
+        let (uid, roles) = {
+            let user = req.require_user()?;
+            (user.id.clone(), user.roles.clone())
+        };
 
         let slug = req.slug.clone();
         let q = slug.clone();

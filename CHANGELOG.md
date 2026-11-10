@@ -3,6 +3,16 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [0.7.1] — 2026-11-10
+
+### Fixed
+
+- **Consumer builds no longer need a direct `inventory` dependency** — `#[handler]`
+  and the route macros now submit their registrations through `::webx::inventory`,
+  the re-export `rust-webx` already publishes. A project created from the
+  quickstart (only `rust-webx`, `serde`, `tokio`) compiles without adding
+  `inventory` itself.
+
 ## [0.7.0] — 2026-11-10
 
 ### Breaking

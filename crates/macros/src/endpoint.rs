@@ -119,14 +119,14 @@ fn expand_endpoint(
 
         #dispatch_fn
 
-        ::inventory::submit! {
+        ::webx::inventory::submit! {
             ::webx::RouteDispatch {
                 handler_type: #req_type_name,
                 dispatch: #dispatch_fn_name,
             }
         }
 
-        ::inventory::submit! {
+        ::webx::inventory::submit! {
             ::webx::RouteEntry::new(
                 ::webx::HttpMethod::#method_ident,
                 #path_str,

@@ -105,7 +105,7 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
             })
         }
 
-        ::inventory::submit! {
+        ::webx::inventory::submit! {
             ::webx::HandlerRegistration {
                 req_type_id: ::std::any::TypeId::of::<#req_ty>(),
                 req_type_name: #req_ty_name,

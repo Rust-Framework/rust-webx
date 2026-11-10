@@ -30,6 +30,9 @@ rust-webx 推荐的业务应用分层：
 
 ```rust
 // contracts/auth.rs
+use serde::Serialize;
+use webx::*;
+
 #[derive(WebxRequestMeta)]
 pub struct LoginRequest {
     pub email: String,

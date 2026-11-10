@@ -61,7 +61,8 @@ rust-webx **不是** 全栈 UI 框架（可搭配任意前端）、**不是** OR
 - **编译时路由快捷键** — `#[get("/path")]`、`#[post("/path")]`、`#[put("/path")]`、`#[delete("/path")]` 一行定义完整端点。
 - **编译时自动扫描** — 通过 `inventory` 在编译时收集路由元数据，在 `Host::build()` 时自动注册。
 - **零配置 Handler 注册** — `#[handler]` 属性宏自动向 DI 容器注册 Handler。
-- **认证与授权** — JWT Bearer 认证 + 声明式规则组授权（`#[authorize]`、`#[claims]`）。
+- **认证与授权** — JWT Bearer 认证 + 声明式规则组授权（`#[authorize]`）。
+- **身份即请求字段** — `#[fromclaim] user: CurrentUser` 把认证身份（id、名称、邮箱、租户、角色）绑定为普通字段；Handler 不再解析 token，`Option<CurrentUser>` 覆盖匿名端点。
 - **端点元数据服务** — `IEndpointCatalog` 在运行时暴露全部端点（`all()` / `localized()`），权限同步、管理导航与 OpenAPI 共用一份元数据。
 - **本地化** — `#[display]` / `#[description]` / `#[category]` 存资源键，全局 `Culture.Default` 决定语言；支持 JSON 资源文件或 `include_str!` 嵌入。
 - **开箱即用的生产能力** — 优雅关闭、动态健康检查、安全响应头、请求 ID、CORS、TLS、速率限制、压缩、OpenAPI + SPA 托管。

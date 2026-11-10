@@ -953,49 +953,98 @@ fn helper_structs(fields: &[FieldSpec]) -> TokenStream2 {
     quote! { #(#helpers)* }
 }
 
+/// The OpenAPI type of a body field's JSON value.
+///
+/// Body values are JSON, so a list is an `array` and a composite type is an
+/// `object`, even though neither has a string form for query/path binding.
+fn body_type_hint(field: &FieldSpec) -> &'static str {
+    match &field.shape {
+        Shape::Scalar(ty) | Shape::Optional(ty) => {
+            if is_known_scalar(ty) {
+                type_hint(ty)
+            } else {
+                "object"
+            }
+        }
+        Shape::Many(_) | Shape::OptionalMany(_) | Shape::Files => "array",
+        Shape::File | Shape::OptionalFile => "binary",
+    }
+}
+
 /// OpenAPI parameter metadata.
+///
+/// Every bindable field becomes one `ParamMeta`. A body field carries its
+/// resolved JSON key in `json_key` (serde `rename` / `rename_all` and `r#`
+/// unraw included) so the spec generator can describe the request body
+/// property by property. An unmarked field keeps `source: ""` — the route
+/// method decides between body and query — but still advertises the JSON key
+/// the write-method case needs.
 fn param_meta(fields: &[FieldSpec], has_form: bool) -> Vec<TokenStream2> {
     let mut entries = Vec::new();
-    let mut body_documented = false;
 
     for f in fields.iter().filter(|f| !f.skipped) {
         if is_current_user(&f.ty) {
             continue;
         }
+
+        // A field that can only bind from a body is documented by its JSON key
+        // and requiredness. `#[serde(flatten)]` has no key of its own: its
+        // inner properties are spread into the body object, so the entry is an
+        // opaque body marker (`json_key: None`) instead of a property.
         if f.src == Src::Body || f.body_only() {
-            body_documented = true;
-            // Auto fields are resolved by the route method, so leave their
-            // source empty; explicit body fields are documented once below.
-            if f.src != Src::Body {
-                continue;
-            }
+            let name = if f.flattened {
+                f.name.as_str()
+            } else {
+                f.json_key.as_str()
+            };
+            let hint = body_type_hint(f);
+            let required = f.required;
+            let json_key = if f.flattened {
+                quote! { ::core::option::Option::None }
+            } else {
+                let key = LitStr::new(&f.json_key, f.ident.span());
+                quote! { ::core::option::Option::Some(#key) }
+            };
+            entries.push(quote! {
+                ::webx::ParamMeta {
+                    name: #name,
+                    source: "body",
+                    type_hint: #hint,
+                    required: #required,
+                    json_key: #json_key,
+                }
+            });
             continue;
         }
+
         let source = if f.src == Src::Auto && has_form {
             "form"
         } else {
             f.src.as_str()
         };
         let name = f.public_name();
-        let hint = f.hint;
+        // An unmarked field on a write method binds from the JSON body first,
+        // so its hint follows the JSON shape; a list is an `array`, not the
+        // element's string form.
+        let hint = if f.src == Src::Auto && !has_form {
+            body_type_hint(f)
+        } else {
+            f.hint
+        };
         let required = f.required;
+        let json_key = if f.src == Src::Auto && !has_form {
+            let key = LitStr::new(&f.json_key, f.ident.span());
+            quote! { ::core::option::Option::Some(#key) }
+        } else {
+            quote! { ::core::option::Option::None }
+        };
         entries.push(quote! {
             ::webx::ParamMeta {
                 name: #name,
                 source: #source,
                 type_hint: #hint,
                 required: #required,
-            }
-        });
-    }
-
-    if body_documented {
-        entries.push(quote! {
-            ::webx::ParamMeta {
-                name: "body",
-                source: "body",
-                type_hint: "object",
-                required: true,
+                json_key: #json_key,
             }
         });
     }
@@ -1788,5 +1837,151 @@ mod tests {
             .nth(1)
             .expect("expected a composite-field guard");
         assert!(guard.contains("\"payload\""), "{guard}");
+    }
+
+    // -----------------------------------------------------------------------
+    // OpenAPI parameter metadata
+    // -----------------------------------------------------------------------
+
+    /// The generated `param_meta` entries, rendered one string per entry.
+    fn param_entries(source: &str) -> Vec<String> {
+        let generated = code(source);
+        let section = generated
+            .split("fn param_meta")
+            .nth(1)
+            .expect("generated param_meta");
+        let section = section.split("fn bind").next().expect("param_meta body");
+        section
+            .split(":: webx :: ParamMeta {")
+            .skip(1)
+            .map(str::to_string)
+            .collect()
+    }
+
+    fn entry_with<'a>(entries: &'a [String], text: &str) -> &'a String {
+        entries
+            .iter()
+            .find(|entry| entry.contains(text))
+            .unwrap_or_else(|| panic!("no param entry containing {text}: {entries:?}"))
+    }
+
+    #[test]
+    fn body_fields_document_json_keys_types_and_requiredness() {
+        let entries = param_entries(
+            r#"struct Req {
+                #[frompath] id: String,
+                #[frombody] title: String,
+                #[frombody] published: Option<bool>,
+                #[frombody] tags: Vec<String>,
+                #[serde(rename = "displayName")] #[frombody] display: String,
+                #[frombody] r#type: String,
+                #[frombody] address: Address,
+            }"#,
+        );
+        assert_eq!(entries.len(), 7, "{entries:?}");
+
+        // Path parameters carry no JSON key.
+        let path = entry_with(&entries, "\"id\"");
+        assert!(path.contains("source : \"path\""), "{path}");
+        assert!(
+            path.contains("json_key : :: core :: option :: Option :: None"),
+            "{path}"
+        );
+
+        let title = entry_with(&entries, "\"title\"");
+        assert!(title.contains("source : \"body\""), "{title}");
+        assert!(title.contains("type_hint : \"string\""), "{title}");
+        assert!(title.contains("required : true"), "{title}");
+        assert!(
+            title.contains("json_key : :: core :: option :: Option :: Some (\"title\")"),
+            "{title}"
+        );
+
+        let published = entry_with(&entries, "\"published\"");
+        assert!(published.contains("type_hint : \"boolean\""), "{published}");
+        assert!(published.contains("required : false"), "{published}");
+
+        // A JSON list is an `array`, not the element's string form.
+        let tags = entry_with(&entries, "\"tags\"");
+        assert!(tags.contains("type_hint : \"array\""), "{tags}");
+
+        // `#[serde(rename)]` decides the documented key.
+        let renamed = entry_with(&entries, "\"displayName\"");
+        assert!(renamed.contains("required : true"), "{renamed}");
+
+        // A raw identifier is documented without its `r#`.
+        let raw = entry_with(&entries, "\"type\"");
+        assert!(
+            raw.contains("json_key : :: core :: option :: Option :: Some (\"type\")"),
+            "{raw}"
+        );
+
+        // A composite type is a JSON object.
+        let composite = entry_with(&entries, "\"address\"");
+        assert!(composite.contains("type_hint : \"object\""), "{composite}");
+    }
+
+    #[test]
+    fn unmarked_fields_advertise_the_json_key_the_route_method_needs() {
+        let entries = param_entries(r#"struct Req { name: String, tags: Vec<String> }"#);
+        assert_eq!(entries.len(), 2, "{entries:?}");
+
+        let name = entry_with(&entries, "\"name\"");
+        // The route method decides between body and query, so the source stays
+        // empty …
+        assert!(name.contains("source : \"\""), "{name}");
+        // … but the JSON key is there for the write-method case.
+        assert!(
+            name.contains("json_key : :: core :: option :: Option :: Some (\"name\")"),
+            "{name}"
+        );
+
+        let tags = entry_with(&entries, "\"tags\"");
+        assert!(tags.contains("type_hint : \"array\""), "{tags}");
+        assert!(tags.contains("required : false"), "{tags}");
+    }
+
+    #[test]
+    fn rename_all_reaches_the_documented_json_key() {
+        let entries = param_entries(
+            r#"#[serde(rename_all = "camelCase")]
+               struct Req { #[frombody] display_name: String }"#,
+        );
+        let entry = entry_with(&entries, "\"displayName\"");
+        assert!(
+            entry.contains("json_key : :: core :: option :: Option :: Some (\"displayName\")"),
+            "{entry}"
+        );
+    }
+
+    #[test]
+    fn flattened_body_fields_are_opaque_body_markers() {
+        let entries = param_entries(
+            r#"struct Req {
+                #[serde(flatten)] paging: Paging,
+                key: String,
+            }"#,
+        );
+        let paging = entry_with(&entries, "\"paging\"");
+        assert!(paging.contains("source : \"body\""), "{paging}");
+        assert!(paging.contains("type_hint : \"object\""), "{paging}");
+        // No single JSON key: the inner properties are spread into the object.
+        assert!(
+            paging.contains("json_key : :: core :: option :: Option :: None"),
+            "{paging}"
+        );
+        // A non-optional flattened field is a required body field.
+        assert!(paging.contains("required : true"), "{paging}");
+    }
+
+    #[test]
+    fn form_fields_have_no_json_key() {
+        let entries = param_entries(r#"struct Req { avatar: FormFile, title: String }"#);
+        let title = entry_with(&entries, "\"title\"");
+        assert!(title.contains("source : \"form\""), "{title}");
+        assert!(
+            title.contains("json_key : :: core :: option :: Option :: None"),
+            "{title}"
+        );
     }
 }

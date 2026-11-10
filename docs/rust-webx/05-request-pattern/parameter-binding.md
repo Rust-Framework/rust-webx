@@ -2,7 +2,7 @@
 
 请求类型**必须**派生 `#[derive(WebxRequestMeta)]`，字段用 `#[from*]` 标记来源。派生宏在编译期生成
 `RequestModel::bind`（运行时绑定）与 `param_meta()`（OpenAPI 元数据），**同一份声明**同时驱动两者，
-不会再出现"文档写 query、运行时当 body"的分歧。
+包括请求体字段级的 OpenAPI schema；不会再出现"文档写 query、运行时当 body"的分歧。
 
 ```rust
 #[derive(WebxRequestMeta)]
@@ -143,9 +143,48 @@ Handler 里直接用 `req.user.id`、`req.user.tenant_id`、`req.user.is_in_role
 
 ## OpenAPI
 
-`param_meta()` 给出每个字段的来源与类型，路由宏再补上模板里的路径参数（合并时以结构体的类型为准）。
-`#[fromclaim]` 属于认证信息，不写进文档；未标记字段按路由方法解析成 body 或 query；
-`FormFile` 生成 `multipart/form-data` 的 `string/binary`。
+`param_meta()` 给出每个字段的来源、类型与 JSON 键，路由宏再补上模板里的路径参数（合并时以结构体的类型为准）。
+`#[fromclaim]` 属于认证信息，不写进文档；未标记字段按路由方法解析成 body 或 query。body 字段
+**逐个**进入请求体 schema，不再只输出一个 `{"type": "object"}` 占位：
+
+- **写方法（POST/PUT/PATCH）**：`requestBody.content["application/json"].schema` 的
+  `properties` 键是字段的 **JSON 键**（`#[serde(rename)]` / `rename_all` 与 `r#type` 的 wire 名），
+  类型按字段形状映射为 `string` / `integer` / `number` / `boolean` / `array` / `object`；
+  `required` 列出必填字段（`Option<T>`、`Vec<T>`、`#[serde(default)]` 不算必填）。
+  `requestBody.required` 由「是否存在必填 body 字段」推导，而不是恒为 `true`。
+- `#[serde(flatten)]` 字段没有独立 JSON 键，无法枚举内部属性：schema 保留
+  `type: "object"` 并加 `additionalProperties: true` 表示未知键；该字段的必填性仍计入
+  `requestBody.required`。
+- **无 body 的方法（GET/HEAD/DELETE/OPTIONS）**：不输出 `requestBody`。这些方法上的 body
+  字段在运行时同样无法绑定（复合类型/必填值会 400），应改用显式 `#[fromquery]` /
+  `#[frompath]`，或把端点改成写方法。
+- **表单端点**：`FormFile` 生成 `multipart/form-data` 的 `string/binary`（见
+  [文件上传与下载](file-upload-download.md#16-openapi-里的上传端点)），同一端点不会同时
+  输出 JSON body。
+
+示例（`PUT /api/blog/{id}` 的请求结构体带 `title: String`、`published: Option<bool>`、
+`tags: Vec<String>`）会生成：
+
+```json
+{
+  "requestBody": {
+    "required": true,
+    "content": {
+      "application/json": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "title": { "type": "string" },
+            "published": { "type": "boolean" },
+            "tags": { "type": "array" }
+          },
+          "required": ["title"]
+        }
+      }
+    }
+  }
+}
+```
 
 ## 响应序列化
 

@@ -124,6 +124,10 @@ pub struct HttpContext {
     resp: HttpResponse,
     /// Authentication claims set by authentication middleware.
     claims: Option<Box<dyn IClaims>>,
+    /// A request rejection recorded at construction (e.g. an oversized declared
+    /// `Content-Length`). The pipeline turns it into a normal error response
+    /// from the innermost handler so CORS/security headers/logging still run.
+    early_error: Option<Error>,
 }
 
 impl HttpContext {
@@ -152,30 +156,30 @@ impl HttpContext {
             .map(parse_query_string)
             .unwrap_or_default();
 
-        let mut resp = HttpResponse::new(200);
+        let resp = HttpResponse::new(200);
 
         // Refuse an oversized upload from its declared length, without reading
         // it. Chunked bodies have no `Content-Length` and are bounded while
         // streaming instead.
+        //
+        // The rejection is recorded, not written eagerly: writing a response
+        // here used to bypass the whole middleware pipeline (no CORS, no
+        // security headers, no access log, no metrics). The router handler
+        // turns it into a normal `PayloadTooLarge` error on the way in.
         let declared_limit = if is_multipart_content_type(headers.get("content-type")) {
             limits.multipart_body
         } else {
             limits.body as u64
         };
-        if let Some(declared) = headers
+        let early_error = headers
             .get("content-length")
             .and_then(|value| value.parse::<u64>().ok())
-        {
-            if declared > declared_limit {
-                let problem = build_problem(
-                    413,
-                    format!("request body exceeds the {declared_limit}-byte limit"),
-                );
-                resp.set_status(413);
-                resp.set_header("content-type", "application/problem+json");
-                resp.body = Some(ResponseBody::Bytes(problem_to_bytes(&problem)));
-            }
-        }
+            .filter(|declared| *declared > declared_limit)
+            .map(|_| {
+                Error::PayloadTooLarge(format!(
+                    "request body exceeds the {declared_limit}-byte limit"
+                ))
+            });
 
         let req = HttpRequest {
             method: parts.method.to_string(),
@@ -194,6 +198,7 @@ impl HttpContext {
             req,
             resp,
             claims: None,
+            early_error,
         }
     }
 
@@ -229,6 +234,10 @@ impl IHttpContext for HttpContext {
 
     fn response_mut(&mut self) -> &mut dyn IHttpResponse {
         &mut self.resp
+    }
+
+    fn take_early_error(&mut self) -> Option<Error> {
+        self.early_error.take()
     }
 }
 
@@ -312,7 +321,7 @@ impl IHttpRequest for HttpRequest {
         let incoming = match &mut *guard {
             RequestBody::Buffered(bytes) => return Ok(bytes.clone()),
             RequestBody::Form(_) => {
-                return Err(Error::Http(
+                return Err(Error::State(
                     "request body was already read as multipart/form-data".to_string(),
                 ))
             }
@@ -320,7 +329,7 @@ impl IHttpRequest for HttpRequest {
         };
 
         let Some(incoming) = incoming else {
-            return Err(Error::Http(
+            return Err(Error::State(
                 "request body has already been consumed".to_string(),
             ));
         };
@@ -332,7 +341,8 @@ impl IHttpRequest for HttpRequest {
 
     async fn body_text(&mut self) -> Result<String> {
         let bytes = self.body_bytes().await?;
-        String::from_utf8(bytes).map_err(|e| Error::Http(e.to_string()))
+        String::from_utf8(bytes)
+            .map_err(|_| Error::Validation("request body is not valid UTF-8".to_string()))
     }
 
     async fn multipart(&mut self) -> Result<Arc<MultipartForm>> {
@@ -367,7 +377,7 @@ impl IHttpRequest for HttpRequest {
         };
 
         let Some(body) = incoming else {
-            return Err(Error::Http(
+            return Err(Error::State(
                 "request body has already been consumed".to_string(),
             ));
         };
@@ -385,8 +395,12 @@ async fn read_body(incoming: Incoming, limit: usize) -> Result<Vec<u8>> {
     let mut stream = incoming.into_data_stream();
 
     while let Some(chunk) = stream.next().await {
-        let chunk =
-            chunk.map_err(|err| Error::Http(format!("failed to read request body: {err}")))?;
+        let chunk = chunk.map_err(|err| {
+            // Transport failure while reading the body: the client went away or
+            // the framing is broken. Log the details, never serve them.
+            tracing::debug!(error = %err, "failed to read request body");
+            Error::State("failed to read request body".to_string())
+        })?;
         total = total.saturating_add(chunk.len());
         if total > limit {
             return Err(Error::PayloadTooLarge(format!(

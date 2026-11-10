@@ -5,8 +5,11 @@
 `Host::run()` 监听 shutdown 信号（Ctrl+C / SIGTERM）：
 
 ```
-收到信号 → 停止接受新连接 → 等待进行中请求完成 → IHostedService::stop() 按启动顺序 → 退出
+收到信号 → 停止接受新连接 → 进行中请求完成（连接收到 Connection: close） → IHostedService::stop() 逆序（每个 ≤30s） → 退出
 ```
+
+关闭信号用 `watch` 通道保存，不是一次性的唤醒：`ServerHandle::shutdown()` / `IHost::stop()` 即使在服务器开始监听之前调用也不会丢失。
+优雅关闭的超时（排空窗口）在 Development 下为 5s、其他模式为 30s；超时后仍未完成的连接会被中止。
 
 ## 可观测性
 

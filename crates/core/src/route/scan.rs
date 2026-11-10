@@ -83,6 +83,17 @@ pub struct ParamMeta {
     /// Whether the parameter must be present (`Option<T>` and `Vec<T>` are
     /// not required; path parameters always are).
     pub required: bool,
+
+    /// The JSON object key this parameter binds from, when it can bind from a
+    /// JSON body: an explicit `#[frombody]` field, a composite field, or an
+    /// unmarked field on a write method (the route method decides; `source` is
+    /// `""` for those).
+    ///
+    /// `None` for parameters bound from the path, query, header, form or
+    /// claims, and for a body field with no JSON key of its own — a
+    /// `#[serde(flatten)]` field spreads its inner properties into the body
+    /// object instead of owning one key.
+    pub json_key: Option<&'static str>,
 }
 
 /// One `#[authorize]` declaration on an endpoint.
@@ -278,12 +289,20 @@ impl ResponseData {
     }
 
     /// Serialize `value` as an `application/json` response.
+    ///
+    /// A serialization failure here is a server-side defect in the response
+    /// DTO, so it becomes [`Error::ResponseSerialization`] (500) rather than
+    /// the request-parse [`Error::Serialization`] (400).
+    ///
+    /// [`Error::ResponseSerialization`]: crate::error::Error::ResponseSerialization
+    /// [`Error::Serialization`]: crate::error::Error::Serialization
     pub fn json<T: serde::Serialize + ?Sized>(value: &T) -> crate::error::Result<Self> {
+        let body = serde_json::to_vec(value).map_err(crate::error::Error::ResponseSerialization)?;
         Ok(Self {
             status: 200,
             content_type: "application/json".to_string(),
             headers: Vec::new(),
-            body: ResponseBody::Bytes(serde_json::to_vec(value)?),
+            body: ResponseBody::Bytes(body),
         })
     }
 
@@ -579,4 +598,33 @@ pub struct HandlerEntry {
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = crate::error::Result<Box<dyn Any + Send>>> + Send>,
     >,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A response DTO that cannot be represented in JSON — the stand-in for the
+    /// server-side defect this mapping exists to catch.
+    struct AlwaysFails;
+
+    impl serde::Serialize for AlwaysFails {
+        fn serialize<S: serde::Serializer>(
+            &self,
+            _serializer: S,
+        ) -> std::result::Result<S::Ok, S::Error> {
+            Err(serde::ser::Error::custom("DTO cannot be serialized"))
+        }
+    }
+
+    #[test]
+    fn response_data_json_failure_is_a_server_error() {
+        let err = ResponseData::json(&AlwaysFails).unwrap_err();
+        assert!(
+            matches!(err, crate::error::Error::ResponseSerialization(_)),
+            "response serialization must not reuse the request-parse variant: {err:?}"
+        );
+        assert_eq!(err.status_code(), 500);
+        assert_eq!(err.public_detail(), None);
+    }
 }

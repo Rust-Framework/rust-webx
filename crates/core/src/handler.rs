@@ -98,14 +98,17 @@ pub trait IEventHandler<T: IEventRequest>: Send + Sync {
 pub trait IHostedService: Send + Sync {
     /// Called when the host starts.
     ///
-    /// The host waits for all hosted services to finish `start()`
-    /// before beginning to accept incoming requests.
+    /// Services start in registration order and the host waits for all of them
+    /// before accepting requests. If one `start()` fails, the services that
+    /// already started are stopped again in reverse order before the host
+    /// reports the error.
     async fn start(&self) -> Result<()>;
 
     /// Called during a graceful shutdown.
     ///
-    /// The host calls `stop()` on all hosted services concurrently
-    /// after the HTTP server has stopped accepting new connections.
+    /// The host stops the services that started, in **reverse** start order
+    /// (the last dependency to start is the first to stop), with a timeout per
+    /// service so one stuck service cannot block the process forever.
     async fn stop(&self) -> Result<()> {
         Ok(())
     }

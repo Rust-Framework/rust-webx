@@ -15,6 +15,14 @@ All notable changes to **rust-webx** are documented in this file.
   without the operator-facing `Display` prefix (`"Unauthorized: …"`); 5xx
   variants return `None`, which is what makes detail redaction enforceable.
 - **`Retry-After` on 429** — derived from the bucket refill rate.
+- **`IHttpContext::take_early_error()`** — a defaulted hook for rejections the
+  host detects from the request line (currently an oversized declared
+  `Content-Length`). The context records them instead of writing a response, so
+  the pipeline can still see the request.
+- **`SpaMiddleware::try_index_fallback()`** — the SPA shell fallback, called by
+  the host after a router miss.
+- **Hosted-service start/stop timeouts** — `start()` and `stop()` are bounded
+  (30s each) so one stuck service cannot block startup or shutdown forever.
 
 ### Changed
 
@@ -31,6 +39,38 @@ All notable changes to **rust-webx** are documented in this file.
   bucketed under a constant `127.0.0.1`, silently turning per-client limits into
   one global bucket. When the host cannot report a peer address the limiter now
   passes the request through instead of bucketing everyone together.
+- **`run()`/`run_at()` bind listeners before anything starts.** A port conflict
+  now returns an error (non-zero exit) instead of being logged and followed by a
+  successful shutdown; a failed startup also stops the hosted services that
+  already started, in reverse order.
+- **Shutdown signals are stored, not broadcast.** `ServerHandle::shutdown()` and
+  `IHost::stop()` use a `watch` channel, so a signal sent before the accept loops
+  start is not lost (the documented `spawn(run); handle.shutdown()` pattern used
+  to hang). Connections are asked to close gracefully (`Connection: close`)
+  during the drain window instead of being aborted after it.
+- **Hosted services stop in reverse start order**, with rollback on a failed
+  start. Docs previously disagreed with the implementation on this.
+- **SPA index fallback runs after routing.** It is applied only when the router
+  has no match and the client explicitly asked for HTML (`Accept: text/html`);
+  unmatched API paths and data clients get a real 404. A handler response can no
+  longer inherit the SPA file cache policy (`Cache-Control: public`), which used
+  to make private JSON publicly cacheable.
+- **Oversized declared bodies go through the middleware pipeline.** The eager
+  413 response previously bypassed CORS, security headers, access logs, metrics
+  and rate limiting; it is now a normal error raised inside the pipeline.
+- **`Error::Serialization` only describes request parsing.** Response
+  serialization failures are `Error::ResponseSerialization` (500) and body
+  state-machine errors are `Error::State` (500), so a server-side bug can no
+  longer be reported to the client as a 400/415.
+- **`AppMode::from_env()` warns when `APP_ENV` is unset.** The default stays
+  `Development` in this release, but a once-per-process warning now tells the
+  operator to set `APP_ENV=Production` explicitly.
+- **Embedded-asset compression defaults to brotli quality 9.** Quality 11 made a
+  clean build of a ~27 MB `wwwroot` take over an hour (the build script is
+  single-threaded), which blocked development and CI. Quality 9 is a few percent
+  larger and an order of magnitude faster; `WEBX_BROTLI_QUALITY=11` restores the
+  old behaviour for size-critical release builds, and changing it now retriggers
+  the build script.
 
 ### Fixed
 

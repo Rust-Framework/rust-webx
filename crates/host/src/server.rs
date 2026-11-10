@@ -106,6 +106,14 @@ fn with_embedded_assets(
     })
 }
 
+/// Shutdown signal shared by the host, its handle and every listener.
+///
+/// `watch` (not `Notify`) because a signal must not be lost: `Notify::notify_waiters`
+/// drops the wakeup when no listener is parked yet, which is exactly the case in
+/// the documented "spawn(run) then handle.shutdown()" pattern. A `watch` keeps
+/// the `true` value, so a listener that subscribes later still sees it.
+type ShutdownSignal = Arc<tokio::sync::watch::Sender<bool>>;
+
 pub struct Host {
     #[allow(dead_code)]
     provider: Arc<ServiceProvider>,
@@ -127,7 +135,7 @@ pub struct Host {
     /// Kept for introspection; the middleware already holds its own copy.
     #[allow(dead_code)]
     spa_source: Option<SpaSource>,
-    shutdown: Arc<tokio::sync::Notify>,
+    shutdown: ShutdownSignal,
     /// Hosted services that are started on host start
     /// and stopped on graceful shutdown.
     hosted_services: Vec<Arc<dyn IHostedService>>,
@@ -595,10 +603,15 @@ impl HostBuilder {
             });
             with_embedded_assets(base, EmbeddedAssets::registered().copied())
         };
+        let mut spa_fallback: Option<Arc<SpaMiddleware>> = None;
         if let Some(ref source) = spa_source {
-            let spa = SpaMiddleware::from_source(source.clone());
+            let spa = Arc::new(SpaMiddleware::from_source(source.clone()));
             log_spa_source(&spa);
-            pipeline.add_middleware(Arc::new(spa));
+            pipeline.add_middleware(Arc::clone(&spa) as Arc<dyn IMiddleware>);
+            // Kept for the post-routing index fallback: static files are served
+            // before routing, but the SPA shell is only served when the router
+            // has no match.
+            spa_fallback = Some(spa);
         }
 
         // Users can register additional middleware here, e.g.:
@@ -751,7 +764,7 @@ impl HostBuilder {
         }
 
         let router = Arc::new(router);
-        let router_handler = make_router_handler(Arc::clone(&router));
+        let router_handler = make_router_handler(Arc::clone(&router), spa_fallback);
 
         // Resolve all registered hosted services from the DI container.
         // These will be started when `run()` is called and stopped on shutdown.
@@ -770,7 +783,7 @@ impl HostBuilder {
             router_handler,
             mode: self.mode,
             spa_source,
-            shutdown: Arc::new(tokio::sync::Notify::new()),
+            shutdown: Arc::new(tokio::sync::watch::channel(false).0),
             hosted_services,
         }
     }
@@ -778,14 +791,17 @@ impl HostBuilder {
 
 /// Handle for a running server, allowing programmatic graceful shutdown.
 pub struct ServerHandle {
-    shutdown: Arc<tokio::sync::Notify>,
+    shutdown: ShutdownSignal,
 }
 
 impl ServerHandle {
     /// Signal the server to stop accepting new connections and begin
     /// draining existing ones.
+    ///
+    /// The signal is stored in a `watch` channel, so calling this before the
+    /// server's accept loops start is not lost.
     pub fn shutdown(self) {
-        self.shutdown.notify_waiters();
+        trigger_shutdown(&self.shutdown);
     }
 }
 
@@ -874,8 +890,6 @@ impl Host {
     /// { "App": { "Urls": ["http://localhost:5000", "https://localhost:5030"] } }
     /// ```
     pub async fn run(&self) -> Result<()> {
-        start_hosted_services(&self.hosted_services, &self.dispatch_runtime).await?;
-
         let urls = if self.options.app.urls.is_empty() {
             vec!["http://0.0.0.0:5000".to_string()]
         } else {
@@ -911,6 +925,20 @@ impl Host {
             None
         };
 
+        // Bind every listener *before* starting hosted services or spawning
+        // accept loops. A port conflict must fail `run()`, not be logged and
+        // forgotten (which used to leave the process exiting with code 0).
+        let mut http_listeners = Vec::with_capacity(http_addrs.len());
+        for addr in &http_addrs {
+            http_listeners.push(bind_listener(addr, "HTTP").await?);
+        }
+        let mut https_listeners = Vec::with_capacity(https_addrs.len());
+        for addr in &https_addrs {
+            https_listeners.push(bind_listener(addr, "HTTPS").await?);
+        }
+
+        start_hosted_services(&self.hosted_services, &self.dispatch_runtime).await?;
+
         // Banner
         if self.mode == AppMode::Development {
             tracing::info!("");
@@ -922,9 +950,8 @@ impl Host {
             tracing::info!("Listening on {} url(s)", urls.len());
         }
 
-        let notify = Arc::clone(&self.shutdown);
-        install_shutdown_handler(Arc::clone(&notify));
-        spawn_async_shutdown_listener(Arc::clone(&notify));
+        install_shutdown_handler(Arc::clone(&self.shutdown));
+        spawn_async_shutdown_listener(Arc::clone(&self.shutdown));
 
         let mut handles = Vec::new();
         let pipeline = Arc::clone(&self.pipeline);
@@ -934,18 +961,14 @@ impl Host {
         let body_limits = self.body_limits.clone();
         let max_connections = self.options.app.max_connections;
 
-        for addr in &http_addrs {
-            let addr = addr.clone();
-            let n = std::sync::Arc::clone(&notify);
-            let p = Arc::clone(&pipeline);
-            let rh = router_handler.clone();
-            let dr = Arc::clone(&dispatch_runtime);
+        for (addr, listener) in http_addrs.into_iter().zip(http_listeners) {
             handles.push(tokio::spawn(serve_http(
                 addr,
-                n,
-                p,
-                rh,
-                dr,
+                listener,
+                self.shutdown.subscribe(),
+                Arc::clone(&pipeline),
+                router_handler.clone(),
+                Arc::clone(&dispatch_runtime),
                 mode,
                 body_limits.clone(),
                 max_connections,
@@ -953,20 +976,15 @@ impl Host {
         }
 
         if let Some(ref tls_acceptor) = acceptor {
-            for addr in &https_addrs {
-                let addr = addr.clone();
-                let n = std::sync::Arc::clone(&notify);
-                let p = Arc::clone(&pipeline);
-                let rh = router_handler.clone();
-                let dr = Arc::clone(&dispatch_runtime);
-                let a = tls_acceptor.clone();
+            for (addr, listener) in https_addrs.into_iter().zip(https_listeners) {
                 handles.push(tokio::spawn(serve_https(
                     addr,
-                    a,
-                    n,
-                    p,
-                    rh,
-                    dr,
+                    tls_acceptor.clone(),
+                    listener,
+                    self.shutdown.subscribe(),
+                    Arc::clone(&pipeline),
+                    router_handler.clone(),
+                    Arc::clone(&dispatch_runtime),
                     mode,
                     body_limits.clone(),
                     max_connections,
@@ -974,26 +992,38 @@ impl Host {
             }
         }
 
-        // Wait for all HTTP listeners to finish (they exit after shutdown signal).
+        // Wait for all listeners to finish (they exit after the shutdown
+        // signal); a panicked listener is a host failure, not a silent exit.
+        let mut run_error: Option<webx_core::error::Error> = None;
         for h in handles {
-            let _ = h.await;
+            if let Err(join_err) = h.await {
+                if run_error.is_none() {
+                    run_error = Some(webx_core::error::Error::Internal(format!(
+                        "a listener task failed: {join_err}"
+                    )));
+                }
+            }
         }
 
         stop_hosted_services(&self.hosted_services).await;
 
-        Ok(())
+        match run_error {
+            Some(err) => Err(err),
+            None => Ok(()),
+        }
     }
 
     /// Start the server at a single explicit address (convenience wrapper).
     pub async fn run_at(&self, addr: &str) -> Result<()> {
+        let listener = bind_listener(addr, "HTTP").await?;
         start_hosted_services(&self.hosted_services, &self.dispatch_runtime).await?;
 
-        let notify = Arc::clone(&self.shutdown);
-        install_shutdown_handler(Arc::clone(&notify));
-        spawn_async_shutdown_listener(Arc::clone(&notify));
+        install_shutdown_handler(Arc::clone(&self.shutdown));
+        spawn_async_shutdown_listener(Arc::clone(&self.shutdown));
         serve_http(
             addr.to_string(),
-            notify,
+            listener,
+            self.shutdown.subscribe(),
             Arc::clone(&self.pipeline),
             self.router_handler.clone(),
             Arc::clone(&self.dispatch_runtime),
@@ -1039,15 +1069,22 @@ impl IHost for Host {
     }
     async fn stop(&self) -> Result<()> {
         tracing::info!("Stop requested.");
-        self.shutdown.notify_waiters();
+        trigger_shutdown(&self.shutdown);
         Ok(())
     }
 }
 
-fn make_router_handler(router: Arc<Router>) -> HandlerFn {
+fn make_router_handler(router: Arc<Router>, spa_fallback: Option<Arc<SpaMiddleware>>) -> HandlerFn {
     Arc::new(move |ctx: &mut dyn IHttpContext| {
         let router = Arc::clone(&router);
+        let spa_fallback = spa_fallback.clone();
         Box::pin(async move {
+            // The context may carry a rejection detected from the request line
+            // (oversized declared Content-Length). Failing here — inside the
+            // pipeline — keeps CORS/security headers/logging/metrics in play.
+            if let Some(err) = ctx.take_early_error() {
+                return Err(err);
+            }
             match router.match_route(ctx).await? {
                 Some((endpoint, params, pattern)) => {
                     drop(router);
@@ -1060,9 +1097,16 @@ fn make_router_handler(router: Arc<Router>) -> HandlerFn {
                 None => {
                     let path_exists = router.path_exists(ctx.request().path());
                     drop(router);
-                    // Don't overwrite if a middleware (e.g. SPA) already
-                    // wrote a response body (static file, index.html fallback).
+                    // Don't overwrite if a middleware (e.g. a static file
+                    // response) already wrote a body.
                     if !ctx.response().has_body() {
+                        // SPA routing: only a genuine router miss gets the app
+                        // shell, and only when the client asked for HTML.
+                        if let Some(spa) = spa_fallback {
+                            if spa.try_index_fallback(ctx).await? {
+                                return Ok(());
+                            }
+                        }
                         if path_exists {
                             write_plain_error(ctx, 405, "Method Not Allowed").await;
                         } else {
@@ -1086,23 +1130,19 @@ async fn handle_request(
 ) -> std::result::Result<hyper::Response<RespBody>, std::convert::Infallible> {
     let mut ctx = HttpContext::new(req, body_limits, remote_addr);
 
-    // A request rejected during construction (e.g. a declared Content-Length
-    // above the limit) already carries its final response.
-    if ctx.response().status() < 400 {
-        let result = dispatch_runtime
-            .run(async { pipeline.execute(&mut ctx, router_handler).await })
-            .await;
-        if let Err(e) = result {
-            match e {
-                // A binding/validation failure already carries its full
-                // ProblemDetails (including the `errors` extension); write it
-                // verbatim instead of flattening it into a detail string.
-                webx_core::error::Error::Problem(problem) => {
-                    write_problem_response(&mut ctx, *problem).await
-                }
-                other => {
-                    write_framework_error(&mut ctx, &other).await;
-                }
+    let result = dispatch_runtime
+        .run(async { pipeline.execute(&mut ctx, router_handler).await })
+        .await;
+    if let Err(e) = result {
+        match e {
+            // A binding/validation failure already carries its full
+            // ProblemDetails (including the `errors` extension); write it
+            // verbatim instead of flattening it into a detail string.
+            webx_core::error::Error::Problem(problem) => {
+                write_problem_response(&mut ctx, *problem).await
+            }
+            other => {
+                write_framework_error(&mut ctx, &other).await;
             }
         }
     }
@@ -1151,21 +1191,84 @@ async fn write_plain_error(ctx: &mut dyn IHttpContext, status: u16, message: &st
 // Shutdown helpers
 // ---------------------------------------------------------------------------
 
+/// Raise the shutdown flag.
+///
+/// `watch::Sender::send` stores the value, so a listener that subscribes later
+/// (or a listener between two `select!` iterations) still observes it — unlike
+/// `Notify::notify_waiters`, which drops the wakeup when nobody is parked.
+fn trigger_shutdown(shutdown: &ShutdownSignal) {
+    // `send_replace` stores the value unconditionally. `send` would fail while
+    // no receiver exists (e.g. `handle.shutdown()` called before `run()`
+    // subscribes) and silently drop the signal — the exact bug this type
+    // replaces `Notify` for.
+    shutdown.send_replace(true);
+}
+
+/// Resolve once the host has been asked to shut down.
+///
+/// Returns immediately when the flag is already set; also returns when the
+/// sender disappears (host dropped) so a connection task never hangs forever.
+async fn wait_for_shutdown(shutdown: &mut tokio::sync::watch::Receiver<bool>) {
+    if *shutdown.borrow() {
+        return;
+    }
+    loop {
+        if shutdown.changed().await.is_err() {
+            return;
+        }
+        if *shutdown.borrow() {
+            return;
+        }
+    }
+}
+
 /// Register a process-wide Ctrl+C / SIGINT handler.
 ///
 /// On Windows, `cargo run` may exit the parent without stopping the child;
 /// registering here ensures the server process itself receives the signal.
 /// A second Ctrl+C forces immediate exit.
-fn install_shutdown_handler(shutdown: Arc<tokio::sync::Notify>) {
-    use std::sync::atomic::{AtomicUsize, Ordering};
+///
+/// `ctrlc::set_handler` can only be installed once per process, so every host
+/// registers its signal (weakly) here and the single handler raises all of
+/// them. That keeps two hosts in one process — integration tests, embedded
+/// scenarios — individually stoppable by Ctrl+C.
+fn install_shutdown_handler(shutdown: ShutdownSignal) {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::{Mutex, OnceLock, Weak};
 
+    static HANDLERS: OnceLock<Mutex<Vec<Weak<tokio::sync::watch::Sender<bool>>>>> = OnceLock::new();
     static CTRL_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static INSTALLED: AtomicBool = AtomicBool::new(false);
+
+    let handlers = HANDLERS.get_or_init(|| Mutex::new(Vec::new()));
+    {
+        let mut registered = handlers
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // Drop hosts that have already exited before adding this one.
+        registered.retain(|weak| weak.strong_count() > 0);
+        registered.push(Arc::downgrade(&shutdown));
+    }
+
+    // `ctrlc::set_handler` is process-wide and may only be called once. The
+    // flag (not the registry length) decides: hosts may come and go, but the
+    // handler stays installed and raises whichever hosts are alive.
+    if INSTALLED.swap(true, Ordering::SeqCst) {
+        return;
+    }
 
     if let Err(e) = ctrlc::set_handler(move || {
         let n = CTRL_COUNT.fetch_add(1, Ordering::SeqCst);
         if n == 0 {
             tracing::info!("Shutdown signal received, draining connections...");
-            shutdown.notify_waiters();
+            let registered = handlers
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            for weak in registered.iter() {
+                if let Some(shutdown) = weak.upgrade() {
+                    trigger_shutdown(&shutdown);
+                }
+            }
         } else {
             tracing::warn!("Second interrupt — force exiting.");
             std::process::exit(130);
@@ -1176,11 +1279,11 @@ fn install_shutdown_handler(shutdown: Arc<tokio::sync::Notify>) {
 }
 
 /// Tokio-based listener for Ctrl+C (all platforms) and SIGTERM (Unix).
-fn spawn_async_shutdown_listener(shutdown: Arc<tokio::sync::Notify>) {
+fn spawn_async_shutdown_listener(shutdown: ShutdownSignal) {
     tokio::spawn(async move {
         wait_for_shutdown_signal().await;
         tracing::info!("Async shutdown signal received, draining connections...");
-        shutdown.notify_waiters();
+        trigger_shutdown(&shutdown);
     });
 }
 
@@ -1206,6 +1309,11 @@ async fn wait_for_shutdown_signal() {
     }
 }
 
+/// How long a hosted service may take to start before the host gives up.
+const HOSTED_START_TIMEOUT_SECS: u64 = 30;
+/// How long a hosted service may take to stop before it is skipped.
+const HOSTED_STOP_TIMEOUT_SECS: u64 = 30;
+
 async fn start_hosted_services(
     services: &[Arc<dyn IHostedService>],
     dispatch_runtime: &DispatchRuntime,
@@ -1214,16 +1322,46 @@ async fn start_hosted_services(
         return Ok(());
     }
     tracing::info!("Starting {} hosted service(s)...", services.len());
-    dispatch_runtime
+    let started = dispatch_runtime
         .run(async {
+            let mut started = 0usize;
             for svc in services {
-                svc.start().await?;
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(HOSTED_START_TIMEOUT_SECS),
+                    svc.start(),
+                )
+                .await
+                {
+                    Ok(Ok(())) => started += 1,
+                    Ok(Err(err)) => return Err((started, err)),
+                    Err(_) => {
+                        return Err((
+                            started,
+                            webx_core::error::Error::Internal(format!(
+                                "hosted service start timed out after {HOSTED_START_TIMEOUT_SECS}s"
+                            )),
+                        ))
+                    }
+                }
             }
-            Ok::<(), webx_core::error::Error>(())
+            Ok(started)
         })
-        .await?;
-    tracing::info!("All hosted services started.");
-    Ok(())
+        .await;
+
+    match started {
+        Ok(count) => {
+            tracing::info!("All {count} hosted service(s) started.");
+            Ok(())
+        }
+        Err((started, err)) => {
+            // Roll back the services that did start, newest first, so a failed
+            // startup does not leave pools/loops running.
+            for (index, svc) in services[..started].iter().enumerate().rev() {
+                stop_hosted_service(index, svc).await;
+            }
+            Err(err)
+        }
+    }
 }
 
 async fn stop_hosted_services(services: &[Arc<dyn IHostedService>]) {
@@ -1231,12 +1369,30 @@ async fn stop_hosted_services(services: &[Arc<dyn IHostedService>]) {
         return;
     }
     tracing::info!("Stopping {} hosted service(s)...", services.len());
-    for svc in services {
-        if let Err(e) = svc.stop().await {
-            tracing::warn!("Hosted service stop error: {}", e);
-        }
+    for (index, svc) in services.iter().enumerate().rev() {
+        stop_hosted_service(index, svc).await;
     }
     tracing::info!("All hosted services stopped.");
+}
+
+/// Stop one service with a timeout, logging (never propagating) failures.
+async fn stop_hosted_service(index: usize, svc: &Arc<dyn IHostedService>) {
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(HOSTED_STOP_TIMEOUT_SECS),
+        svc.stop(),
+    )
+    .await
+    {
+        Ok(Ok(())) => {}
+        Ok(Err(err)) => {
+            tracing::warn!(service_index = index, error = %err, "hosted service stop error")
+        }
+        Err(_) => tracing::error!(
+            service_index = index,
+            timeout_secs = HOSTED_STOP_TIMEOUT_SECS,
+            "hosted service stop timed out"
+        ),
+    }
 }
 
 async fn drain_connections(join_set: &mut JoinSet<()>, label: &str, mode: AppMode) {
@@ -1263,6 +1419,17 @@ async fn drain_connections(join_set: &mut JoinSet<()>, label: &str, mode: AppMod
 // URL parsing & binding helpers
 // ---------------------------------------------------------------------------
 
+/// Bind a TCP listener, turning an OS-level failure into a host error.
+///
+/// Binding happens before any accept loop starts, so a port conflict fails
+/// `run()`/`run_at()` with a non-zero exit instead of a log line and a silent
+/// `Ok(())`.
+async fn bind_listener(addr: &str, label: &str) -> Result<tokio::net::TcpListener> {
+    tokio::net::TcpListener::bind(addr).await.map_err(|err| {
+        webx_core::error::Error::Http(format!("failed to bind {label} on {addr}: {err}"))
+    })
+}
+
 /// Parse a URL string into (scheme, addr) pair.
 /// e.g., "https://0.0.0.0:5030" →("https", "0.0.0.0:5030")
 fn parse_url(url: &str) -> Result<(&str, String)> {
@@ -1278,11 +1445,12 @@ fn parse_url(url: &str) -> Result<(&str, String)> {
     }
 }
 
-/// Serve plain HTTP on the given address.
+/// Serve plain HTTP on an already-bound listener.
 #[allow(clippy::too_many_arguments)]
 async fn serve_http(
     addr: String,
-    shutdown: std::sync::Arc<tokio::sync::Notify>,
+    listener: tokio::net::TcpListener,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
     pipeline: Arc<MiddlewarePipeline>,
     router_handler: HandlerFn,
     dispatch_runtime: Arc<DispatchRuntime>,
@@ -1290,19 +1458,22 @@ async fn serve_http(
     body_limits: BodyLimits,
     max_connections: usize,
 ) {
-    let listener = match tokio::net::TcpListener::bind(&addr).await {
-        Ok(l) => l,
-        Err(e) => {
-            tracing::error!("Failed to bind HTTP on {}: {}", addr, e);
-            return;
-        }
-    };
-
     let sem = Arc::new(tokio::sync::Semaphore::new(max_connections));
     let mut join_set = JoinSet::new();
 
     loop {
+        // Check the stored flag first: a shutdown requested before this loop
+        // started (the documented `spawn(run); handle.shutdown()` pattern) must
+        // not be missed.
+        if *shutdown.borrow() {
+            tracing::info!("HTTP {}: stop accepting, draining...", addr);
+            break;
+        }
         tokio::select! {
+            _ = shutdown.changed() => {
+                tracing::info!("HTTP {}: stop accepting, draining...", addr);
+                break;
+            }
             accept_result = listener.accept() => {
                 let (stream, peer_addr) = match accept_result {
                     Ok(v) => v,
@@ -1326,6 +1497,7 @@ async fn serve_http(
                 let router_handler = router_handler.clone();
                 let dispatch_runtime = Arc::clone(&dispatch_runtime);
                 let body_limits = body_limits.clone();
+                let conn_shutdown = shutdown.clone();
 
                 join_set.spawn(async move {
                     let _permit = permit;
@@ -1367,17 +1539,27 @@ async fn serve_http(
                         }
                     });
 
-                    if let Err(err) = hyper::server::conn::http1::Builder::new()
-                        .serve_connection(io, svc_fn)
-                        .await
-                    {
-                        tracing::error!("Connection error: {}", err);
+                    let conn = hyper::server::conn::http1::Builder::new()
+                        .serve_connection(io, svc_fn);
+                    let mut conn = std::pin::pin!(conn);
+                    let mut conn_shutdown = conn_shutdown;
+                    tokio::select! {
+                        result = conn.as_mut() => {
+                            if let Err(err) = result {
+                                tracing::error!("Connection error: {}", err);
+                            }
+                        }
+                        _ = wait_for_shutdown(&mut conn_shutdown) => {
+                            // Let in-flight requests finish and answer with
+                            // `Connection: close` instead of aborting the socket
+                            // after the drain timeout.
+                            conn.as_mut().graceful_shutdown();
+                            if let Err(err) = conn.await {
+                                tracing::debug!(error = %err, "connection closed during shutdown");
+                            }
+                        }
                     }
                 });
-            }
-            _ = shutdown.notified() => {
-                tracing::info!("HTTP {}: stop accepting, draining...", addr);
-                break;
             }
         }
     }
@@ -1385,12 +1567,13 @@ async fn serve_http(
     drain_connections(&mut join_set, &format!("HTTP {}", addr), mode).await;
 }
 
-/// Serve HTTPS (TLS) on the given address.
+/// Serve HTTPS (TLS) on an already-bound listener.
 #[allow(clippy::too_many_arguments)]
 async fn serve_https(
     addr: String,
     acceptor: TlsAcceptor,
-    shutdown: std::sync::Arc<tokio::sync::Notify>,
+    listener: tokio::net::TcpListener,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
     pipeline: Arc<MiddlewarePipeline>,
     router_handler: HandlerFn,
     dispatch_runtime: Arc<DispatchRuntime>,
@@ -1398,19 +1581,19 @@ async fn serve_https(
     body_limits: BodyLimits,
     max_connections: usize,
 ) {
-    let listener = match tokio::net::TcpListener::bind(&addr).await {
-        Ok(l) => l,
-        Err(e) => {
-            tracing::error!("Failed to bind HTTPS on {}: {}", addr, e);
-            return;
-        }
-    };
-
     let sem = Arc::new(tokio::sync::Semaphore::new(max_connections));
     let mut join_set = JoinSet::new();
 
     loop {
+        if *shutdown.borrow() {
+            tracing::info!("HTTPS {}: stop accepting, draining...", addr);
+            break;
+        }
         tokio::select! {
+            _ = shutdown.changed() => {
+                tracing::info!("HTTPS {}: stop accepting, draining...", addr);
+                break;
+            }
             accept_result = listener.accept() => {
                 let (stream, peer_addr) = match accept_result {
                     Ok(v) => v,
@@ -1434,6 +1617,7 @@ async fn serve_https(
                 let router_handler = router_handler.clone();
                 let dispatch_runtime = Arc::clone(&dispatch_runtime);
                 let body_limits = body_limits.clone();
+                let conn_shutdown = shutdown.clone();
 
                 join_set.spawn(async move {
                     let _permit = permit;
@@ -1477,11 +1661,22 @@ async fn serve_https(
                                 }
                             });
 
-                            if let Err(err) = hyper::server::conn::http1::Builder::new()
-                                .serve_connection(io, svc_fn)
-                                .await
-                            {
-                                tracing::error!("TLS connection error: {}", err);
+                            let conn = hyper::server::conn::http1::Builder::new()
+                                .serve_connection(io, svc_fn);
+                            let mut conn = std::pin::pin!(conn);
+                            let mut conn_shutdown = conn_shutdown;
+                            tokio::select! {
+                                result = conn.as_mut() => {
+                                    if let Err(err) = result {
+                                        tracing::error!("TLS connection error: {}", err);
+                                    }
+                                }
+                                _ = wait_for_shutdown(&mut conn_shutdown) => {
+                                    conn.as_mut().graceful_shutdown();
+                                    if let Err(err) = conn.await {
+                                        tracing::debug!(error = %err, "TLS connection closed during shutdown");
+                                    }
+                                }
                             }
                         }
                         Err(e) => {
@@ -1489,10 +1684,6 @@ async fn serve_https(
                         }
                     }
                 });
-            }
-            _ = shutdown.notified() => {
-                tracing::info!("HTTPS {}: stop accepting, draining...", addr);
-                break;
             }
         }
     }

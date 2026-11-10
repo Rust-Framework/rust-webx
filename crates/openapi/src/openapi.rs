@@ -40,7 +40,7 @@ pub fn generate_openapi_spec(
         tags_set.insert(tag.clone());
 
         let mut parameters = Vec::new();
-        let mut has_body = false;
+        let mut body_params: Vec<ParamMeta> = Vec::new();
         let mut form_params: Vec<ParamMeta> = Vec::new();
 
         // An unmarked field (`source == ""`) is a body field on a method that
@@ -62,7 +62,7 @@ pub fn generate_openapi_spec(
                 // An upload endpoint describes its fields as multipart parts;
                 // the generic JSON body is not applicable.
                 "form" => form_params.push(param),
-                "body" => has_body = true,
+                "body" => body_params.push(param),
                 // Claims come from the principal, not from the request.
                 "claim" => {}
                 _ => {
@@ -105,14 +105,15 @@ pub fn generate_openapi_spec(
                     }
                 }
             });
-        } else if has_body {
+        } else if body_method && !body_params.is_empty() {
+            // Only write methods carry a JSON body. A read method (GET/DELETE/…)
+            // cannot bind these fields at runtime, so no request body is
+            // advertised for it.
             operation["requestBody"] = json!({
-                "required": true,
+                "required": body_params.iter().any(|param| param.required),
                 "content": {
                     "application/json": {
-                        "schema": {
-                            "type": "object",
-                        }
+                        "schema": body_schema(&body_params),
                     }
                 }
             });
@@ -218,6 +219,50 @@ fn form_schema(params: &[ParamMeta]) -> JsonValue {
         "properties": JsonValue::Object(properties),
         "required": required,
     })
+}
+
+/// Build the JSON request body schema from the field-level metadata.
+///
+/// Only entries carrying a `json_key` become named properties. A body field
+/// without one (`#[serde(flatten)]`) spreads its inner properties into the
+/// object, which this metadata cannot enumerate: those keys are reported via
+/// `additionalProperties: true` while the field's requiredness still counts
+/// towards `requestBody.required`.
+fn body_schema(params: &[ParamMeta]) -> JsonValue {
+    let mut properties = serde_json::Map::new();
+    let mut required = Vec::new();
+    let mut opaque = false;
+
+    for param in params {
+        match param.json_key {
+            Some(key) => {
+                properties.insert(key.to_string(), body_property_schema(param.type_hint));
+                if param.required {
+                    required.push(json!(key));
+                }
+            }
+            None => opaque = true,
+        }
+    }
+
+    let mut schema = json!({ "type": "object" });
+    if !properties.is_empty() {
+        schema["properties"] = JsonValue::Object(properties);
+        schema["required"] = json!(required);
+    }
+    if opaque {
+        schema["additionalProperties"] = json!(true);
+    }
+    schema
+}
+
+/// The schema of one JSON body property, from its type hint.
+fn body_property_schema(type_hint: &str) -> JsonValue {
+    match type_hint {
+        "binary" => json!({ "type": "string", "format": "binary" }),
+        "array" => json!({ "type": "array" }),
+        other => json!({ "type": other }),
+    }
 }
 
 /// Build a responses object based on the response type name.

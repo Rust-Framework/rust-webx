@@ -102,6 +102,7 @@ fn expand_endpoint(
                     source: "path",
                     type_hint: "string",
                     required: true,
+                    json_key: ::core::option::Option::None,
                 }
             }
         })

@@ -45,6 +45,52 @@ inventory::submit! {
     )
 }
 
+// A write endpoint: its request body fields become documented properties.
+inventory::submit! {
+    RouteEntry::new(
+        HttpMethod::Post,
+        "/api/blog",
+        "CreateBlogRequest",
+        "String",
+        TextRef::text("创建博客"),
+        TextRef::text("创建一篇博客"),
+        TextRef::key("endpoint.blog.category"),
+        &[],
+        &[],
+    )
+}
+
+// A write endpoint whose body has no required fields.
+inventory::submit! {
+    RouteEntry::new(
+        HttpMethod::Put,
+        "/api/settings",
+        "UpdateSettingsRequest",
+        "String",
+        TextRef::text("更新设置"),
+        TextRef::text("更新用户设置"),
+        TextRef::text(""),
+        &[],
+        &[],
+    )
+}
+
+// A read endpoint that (wrongly) declares body-only fields: the runtime cannot
+// bind them, so the spec must not advertise a request body either.
+inventory::submit! {
+    RouteEntry::new(
+        HttpMethod::Get,
+        "/api/legacy-body",
+        "LegacyBodyRequest",
+        "String",
+        TextRef::text("旧端点"),
+        TextRef::text(""),
+        TextRef::text(""),
+        &[],
+        &[],
+    )
+}
+
 inventory::submit! {
     RequestParamEntry {
         request_type: "SearchRequest",
@@ -54,14 +100,104 @@ inventory::submit! {
                 source: "query",
                 type_hint: "string",
                 required: false,
+                json_key: None,
             },
             ParamMeta {
                 name: "page",
                 source: "query",
                 type_hint: "integer",
                 required: false,
+                json_key: None,
             },
         ],
+    }
+}
+
+inventory::submit! {
+    RequestParamEntry {
+        request_type: "CreateBlogRequest",
+        params: &[
+            ParamMeta {
+                name: "title",
+                source: "body",
+                type_hint: "string",
+                required: true,
+                json_key: Some("title"),
+            },
+            ParamMeta {
+                name: "published",
+                source: "body",
+                type_hint: "boolean",
+                required: false,
+                json_key: Some("published"),
+            },
+            ParamMeta {
+                name: "tags",
+                source: "body",
+                type_hint: "array",
+                required: false,
+                json_key: Some("tags"),
+            },
+            // The struct field is `display_name`; the JSON key is renamed.
+            ParamMeta {
+                name: "display_name",
+                source: "body",
+                type_hint: "string",
+                required: true,
+                json_key: Some("displayName"),
+            },
+            // An unmarked field: the route method (POST) resolves it to the body.
+            ParamMeta {
+                name: "slug",
+                source: "",
+                type_hint: "string",
+                required: false,
+                json_key: Some("slug"),
+            },
+            // A `#[serde(flatten)]` field: no key of its own.
+            ParamMeta {
+                name: "meta",
+                source: "body",
+                type_hint: "object",
+                required: false,
+                json_key: None,
+            },
+        ],
+    }
+}
+
+inventory::submit! {
+    RequestParamEntry {
+        request_type: "UpdateSettingsRequest",
+        params: &[
+            ParamMeta {
+                name: "theme",
+                source: "body",
+                type_hint: "string",
+                required: false,
+                json_key: Some("theme"),
+            },
+            ParamMeta {
+                name: "notify",
+                source: "body",
+                type_hint: "boolean",
+                required: false,
+                json_key: Some("notify"),
+            },
+        ],
+    }
+}
+
+inventory::submit! {
+    RequestParamEntry {
+        request_type: "LegacyBodyRequest",
+        params: &[ParamMeta {
+            name: "payload",
+            source: "body",
+            type_hint: "object",
+            required: true,
+            json_key: None,
+        }],
     }
 }
 
@@ -143,4 +279,64 @@ fn category_becomes_the_openapi_tag() {
         zh["paths"]["/api/search"]["get"]["tags"],
         serde_json::json!(["Search"])
     );
+}
+
+// ---------------------------------------------------------------------------
+// JSON request body
+// ---------------------------------------------------------------------------
+
+#[test]
+fn request_body_documents_field_properties_and_requiredness() {
+    let spec = generate_openapi_spec("Test API", "1.0.0", &localizer("zh-CN"));
+    let request_body = &spec["paths"]["/api/blog"]["post"]["requestBody"];
+
+    assert_eq!(request_body["required"], true);
+    let schema = &request_body["content"]["application/json"]["schema"];
+    assert_eq!(schema["type"], "object", "got {request_body}");
+
+    // Every field becomes a property with its JSON type.
+    assert_eq!(schema["properties"]["title"]["type"], "string");
+    assert_eq!(schema["properties"]["published"]["type"], "boolean");
+    assert_eq!(schema["properties"]["tags"]["type"], "array");
+    // The JSON key wins over the Rust field name (`display_name` → `displayName`).
+    assert_eq!(schema["properties"]["displayName"]["type"], "string");
+    assert!(schema["properties"]["display_name"].is_null());
+    // An unmarked field on a write method is a body property too.
+    assert_eq!(schema["properties"]["slug"]["type"], "string");
+    // A flattened field has no property of its own; unknown keys stay allowed.
+    assert!(schema["properties"]["meta"].is_null());
+    assert_eq!(schema["additionalProperties"], true);
+
+    // Requiredness comes from the fields, not from a constant.
+    assert_eq!(
+        schema["required"],
+        serde_json::json!(["title", "displayName"])
+    );
+
+    // The JSON endpoint must not advertise a multipart body.
+    assert!(request_body["content"]["multipart/form-data"].is_null());
+}
+
+#[test]
+fn request_body_required_follows_the_fields() {
+    let spec = generate_openapi_spec("Test API", "1.0.0", &localizer("zh-CN"));
+    let request_body = &spec["paths"]["/api/settings"]["put"]["requestBody"];
+
+    // No required body field → the body itself is optional.
+    assert_eq!(request_body["required"], false);
+    let schema = &request_body["content"]["application/json"]["schema"];
+    assert_eq!(schema["properties"]["theme"]["type"], "string");
+    assert_eq!(schema["properties"]["notify"]["type"], "boolean");
+    assert_eq!(schema["required"], serde_json::json!([]));
+}
+
+#[test]
+fn read_methods_do_not_advertise_a_request_body() {
+    let spec = generate_openapi_spec("Test API", "1.0.0", &localizer("zh-CN"));
+    let operation = &spec["paths"]["/api/legacy-body"]["get"];
+
+    // A GET cannot bind a JSON body, so neither a request body nor the
+    // body-only fields are documented.
+    assert!(operation["requestBody"].is_null());
+    assert!(operation["parameters"].is_null());
 }

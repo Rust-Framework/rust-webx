@@ -424,6 +424,18 @@ pub trait IHttpContext: IClaimsExt + Send {
     fn request_mut(&mut self) -> &mut dyn IHttpRequest;
     fn response(&self) -> &dyn IHttpResponse;
     fn response_mut(&mut self) -> &mut dyn IHttpResponse;
+
+    /// Take a request rejection recorded while the context was built.
+    ///
+    /// The host records failures it can detect from the request line alone —
+    /// currently an oversized declared `Content-Length` — instead of writing a
+    /// response eagerly. The request then still travels through the middleware
+    /// pipeline (CORS, security headers, access log, metrics, rate limiting)
+    /// and the innermost handler turns the value into the normal error
+    /// response. A context without such a record returns `None`.
+    fn take_early_error(&mut self) -> Option<crate::error::Error> {
+        None
+    }
 }
 
 /// HTTP request abstraction.
@@ -475,7 +487,8 @@ pub trait IHttpRequest: Send {
     /// Return the request body as a UTF-8 string.
     async fn body_text(&mut self) -> Result<String> {
         let bytes = self.body_bytes().await?;
-        String::from_utf8(bytes).map_err(|e| crate::error::Error::Http(e.to_string()))
+        String::from_utf8(bytes)
+            .map_err(|_| crate::error::Error::Validation("request body is not valid UTF-8".into()))
     }
 
     /// The request's media type, without parameters (e.g. `"multipart/form-data"`).
@@ -615,11 +628,15 @@ fn percent_encode_ext_value(value: &str) -> String {
 }
 
 /// Helper: build a JSON response by serializing a value and writing it.
+///
+/// A serialization failure is a server-side defect in the response DTO, so it
+/// surfaces as [`Error::ResponseSerialization`] (500), not the request-parse
+/// [`Error::Serialization`] (400).
 pub async fn write_json_response<T: serde::Serialize + Send>(
     resp: &mut dyn IHttpResponse,
     value: &T,
 ) -> Result<()> {
-    let json = serde_json::to_vec(value)?;
+    let json = serde_json::to_vec(value).map_err(crate::error::Error::ResponseSerialization)?;
     resp.set_header("content-type", "application/json");
     resp.write_bytes(json).await
 }

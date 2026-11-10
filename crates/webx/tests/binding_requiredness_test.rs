@@ -1043,3 +1043,40 @@ async fn openapi_required_flags_match_runtime() {
     assert!(!header_flag("X-Optional"));
     assert!(!header_flag("X-List"));
 }
+
+#[tokio::test]
+async fn openapi_documents_json_body_fields() {
+    let base = spawn_host().await;
+    let spec: serde_json::Value = reqwest::get(format!("{base}/api/openapi.json"))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    // A write endpoint documents each body field as a property of the body.
+    let request_body = &spec["paths"]["/req/body/{id}"]["put"]["requestBody"];
+    assert_eq!(request_body["required"], true, "got {request_body}");
+    let schema = &request_body["content"]["application/json"]["schema"];
+    assert_eq!(schema["type"], "object", "got {request_body}");
+    assert_eq!(schema["properties"]["name"]["type"], "string");
+    assert_eq!(schema["properties"]["nickname"]["type"], "string");
+    assert_eq!(schema["properties"]["tags"]["type"], "array");
+    assert_eq!(schema["properties"]["note"]["type"], "string");
+    assert_eq!(schema["properties"]["extra"]["type"], "array");
+    // Only the non-`Option`, no-`#[serde(default)]` field is required.
+    assert_eq!(schema["required"], serde_json::json!(["name"]));
+    assert!(request_body["content"]["multipart/form-data"].is_null());
+
+    // A read method has no body: body-only fields must not fake one.
+    assert!(spec["paths"]["/req/composite"]["get"]["requestBody"].is_null());
+    assert!(spec["paths"]["/req/composite-optional"]["get"]["requestBody"].is_null());
+
+    // Multipart endpoints keep their form schema and gain no JSON body.
+    let form_body = &spec["paths"]["/req/form"]["post"]["requestBody"];
+    assert_eq!(
+        form_body["content"]["multipart/form-data"]["schema"]["type"],
+        "object"
+    );
+    assert!(form_body["content"]["application/json"].is_null());
+}

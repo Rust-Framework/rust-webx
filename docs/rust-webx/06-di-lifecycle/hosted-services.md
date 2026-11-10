@@ -18,12 +18,13 @@ graph LR
     B --> C[HTTP 监听启动]
     C --> D[服务运行中]
     D --> E[收到 shutdown 信号]
-    E --> F[stop × N 按注册顺序]
-    F --> G[连接排空]
+    E --> F[连接排空]
+    F --> G[stop × N 逆序]
 ```
 
-- `start()` 在 HTTP 监听器启动**之前**执行
-- `stop()` 在优雅关闭时按**与启动相同的顺序**执行
+- `start()` 在 HTTP 监听器启动**之前**执行；任一服务 `start()` 失败时，已启动的服务按**逆序**回滚 `stop()`，然后 `run()` 返回错误
+- 监听器**先绑定后启动**：端口占用等绑定错误让 `run()`/`run_at()` 直接返回 `Err`（进程非 0 退出），不会静默"启动成功"
+- `stop()` 在优雅关闭、连接排空之后按**启动的逆序**执行（最后启动的最先停止），每个服务最多等待 30s，超时只记日志、不阻塞进程
 - `stop()` 有默认空实现，不需要关闭逻辑可省略
 
 ## 典型用途
@@ -86,12 +87,12 @@ Host::builder()
 
 ## 多个 HostedService
 
-按注册顺序启动，也按注册顺序停止：
+按注册顺序启动，按**逆序**停止（依赖方向：先启动的最晚停止）：
 
 ```
 注册顺序: DbInit → CacheWarmup → QueueConsumer
 启动顺序: DbInit → CacheWarmup → QueueConsumer
-停止顺序: DbInit → CacheWarmup → QueueConsumer
+停止顺序: QueueConsumer → CacheWarmup → DbInit
 ```
 
 ## 小结

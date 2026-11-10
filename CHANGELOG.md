@@ -3,7 +3,7 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
-## [Unreleased] — 0.9.0 (in progress)
+## [0.9.0] — 2026-11-10
 
 ### Breaking
 

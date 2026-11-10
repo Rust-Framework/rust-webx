@@ -2103,7 +2103,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "async-trait",
  "hyper",
@@ -2124,7 +2124,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-build"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "brotli",
  "mime_guess",
@@ -2134,7 +2134,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-core"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2151,7 +2151,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-host"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2192,7 +2192,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-macros"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2201,7 +2201,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-openapi"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "inventory",
  "rust-webx-core",
@@ -2210,7 +2210,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-spa"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "async-trait",
  "brotli",

@@ -55,6 +55,7 @@
 - [路由宏详解](05-request-pattern/route-macros.md)
 - [Handler 注册策略](05-request-pattern/handler-registration.md)
 - [参数绑定与序列化](05-request-pattern/parameter-binding.md)
+- [用户身份与多租户](05-request-pattern/user-identity.md)
 - [文件上传与下载](05-request-pattern/file-upload-download.md)
 - [错误处理与 ProblemDetails](05-request-pattern/error-handling.md)
 

@@ -30,7 +30,7 @@ rust-webx 推荐的业务应用分层：
 
 ```rust
 // contracts/auth.rs
-#[derive(Default, Deserialize, WebxRequestMeta)]
+#[derive(WebxRequestMeta)]
 pub struct LoginRequest {
     pub email: String,
     pub password: String,

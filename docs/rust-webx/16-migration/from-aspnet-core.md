@@ -108,7 +108,37 @@ Host::builder()
 | `INotification` | `IEventRequest` + `publish()` |
 | `IPipelineBehavior` | `IPipelineBehavior` |
 
-## 步骤 4：配置迁移
+## 步骤 4：身份获取（ControllerBase.User → CurrentUser）
+
+ASP.NET Core 里通常这样拿身份：
+
+```csharp
+var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+var tenant = User.FindFirst("tenant_id")?.Value;
+var isAdmin = User.IsInRole("admin");
+```
+
+rust-webx 把身份变成 Request 的字段：
+
+```rust
+#[derive(WebxRequestMeta)]
+pub struct CreateOrderRequest {
+    #[fromclaim]
+    pub user: CurrentUser,   // 未登录 → 401
+    pub sku: String,
+}
+
+// handler
+let user = req.require_user()?;
+let user_id = &user.id;
+let tenant = &user.tenant_id;
+let is_admin = user.is_in_role("admin");
+```
+
+Handler 不需要 `HttpContext`；未登录请求在绑定阶段直接 401。
+详见[用户身份与多租户](../05-request-pattern/user-identity.md)。
+
+## 步骤 5：配置迁移
 
 `appsettings.json` 格式几乎直接复用，注意字段名大小写：
 
@@ -121,7 +151,7 @@ Host::builder()
 }
 ```
 
-## 步骤 5：IHostedService
+## 步骤 6：IHostedService
 
 API 完全相同：
 

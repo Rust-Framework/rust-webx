@@ -8,9 +8,9 @@
 
 ```rust
 use webx::*;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize)]
 pub struct UserDto {
     pub id: String,
     pub name: String,
@@ -18,14 +18,14 @@ pub struct UserDto {
 }
 
 // ── List ──
-#[derive(Default, Deserialize, WebxRequestMeta)]
+#[derive(WebxRequestMeta)]
 pub struct ListUsersRequest;
 
 #[get("/api/users")]
 impl IRequest<Vec<UserDto>> for ListUsersRequest {}
 
 // ── Get by ID ──
-#[derive(Default, Deserialize, WebxRequestMeta)]
+#[derive(WebxRequestMeta)]
 pub struct GetUserRequest {
     #[frompath]
     pub id: String,
@@ -35,7 +35,7 @@ pub struct GetUserRequest {
 impl IRequest<UserDto> for GetUserRequest {}
 
 // ── Create ──
-#[derive(Default, Deserialize, WebxRequestMeta)]
+#[derive(WebxRequestMeta)]
 pub struct CreateUserRequest {
     pub name: String,
     pub email: String,
@@ -45,7 +45,7 @@ pub struct CreateUserRequest {
 impl IRequest<UserDto> for CreateUserRequest {}
 
 // ── Update ──
-#[derive(Default, Deserialize, WebxRequestMeta)]
+#[derive(WebxRequestMeta)]
 pub struct UpdateUserRequest {
     #[frompath]
     pub id: String,
@@ -57,7 +57,7 @@ pub struct UpdateUserRequest {
 impl IRequest<UserDto> for UpdateUserRequest {}
 
 // ── Delete ──
-#[derive(Default, Deserialize, WebxRequestMeta)]
+#[derive(WebxRequestMeta)]
 pub struct DeleteUserRequest {
     #[frompath]
     pub id: String,
@@ -187,6 +187,35 @@ async fn handle(&mut self, req: GetUserRequest) -> Result<UserDto> {
 
 `Error::NotFound` 自动映射为 HTTP 404，响应体为 RFC 7807 `application/problem+json`（`type` / `title` / `status` / `detail`）。
 
+## 需要登录的接口：身份直接进 Request
+
+用户 CRUD 本身是公开的。给「修改个人资料」加一条需要登录的端点时，不需要在 Handler 里解析 token：
+
+```rust
+#[derive(WebxRequestMeta)]
+pub struct UpdateProfileRequest {
+    #[fromclaim]
+    pub user: CurrentUser,       // 未登录 → 401
+    pub display_name: String,    // JSON body
+}
+
+#[put("/api/profile")]
+#[authorize]
+impl IRequest<UserDto> for UpdateProfileRequest {}
+```
+
+```rust
+async fn handle(&mut self, req: UpdateProfileRequest) -> Result<UserDto> {
+    let user = req.require_user()?;
+    self.store
+        .update_profile(&user.id, &user.tenant_id, req.display_name)
+        .await
+}
+```
+
+如果端点允许游客访问（例如商品详情要显示「是否已收藏」），把字段写成 `Option<CurrentUser>`，
+未登录时就是 `None`，不会 401。完整场景见[用户身份与多租户](../05-request-pattern/user-identity.md)。
+
 ## 设计要点
 
 | 实践 | 说明 |
@@ -196,6 +225,8 @@ async fn handle(&mut self, req: GetUserRequest) -> Result<UserDto> {
 | 请求类型派生 | 每个 Request 都必须派生 `WebxRequestMeta`（绑定 + OpenAPI 元数据） |
 | 路径参数 | 用 `#[frompath]` 显式声明；GET 的未标记字段先查 query，再回退到路径 |
 | Body 字段 | POST/PUT/PATCH 的未标记字段从 JSON body 绑定；`Option<T>` 表示可选 |
+| 身份获取 | 需要登录时用 `#[fromclaim] CurrentUser`，Handler 只读 `req.user` |
+| 序列化派生 | 请求类型只需 `WebxRequestMeta`，不必再派生 `Deserialize` |
 
 ## 小结
 

@@ -86,7 +86,7 @@ impl IRequest<ProfileView> for UpdateProfileRequest {}
 
 Handler 里 `req.user.id`、`req.user.tenant_id`、`req.user.is_in_role("admin")` 随取随用；
 匿名可访问的端点用 `Option<CurrentUser>`。详见
-[参数绑定 · 用户身份](../05-request-pattern/parameter-binding.md#用户身份currentuser)。
+[用户身份与多租户](../05-request-pattern/user-identity.md)。
 
 ## 动态授权：IDynamicAuthorizer
 

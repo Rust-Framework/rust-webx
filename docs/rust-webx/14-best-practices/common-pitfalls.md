@@ -92,6 +92,16 @@ let all = catalog.all();                        // &[EndpointDescriptor]
 - 语言来自全局 `Culture.Default`，不跟随请求头；
 - `#[category]` 会成为 OpenAPI `tag`；未设置时按路径推导 tag。
 
+## 11. 身份与租户处理
+
+| 反模式 | 后果 | 正确写法 |
+|--------|------|----------|
+| 每个 Handler 里 `ctx.claims()` 再解析 `sub`/`tenant` | 样板重复，容易漏租户条件 | `#[fromclaim] user: CurrentUser` |
+| 租户取自 query/body | 客户端可自选租户，数据越权 | `user.tenant_id` |
+| 匿名接口用 `CurrentUser` | 未登录直接 401 | `Option<CurrentUser>` |
+
+完整的登录、匿名、角色、多租户场景见[用户身份与多租户](../05-request-pattern/user-identity.md)。
+
 ## 排查流程
 
 ```

@@ -198,7 +198,7 @@ pub struct UploadRequest {
 ```rust
 use webx::*;
 
-#[derive(Default, Deserialize, WebxRequestMeta)]
+#[derive(WebxRequestMeta)]
 pub struct DownloadReportRequest {
     #[frompath]
     pub id: String,

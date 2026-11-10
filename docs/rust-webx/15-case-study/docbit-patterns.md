@@ -100,6 +100,33 @@ impl From<Blog> for BlogPostSummary { /* ... */ }
 
 contracts 不引用 domain；domain 可通过 `use docbit_contracts::…` 复用枚举。
 
+## 模式 7：身份作为请求字段
+
+早期 docbit 端点用 `#[claims]` 字段 + `req.claims` 手动读身份。新端点统一用 `CurrentUser`：
+
+```rust
+// contracts/comment.rs
+#[derive(WebxRequestMeta)]
+pub struct CreateCommentRequest {
+    #[fromclaim]
+    pub user: CurrentUser,
+    pub blog_id: String,
+    pub content: String,
+}
+
+// handlers/comment.rs
+let user = req.require_user()?;
+let comment = Comment {
+    user_id: user.id.clone(),
+    user_name: user.display_name().to_string(),
+    content: req.content,
+    ..Default::default()
+};
+```
+
+好处：`401`、空值、角色判断都在绑定层完成；多租户模块用 `user.tenant_id` 过滤，不再依赖每个查询自觉。
+完整场景见[用户身份与多租户](../05-request-pattern/user-identity.md)。
+
 ## 新项目检查清单
 
 见 [代码审查清单](../14-best-practices/code-review-checklist.md) 与 [职责归属与边界](../12-project-structure/responsibility-division.md)。

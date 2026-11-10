@@ -40,13 +40,30 @@ sequenceDiagram
     end
 ```
 
-## 在 Handler 中访问 Claims
+## 在 Handler 中读取身份
+
+首选把身份声明为 Request 字段，Handler 不接触 `IHttpContext`（见[用户身份与多租户](../05-request-pattern/user-identity.md)）：
 
 ```rust
-// JwtClaims 实现 IClaims
+#[derive(WebxRequestMeta)]
+pub struct MeRequest {
+    #[fromclaim]
+    pub user: CurrentUser,   // 未登录 → 401
+}
+
+#[get("/api/me")]
+impl IRequest<UserView> for MeRequest {}
+
+// Handler
+let user = req.require_user()?;
+println!("{} / {:?}", user.id, user.roles);
+```
+
+只有需要完整 claim map 的高级场景才直接读上下文：
+
+```rust
 let claims = ctx.claims().unwrap();
 println!("User: {}", claims.subject());
-println!("Roles: {:?}", claims.roles());
 ```
 
 ## 签发 Token
@@ -67,6 +84,7 @@ Docbit 的 `LoginHandler` 是完整示例。
 
 ## 小结
 
-`add_authentication()` + `Jwt.Secret` 配置即可启用 JWT 认证，Claims 通过 `IHttpContext` 存取。
+`add_authentication()` + `Jwt.Secret` 配置即可启用 JWT 认证。业务代码优先通过 Request 的
+`CurrentUser` 字段拿身份，而不是直接操作 `IHttpContext`。
 
 下一节：[基于资源的授权](resource-authorization.md)

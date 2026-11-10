@@ -20,6 +20,7 @@ pub enum Error {
     Conflict(String),
     PayloadTooLarge(String),
     UnsupportedMediaType(String),
+    Problem(Box<ProblemDetails>),   // 绑定/校验失败，原样写出
 }
 ```
 
@@ -41,6 +42,7 @@ pub enum Error {
 | `Conflict` | 409 | 状态冲突 / 并发冲突 |
 | `PayloadTooLarge` | 413 | 请求体或上传文件超限 |
 | `UnsupportedMediaType` | 415 | 请求内容类型不受支持 |
+| `Problem(details)` | `details.status` | 字段级校验/绑定失败，携带 `errors` |
 
 ## 默认错误响应格式
 
@@ -82,19 +84,32 @@ let data = self.external_api.fetch().await
 
 ## ProblemDetails（RFC 7807）
 
-框架支持标准化问题详情：
+框架支持标准化问题详情；同一字段的多条错误会合并进 `errors` 数组：
 
 ```rust
-use webx::{ProblemDetails, FieldError};
+use webx::{FieldError, ProblemDetails};
 
-let problem = ProblemDetails::validation(vec![
+return Err(ProblemDetails::validation(vec![
     FieldError::new("email", "Invalid format"),
-]);
+    FieldError::new("email", "Already registered"),
+])
+.to_error());
+```
+
+响应：
+
+```json
+{
+  "title": "Validation Failed",
+  "status": 400,
+  "detail": "One or more validation errors occurred",
+  "errors": { "email": ["Invalid format", "Already registered"] }
+}
 ```
 
 `ProblemDetails` 还提供 `not_found(...)`、`with_detail(...)`、`with_instance(...)` 与 `to_error()`。
-
-适用于需要结构化错误信息的公共 API。
+参数绑定失败产生的也是 `Error::Problem`，因此客户端拿到的 `errors` 结构与手动校验完全一致
+（见[参数绑定](parameter-binding.md#错误响应)）。
 
 ## 错误处理最佳实践
 

@@ -153,7 +153,7 @@ struct PermissionSync {
 只返回 `EndpointDescriptor`（`name` / `description` / `category` 是 `TextRef { key, text }`）：
 
 ```rust
-#[derive(Default, Deserialize, WebxRequestMeta)]
+#[derive(WebxRequestMeta)]
 struct ListEndpointsRequest;
 
 #[get("/api/endpoints")]

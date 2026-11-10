@@ -7,7 +7,6 @@
 ```
 docs/
 ├── README.md           # 本文件
-├── ARCHITECTURE_REMEDIATION.md
 └── rust-webx/          # 唯一提交到 git 的手册（Docbit slug: rust-webx）
     ├── FOREWORD.md
     ├── INDEX.md

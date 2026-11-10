@@ -9,7 +9,6 @@
 ```rust
 // contracts/docs.rs — 定义「对外承诺什么」
 
-use serde::Deserialize;
 use webx::*;
 
 /// 文档读取服务接口 — 与 Request 同级，同属契约层
@@ -19,7 +18,7 @@ pub trait IDocumentService: Send + Sync {
     fn content(&self, work: &str, path: &str) -> std::result::Result<DocContent, String>;
 }
 
-#[derive(Default, Deserialize, WebxRequestMeta)]
+#[derive(WebxRequestMeta)]
 pub struct GetDocIndexRequest {
     #[frompath]
     pub work: String,
@@ -35,6 +34,8 @@ impl IRequest<DocIndex> for GetDocIndexRequest {}
 - 每个请求结构体都派生 `WebxRequestMeta`；字段用 `#[frompath]` / `#[fromquery]` /
   `#[frombody]` / `#[fromform]` / `#[fromheader]` / `#[fromclaim]` 声明来源，
   绑定与 OpenAPI 共用这一处声明
+- 需要登录的请求把身份写成 `#[fromclaim] user: CurrentUser`，Handler 直接读 `req.user`，
+  见[用户身份与多租户](../05-request-pattern/user-identity.md)
 - 路由宏、`#[authorize]`、`#[display]` / `#[description]` / `#[category]` 等元数据在此声明
 - 是 OpenAPI 与 `IEndpointCatalog` 的共同数据源；团队讨论 API 时**只看 contracts**
 - **不含** `async fn` 业务实现、数据库访问

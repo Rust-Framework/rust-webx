@@ -21,6 +21,7 @@
 | 模块间强耦合 | `IMediator::send()` 调度请求，`publish()` 发布事件 |
 | 错误与 HTTP 状态码映射分散 | 统一 `Error` 类型 + 内置异常中间件 |
 | 认证授权各自为政 | `add_authentication()` + `#[authorize]` 声明式授权 |
+| 身份/租户在每个 Handler 里重复解析 | `#[fromclaim] CurrentUser` 把身份变成 Request 字段，绑定层统一 401 与租户信息 |
 | 权限/菜单与 API 文档各自维护 | `IEndpointCatalog` 从同一份路由元数据投影权限、菜单与 OpenAPI |
 | 文案散落在代码里、无法统一语言 | `#[display]` / `#[description]` / `#[category]` 资源键 + 全局 `Culture.Default` |
 
@@ -119,6 +120,25 @@ Handler 不直接调用彼此，而是通过 `IMediator` 调度。这带来：
 - `appsettings.json` 配置体系
 - `IHostedService` 后台服务生命周期（数据迁移、种子数据）
 - 健康检查、TLS、优雅关闭
+
+### 4. 身份即请求字段
+
+需要登录的 Request 把身份声明成普通字段，Handler 不再解析 token：
+
+```rust
+#[derive(WebxRequestMeta)]
+pub struct CreateOrderRequest {
+    #[fromclaim]
+    pub user: CurrentUser,   // 未登录 → 401
+    pub sku: String,
+}
+
+let user = req.require_user()?;
+// user.id / user.tenant_id / user.roles
+```
+
+标准身份包含用户标识、名称、邮箱、租户、角色与权限；匿名接口用 `Option<CurrentUser>`。
+详见[用户身份与多租户](../05-request-pattern/user-identity.md)。
 
 ## 框架边界：它不是什么
 

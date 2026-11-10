@@ -209,6 +209,13 @@
               "difficulty": "intermediate"
             },
             {
+              "id": "user-identity",
+              "title": "用户身份与多租户",
+              "summary": "CurrentUser、登录/匿名/角色/租户隔离场景",
+              "readingTime": 12,
+              "difficulty": "intermediate"
+            },
+            {
               "id": "file-upload-download",
               "title": "文件上传与下载",
               "summary": "多部分表单解析、流式读写与断点续传",

@@ -34,12 +34,20 @@ Error::Internal(format!("SQL error: {}", db_err))
 ## DTO 设计
 
 ```rust
-// 请求 DTO：只包含输入字段
-#[derive(Default, Deserialize, WebxRequestMeta)]
+// 请求 DTO：只包含输入字段；只需派生 WebxRequestMeta
+#[derive(WebxRequestMeta)]
 pub struct CreateUserRequest {
     pub name: String,
     pub email: String,
     // 不包含 id、created_at 等系统字段
+}
+
+// 需要登录的请求：身份作为字段，而不是在 Handler 里解析 claims
+#[derive(WebxRequestMeta)]
+pub struct UpdateProfileRequest {
+    #[fromclaim]
+    pub user: CurrentUser,
+    pub display_name: String,
 }
 
 // 响应 DTO：包含输出字段

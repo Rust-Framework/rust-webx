@@ -27,7 +27,8 @@
 | `[FromRoute]` | `#[frompath]`（字段名与 `{name}` 一致；未标注字段也优先匹配路径） | 路径参数 |
 | `[FromQuery]` | `#[fromquery]`（未标注字段在非 body 方法上按 query 绑定） | 查询参数 |
 | `[FromHeader]` | `#[fromheader("X-Name")]` | 请求头 |
-| `User.FindFirst(...)` | `#[fromclaim("key")]` | 认证声明 |
+| `User` / `ClaimsPrincipal` | `CurrentUser`（`#[fromclaim]` 字段） | 统一身份：id/name/email/tenant/roles |
+| `User.FindFirst("sub")` | `user.id` 或 `#[fromclaim("sub")]` | 标准身份优先，特殊 claim 用键名 |
 | `[FromForm]` + `IFormFile` | 请求结构体字段声明为 `FormFile` | multipart 上传 |
 | `List<IFormFile>` | `Vec<FormFile>` | 多文件上传 |
 | `IFormFile.CopyToAsync()` | `FormFile::save_as()` / `copy_to()` | 落盘 |

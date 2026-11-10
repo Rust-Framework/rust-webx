@@ -23,6 +23,7 @@ use webx_core::error::{Error, Result as LrwfResult};
 use webx_core::handler::{IEventHandler, IRequestHandler};
 use webx_core::mediator::Mediator;
 use webx_core::mediator::{IEventRequest, IMediator, IRequest};
+use webx_core::route::ext::IServiceCollectionExt;
 use webx_core::route::scan::HandlerRegistration;
 
 // --- Request / Response Types ---
@@ -583,4 +584,122 @@ async fn mediator_send_pipeline_empty_chain_works() {
 
     assert_eq!(rsp.source, "handler");
     assert_eq!(rsp.message, "from-handler");
+}
+
+// --- #21: constructor injection into pipeline behaviors (`add_pipeline_with`) ---
+//
+// Behaviors are singletons, so their dependencies can only be taken while they
+// are constructed — `add_pipeline_with` hands the factory the DI resolver for
+// exactly that. Before the fix the resolver was dropped and only `Default`
+// zero-argument behaviors could be registered.
+
+/// A dependency the behavior receives through the container.
+struct BehaviorDependency {
+    source: String,
+}
+
+/// Rewrites the response's `source` with the value of its injected dependency,
+/// proving the behavior was constructed by the resolver.
+struct InjectedDependencyBehavior {
+    source: String,
+}
+
+#[async_trait::async_trait]
+impl IPipelineBehavior for InjectedDependencyBehavior {
+    async fn handle(
+        &self,
+        req: Box<dyn std::any::Any + Send>,
+        next: BoxedNextFn,
+    ) -> LrwfResult<Box<dyn std::any::Any + Send>> {
+        let response = next(req).await?;
+        let mut typed = *response
+            .downcast::<BehaviorProbeResponse>()
+            .map_err(|_| Error::Internal("unexpected response type".into()))?;
+        typed.source = self.source.clone();
+        Ok(Box::new(typed) as Box<dyn std::any::Any + Send>)
+    }
+}
+
+#[tokio::test]
+async fn mediator_send_pipeline_behavior_gets_constructor_injected_dependencies() {
+    let provider = ServiceCollection::new()
+        .instance(Arc::new(BehaviorDependency {
+            source: "injected-by-di".into(),
+        }))
+        .add_pipeline_with(|resolver| {
+            // `&dyn IServiceResolver` is object-safe: resolve type-erased.
+            let dependency: Arc<BehaviorDependency> = resolver
+                .get_any(std::any::type_name::<BehaviorDependency>())
+                .and_then(|service| service.downcast::<Arc<BehaviorDependency>>().ok())
+                .map(|service| Arc::clone(&*service))
+                .expect("register BehaviorDependency before the pipeline");
+            Arc::new(InjectedDependencyBehavior {
+                source: dependency.source.clone(),
+            }) as Arc<dyn IPipelineBehavior>
+        })
+        .build()
+        .expect("provider must build");
+
+    let mediator = Mediator::new(provider);
+    let rsp = mediator
+        .send(BehaviorProbeRequest)
+        .await
+        .expect("send failed");
+
+    assert_eq!(rsp.message, "from-handler");
+    assert_eq!(
+        rsp.source, "injected-by-di",
+        "the behavior must run with the dependency injected through the resolver"
+    );
+}
+
+// --- #21: a short-circuit with the wrong response type must be explainable ---
+
+/// Short-circuits with `()` although the handler returns `BehaviorProbeResponse`.
+struct WrongResponseTypeBehavior;
+
+#[async_trait::async_trait]
+impl IPipelineBehavior for WrongResponseTypeBehavior {
+    async fn handle(
+        &self,
+        _req: Box<dyn std::any::Any + Send>,
+        _next: BoxedNextFn,
+    ) -> LrwfResult<Box<dyn std::any::Any + Send>> {
+        Ok(Box::new(()))
+    }
+}
+
+#[tokio::test]
+async fn mediator_send_pipeline_behavior_wrong_response_type_is_explained() {
+    let provider = ServiceCollection::new()
+        .singleton::<dyn IPipelineBehavior>(|_| {
+            Arc::new(WrongResponseTypeBehavior) as Arc<dyn IPipelineBehavior>
+        })
+        .build()
+        .expect("provider must build");
+    let mediator = Mediator::new(provider);
+
+    let err = mediator
+        .send(BehaviorProbeRequest)
+        .await
+        .expect_err("a response of the wrong type must fail loudly");
+
+    let message = err.to_string();
+    assert!(
+        message.contains("expected"),
+        "the error must name the expected type: {message}"
+    );
+    assert!(
+        message.contains(std::any::type_name::<BehaviorProbeResponse>()),
+        "the error must include the handler's response type: {message}"
+    );
+    assert!(
+        message.contains("Box::new(())") && message.contains("next"),
+        "the error must explain the fix (return the handler's type or call next): {message}"
+    );
+    assert_eq!(
+        err.status_code(),
+        500,
+        "a broken pipeline is a server error"
+    );
 }

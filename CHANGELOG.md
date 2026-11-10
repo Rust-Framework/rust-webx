@@ -67,6 +67,29 @@ All notable changes to **rust-webx** are documented in this file.
   (`impl IRequest<T> for contracts::ListOrdersRequest`) and same-named request types
   in different modules no longer lose or mix up their parameter documentation;
   string keys remain only as a fallback for hand-written `RouteEntry::new` entries.
+- **User middleware defaults to the after-authentication slot.** `use_middleware`
+  / `use_middleware_with` (and DI-registered `IMiddleware`) now run after JWT, so a
+  middleware that reads `ctx.claims()` sees the principal — the framework's own
+  `RequestTracing` previously logged `anon` for every production request. Explicit
+  positions use `use_middleware_at` / `use_middleware_with_at` with the new
+  `MiddlewareSlot::{BeforeCors, AfterAuth, AfterSpa}`. Pipeline order is now
+  SecurityHeaders → RequestId → user(BeforeCors) → CORS → Metrics → RateLimit →
+  auth → user(AfterAuth) → SPA → user(AfterSpa) → Router, so 429/413 responses
+  carry CORS headers and rate-limited requests are counted.
+- **Hosted services run inside a DI scope.** Each `IHostedService::start`/`stop`
+  gets a fresh scope: `dispatch_provider().get_owned::<DbContext>()` resolves
+  scoped dependencies against that scope and they are disposed when the call
+  returns, instead of being cached on the root provider for the process lifetime.
+- **`add_pipeline_with` gives pipeline behaviors real constructor injection.**
+  `add_pipeline` always required `Default` and discarded the DI resolver, so the
+  documented "behaviors resolve dependencies via constructor injection" was a
+  no-op. The new
+  `add_pipeline_with(|resolver| Arc::new(MyBehavior::new(...)) as Arc<dyn IPipelineBehavior>)`
+  receives the resolver at construction time (capture an `Arc` in the closure for
+  the simple case; during DI build-time validation the portable resolver call is
+  `resolver.get_any(type_name::<T>())` + downcast). A behavior that short-circuits
+  with a different response type now produces an error naming the expected type
+  and the fix instead of a generic "response type mismatch".
 - **`after` hooks run on error paths.** The middleware pipeline now unwinds the
   middlewares that entered when a later `invoke` or the final handler returns an
   error, then returns the first error. Metrics, tracing, compression and cleanup

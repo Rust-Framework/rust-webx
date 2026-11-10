@@ -141,6 +141,15 @@ pub struct Host {
     hosted_services: Vec<Arc<dyn IHostedService>>,
 }
 
+/// Factory for a user-registered middleware.
+type MiddlewareFactory = Box<dyn Fn() -> Arc<dyn IMiddleware> + Send + Sync>;
+
+/// A user middleware waiting to be placed in the pipeline at its slot.
+struct MiddlewareSpec {
+    slot: webx_core::middleware::MiddlewareSlot,
+    factory: MiddlewareFactory,
+}
+
 #[allow(clippy::type_complexity)]
 pub struct HostBuilder {
     service_configs: Vec<Box<dyn FnOnce(ServiceCollection) -> ServiceCollection + Send>>,
@@ -152,6 +161,9 @@ pub struct HostBuilder {
     auth_enabled: bool,
     localization: Option<LocalizationOptions>,
     health_registry: Arc<HealthCheckRegistry>,
+    /// Middlewares registered through the builder, kept with their slot so
+    /// ordering does not depend on DI enumeration order.
+    middleware_specs: Vec<MiddlewareSpec>,
 }
 
 #[allow(clippy::type_complexity)]
@@ -179,8 +191,8 @@ impl HostBuilder {
     pub fn new() -> Self {
         Self {
             service_configs: Vec::new(),
-            // 默认从 `APP_ENV` 环境变量解析运行模式；未设置时为 Development。
-            // 应用可通过 `.mode()` 显式覆盖。
+            // 默认从 `APP_ENV` 环境变量解析运行模式；未设置时为 Production。
+            // 应用可通过 `.mode()` 显式覆盖（本机开发通常设 APP_ENV=Development）。
             mode: AppMode::from_env(),
             spa_source: None,
             spa_disabled: false,
@@ -189,6 +201,7 @@ impl HostBuilder {
             auth_enabled: false,
             localization: None,
             health_registry: HealthCheckRegistry::new(),
+            middleware_specs: Vec::new(),
         }
     }
 
@@ -386,42 +399,66 @@ impl HostBuilder {
         self
     }
 
-    /// Register a middleware by type.
+    /// Register a middleware by type in the default slot
+    /// ([`MiddlewareSlot::AfterAuth`](webx_core::middleware::MiddlewareSlot::AfterAuth)).
     ///
-    /// Middleware `T` is registered as Singleton in the DI container and
-    /// automatically collected by `provider.get_all::<dyn IMiddleware>()`
-    /// during `build()`.
+    /// The default slot runs **after** authentication, so middleware that reads
+    /// `ctx.claims()` actually sees the principal. Use
+    /// [`Self::use_middleware_at`] to choose a different slot.
     ///
     /// ```ignore
     /// Host::builder()
-    ///     .use_middleware::<RequestIdMiddleware>()
+    ///     .use_middleware::<TimingMiddleware>()
     ///     .build()
     /// ```
-    pub fn use_middleware<T: IMiddleware + Default + 'static>(mut self) -> Self {
-        self.service_configs.push(Box::new(|svc| {
-            svc.singleton::<dyn IMiddleware>(|_| Arc::new(T::default()) as Arc<dyn IMiddleware>)
-        }));
+    pub fn use_middleware<T: IMiddleware + Default + 'static>(self) -> Self {
+        self.use_middleware_at::<T>(webx_core::middleware::MiddlewareSlot::AfterAuth)
+    }
+
+    /// Register a middleware by type in a specific pipeline slot.
+    pub fn use_middleware_at<T: IMiddleware + Default + 'static>(
+        mut self,
+        slot: webx_core::middleware::MiddlewareSlot,
+    ) -> Self {
+        self.middleware_specs.push(MiddlewareSpec {
+            slot,
+            factory: Box::new(|| Arc::new(T::default()) as Arc<dyn IMiddleware>),
+        });
         self
     }
 
-    /// Register a middleware with a custom factory function.
+    /// Register a middleware with a custom factory function (default slot:
+    /// [`MiddlewareSlot::AfterAuth`](webx_core::middleware::MiddlewareSlot::AfterAuth)).
     ///
     /// Use this when the middleware requires constructor parameters:
     ///
     /// ```ignore
     /// Host::builder()
     ///     .use_middleware_with(|| {
-    ///         Arc::new(RateLimitMiddleware::new(10.0, 20)) as Arc<dyn IMiddleware>
+    ///         Arc::new(TimingMiddleware::new("api")) as Arc<dyn IMiddleware>
     ///     })
     ///     .build()
     /// ```
-    pub fn use_middleware_with<F>(mut self, factory: F) -> Self
+    pub fn use_middleware_with<F>(self, factory: F) -> Self
     where
         F: Fn() -> Arc<dyn IMiddleware> + Send + Sync + 'static,
     {
-        self.service_configs.push(Box::new(move |svc| {
-            svc.singleton::<dyn IMiddleware>(move |_| factory())
-        }));
+        self.use_middleware_with_at(webx_core::middleware::MiddlewareSlot::AfterAuth, factory)
+    }
+
+    /// Register a middleware with a custom factory in a specific pipeline slot.
+    pub fn use_middleware_with_at<F>(
+        mut self,
+        slot: webx_core::middleware::MiddlewareSlot,
+        factory: F,
+    ) -> Self
+    where
+        F: Fn() -> Arc<dyn IMiddleware> + Send + Sync + 'static,
+    {
+        self.middleware_specs.push(MiddlewareSpec {
+            slot,
+            factory: Box::new(factory),
+        });
         self
     }
 
@@ -524,33 +561,26 @@ impl HostBuilder {
 
         let mut pipeline = MiddlewarePipeline::new();
 
-        // Default security & observability middleware (zero-config safe defaults).
-        // Order: SecurityHeaders → RequestId → RateLimit → Metrics → user → CORS → Auth → SPA
+        // Pipeline order (see docs/rust-webx/07-middleware/ordering-strategy.md):
+        //
+        //   SecurityHeaders → RequestId → user(BeforeCors) → CORS → Metrics →
+        //   RateLimit → auth → user(AfterAuth, default) → SPA → user(AfterSpa) → Router
+        //
+        // CORS runs before the short-circuiting middlewares so a 429/413/401
+        // still carries Access-Control-Allow-Origin; Metrics runs before
+        // RateLimit so rate-limited requests are counted; user middleware
+        // defaults to AfterAuth so it can read the authenticated principal.
         pipeline.add_middleware(Arc::new(
             crate::security_headers::SecurityHeadersMiddleware::new(),
         ));
         pipeline.add_middleware(Arc::new(crate::request_id::RequestIdMiddleware::new()));
 
-        if options.rate_limit.enabled {
-            tracing::info!(
-                "[Host] RateLimit enabled: {} req/s, burst {}, max_ips {}",
-                options.rate_limit.requests_per_second,
-                options.rate_limit.burst_size,
-                options.rate_limit.max_tracked_ips
-            );
-            pipeline.add_middleware(Arc::new(RateLimitMiddleware::from_config(
-                &options.rate_limit,
-            )));
-        }
-
-        if options.metrics.enabled {
-            tracing::info!("[Host] Metrics enabled at GET /metrics");
-            pipeline.add_middleware(Arc::new(MetricsMiddleware::new(Arc::clone(&http_metrics))));
-        }
-
-        let middlewares: Vec<Arc<dyn IMiddleware>> = provider.get_all::<dyn IMiddleware>();
-        for mw in middlewares {
-            pipeline.add_middleware(mw);
+        for spec in self
+            .middleware_specs
+            .iter()
+            .filter(|spec| spec.slot == webx_core::middleware::MiddlewareSlot::BeforeCors)
+        {
+            pipeline.add_middleware((spec.factory)());
         }
 
         let cors = self.cors_config.unwrap_or_else(|| {
@@ -566,6 +596,23 @@ impl HostBuilder {
         });
         pipeline.add_middleware(Arc::new(CorsMiddleware::new(cors)));
 
+        if options.metrics.enabled {
+            tracing::info!("[Host] Metrics enabled at GET /metrics");
+            pipeline.add_middleware(Arc::new(MetricsMiddleware::new(Arc::clone(&http_metrics))));
+        }
+
+        if options.rate_limit.enabled {
+            tracing::info!(
+                "[Host] RateLimit enabled: {} req/s, burst {}, max_ips {}",
+                options.rate_limit.requests_per_second,
+                options.rate_limit.burst_size,
+                options.rate_limit.max_tracked_ips
+            );
+            pipeline.add_middleware(Arc::new(RateLimitMiddleware::from_config(
+                &options.rate_limit,
+            )));
+        }
+
         if self.auth_enabled {
             let secret = options.jwt.secret.clone();
             if !secret.is_empty() {
@@ -580,6 +627,20 @@ impl HostBuilder {
                     "add_authentication() enabled but no JWT secret configured. Set Jwt.Secret in appsettings.json, JWT_SECRET, or APP__Jwt__Secret env var."
                 );
             }
+        }
+
+        // User middlewares in the default slot: after authentication, so
+        // `ctx.claims()` is populated. Middlewares registered directly on the
+        // DI container join the same slot, after the builder-registered ones.
+        for spec in self
+            .middleware_specs
+            .iter()
+            .filter(|spec| spec.slot == webx_core::middleware::MiddlewareSlot::AfterAuth)
+        {
+            pipeline.add_middleware((spec.factory)());
+        }
+        for mw in provider.get_all::<dyn IMiddleware>() {
+            pipeline.add_middleware(mw);
         }
 
         // SPA 自动启用：若应用显式调用 `use_spa`，使用指定的文件源；
@@ -614,9 +675,14 @@ impl HostBuilder {
             spa_fallback = Some(spa);
         }
 
-        // Users can register additional middleware here, e.g.:
-        // pipeline.add_middleware(Arc::new(RequestIdMiddleware::new()));
-        // pipeline.add_middleware(Arc::new(TimingMiddleware::new()));
+        // Last-chance hooks: after static files/SPA, immediately before routing.
+        for spec in self
+            .middleware_specs
+            .iter()
+            .filter(|spec| spec.slot == webx_core::middleware::MiddlewareSlot::AfterSpa)
+        {
+            pipeline.add_middleware((spec.factory)());
+        }
 
         let pipeline = Arc::new(pipeline);
 
@@ -1005,7 +1071,7 @@ impl Host {
             }
         }
 
-        stop_hosted_services(&self.hosted_services).await;
+        stop_hosted_services(&self.hosted_services, &self.dispatch_runtime).await;
 
         match run_error {
             Some(err) => Err(err),
@@ -1033,7 +1099,7 @@ impl Host {
         )
         .await;
 
-        stop_hosted_services(&self.hosted_services).await;
+        stop_hosted_services(&self.hosted_services, &self.dispatch_runtime).await;
         Ok(())
     }
 
@@ -1338,70 +1404,79 @@ const HOSTED_STOP_TIMEOUT_SECS: u64 = 30;
 
 async fn start_hosted_services(
     services: &[Arc<dyn IHostedService>],
-    dispatch_runtime: &DispatchRuntime,
+    dispatch_runtime: &Arc<DispatchRuntime>,
 ) -> Result<()> {
     if services.is_empty() {
         return Ok(());
     }
     tracing::info!("Starting {} hosted service(s)...", services.len());
-    let started = dispatch_runtime
-        .run(async {
-            let mut started = 0usize;
-            for svc in services {
-                match tokio::time::timeout(
-                    std::time::Duration::from_secs(HOSTED_START_TIMEOUT_SECS),
-                    svc.start(),
-                )
-                .await
-                {
-                    Ok(Ok(())) => started += 1,
-                    Ok(Err(err)) => return Err((started, err)),
-                    Err(_) => {
-                        return Err((
-                            started,
-                            webx_core::error::Error::Internal(format!(
-                                "hosted service start timed out after {HOSTED_START_TIMEOUT_SECS}s"
-                            )),
-                        ))
-                    }
-                }
-            }
-            Ok(started)
-        })
-        .await;
+    let mut started = 0usize;
+    let mut failure: Option<webx_core::error::Error> = None;
 
-    match started {
-        Ok(count) => {
-            tracing::info!("All {count} hosted service(s) started.");
+    for svc in services {
+        // Each start gets its own DI scope: a `dispatch_provider().get_owned()`
+        // inside `start()` resolves scoped dependencies (DbContext, connections)
+        // against this scope instead of the root provider's cache, so they are
+        // disposed when the start finishes rather than living for the process.
+        let attempt = tokio::time::timeout(
+            std::time::Duration::from_secs(HOSTED_START_TIMEOUT_SECS),
+            dispatch_runtime.run_in_scope(async { svc.start().await }),
+        )
+        .await;
+        match attempt {
+            Ok(Ok(())) => started += 1,
+            Ok(Err(err)) => {
+                failure = Some(err);
+                break;
+            }
+            Err(_) => {
+                failure = Some(webx_core::error::Error::Internal(format!(
+                    "hosted service start timed out after {HOSTED_START_TIMEOUT_SECS}s"
+                )));
+                break;
+            }
+        }
+    }
+
+    match failure {
+        None => {
+            tracing::info!("All {started} hosted service(s) started.");
             Ok(())
         }
-        Err((started, err)) => {
+        Some(err) => {
             // Roll back the services that did start, newest first, so a failed
             // startup does not leave pools/loops running.
             for (index, svc) in services[..started].iter().enumerate().rev() {
-                stop_hosted_service(index, svc).await;
+                stop_hosted_service(dispatch_runtime, index, svc).await;
             }
             Err(err)
         }
     }
 }
 
-async fn stop_hosted_services(services: &[Arc<dyn IHostedService>]) {
+async fn stop_hosted_services(
+    services: &[Arc<dyn IHostedService>],
+    dispatch_runtime: &Arc<DispatchRuntime>,
+) {
     if services.is_empty() {
         return;
     }
     tracing::info!("Stopping {} hosted service(s)...", services.len());
     for (index, svc) in services.iter().enumerate().rev() {
-        stop_hosted_service(index, svc).await;
+        stop_hosted_service(dispatch_runtime, index, svc).await;
     }
     tracing::info!("All hosted services stopped.");
 }
 
-/// Stop one service with a timeout, logging (never propagating) failures.
-async fn stop_hosted_service(index: usize, svc: &Arc<dyn IHostedService>) {
+/// Stop one service with a timeout (and a fresh DI scope), logging failures.
+async fn stop_hosted_service(
+    dispatch_runtime: &Arc<DispatchRuntime>,
+    index: usize,
+    svc: &Arc<dyn IHostedService>,
+) {
     match tokio::time::timeout(
         std::time::Duration::from_secs(HOSTED_STOP_TIMEOUT_SECS),
-        svc.stop(),
+        dispatch_runtime.run_in_scope(async { svc.stop().await }),
     )
     .await
     {

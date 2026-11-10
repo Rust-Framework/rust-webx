@@ -99,16 +99,20 @@ pub trait IHostedService: Send + Sync {
     /// Called when the host starts.
     ///
     /// Services start in registration order and the host waits for all of them
-    /// before accepting requests. If one `start()` fails, the services that
-    /// already started are stopped again in reverse order before the host
-    /// reports the error.
+    /// before accepting requests. Each `start()` runs inside its own DI scope:
+    /// `dispatch_provider().get_owned::<DbContext>()` resolves scoped
+    /// dependencies against that scope, and they are disposed when the call
+    /// returns instead of being cached on the root provider. If one `start()`
+    /// fails, the services that already started are stopped again in reverse
+    /// order before the host reports the error.
     async fn start(&self) -> Result<()>;
 
     /// Called during a graceful shutdown.
     ///
     /// The host stops the services that started, in **reverse** start order
     /// (the last dependency to start is the first to stop), with a timeout per
-    /// service so one stuck service cannot block the process forever.
+    /// service so one stuck service cannot block the process forever. Like
+    /// `start()`, each `stop()` runs inside a fresh DI scope.
     async fn stop(&self) -> Result<()> {
         Ok(())
     }

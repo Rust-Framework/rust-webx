@@ -181,6 +181,16 @@ pub struct RateLimitSection {
     /// Only enable when behind a trusted reverse proxy. Default: false.
     #[serde(default, rename = "TrustProxy")]
     pub trust_proxy: bool,
+    /// CIDR ranges of the trusted proxies. When `TrustProxy` is enabled, the
+    /// forwarded headers are only consulted if the direct peer address belongs
+    /// to one of these ranges; the client IP is then the right-most address in
+    /// `X-Forwarded-For` that is not itself a trusted proxy.
+    ///
+    /// An empty list with `TrustProxy = true` is treated as "trust nothing":
+    /// the headers are ignored (a client can otherwise rotate
+    /// `X-Forwarded-For` to bypass the limiter).
+    #[serde(default, rename = "TrustedProxies")]
+    pub trusted_proxies: Vec<String>,
 }
 
 impl Default for RateLimitSection {
@@ -191,6 +201,7 @@ impl Default for RateLimitSection {
             burst_size: default_rate_limit_burst(),
             max_tracked_ips: default_rate_limit_max_ips(),
             trust_proxy: false,
+            trusted_proxies: Vec::new(),
         }
     }
 }

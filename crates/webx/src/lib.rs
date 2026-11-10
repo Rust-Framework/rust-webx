@@ -49,7 +49,7 @@ pub use webx_core::localization::{
 };
 pub use webx_core::mediator::build_pipeline_chain;
 pub use webx_core::mediator::{IEventRequest, IMediator, IRequest};
-pub use webx_core::middleware::IMiddleware;
+pub use webx_core::middleware::{IMiddleware, MiddlewareSlot};
 pub use webx_core::mode::AppMode;
 pub use webx_core::pagination::{PagedRequest, PagedResponse};
 pub use webx_core::paths::{

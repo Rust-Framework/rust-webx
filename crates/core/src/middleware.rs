@@ -4,6 +4,26 @@ use crate::error::Result;
 use crate::http::IHttpContext;
 use std::ops::ControlFlow;
 
+/// Where a user middleware runs relative to the framework's built-in stages.
+///
+/// The default for [`HostBuilder::use_middleware`] is [`MiddlewareSlot::AfterAuth`],
+/// so a middleware that reads the authenticated principal (`ctx.claims()`)
+/// actually sees it: authentication runs before the slot. Use
+/// [`MiddlewareSlot::BeforeCors`] only when the middleware must observe requests
+/// that CORS would otherwise short-circuit (e.g. preflight accounting), and
+/// [`MiddlewareSlot::AfterSpa`] for post-static-file hooks.
+///
+/// [`HostBuilder::use_middleware`]: https://docs.rs/rust-webx-host
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MiddlewareSlot {
+    /// After `RequestId`, before CORS/preflight handling.
+    BeforeCors,
+    /// After authentication, before the SPA static-file middleware (default).
+    AfterAuth,
+    /// After the SPA middleware, immediately before the router.
+    AfterSpa,
+}
+
 /// Middleware component in the HTTP request pipeline.
 ///
 /// Middlewares are called in registration order. Each middleware can:

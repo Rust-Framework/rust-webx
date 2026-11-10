@@ -48,6 +48,16 @@ where
     let chain = build_pipeline_chain(behaviors, terminal);
     let result_box = chain(Box::new(req)).await?;
     Ok(*result_box.downcast::<R>().map_err(|_| {
-        crate::Error::Internal("Response type mismatch in dispatch call bridge".to_string())
+        // Reached when something in the chain returned a value of a different
+        // type than `R`. The handler's own response type is `R`; the usual
+        // cause is a pipeline behavior that short-circuited with a placeholder
+        // (e.g. `Box::new(())`) instead of the handler's response type.
+        crate::Error::Internal(format!(
+            "Response type mismatch: the pipeline returned a different type than the handler \
+             expects (expected `{}`). A pipeline behavior must not short-circuit with a \
+             different response type (e.g. `Box::new(())`); return the handler's response type \
+             or call `next`.",
+            std::any::type_name::<R>()
+        ))
     })?)
 }

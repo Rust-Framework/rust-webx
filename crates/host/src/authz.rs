@@ -235,35 +235,6 @@ impl AuthorizerSet {
     }
 }
 
-/// Build a [`ResourceAuthorization`] policy from compile-time route metadata.
-///
-/// Deprecated: each endpoint enforces its own `#[authorize]` rules after
-/// routing. A policy stores one role/permission set per path, so it cannot
-/// faithfully represent several rules on one endpoint; use an
-/// `IDynamicAuthorizer` for custom policies.
-#[deprecated(
-    since = "0.6.0",
-    note = "Endpoints enforce their declared authorization rules directly; use IDynamicAuthorizer for custom policies"
-)]
-pub fn build_resource_policy_from_routes() -> ResourceAuthorization {
-    use webx_core::route::scan::RouteEntry;
-
-    let mut policy = ResourceAuthorization::new();
-    for entry in inventory::iter::<RouteEntry> {
-        for rule in entry.authorization {
-            for role in rule.roles {
-                if *role != "authenticated" {
-                    policy = policy.allow_role(entry.path, *role);
-                }
-            }
-            for permission in rule.permissions {
-                policy = policy.allow_permission(entry.path, *permission);
-            }
-        }
-    }
-    policy
-}
-
 /// Result from collecting `IDynamicAuthorizer` instances from DI.
 /// `None` means no authorizers are registered (pass-through mode).
 pub fn collect_authorizers(provider: &rust_dix::ServiceProvider) -> Option<Arc<AuthorizerSet>> {

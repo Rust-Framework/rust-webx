@@ -1,30 +1,22 @@
-//! Pipeline behaviors: typed (`IPipelineBehavior<Req, Rsp>`) and the legacy
-//! type-erased variant (`IErasedPipelineBehavior`).
+//! Typed pipeline behaviors: `IPipelineBehavior<Req, Rsp>`.
 
 use crate::error::Result;
-use std::any::Any;
 use std::future::Future;
 use std::pin::Pin;
 
-/// Type-erased continuation function used by [`IErasedPipelineBehavior`].
-pub type BoxedNextFn = Box<dyn FnOnce(Box<dyn Any + Send>) -> BoxedPipelineFuture + Send>;
-
-/// Boxed future returned by a type-erased pipeline step.
-pub type BoxedPipelineFuture = Pin<Box<dyn Future<Output = Result<Box<dyn Any + Send>>> + Send>>;
-
-/// The continuation a typed behavior calls to run the rest of the chain.
-///
-/// The framework builds this value; behaviors only consume it:
-///
-/// ```ignore
-/// let response = next.run(req).await?;   // run the remaining chain + handler
-/// ```
 /// Boxed future returned by one typed pipeline step.
 type NextFuture<Rsp> = Pin<Box<dyn Future<Output = Result<Rsp>> + Send>>;
 
 /// Callable continuation stored by [`Next`].
 type NextCall<Req, Rsp> = Box<dyn FnOnce(Req) -> NextFuture<Rsp> + Send>;
 
+/// The continuation a behavior calls to run the rest of the chain.
+///
+/// The framework builds this value; behaviors only consume it:
+///
+/// ```ignore
+/// let response = next.run(req).await?;   // run the remaining chain + handler
+/// ```
 pub struct Next<Req, Rsp>
 where
     Req: Send + 'static,
@@ -94,24 +86,4 @@ where
 #[async_trait::async_trait]
 pub trait IPipelineBehavior<Req: Send + 'static, Rsp: Send + 'static>: Send + Sync {
     async fn handle(&self, req: Req, next: Next<Req, Rsp>) -> Result<Rsp>;
-}
-
-/// Legacy type-erased pipeline behavior (deprecated since 0.10.0).
-///
-/// Kept for one release so existing behaviors keep compiling and running: the
-/// erased chain runs **outside** the typed chain, so it observes the request
-/// before typed behaviors and the response after them. A short-circuit here
-/// must still return the handler's response type as `Box<dyn Any + Send>`;
-/// prefer [`IPipelineBehavior`] for new code.
-#[deprecated(
-    since = "0.10.0",
-    note = "use the typed `IPipelineBehavior<Req, Rsp>`; the erased trait is removed in 1.0"
-)]
-#[async_trait::async_trait]
-pub trait IErasedPipelineBehavior: Send + Sync {
-    async fn handle(
-        &self,
-        req: Box<dyn Any + Send>,
-        next: BoxedNextFn,
-    ) -> Result<Box<dyn Any + Send>>;
 }

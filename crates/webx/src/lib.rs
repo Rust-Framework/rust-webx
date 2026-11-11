@@ -47,7 +47,6 @@ pub use webx_core::http::{
 pub use webx_core::localization::{
     IStringLocalizer, LocalizationOptions, LocalizedString, StringLocalizer, TextRef,
 };
-pub use webx_core::mediator::build_pipeline_chain;
 pub use webx_core::mediator::dispatch;
 pub use webx_core::mediator::{IEventRequest, IMediator, IRequest};
 pub use webx_core::middleware::{IMiddleware, MiddlewareSlot};
@@ -56,10 +55,7 @@ pub use webx_core::pagination::{PagedRequest, PagedResponse};
 pub use webx_core::paths::{
     app_base, framework_root, looks_like_app_base, looks_like_framework_root,
 };
-#[allow(deprecated)]
-pub use webx_core::pipeline::{
-    BoxedNextFn, BoxedPipelineFuture, IErasedPipelineBehavior, IPipelineBehavior, Next,
-};
+pub use webx_core::pipeline::{IPipelineBehavior, Next};
 pub use webx_core::problem::{FieldError, ProblemDetails};
 pub use webx_core::request_context::RequestContext;
 pub use webx_core::route::catalog::{
@@ -83,11 +79,9 @@ pub use webx_core::route::scan::{
 
 // --- HTTP layer ---
 pub use webx_host::auth_jwt::{init_jwt_secret, jwt_middleware, jwt_secret, JwtAuth, JwtClaims};
-#[allow(deprecated)]
-pub use webx_host::authz::{
-    build_resource_policy_from_routes, collect_authorizers, resource_auth_middleware,
-    AuthorizerSet, ResourceAuthorization,
-};
+pub use webx_host::authz::collect_authorizers;
+pub use webx_host::authz::resource_auth_middleware;
+pub use webx_host::authz::{AuthorizerSet, ResourceAuthorization};
 pub use webx_host::compression::{compress_gzip, CompressionConfig, CompressionMiddleware};
 pub use webx_host::context::{HttpContext, HttpRequest, HttpResponse};
 pub use webx_host::cors::{CorsConfig, CorsMiddleware};
@@ -165,37 +159,3 @@ pub use inventory;
 pub use serde;
 pub use serde_json;
 pub use tokio;
-
-// =========================================================================
-// Convenience macro: register_handlers!
-//
-// **Deprecated for HTTP handlers.** HTTP dispatch uses inventory +
-// `HandlerCache` exclusively (`#[handler]` / `#[handler(inject)]`).
-// Keep this macro only for non-HTTP Mediator use or manual DI registration.
-//
-// Generates chained .singleton() calls for handlers that implement Default.
-//
-// Usage inside register():
-//   .register(|svc| {
-//       register_handlers!(svc,
-//           HelloRequest => String => HelloHandler,
-//           DeleteUserRequest => () => DeleteUserHandler,
-//       )
-//   })
-// =========================================================================
-#[deprecated(
-    since = "0.2.0",
-    note = "HTTP handlers should use `#[handler]` / `#[handler(inject)]` (inventory). \
-            register_handlers! remains for non-HTTP Mediator scenarios only."
-)]
-#[macro_export]
-macro_rules! register_handlers {
-    ($svc:ident, $($req:ty => $rsp:ty => $handler:ty),+ $(,)?) => {
-        $svc
-        $(
-            .singleton::<dyn $crate::IRequestHandler<$req, $rsp>>(
-                |_| ::std::sync::Arc::new(<$handler>::default())
-            )
-        )+
-    };
-}

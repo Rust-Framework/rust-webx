@@ -25,8 +25,10 @@ use crate::mediator::{IEventRequest, IRequest};
 /// free of auth concerns. Requests that need the caller declare
 /// `#[fromclaim] user: IdentityUser`; the binder fills it before `handle` runs.
 ///
-/// Register via `#[handler]` proc macro for compile-time collection,
-/// or use `register_handlers!` for manual DI registration.
+/// Register via `#[handler]` proc macro for compile-time collection; for
+/// non-HTTP Mediator use, register the handler in DI with rust-dix's
+/// `#[rust_dix::inject]` attribute (trait-impl registration) or
+/// `ServiceCollection::singleton`.
 ///
 /// `handle(&mut self, ...)` enables the EFCore-style owned-DbContext pattern:
 /// handlers declare a bare `ctx: DbContext` field, resolved per-request via

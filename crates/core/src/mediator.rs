@@ -5,7 +5,6 @@ pub mod dispatch;
 pub mod pipeline;
 pub use default::Mediator;
 pub use dispatch::dispatch;
-pub use pipeline::build_chain as build_pipeline_chain;
 
 use crate::error::Result;
 

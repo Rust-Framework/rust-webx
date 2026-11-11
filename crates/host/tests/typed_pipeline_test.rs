@@ -4,8 +4,6 @@
 //! cannot depend on the `webx` umbrella); the test builds the provider and the
 //! handler registry explicitly, exactly like `Host::build` does.
 
-// The legacy erased behavior is deliberately exercised for ordering.
-#![allow(deprecated)]
 #![allow(clippy::type_complexity)]
 
 use std::any::Any;
@@ -15,7 +13,7 @@ use rust_dix::ServiceCollection;
 use webx_core::error::{Error, Result};
 use webx_core::handler::IRequestHandler;
 use webx_core::mediator::{IMediator, IRequest, Mediator};
-use webx_core::pipeline::{IErasedPipelineBehavior, IPipelineBehavior, Next};
+use webx_core::pipeline::{IPipelineBehavior, Next};
 use webx_core::route::ext::IServiceCollectionExt;
 use webx_core::route::scan::{HandlerCache, HandlerRegistration};
 
@@ -142,26 +140,6 @@ impl IPipelineBehavior<PingRequest, PingResponse> for LogBehavior {
     }
 }
 
-/// Legacy erased counterpart, used to prove the outer/inner ordering.
-struct ErasedLogBehavior {
-    log: EventLog,
-}
-
-#[allow(deprecated)]
-#[async_trait::async_trait]
-impl IErasedPipelineBehavior for ErasedLogBehavior {
-    async fn handle(
-        &self,
-        req: Box<dyn Any + Send>,
-        next: webx_core::pipeline::BoxedNextFn,
-    ) -> Result<Box<dyn Any + Send>> {
-        self.log.lock().unwrap().push("erased-before".to_string());
-        let response = next(req).await?;
-        self.log.lock().unwrap().push("erased-after".to_string());
-        Ok(response)
-    }
-}
-
 // --- test harness ---
 
 async fn send(provider: &Arc<rust_dix::ServiceProvider>, req: PingRequest) -> Result<PingResponse> {
@@ -216,16 +194,17 @@ async fn typed_behavior_short_circuit_returns_the_response_without_the_handler()
 }
 
 #[tokio::test]
-async fn erased_behaviors_run_outside_typed_behaviors() {
+async fn typed_behaviors_run_in_registration_order_outermost_first() {
     let log: EventLog = Arc::new(Mutex::new(Vec::new()));
     let provider = ServiceCollection::new()
         .instance(Arc::clone(&log))
-        .add_pipeline_with({
+        .add_typed_pipeline_with({
             let log = Arc::clone(&log);
             move |_| {
-                Arc::new(ErasedLogBehavior {
+                Arc::new(LogBehavior {
                     log: Arc::clone(&log),
-                }) as Arc<dyn IErasedPipelineBehavior>
+                    tag: "outer",
+                }) as Arc<dyn IPipelineBehavior<PingRequest, PingResponse>>
             }
         })
         .add_typed_pipeline_with({
@@ -233,7 +212,7 @@ async fn erased_behaviors_run_outside_typed_behaviors() {
             move |_| {
                 Arc::new(LogBehavior {
                     log: Arc::clone(&log),
-                    tag: "typed",
+                    tag: "inner",
                 }) as Arc<dyn IPipelineBehavior<PingRequest, PingResponse>>
             }
         })
@@ -247,12 +226,12 @@ async fn erased_behaviors_run_outside_typed_behaviors() {
     assert_eq!(
         log.lock().unwrap().as_slice(),
         [
-            "erased-before",
-            "typed-before",
+            "outer-before",
+            "inner-before",
             "handler",
-            "typed-after",
-            "erased-after"
+            "inner-after",
+            "outer-after"
         ],
-        "legacy erased behaviors are the outer chain, typed behaviors the inner chain"
+        "the first registered behavior is the outermost (runs first on the request, last on the response)"
     );
 }

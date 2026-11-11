@@ -979,6 +979,17 @@ impl Host {
         &self.provider
     }
 
+    /// Dispose the DI provider after the server and hosted services stopped.
+    ///
+    /// rust-dix releases singletons/root-scoped instances in reverse creation
+    /// order, runs cleanup closures in reverse registration order and marks the
+    /// provider disposed; later resolution returns `ProviderDisposed`. The call
+    /// is idempotent, so a second shutdown is harmless.
+    fn dispose_di(&self) {
+        self.provider.dispose();
+        tracing::debug!("[Host] DI provider disposed");
+    }
+
     /// Instance-scoped dispatch runtime (provider + handler cache).
     pub fn dispatch_runtime(&self) -> &Arc<DispatchRuntime> {
         &self.dispatch_runtime
@@ -1059,7 +1070,10 @@ impl Host {
             https_listeners.push(bind_listener(addr, "HTTPS").await?);
         }
 
-        start_hosted_services(&self.hosted_services).await?;
+        if let Err(err) = start_hosted_services(&self.hosted_services).await {
+            self.dispose_di();
+            return Err(err);
+        }
 
         // Banner
         if self.mode == AppMode::Development {
@@ -1128,6 +1142,7 @@ impl Host {
         }
 
         stop_hosted_services(&self.hosted_services).await;
+        self.dispose_di();
 
         match run_error {
             Some(err) => Err(err),
@@ -1138,7 +1153,10 @@ impl Host {
     /// Start the server at a single explicit address (convenience wrapper).
     pub async fn run_at(&self, addr: &str) -> Result<()> {
         let listener = bind_listener(addr, "HTTP").await?;
-        start_hosted_services(&self.hosted_services).await?;
+        if let Err(err) = start_hosted_services(&self.hosted_services).await {
+            self.dispose_di();
+            return Err(err);
+        }
 
         install_shutdown_handler(Arc::clone(&self.shutdown));
         spawn_async_shutdown_listener(Arc::clone(&self.shutdown));
@@ -1156,6 +1174,7 @@ impl Host {
         .await;
 
         stop_hosted_services(&self.hosted_services).await;
+        self.dispose_di();
         Ok(())
     }
 

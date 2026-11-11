@@ -1,12 +1,9 @@
 //! IServiceCollectionExt — Extension trait for rust_dix ServiceCollection.
 
-// The legacy type-erased pipeline is deprecated but exercised on purpose here.
-#![allow(deprecated)]
-
 use crate::handler::IHostedService;
 use crate::mediator::Mediator;
 use crate::middleware::IMiddleware;
-use crate::pipeline::{IErasedPipelineBehavior, IPipelineBehavior};
+use crate::pipeline::IPipelineBehavior;
 use rust_dix::{IServiceResolver, ServiceCollection, ServiceLifetime};
 use std::sync::Arc;
 
@@ -71,28 +68,6 @@ pub trait IServiceCollectionExt: Sized {
             + 'static,
         Req: Send + 'static,
         Rsp: Send + 'static;
-
-    /// Register a legacy **type-erased** pipeline behavior (deprecated).
-    ///
-    /// Requires `Default`, so it is only usable for behaviors without
-    /// dependencies. Use [`IServiceCollectionExt::add_typed_pipeline`] for new
-    /// code; the erased chain runs outside the typed chain and is removed in 1.0.
-    #[deprecated(
-        since = "0.10.0",
-        note = "use add_typed_pipeline::<B, Req, Rsp>() with the typed IPipelineBehavior"
-    )]
-    fn add_pipeline<T>(self) -> Self
-    where
-        T: IErasedPipelineBehavior + Default + Send + Sync + 'static;
-
-    /// Register a legacy type-erased behavior built from a factory (deprecated).
-    #[deprecated(
-        since = "0.10.0",
-        note = "use add_typed_pipeline_with(...) with the typed IPipelineBehavior"
-    )]
-    fn add_pipeline_with<F>(self, factory: F) -> Self
-    where
-        F: Fn(&dyn IServiceResolver) -> Arc<dyn IErasedPipelineBehavior> + Send + Sync + 'static;
 
     /// Register a hosted service in the DI container as a singleton.
     ///
@@ -184,23 +159,6 @@ impl IServiceCollectionExt for ServiceCollection {
         self.add(ServiceLifetime::Singleton, factory)
     }
 
-    #[allow(deprecated)]
-    fn add_pipeline<T>(self) -> Self
-    where
-        T: IErasedPipelineBehavior + Default + Send + Sync + 'static,
-    {
-        self.add_pipeline_with(|_| Arc::new(T::default()) as Arc<dyn IErasedPipelineBehavior>)
-    }
-
-    #[allow(deprecated)]
-    fn add_pipeline_with<F>(self, factory: F) -> Self
-    where
-        F: Fn(&dyn IServiceResolver) -> Arc<dyn IErasedPipelineBehavior> + Send + Sync + 'static,
-    {
-        // Singleton: the factory (and therefore constructor injection) runs once
-        // per provider; behaviors are stateless wrappers over the request chain.
-        self.add(ServiceLifetime::Singleton, factory)
-    }
     fn add_hosted_service<T>(self) -> Self
     where
         T: IHostedService + Default + Send + Sync + 'static,
@@ -224,40 +182,9 @@ pub fn is_mediator_active() -> bool {
 
 #[cfg(test)]
 mod tests {
-    #![allow(deprecated)]
-
     use super::*;
-    use crate::pipeline::{
-        BoxedNextFn, BoxedPipelineFuture, IErasedPipelineBehavior, IPipelineBehavior, Next,
-    };
-    use std::any::Any;
+    use crate::pipeline::{IPipelineBehavior, Next};
     use std::sync::atomic::{AtomicU32, Ordering};
-
-    // ----- legacy type-erased behaviors (kept working for one release) -----
-
-    /// Behavior whose dependency (a counter) comes from the DI container.
-    struct TickingBehavior {
-        ticks: Arc<AtomicU32>,
-    }
-
-    #[async_trait::async_trait]
-    impl IErasedPipelineBehavior for TickingBehavior {
-        async fn handle(
-            &self,
-            req: Box<dyn Any + Send>,
-            next: BoxedNextFn,
-        ) -> crate::error::Result<Box<dyn Any + Send>> {
-            self.ticks.fetch_add(1, Ordering::SeqCst);
-            next(req).await
-        }
-    }
-
-    /// A terminal that plays the handler's role.
-    fn terminal() -> BoxedNextFn {
-        Box::new(|_req: Box<dyn Any + Send>| -> BoxedPipelineFuture {
-            Box::pin(async { Ok(Box::new("handler-response") as Box<dyn Any + Send>) })
-        })
-    }
 
     /// Resolve a registered singleton from the type-erased resolver the
     /// registration factories receive.
@@ -267,74 +194,6 @@ mod tests {
             .and_then(|service| service.downcast::<Arc<T>>().ok())
             .map(|service| Arc::clone(&*service))
             .expect("the dependency must be registered before the pipeline")
-    }
-
-    #[tokio::test]
-    async fn legacy_add_pipeline_with_constructor_injects_from_the_resolver() {
-        let ticks = Arc::new(AtomicU32::new(0));
-
-        let provider = ServiceCollection::new()
-            .instance(Arc::clone(&ticks))
-            .add_pipeline_with(|resolver| {
-                let ticks: Arc<AtomicU32> = resolve::<AtomicU32>(resolver);
-                Arc::new(TickingBehavior { ticks }) as Arc<dyn IErasedPipelineBehavior>
-            })
-            .build()
-            .expect("provider must build");
-
-        let behavior = provider
-            .get::<dyn IErasedPipelineBehavior>()
-            .expect("the behavior must be registered as a singleton");
-        let response = behavior
-            .handle(Box::new("request"), terminal())
-            .await
-            .expect("behavior must pass through to the next step");
-        assert_eq!(
-            *response.downcast::<&str>().expect("handler response"),
-            "handler-response"
-        );
-        assert_eq!(ticks.load(Ordering::SeqCst), 1);
-
-        provider
-            .get::<dyn IErasedPipelineBehavior>()
-            .expect("the behavior must be registered as a singleton")
-            .handle(Box::new("request"), terminal())
-            .await
-            .expect("behavior must pass through to the next step");
-        assert_eq!(ticks.load(Ordering::SeqCst), 2);
-    }
-
-    #[tokio::test]
-    async fn legacy_add_pipeline_keeps_registering_default_behaviors() {
-        #[derive(Default)]
-        struct NoopBehavior;
-
-        #[async_trait::async_trait]
-        impl IErasedPipelineBehavior for NoopBehavior {
-            async fn handle(
-                &self,
-                req: Box<dyn Any + Send>,
-                next: BoxedNextFn,
-            ) -> crate::error::Result<Box<dyn Any + Send>> {
-                next(req).await
-            }
-        }
-
-        let provider = ServiceCollection::new()
-            .add_pipeline::<NoopBehavior>()
-            .build()
-            .expect("provider must build");
-
-        let response = provider
-            .get::<dyn IErasedPipelineBehavior>()
-            .expect("`add_pipeline` must still register a zero-dependency behavior")
-            .handle(Box::new("request"), terminal())
-            .await
-            .expect("behavior must pass through to the next step");
-        assert_eq!(
-            *response.downcast::<&str>().expect("handler response"),
-            "handler-response"
-        );
     }
 
     // ----- typed behaviors (0.10) -----

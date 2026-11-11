@@ -169,6 +169,21 @@ pub struct HostBuilder {
     lenient_scope_validation: bool,
 }
 
+/// Everything `prepare` collects before the DI provider is built.
+///
+/// Splitting at the provider boundary is what lets `try_build` and
+/// `try_build_async` share the whole assembly (options, host defaults, pipeline,
+/// router) while choosing rust-dix's sync or async provider builder.
+struct PreparedHost {
+    builder: HostBuilder,
+    svc: ServiceCollection,
+    provider_options: rust_dix::ServiceProviderOptions,
+    options: AppOptions,
+    endpoints: Arc<dyn IEndpointCatalog>,
+    localizer: Arc<dyn IStringLocalizer>,
+    handler_cache: Arc<webx_core::route::scan::HandlerCache>,
+}
+
 #[allow(clippy::type_complexity)]
 pub struct HostAppBuilder {
     options_modifiers: Vec<Box<dyn FnOnce(&mut AppOptions) + Send>>,
@@ -503,6 +518,54 @@ impl HostBuilder {
     /// }
     /// ```
     pub fn try_build(self) -> Result<Host> {
+        let prepared = self.prepare()?;
+        let PreparedHost {
+            builder,
+            svc,
+            provider_options,
+            options,
+            endpoints,
+            localizer,
+            handler_cache,
+        } = prepared;
+        let provider = svc
+            .build_with(provider_options)
+            .map_err(build_provider_error)?;
+        builder.assemble(provider, handler_cache, options, endpoints, localizer)
+    }
+
+    /// Build the host, awaiting rust-dix's `build_async` for async singletons.
+    ///
+    /// Use this instead of [`HostBuilder::try_build`] when the service
+    /// collection contains `async_*` registrations (for example rust-ef's
+    /// `add_dbcontext_async`). Async singletons are initialised dependency-first
+    /// by rust-dix before the host is assembled; failures surface as `Error::Di`.
+    ///
+    /// ```ignore
+    /// let host = Host::builder()
+    ///     .register(|svc| svc.add_dbcontext_async(|options| { /* ... */ }))
+    ///     .try_build_async()
+    ///     .await?;
+    /// ```
+    pub async fn try_build_async(self) -> Result<Host> {
+        let prepared = self.prepare()?;
+        let PreparedHost {
+            builder,
+            svc,
+            provider_options,
+            options,
+            endpoints,
+            localizer,
+            handler_cache,
+        } = prepared;
+        let provider = svc
+            .build_async_with(provider_options)
+            .await
+            .map_err(build_provider_error)?;
+        builder.assemble(provider, handler_cache, options, endpoints, localizer)
+    }
+
+    fn prepare(mut self) -> Result<PreparedHost> {
         // Initialize structured logging based on app mode.
         // This is idempotent —subsequent calls are no-ops.
         let env_filter = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into());
@@ -524,7 +587,7 @@ impl HostBuilder {
         let appsettings =
             config::load_appsettings(self.mode).unwrap_or_else(|| serde_json::json!({}));
         let mut options: AppOptions = config::bind_root(&appsettings);
-        for modifier in self.options_modifiers {
+        for modifier in std::mem::take(&mut self.options_modifiers) {
             modifier(&mut options);
         }
 
@@ -533,7 +596,10 @@ impl HostBuilder {
         } else {
             options.culture.default.clone()
         };
-        let localization = self.localization.unwrap_or_else(LocalizationOptions::none);
+        let localization = self
+            .localization
+            .take()
+            .unwrap_or_else(LocalizationOptions::none);
         let localizer: Arc<dyn IStringLocalizer> = Arc::new(
             StringLocalizer::new(default_culture, &localization)
                 .map_err(|error| Error::Di(format!("Invalid localization resources: {error}")))?,
@@ -541,7 +607,7 @@ impl HostBuilder {
         let endpoints: Arc<dyn IEndpointCatalog> = Arc::new(EndpointCatalog::from_inventory());
 
         let mut svc = ServiceCollection::from_injected();
-        for cfg in self.service_configs {
+        for cfg in std::mem::take(&mut self.service_configs) {
             svc = cfg(svc);
         }
 
@@ -566,13 +632,26 @@ impl HostBuilder {
         } else {
             rust_dix::ServiceProviderOptions::default()
         };
-        let provider = svc.build_with(provider_options).map_err(|e| {
-            Error::Di(format!(
-                "Failed to build ServiceProvider: {}. Check your DI registrations.",
-                e
-            ))
-        })?;
+        Ok(PreparedHost {
+            builder: self,
+            svc,
+            provider_options,
+            options,
+            endpoints,
+            localizer,
+            handler_cache,
+        })
+    }
 
+    #[allow(clippy::too_many_arguments)]
+    fn assemble(
+        self,
+        provider: Arc<ServiceProvider>,
+        handler_cache: Arc<webx_core::route::scan::HandlerCache>,
+        options: AppOptions,
+        endpoints: Arc<dyn IEndpointCatalog>,
+        localizer: Arc<dyn IStringLocalizer>,
+    ) -> Result<Host> {
         // Per-host dispatch runtime (provider + handler registry).
         let dispatch_runtime = Arc::new(DispatchRuntime::new(Arc::clone(&provider), handler_cache));
 
@@ -900,6 +979,14 @@ impl HostBuilder {
             Err(error) => panic!("{}", build_failure_message(&error)),
         }
     }
+}
+
+/// Map a rust-dix provider build failure to the host `Error::Di` form.
+fn build_provider_error(error: rust_dix::RdiError) -> Error {
+    Error::Di(format!(
+        "Failed to build ServiceProvider: {}. Check your DI registrations.",
+        error
+    ))
 }
 
 /// Operator-facing text of a `try_build` failure, without the `Error` variant

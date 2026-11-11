@@ -50,13 +50,13 @@ dmbit-domain = { version = "0.1.0", path = "dmbit/domain" }
 dmbit-handlers = { version = "0.1.0", path = "dmbit/handlers" }
 
 # DI framework (crates.io — no local path required)
-rust-dix = "0.7"
-rust-dix-macros = "0.7"
+rust-dix = "0.10"
+rust-dix-macros = "0.10"
 
-# rust-ef ORM (rust-dix 0.7 integration via add_dbcontext + owned resolution)
-rust-ef = "2.0.1"
-rust-ef-sqlite = "2.0.1"
-rust-ef-mysql = "2.0.1"
+# rust-ef ORM (rust-dix 0.10 integration via add_dbcontext + owned resolution)
+rust-ef = "2.1.0"
+rust-ef-sqlite = "2.1.0"
+rust-ef-mysql = "2.1.0"
 
 # External dependencies
 async-trait = "0.1"

@@ -179,16 +179,20 @@ mod tests {
         assert_eq!(created.load(Ordering::SeqCst), 2);
     }
 
-    /// Outside `run_in_scope` the runtime's own provider is used (the scope
-    /// override is scoped, not global).
+    /// Outside `run_in_scope` the runtime's own (root) provider is used, and
+    /// rust-dix 0.8+ strict scope validation rejects resolving a Scoped service
+    /// from the root. Callers must open a scope (or use `get_owned`).
     #[tokio::test]
-    async fn scope_provider_does_not_leak_outside_run_in_scope() {
+    async fn root_provider_rejects_scoped_resolution_under_strict_validation() {
         let (runtime, _created) = runtime_with_scoped_counter();
         runtime
             .run(async {
+                let err = dispatch_provider()
+                    .get::<ScopedThing>()
+                    .expect_err("strict scope validation rejects Scoped services from the root");
                 assert!(
-                    dispatch_provider().get::<ScopedThing>().is_ok(),
-                    "runtime provider still resolves the service"
+                    err.to_string().contains("root provider"),
+                    "the error must explain the root-scope rule, got: {err}"
                 );
             })
             .await;

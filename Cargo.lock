@@ -2022,9 +2022,9 @@ dependencies = [
 
 [[package]]
 name = "rust-dix"
-version = "0.7.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e551498587849de60258a757309c7debb8fc509f92c0777e013b925c682cb701"
+checksum = "8454b7a8edacafce54c66a3caa8b6f089f56903abaf417e06fe61381dfa29b89"
 dependencies = [
  "futures",
  "inventory",
@@ -2034,9 +2034,9 @@ dependencies = [
 
 [[package]]
 name = "rust-dix-macros"
-version = "0.7.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14370f4c9b1e95d089563a832876760992575d3251bff933f98164454f0ee0c6"
+checksum = "f9e9898e2f2791e6349c7045756df0f1643bc7e8b0d49a7e33fd396b76755abd"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2045,9 +2045,9 @@ dependencies = [
 
 [[package]]
 name = "rust-ef"
-version = "2.0.1"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7340492847a2df97e56e2895a671761568eed825618417af1a2d485ff222237f"
+checksum = "63f7da328dade5f9fdcd00b421291f01680a5e50aa22990b1bf4674fa319b896"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2062,9 +2062,9 @@ dependencies = [
 
 [[package]]
 name = "rust-ef-macros"
-version = "2.0.1"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5af10edb4e882b396cb3060f921c6a63ac7e4b9c56f8563e7a0aa3a128ca162b"
+checksum = "728688f4f7152d372249dc8dece31969a176fb0846e981f3baa97af0dc890cea"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2073,9 +2073,9 @@ dependencies = [
 
 [[package]]
 name = "rust-ef-sqlite"
-version = "2.0.1"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad23a1b6a6daa20add8ef854ada0a9045323c1877d7fffc82a7605bd05a5b975"
+checksum = "6aefe6447cab5a0531bcd01be670b7a315840c62bee6b3fcdd23bc0abdf0af35"
 dependencies = [
  "async-trait",
  "chrono",

@@ -122,6 +122,7 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
         #[doc(hidden)]
         fn #boxed_fn(
             provider: ::std::sync::Arc<::webx::rust_dix::ServiceProvider>,
+            handler_cache: ::std::sync::Arc<::webx::HandlerCache>,
             request: ::std::boxed::Box<dyn ::std::any::Any + Send>,
         ) -> ::webx::BoxedDispatchFuture {
             ::std::boxed::Box::pin(async move {
@@ -131,7 +132,7 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
                         #req_ty_name
                     ))
                 })?;
-                let result: #rsp_ty = ::webx::dispatch(&provider, req).await?;
+                let result: #rsp_ty = ::webx::dispatch(&provider, &handler_cache, req).await?;
                 Ok(::std::boxed::Box::new(result) as ::std::boxed::Box<dyn ::std::any::Any + Send>)
             })
         }

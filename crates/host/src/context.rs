@@ -128,6 +128,8 @@ pub struct HttpContext {
     /// `Content-Length`). The pipeline turns it into a normal error response
     /// from the innermost handler so CORS/security headers/logging still run.
     early_error: Option<Error>,
+    /// Host DI handles (provider + handler registry) for endpoint dispatch.
+    dispatch_runtime: Option<Arc<webx_core::DispatchRuntime>>,
 }
 
 impl HttpContext {
@@ -140,6 +142,7 @@ impl HttpContext {
         req: Request<Incoming>,
         limits: BodyLimits,
         remote_addr: Option<SocketAddr>,
+        dispatch_runtime: Arc<webx_core::DispatchRuntime>,
     ) -> Self {
         let (parts, body) = req.into_parts();
 
@@ -199,6 +202,7 @@ impl HttpContext {
             resp,
             claims: None,
             early_error,
+            dispatch_runtime: Some(dispatch_runtime),
         }
     }
 
@@ -238,6 +242,10 @@ impl IHttpContext for HttpContext {
 
     fn take_early_error(&mut self) -> Option<Error> {
         self.early_error.take()
+    }
+
+    fn dispatch_runtime(&self) -> Option<&Arc<webx_core::DispatchRuntime>> {
+        self.dispatch_runtime.as_ref()
     }
 }
 

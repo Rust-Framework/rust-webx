@@ -99,12 +99,13 @@ pub trait IHostedService: Send + Sync {
     /// Called when the host starts.
     ///
     /// Services start in registration order and the host waits for all of them
-    /// before accepting requests. Each `start()` runs inside its own DI scope:
-    /// `dispatch_provider().get_owned::<DbContext>()` resolves scoped
-    /// dependencies against that scope, and they are disposed when the call
-    /// returns instead of being cached on the root provider. If one `start()`
-    /// fails, the services that already started are stopped again in reverse
-    /// order before the host reports the error.
+    /// before accepting requests. There is **no ambient DI context**: a hosted
+    /// service that needs scoped dependencies (DbContext, transactions, ...)
+    /// takes rust-dix's built-in `#[inject] services: Arc<dyn ScopeFactory>`
+    /// field and opens its own scope
+    /// (`let scope = services.create_scope();`), disposed with the scope.
+    /// If one `start()` fails, the services that already started are stopped
+    /// again in reverse order before the host reports the error.
     async fn start(&self) -> Result<()>;
 
     /// Called during a graceful shutdown.

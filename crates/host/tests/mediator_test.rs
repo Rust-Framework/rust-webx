@@ -23,7 +23,6 @@
 
 use rust_dix::ServiceCollection;
 use std::sync::{Arc, Mutex};
-use webx_core::dispatch_runtime::DispatchRuntime;
 use webx_core::error::{Error, Result as LrwfResult};
 use webx_core::handler::{IEventHandler, IRequestHandler};
 use webx_core::mediator::Mediator;
@@ -175,23 +174,18 @@ fn build_provider() -> Arc<rust_dix::ServiceProvider> {
     ServiceCollection::new().build().unwrap()
 }
 
-/// `Mediator` driven in-process, with a [`DispatchRuntime`] around every call.
+/// `Mediator` driven in-process over the compiled handler registry.
 ///
-/// 0.10 removed the process-wide provider/handler-cache fallbacks:
-/// `dispatch_handler_cache()` panics unless a runtime is active. Production code
-/// gets one from HTTP dispatch or `Host`; tests enter one explicitly, which is
-/// also what `cargo test` users must do for `Mediator::send`.
+/// 1.0 removed the task-local dispatch runtime: the provider and registry are
+/// explicit handles, exactly as `Host::build` wires them.
 struct TestMediator {
     mediator: Mediator,
-    runtime: DispatchRuntime,
 }
 
 impl TestMediator {
     fn new(provider: Arc<rust_dix::ServiceProvider>) -> Self {
-        let runtime = DispatchRuntime::new(Arc::clone(&provider), Arc::new(HandlerCache::build()));
         Self {
-            mediator: Mediator::new(provider),
-            runtime,
+            mediator: Mediator::new(provider, Arc::new(HandlerCache::build())),
         }
     }
 
@@ -200,7 +194,7 @@ impl TestMediator {
         T: IRequest<R> + Send + 'static,
         R: Send + 'static,
     {
-        self.runtime.run(self.mediator.send(req)).await
+        self.mediator.send(req).await
     }
 
     async fn publish<T: IEventRequest>(&self, event: T) -> LrwfResult<()> {

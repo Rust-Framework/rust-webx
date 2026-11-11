@@ -43,6 +43,10 @@ fn is_schema_mismatch(err: &dyn std::fmt::Display) -> bool {
 pub struct DbInitService {
     #[inject]
     docs: Arc<dyn IDocumentService>,
+    /// rust-dix built-in scope factory: background work opens its own scope
+    /// instead of relying on a task-local ambient provider.
+    #[inject]
+    services: Arc<dyn ScopeFactory>,
 }
 
 #[inject]
@@ -51,7 +55,8 @@ impl IHostedService for DbInitService {
     async fn start(&self) -> Result<()> {
         tracing::info!("[DbInit] Starting initialization...");
 
-        let mut ctx: DbContext = dispatch_provider()
+        let scope = self.services.create_scope();
+        let mut ctx: DbContext = scope
             .get_owned()
             .map_err(|e| Error::Internal(format!("DbContext resolution failed: {}", e)))?;
 

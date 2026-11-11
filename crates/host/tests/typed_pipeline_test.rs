@@ -1,8 +1,8 @@
 //! Typed pipeline behaviors (0.10) through the real `Mediator` path.
 //!
 //! Handlers are registered manually via `inventory::submit!` (the host crate
-//! cannot depend on the `webx` umbrella), then dispatched inside a
-//! `DispatchRuntime` so `dispatch_handler_cache()` resolves the registry.
+//! cannot depend on the `webx` umbrella); the test builds the provider and the
+//! handler registry explicitly, exactly like `Host::build` does.
 
 // The legacy erased behavior is deliberately exercised for ordering.
 #![allow(deprecated)]
@@ -12,7 +12,6 @@ use std::any::Any;
 use std::sync::{Arc, Mutex};
 
 use rust_dix::ServiceCollection;
-use webx_core::dispatch_runtime::DispatchRuntime;
 use webx_core::error::{Error, Result};
 use webx_core::handler::IRequestHandler;
 use webx_core::mediator::{IMediator, IRequest, Mediator};
@@ -166,16 +165,8 @@ impl IErasedPipelineBehavior for ErasedLogBehavior {
 // --- test harness ---
 
 async fn send(provider: &Arc<rust_dix::ServiceProvider>, req: PingRequest) -> Result<PingResponse> {
-    let runtime = Arc::new(DispatchRuntime::new(
-        Arc::clone(provider),
-        Arc::new(HandlerCache::build()),
-    ));
-    runtime
-        .run(async {
-            let mediator = Mediator::new(Arc::clone(provider));
-            mediator.send(req).await
-        })
-        .await
+    let mediator = Mediator::new(Arc::clone(provider), Arc::new(HandlerCache::build()));
+    mediator.send(req).await
 }
 
 fn provider_with<F>(configure: F) -> (Arc<rust_dix::ServiceProvider>, EventLog)

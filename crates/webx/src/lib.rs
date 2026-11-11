@@ -32,7 +32,7 @@ pub use webx_core::config::{
     bind_config, bind_root, load_appsettings, AppOptions, AppSection, CorsSection, CultureSection,
     IAppOptions, JwtSection, MetricsSection, RateLimitSection, TlsSection,
 };
-pub use webx_core::dispatch_runtime::{dispatch_provider, DispatchRuntime};
+pub use webx_core::dispatch_runtime::DispatchRuntime;
 pub use webx_core::error::{Error, Result};
 pub use webx_core::form::{
     sanitize_file_name, set_spool_root, spool_root, FormField, FormFile, FormFileBuilder,

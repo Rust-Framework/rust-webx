@@ -198,9 +198,21 @@ fn generate_dispatch_fn(
                     let request: #ty =
                         <#ty as ::webx::RequestModel>::bind(&mut *ctx).await?;
 
-                    // HTTP adapter: construct request, then dispatch via IMediator
-                    // (same path as in-process calls).
-                    let mediator = ::webx::Mediator::new(::webx::dispatch_provider());
+                    // HTTP adapter: construct request, then dispatch through the
+                    // host-provided DI handles (same path as in-process calls). No ambient
+                    // provider: the request context owns the handle.
+                    let (provider, handler_cache) = {
+                        let runtime = ctx.dispatch_runtime().ok_or_else(|| {
+                            ::webx::Error::Internal(
+                                "HTTP dispatch requires a request context built by webx::Host".to_string(),
+                            )
+                        })?;
+                        (
+                            ::std::sync::Arc::clone(runtime.provider()),
+                            ::std::sync::Arc::clone(runtime.handler_cache()),
+                        )
+                    };
+                    let mediator = ::webx::Mediator::new(provider, handler_cache);
                     let result: #rsp_type = mediator.send(request).await?;
                     #response_expr
                 })

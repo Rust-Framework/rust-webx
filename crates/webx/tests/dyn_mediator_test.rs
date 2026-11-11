@@ -58,14 +58,13 @@ async fn send_boxed_with(
     provider: Arc<rust_dix::ServiceProvider>,
     req: DynRequest,
 ) -> Result<DynResponse> {
-    let runtime = Arc::new(DispatchRuntime::new(
+    let mediator: Arc<dyn IMediator> = Arc::new(Mediator::new(
         Arc::clone(&provider),
         Arc::new(HandlerCache::build()),
     ));
-    let mediator: Arc<dyn IMediator> = Arc::new(Mediator::new(Arc::clone(&provider)));
 
-    runtime
-        .run(async move { mediator.send_boxed(Box::new(req)).await })
+    mediator
+        .send_boxed(Box::new(req))
         .await
         .and_then(|response| {
             response
@@ -93,15 +92,12 @@ async fn dyn_mediator_send_boxed_reports_unregistered_requests() {
     struct UnknownRequest;
 
     let provider = provider();
-    let runtime = Arc::new(DispatchRuntime::new(
+    let mediator: Arc<dyn IMediator> = Arc::new(Mediator::new(
         Arc::clone(&provider),
         Arc::new(HandlerCache::build()),
     ));
-    let mediator: Arc<dyn IMediator> = Arc::new(Mediator::new(Arc::clone(&provider)));
 
-    let result = runtime
-        .run(async move { mediator.send_boxed(Box::new(UnknownRequest)).await })
-        .await;
+    let result = mediator.send_boxed(Box::new(UnknownRequest)).await;
     let message = format!("{}", result.expect_err("unregistered request must fail"));
     assert!(
         message.contains("boxed dispatch"),

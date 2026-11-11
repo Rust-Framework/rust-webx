@@ -120,13 +120,24 @@ pub trait IServiceCollectionExt: Sized {
 impl IServiceCollectionExt for ServiceCollection {
     fn add_mediator(self) -> Self {
         // Transient (not singleton) so build-time validation does not require a
-        // fully wired ServiceProvider. Each resolution shares the root provider Arc.
+        // fully wired ServiceProvider. Each resolution shares the root provider
+        // Arc; the handler registry is registered by `Host::build` as an
+        // instance (or rebuilt when the mediator is used without a host).
         MEDIATOR_ACTIVE.store(true, std::sync::atomic::Ordering::SeqCst);
         self.transient::<Mediator>(|resolver| {
             let provider = resolver
                 .provider_arc()
                 .expect("ServiceProvider not available from DI resolver");
-            Arc::new(Mediator::new(provider))
+            let handler_cache = resolver
+                .get_any(std::any::type_name::<Arc<crate::route::scan::HandlerCache>>())
+                .and_then(|service| {
+                    service
+                        .downcast::<Arc<crate::route::scan::HandlerCache>>()
+                        .ok()
+                })
+                .map(|service| Arc::clone(&*service))
+                .unwrap_or_else(|| Arc::new(crate::route::scan::HandlerCache::build()));
+            Arc::new(Mediator::new(provider, handler_cache))
         })
     }
 

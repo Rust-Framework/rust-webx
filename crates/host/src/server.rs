@@ -545,6 +545,11 @@ impl HostBuilder {
             svc = cfg(svc);
         }
 
+        // The compiled handler registry is a host service: `add_mediator`
+        // resolves it from DI, and the HTTP path reads it from DispatchRuntime.
+        let handler_cache = Arc::new(webx_core::route::scan::HandlerCache::build());
+        svc = svc.instance(Arc::clone(&handler_cache));
+
         // Host-provided defaults use `try_add*`: rust-dix 0.8+ resolves the *last*
         // registration, so an earlier user registration must win over these.
         let health_registry = Arc::clone(&self.health_registry);
@@ -569,7 +574,6 @@ impl HostBuilder {
         })?;
 
         // Per-host dispatch runtime (provider + handler registry).
-        let handler_cache = Arc::new(webx_core::route::scan::HandlerCache::build());
         let dispatch_runtime = Arc::new(DispatchRuntime::new(Arc::clone(&provider), handler_cache));
 
         // Upload spooling and body limits come from the same merged config.
@@ -1055,7 +1059,7 @@ impl Host {
             https_listeners.push(bind_listener(addr, "HTTPS").await?);
         }
 
-        start_hosted_services(&self.hosted_services, &self.dispatch_runtime).await?;
+        start_hosted_services(&self.hosted_services).await?;
 
         // Banner
         if self.mode == AppMode::Development {
@@ -1123,7 +1127,7 @@ impl Host {
             }
         }
 
-        stop_hosted_services(&self.hosted_services, &self.dispatch_runtime).await;
+        stop_hosted_services(&self.hosted_services).await;
 
         match run_error {
             Some(err) => Err(err),
@@ -1134,7 +1138,7 @@ impl Host {
     /// Start the server at a single explicit address (convenience wrapper).
     pub async fn run_at(&self, addr: &str) -> Result<()> {
         let listener = bind_listener(addr, "HTTP").await?;
-        start_hosted_services(&self.hosted_services, &self.dispatch_runtime).await?;
+        start_hosted_services(&self.hosted_services).await?;
 
         install_shutdown_handler(Arc::clone(&self.shutdown));
         spawn_async_shutdown_listener(Arc::clone(&self.shutdown));
@@ -1151,7 +1155,7 @@ impl Host {
         )
         .await;
 
-        stop_hosted_services(&self.hosted_services, &self.dispatch_runtime).await;
+        stop_hosted_services(&self.hosted_services).await;
         Ok(())
     }
 
@@ -1261,11 +1265,9 @@ async fn handle_request(
     body_limits: BodyLimits,
     remote_addr: Option<std::net::SocketAddr>,
 ) -> std::result::Result<hyper::Response<RespBody>, std::convert::Infallible> {
-    let mut ctx = HttpContext::new(req, body_limits, remote_addr);
+    let mut ctx = HttpContext::new(req, body_limits, remote_addr, Arc::clone(&dispatch_runtime));
 
-    let result = dispatch_runtime
-        .run(async { pipeline.execute(&mut ctx, router_handler).await })
-        .await;
+    let result = pipeline.execute(&mut ctx, router_handler).await;
     if let Err(e) = result {
         match e {
             // A binding/validation failure already carries its full
@@ -1454,10 +1456,7 @@ const HOSTED_START_TIMEOUT_SECS: u64 = 30;
 /// How long a hosted service may take to stop before it is skipped.
 const HOSTED_STOP_TIMEOUT_SECS: u64 = 30;
 
-async fn start_hosted_services(
-    services: &[Arc<dyn IHostedService>],
-    dispatch_runtime: &Arc<DispatchRuntime>,
-) -> Result<()> {
+async fn start_hosted_services(services: &[Arc<dyn IHostedService>]) -> Result<()> {
     if services.is_empty() {
         return Ok(());
     }
@@ -1466,13 +1465,12 @@ async fn start_hosted_services(
     let mut failure: Option<webx_core::error::Error> = None;
 
     for svc in services {
-        // Each start gets its own DI scope: a `dispatch_provider().get_owned()`
-        // inside `start()` resolves scoped dependencies (DbContext, connections)
-        // against this scope instead of the root provider's cache, so they are
-        // disposed when the start finishes rather than living for the process.
+        // No ambient DI scope is created here: hosted services own their scope
+        // via an injected `Arc<dyn ScopeFactory>` (rust-dix built-in) and dispose
+        // it themselves, so scoped dependencies never outlive the service run.
         let attempt = tokio::time::timeout(
             std::time::Duration::from_secs(HOSTED_START_TIMEOUT_SECS),
-            dispatch_runtime.run_in_scope(async { svc.start().await }),
+            svc.start(),
         )
         .await;
         match attempt {
@@ -1499,36 +1497,29 @@ async fn start_hosted_services(
             // Roll back the services that did start, newest first, so a failed
             // startup does not leave pools/loops running.
             for (index, svc) in services[..started].iter().enumerate().rev() {
-                stop_hosted_service(dispatch_runtime, index, svc).await;
+                stop_hosted_service(index, svc).await;
             }
             Err(err)
         }
     }
 }
 
-async fn stop_hosted_services(
-    services: &[Arc<dyn IHostedService>],
-    dispatch_runtime: &Arc<DispatchRuntime>,
-) {
+async fn stop_hosted_services(services: &[Arc<dyn IHostedService>]) {
     if services.is_empty() {
         return;
     }
     tracing::info!("Stopping {} hosted service(s)...", services.len());
     for (index, svc) in services.iter().enumerate().rev() {
-        stop_hosted_service(dispatch_runtime, index, svc).await;
+        stop_hosted_service(index, svc).await;
     }
     tracing::info!("All hosted services stopped.");
 }
 
 /// Stop one service with a timeout (and a fresh DI scope), logging failures.
-async fn stop_hosted_service(
-    dispatch_runtime: &Arc<DispatchRuntime>,
-    index: usize,
-    svc: &Arc<dyn IHostedService>,
-) {
+async fn stop_hosted_service(index: usize, svc: &Arc<dyn IHostedService>) {
     match tokio::time::timeout(
         std::time::Duration::from_secs(HOSTED_STOP_TIMEOUT_SECS),
-        dispatch_runtime.run_in_scope(async { svc.stop().await }),
+        svc.stop(),
     )
     .await
     {

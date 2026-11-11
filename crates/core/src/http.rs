@@ -436,6 +436,18 @@ pub trait IHttpContext: IClaimsExt + Send {
     fn take_early_error(&mut self) -> Option<crate::error::Error> {
         None
     }
+
+    /// DI handles of the host that dispatched this request.
+    ///
+    /// Endpoint adapters use this to build the `Mediator` over the host's
+    /// service provider and handler registry. Contexts created by tests or
+    /// alternative hosts return `None`; dispatching an endpoint through such a
+    /// context is a programming error and is reported as `Error::Internal`.
+    fn dispatch_runtime(
+        &self,
+    ) -> Option<&std::sync::Arc<crate::dispatch_runtime::DispatchRuntime>> {
+        None
+    }
 }
 
 /// HTTP request abstraction.

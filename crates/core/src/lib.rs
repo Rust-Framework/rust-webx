@@ -33,7 +33,7 @@ pub use cache::cache_ext::DistributedCacheExtensions;
 pub use cache::options::DistributedCacheEntryOptions;
 pub use cache::trait_def::{CacheError, IDistributedCache};
 pub use config::*;
-pub use dispatch_runtime::{dispatch_handler_cache, dispatch_provider, DispatchRuntime};
+pub use dispatch_runtime::DispatchRuntime;
 pub use error::*;
 pub use form::*;
 pub use handler::*;

@@ -541,6 +541,7 @@ pub type BoxedDispatchFuture = std::pin::Pin<
 /// `Arc<dyn IMediator>` without knowing `T`/`R` at the call site.
 pub type BoxedDispatchFn = fn(
     std::sync::Arc<rust_dix::ServiceProvider>,
+    std::sync::Arc<HandlerCache>,
     Box<dyn std::any::Any + Send>,
 ) -> BoxedDispatchFuture;
 

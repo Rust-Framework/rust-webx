@@ -97,7 +97,7 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler { ... }
 规则内 any-of；没有规则表示公开。`IEndpointCatalog` 把同一份规则组暴露给权限系统，OpenAPI 与
 权限同步不需要再解析宏文本。
 
-旧 `build_resource_policy_from_routes()` 已过时，不再参与 HTTP 分发；`collect_authorizers()` 仍从 DI
+`build_resource_policy_from_routes()` 已在 1.0 删除，不再参与 HTTP 分发；`collect_authorizers()` 仍从 DI
 收集 `IDynamicAuthorizer`，作为端点的额外动态检查。
 
 > **注意：** `add_authentication()` 仅注册 JWT 中间件，让受保护端点拿到 claims；`#[authorize]` 规则

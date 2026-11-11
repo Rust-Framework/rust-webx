@@ -3,6 +3,63 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [1.0.0] — 2026-11-11
+
+### Breaking
+
+- **rust-dix 0.10 alignment.** The DI container is now rust-dix 0.10 (rust-dix-macros 0.10,
+  rust-ef 2.1 for the examples); MSRV is 1.95. User-visible semantics:
+  - strict scope validation is the **default** — resolving a Scoped service from the root
+    provider returns `Err(ScopedFromRootProvider)`; `provider.scope()` is the supported path,
+    and `get_owned` / `try_get_owned` remain callable from the root (caller-owned, not cached);
+  - single-service resolution is MEDI **last-registration-wins**; framework defaults are
+    registered with `try_add*` so an earlier user registration still wins;
+  - `get_all` returns **non-keyed** registrations only; use `get_all_keyed::<T>()` for keyed;
+  - `get_owned` on a Singleton returns `Err(OwnedNotSupported)` instead of panicking;
+  - `RdiError` is `#[non_exhaustive]` with new `ScopedFromRootProvider` / `ProviderDisposed` /
+    `ScopeDisposed` variants.
+- **Ambient DI removed.** `dispatch_provider()`, `dispatch_handler_cache()`,
+  `DispatchRuntime::run()` and `DispatchRuntime::run_in_scope()` are gone; there is no
+  task-local provider. `DispatchRuntime` is a plain per-host handle (`provider()`,
+  `handler_cache()`, `scope()`). Handlers use `#[handler(inject)]` constructor injection;
+  background work injects rust-dix's built-in `Arc<dyn ScopeFactory>` and opens scopes
+  explicitly; `IHttpContext::dispatch_runtime()` gives endpoint adapters the host handles.
+- **`Mediator::new` takes explicit handles**: `Mediator::new(provider, Arc<HandlerCache>)`.
+  `add_mediator()` still registers a DI-injectable mediator (the host registers the handler
+  registry in DI).
+- **Typed pipeline only.** `IErasedPipelineBehavior`, `BoxedNextFn`, `BoxedPipelineFuture`,
+  `add_pipeline` / `add_pipeline_with` and `build_pipeline_chain` are removed; dispatch runs a
+  single `IPipelineBehavior<Req, Rsp>` chain (short-circuit values are compiler-checked).
+- **Deprecated APIs removed**: `register_handlers!` (since 0.2) and
+  `build_resource_policy_from_routes()` (since 0.6).
+- **Host shutdown disposes the provider**: after hosted services stop and connections drain,
+  `provider.dispose()` releases singletons in reverse creation order and marks the provider
+  disposed (later resolution returns `ProviderDisposed`; the call is idempotent).
+
+### Added
+
+- **`HostBuilder::try_build_async()`** for async singletons (rust-ef `add_dbcontext_async`):
+  it awaits rust-dix `build_async_with`, and `try_build()` reports an actionable error when
+  async registrations are present. Host assembly is shared between the sync and async paths.
+- **`HostBuilder::lenient_scope_validation()`**: migration-only opt-out that restores the
+  pre-1.0 root-scope behavior (`ServiceProviderOptions::lenient()`).
+- `DispatchRuntime::scope()` and `IHttpContext::dispatch_runtime()` as explicit DI handles.
+- Migration guide `16-migration/upgrade-to-1.0.md` (Chinese + English summary).
+
+### Changed
+
+- Framework-provided defaults (`HealthCheckRegistry`, `IEndpointCatalog`, `IStringLocalizer`)
+  use `try_add*`; rust-dix 0.10 resolves the last registration, so user overrides keep winning.
+- docbit/dmbit examples migrated: `DbInitService` injects `Arc<dyn ScopeFactory>`, the SEO
+  middleware opens its own scope, and the old ambient calls are gone.
+- README / handbook version references moved to 1.0.
+
+### Fixed
+
+- Hosted services no longer depend on an implicit task-local scope: scoped dependencies are
+  bound to the scope the service opens and are released with it.
+- Endpoint dispatch no longer relies on a global provider lookup; a missing runtime is reported
+  as a clear `Error::Internal` instead of a panic in a macro-generated dispatch.
 ## [0.10.0] — 2026-11-11
 
 ### Breaking

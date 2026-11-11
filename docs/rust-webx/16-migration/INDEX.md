@@ -9,6 +9,7 @@
 
 | 小节 | 内容 |
 |------|------|
+| [升级到 1.0（破坏性变更）](upgrade-to-1.0.md) | rust-dix 0.10 对齐、删除 ambient DI 与 erased pipeline、dispose/async build |
 | [升级到 0.10（破坏性变更）](upgrade-to-0.10.md) | typed pipeline、移除全局 provider shim、try_build |
 | [升级到 0.9（破坏性变更）](upgrade-to-0.9.md) | 默认安全、身份 fail-closed、错误/协议与扩展点收口 |
 | [升级到 0.6（破坏性变更）](upgrade-to-0.6.md) | 端点目录、授权规则组、资源键本地化 |
@@ -19,8 +20,8 @@
 
 ## 下一步
 
-已经在用 rust-webx？从 [升级到 0.10](upgrade-to-0.10.md)（0.9 → 0.10）或
-[升级到 0.9](upgrade-to-0.9.md)（0.8 → 0.9）开始。
+已经在用 rust-webx？直接看 [升级到 1.0](upgrade-to-1.0.md)（0.9/0.10 → 1.0），
+更早的版本按其历史升级页逐级迁移。
 从其它框架过来？看 [从 ASP.NET Core 迁移](from-aspnet-core.md) 或
 [从 Axum / Actix 迁移](from-axum-actix.md)；遇到不熟悉的术语时查
 [概念对照表](concept-mapping.md)。

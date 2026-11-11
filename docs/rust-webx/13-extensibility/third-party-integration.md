@@ -45,11 +45,19 @@ pub struct CreateItemHandler {
 }
 ```
 
-schema 初始化在 `IHostedService` 中执行（没有版本化迁移模块，直接 ensure schema 后 seed）：
+schema 初始化在 `IHostedService` 中执行（没有版本化迁移模块，直接 ensure schema 后 seed）。
+后台任务注入 rust-dix 内建的 `Arc<dyn ScopeFactory>` 并显式开 scope：
 
 ```rust
+#[derive(Inject)]
+struct DbInitService {
+    #[inject]
+    services: Arc<dyn ScopeFactory>,
+}
+
 async fn start(&self) -> Result<()> {
-    let mut ctx: DbContext = dispatch_provider()
+    let scope = self.services.create_scope();
+    let mut ctx: DbContext = scope
         .get_owned()
         .map_err(|e| Error::Internal(format!("DbContext resolution failed: {}", e)))?;
 

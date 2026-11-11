@@ -23,9 +23,10 @@ graph LR
 ```
 
 - `start()` 在 HTTP 监听器启动**之前**执行；任一服务 `start()` 失败时，已启动的服务按**逆序**回滚 `stop()`，然后 `run()` 返回错误
-- 每个 `start()` / `stop()` 都在一个**独立的 DI scope** 内执行：内部调用
-  `dispatch_provider().get_owned::<DbContext>()` 时，Scoped 依赖解析并缓存在该 scope，
-  方法结束后连同连接一起释放，不会落到 root provider 变成进程级单例
+- 1.0 起没有 ambient DI：服务若需要 Scoped 依赖（`DbContext`、事务、连接），注入 rust-dix 内建的
+  `#[inject] services: Arc<dyn ScopeFactory>`，在 `start()`/后台循环里显式
+  `let scope = services.create_scope(); let mut ctx: DbContext = scope.get_owned()?;`，scope 释放即释放依赖
+- Host 停机顺序：连接排空 → `stop()` 逆序 → **`provider.dispose()`**（rust-dix 逆序释放 singleton 并标记 disposed）
 - 监听器**先绑定后启动**：端口占用等绑定错误让 `run()`/`run_at()` 直接返回 `Err`（进程非 0 退出），不会静默"启动成功"
 - `stop()` 在优雅关闭、连接排空之后按**启动的逆序**执行（最后启动的最先停止），每个服务最多等待 30s，超时只记日志、不阻塞进程
 - `stop()` 有默认空实现，不需要关闭逻辑可省略
@@ -50,14 +51,18 @@ graph LR
 pub struct DbInitService {
     #[inject]
     docs: Arc<dyn IDocumentService>,
+    /// rust-dix 内建：后台任务自己开 scope
+    #[inject]
+    services: Arc<dyn ScopeFactory>,
 }
 
 #[inject]
 #[async_trait]
 impl IHostedService for DbInitService {
     async fn start(&self) -> Result<()> {
-        // 请求作用域由框架建立，Scoped 依赖在此解析
-        let mut ctx: DbContext = dispatch_provider()
+        // 显式 DI scope：释放 scope 即释放 Scoped 依赖（不落 root）
+        let scope = self.services.create_scope();
+        let mut ctx: DbContext = scope
             .get_owned()
             .map_err(|e| Error::Internal(format!("DbContext resolution failed: {}", e)))?;
 

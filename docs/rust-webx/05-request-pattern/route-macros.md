@@ -210,23 +210,9 @@ fn __rdi_try_construct_ListEndpointsHandler(
 }
 ```
 
-不想用构造注入时，也可以在 `handle` 里显式从当前请求容器取：
-
-```rust
-#[handler]
-#[async_trait]
-impl IRequestHandler<ListEndpointsRequest, Vec<EndpointDescriptor>> for ListEndpointsHandler {
-    async fn handle(&mut self, _req: ListEndpointsRequest) -> Result<Vec<EndpointDescriptor>> {
-        let catalog = dispatch_provider()
-            .get::<dyn IEndpointCatalog>()
-            .map_err(|error| Error::Di(error.to_string()))?;
-        Ok(catalog.all().to_vec())
-    }
-}
-```
-
-`dispatch_provider()` 只在 HTTP/Mediator 的 dispatch runtime 内有效；hosted service 等非请求场景
-优先使用构造注入。
+Handler 内**没有 ambient DI 入口**（1.0 删除了 `dispatch_provider()`）：需要容器服务的 handler 用
+**构造注入**——`#[handler(inject)]` + `#[derive(Inject)]` 的 `#[inject]` 字段（见上一节），或把依赖
+作为参数传给用例函数。后台任务（hosted service）注入 `Arc<dyn ScopeFactory>` 后自行开 scope。
 
 `IEndpointCatalog`、`EndpointDescriptor`、`EndpointInfo` 都由 `webx::*` 导出。`EndpointDescriptor`
 也实现了 `Serialize`，因此原始列表可直接作为 JSON 返回：

@@ -9,8 +9,19 @@ use serde::{Deserialize, Serialize};
 use webx::*;
 
 fn find_free_port() -> u16 {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    listener.local_addr().unwrap().port()
+    // Tests in this binary run in parallel: asking the OS for an ephemeral
+    // port twice can return the same number after release (the host binds it
+    // milliseconds later), so use a process-unique rolling range and verify
+    // each candidate is still free.
+    use std::sync::atomic::{AtomicU16, Ordering};
+    static NEXT: AtomicU16 = AtomicU16::new(0);
+    loop {
+        let offset = NEXT.fetch_add(1, Ordering::Relaxed);
+        let port = 20_000 + (offset % 30_000);
+        if TcpListener::bind(("127.0.0.1", port)).is_ok() {
+            return port;
+        }
+    }
 }
 
 async fn spawn_host(port: u16) {

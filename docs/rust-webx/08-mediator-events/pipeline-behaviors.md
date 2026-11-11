@@ -1,19 +1,18 @@
-# IPipelineBehavior 拦截链
+# IPipelineBehavior 拦截链（1.0 typed）
 
 ## 接口
 
+1.0 起 pipeline 是**类型化**的（0.10 引入、1.0 删除旧 erased 兼容层）：
+
 ```rust
 #[async_trait]
-pub trait IPipelineBehavior: Send + Sync {
-    async fn handle(
-        &self,
-        req: Box<dyn Any + Send>,
-        next: BoxedNextFn,
-    ) -> Result<Box<dyn Any + Send>>;
+pub trait IPipelineBehavior<Req: Send + 'static, Rsp: Send + 'static>: Send + Sync {
+    async fn handle(&self, req: Req, next: Next<Req, Rsp>) -> Result<Rsp>;
 }
 ```
 
-`next` 是类型擦除的续接函数；不调用它即短路，跳过后续 behavior 与最终 Handler。
+`req` / `Rsp` 是真实类型；`next.run(req)` 继续执行剩余链与 Handler。不调用 `next` 即**短路**，
+返回值必须就是 Handler 的响应类型——**编译期检查**，不再有 `Box<dyn Any>` 与运行时 downcast。
 
 ## 用途
 
@@ -21,45 +20,50 @@ pub trait IPipelineBehavior: Send + Sync {
 
 | Behavior | 职责 |
 |----------|------|
-| ValidationBehavior | 请求校验 |
+| ValidationBehavior | 请求校验（失败可直接 `Err` 返回） |
 | LoggingBehavior | 记录请求/响应 |
-| CachingBehavior | 响应缓存 |
+| CachingBehavior | 响应缓存（命中时短路返回 `Rsp`） |
 | TransactionBehavior | 数据库事务包装 |
 
 ## 示例
 
 ```rust
 #[derive(Default)]
-pub struct ValidationBehavior;
+pub struct RequireNote;
 
 #[async_trait]
-impl IPipelineBehavior for ValidationBehavior {
+impl IPipelineBehavior<CreateOrderRequest, OrderView> for RequireNote {
     async fn handle(
         &self,
-        req: Box<dyn Any + Send>,
-        next: BoxedNextFn,
-    ) -> Result<Box<dyn Any + Send>> {
-        // 前置：校验 req
-        // 调用 next 继续管道
-        let result = next(req).await?;
-        // 后置：处理 result
-        Ok(result)
+        req: CreateOrderRequest,
+        next: Next<CreateOrderRequest, OrderView>,
+    ) -> Result<OrderView> {
+        if req.note.trim().is_empty() {
+            return Err(Error::Validation("note is required".into()));
+        }
+        next.run(req).await
     }
 }
 ```
 
 ## 注册与执行
 
-用 `svc.add_pipeline::<ValidationBehavior>()` 注册（要求 `Default`），behavior 以 singleton 进入 DI：
-
 ```rust
-Host::builder()
-    .register(|svc| svc.add_pipeline::<ValidationBehavior>())
-    .build();
+svc.add_typed_pipeline::<RequireNote, CreateOrderRequest, OrderView>();
+// 需要构造注入时：
+svc.add_typed_pipeline_with::<_, CreateOrderRequest, OrderView>(|resolver| {
+    let clock: Arc<Clock> = resolver
+        .get_any(std::any::type_name::<Clock>())
+        .and_then(|service| service.downcast::<Arc<Clock>>().ok())
+        .map(|service| Arc::clone(&*service))
+        .expect("register Clock first");
+    Arc::new(RequireNoteWithClock { clock })
+});
 ```
 
-`Mediator::send()` 与 HTTP endpoint 分发都会在每请求作用域内取出全部 `dyn IPipelineBehavior`，
-按注册顺序构造嵌套链后调用（第一个注册的最外层）。
+Behavior 以 singleton 进入 DI，**只对注册的 `<Req, Rsp>` 对生效**；每请求作用域内
+`get_all::<dyn IPipelineBehavior<Req, Rsp>>()` 按注册顺序构造嵌套链（第一个注册的最外层）。
+`Mediator::send()` 与 HTTP endpoint 分发走同一条链。
 
 ## 小结
 

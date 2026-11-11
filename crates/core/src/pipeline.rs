@@ -1,65 +1,114 @@
-//! Pipeline behavior trait: IPipelineBehavior.
+//! Pipeline behaviors: typed (`IPipelineBehavior<Req, Rsp>`) and the legacy
+//! type-erased variant (`IErasedPipelineBehavior`).
 
 use crate::error::Result;
 use std::any::Any;
 use std::future::Future;
 use std::pin::Pin;
 
-/// Type-erased continuation function for pipeline behaviors.
-///
-/// Carries a boxed request to the next behavior (or terminal handler).
+/// Type-erased continuation function used by [`IErasedPipelineBehavior`].
 pub type BoxedNextFn = Box<dyn FnOnce(Box<dyn Any + Send>) -> BoxedPipelineFuture + Send>;
 
-/// Boxed future returned by a pipeline behavior step.
+/// Boxed future returned by a type-erased pipeline step.
 pub type BoxedPipelineFuture = Pin<Box<dyn Future<Output = Result<Box<dyn Any + Send>>> + Send>>;
 
-/// Pipeline behavior that wraps around request handling.
+/// The continuation a typed behavior calls to run the rest of the chain.
 ///
-/// Multiple behaviors form a chain. Each behavior can:
-/// - Inspect or modify the request before passing it on
-/// - Inspect or modify the response after it returns
-/// - Short-circuit and skip the rest of the chain (by not calling `next`)
-///
-/// Analogous to MediatR's `IPipelineBehavior<TRequest, TResponse>`.
-///
-/// # Lifetime and dependencies
-///
-/// Behaviors are registered as **singletons**: one instance per host, shared by
-/// every request. The DI resolver is available only while the behavior is being
-/// **constructed** — use [`IServiceCollectionExt::add_pipeline_with`] and take
-/// your dependencies in the factory closure:
+/// The framework builds this value; behaviors only consume it:
 ///
 /// ```ignore
-/// svc.add_pipeline_with(|resolver| {
-///     // `&dyn IServiceResolver` is object-safe: resolve type-erased.
-///     let clock: Arc<Clock> = resolver
-///         .get_any(std::any::type_name::<Clock>())
-///         .and_then(|service| service.downcast::<Arc<Clock>>().ok())
-///         .map(|service| Arc::clone(&*service))
-///         .expect("register Clock before the pipeline");
-///     Arc::new(TimingBehavior { clock }) as Arc<dyn IPipelineBehavior>
-/// })
+/// let response = next.run(req).await?;   // run the remaining chain + handler
+/// ```
+/// Boxed future returned by one typed pipeline step.
+type NextFuture<Rsp> = Pin<Box<dyn Future<Output = Result<Rsp>> + Send>>;
+
+/// Callable continuation stored by [`Next`].
+type NextCall<Req, Rsp> = Box<dyn FnOnce(Req) -> NextFuture<Rsp> + Send>;
+
+pub struct Next<Req, Rsp>
+where
+    Req: Send + 'static,
+    Rsp: Send + 'static,
+{
+    call: NextCall<Req, Rsp>,
+}
+
+impl<Req, Rsp> Next<Req, Rsp>
+where
+    Req: Send + 'static,
+    Rsp: Send + 'static,
+{
+    /// Wrap a typed continuation.
+    pub fn new<F, Fut>(call: F) -> Self
+    where
+        F: FnOnce(Req) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<Rsp>> + Send + 'static,
+    {
+        Self {
+            call: Box::new(move |req| Box::pin(call(req))),
+        }
+    }
+
+    /// Run the rest of the chain (and the handler) with `req`.
+    pub async fn run(self, req: Req) -> Result<Rsp> {
+        (self.call)(req).await
+    }
+}
+
+/// Typed pipeline behavior that wraps around request handling.
+///
+/// Multiple behaviors form a chain: the first registered behavior is the
+/// outermost (runs first on the request, last on the response). A behavior can
+/// inspect/modify the request and response, or **short-circuit** by returning a
+/// response without calling [`Next::run`] — the value is the handler's response
+/// type, checked by the compiler:
+///
+/// ```ignore
+/// #[derive(Default)]
+/// struct RequireNotes;
+///
+/// #[async_trait::async_trait]
+/// impl IPipelineBehavior<CreateOrderRequest, OrderView> for RequireNotes {
+///     async fn handle(
+///         &self,
+///         req: CreateOrderRequest,
+///         next: Next<CreateOrderRequest, OrderView>,
+///     ) -> Result<OrderView> {
+///         if req.note.is_empty() {
+///             return Err(Error::Validation("note is required".into()));
+///         }
+///         next.run(req).await
+///     }
+/// }
+///
+/// svc.add_typed_pipeline::<RequireNotes, CreateOrderRequest, OrderView>();
 /// ```
 ///
-/// Inside [`IPipelineBehavior::handle`] there is no resolver and no typed
-/// request/response: the request and the eventual response are
-/// `Box<dyn Any + Send>`. Cross-cutting mechanics (timing, logging, cancellation)
-/// belong here; business rules that need the typed request belong in the handler
-/// or a use case it calls. [`IServiceCollectionExt::add_pipeline`] remains the
-/// zero-dependency convenience registration for `Default` behaviors.
+/// Behaviors are **singletons** (one instance per host). The DI resolver is only
+/// available while a behavior is being **constructed**:
+/// [`IServiceCollectionExt::add_typed_pipeline_with`] hands the factory the
+/// resolver; inside `handle` only the typed request/continuation exist.
 ///
-/// # Response type contract
-///
-/// A behavior that short-circuits **must** return the same response type the
-/// handler would return (`downcast` to it happens after the chain, before the
-/// caller sees the value). Short-circuiting with a different type — for example
-/// `Box::new(())` — fails with an explicit type-mismatch error instead of
-/// silently succeeding.
-///
-/// [`IServiceCollectionExt::add_pipeline_with`]: crate::route::ext::IServiceCollectionExt::add_pipeline_with
-/// [`IServiceCollectionExt::add_pipeline`]: crate::route::ext::IServiceCollectionExt::add_pipeline
+/// [`IServiceCollectionExt::add_typed_pipeline_with`]:
+///     crate::route::ext::IServiceCollectionExt::add_typed_pipeline_with
 #[async_trait::async_trait]
-pub trait IPipelineBehavior: Send + Sync {
+pub trait IPipelineBehavior<Req: Send + 'static, Rsp: Send + 'static>: Send + Sync {
+    async fn handle(&self, req: Req, next: Next<Req, Rsp>) -> Result<Rsp>;
+}
+
+/// Legacy type-erased pipeline behavior (deprecated since 0.10.0).
+///
+/// Kept for one release so existing behaviors keep compiling and running: the
+/// erased chain runs **outside** the typed chain, so it observes the request
+/// before typed behaviors and the response after them. A short-circuit here
+/// must still return the handler's response type as `Box<dyn Any + Send>`;
+/// prefer [`IPipelineBehavior`] for new code.
+#[deprecated(
+    since = "0.10.0",
+    note = "use the typed `IPipelineBehavior<Req, Rsp>`; the erased trait is removed in 1.0"
+)]
+#[async_trait::async_trait]
+pub trait IErasedPipelineBehavior: Send + Sync {
     async fn handle(
         &self,
         req: Box<dyn Any + Send>,

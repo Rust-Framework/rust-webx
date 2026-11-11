@@ -15,7 +15,7 @@
     "demoUrl": "",
     "featured": true,
     "sortOrder": 1,
-    "version": "0.9.0",
+    "version": "0.10.0",
     "language": "zh-CN",
     "author": "Start",
     "logo": "logo.svg",
@@ -590,6 +590,13 @@
           "title": "迁移指南",
           "subtitle": "版本升级、ASP.NET Core 与 Axum / Actix 迁移",
           "sections": [
+            {
+              "id": "upgrade-to-0.10",
+              "title": "升级到 0.10（破坏性变更）",
+              "summary": "typed pipeline、移除全局 provider shim 与 try_build",
+              "readingTime": 18,
+              "difficulty": "intermediate"
+            },
             {
               "id": "upgrade-to-0.9",
               "title": "升级到 0.9（破坏性变更）",

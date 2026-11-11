@@ -16,15 +16,20 @@
 // `Pin<Box<dyn Future<Output = Result<Box<dyn Any + Send>>> + Send>>` return
 // type is inherent to the dispatch bridge pattern.
 #![allow(clippy::type_complexity)]
+// The erased pipeline tests below are deliberate legacy-regression tests: 0.10
+// introduced the typed `IPipelineBehavior<Req, Rsp>` but keeps
+// `IErasedPipelineBehavior` running for one release.
+#![allow(deprecated)]
 
 use rust_dix::ServiceCollection;
 use std::sync::{Arc, Mutex};
+use webx_core::dispatch_runtime::DispatchRuntime;
 use webx_core::error::{Error, Result as LrwfResult};
 use webx_core::handler::{IEventHandler, IRequestHandler};
 use webx_core::mediator::Mediator;
 use webx_core::mediator::{IEventRequest, IMediator, IRequest};
 use webx_core::route::ext::IServiceCollectionExt;
-use webx_core::route::scan::HandlerRegistration;
+use webx_core::route::scan::{HandlerCache, HandlerRegistration};
 
 // --- Request / Response Types ---
 
@@ -170,9 +175,42 @@ fn build_provider() -> Arc<rust_dix::ServiceProvider> {
     ServiceCollection::new().build().unwrap()
 }
 
+/// `Mediator` driven in-process, with a [`DispatchRuntime`] around every call.
+///
+/// 0.10 removed the process-wide provider/handler-cache fallbacks:
+/// `dispatch_handler_cache()` panics unless a runtime is active. Production code
+/// gets one from HTTP dispatch or `Host`; tests enter one explicitly, which is
+/// also what `cargo test` users must do for `Mediator::send`.
+struct TestMediator {
+    mediator: Mediator,
+    runtime: DispatchRuntime,
+}
+
+impl TestMediator {
+    fn new(provider: Arc<rust_dix::ServiceProvider>) -> Self {
+        let runtime = DispatchRuntime::new(Arc::clone(&provider), Arc::new(HandlerCache::build()));
+        Self {
+            mediator: Mediator::new(provider),
+            runtime,
+        }
+    }
+
+    async fn send<T, R>(&self, req: T) -> LrwfResult<R>
+    where
+        T: IRequest<R> + Send + 'static,
+        R: Send + 'static,
+    {
+        self.runtime.run(self.mediator.send(req)).await
+    }
+
+    async fn publish<T: IEventRequest>(&self, event: T) -> LrwfResult<()> {
+        self.mediator.publish(event).await
+    }
+}
+
 #[tokio::test]
 async fn mediator_send_success() {
-    let mediator = Mediator::new(build_provider());
+    let mediator = TestMediator::new(build_provider());
     let result = mediator.send(HelloRequest).await;
     let rsp = result.expect("send should succeed");
     assert_eq!(rsp.message, "hello");
@@ -180,7 +218,7 @@ async fn mediator_send_success() {
 
 #[tokio::test]
 async fn mediator_send_handler_failure() {
-    let mediator = Mediator::new(build_provider());
+    let mediator = TestMediator::new(build_provider());
     let result = mediator.send(FailingHelloRequest).await;
     assert!(result.is_err());
     match result.unwrap_err() {
@@ -197,7 +235,7 @@ impl IRequest<UnregisteredResponse> for UnregisteredRequest {}
 
 #[tokio::test]
 async fn mediator_send_handler_not_registered() {
-    let mediator = Mediator::new(build_provider());
+    let mediator = TestMediator::new(build_provider());
     let result = mediator.send(UnregisteredRequest).await;
     assert!(result.is_err());
     match result.unwrap_err() {
@@ -221,7 +259,7 @@ async fn mediator_publish_single_handler() {
         })
         .build()
         .unwrap();
-    let mediator = Mediator::new(provider);
+    let mediator = TestMediator::new(provider);
     mediator
         .publish(TestEvent {
             payload: "event-1".into(),
@@ -253,7 +291,7 @@ async fn mediator_publish_multiple_handlers() {
         })
         .build()
         .unwrap();
-    let mediator = Mediator::new(provider);
+    let mediator = TestMediator::new(provider);
     mediator
         .publish(TestEvent {
             payload: "multi".into(),
@@ -273,7 +311,7 @@ async fn mediator_publish_handler_returns_error() {
         .singleton::<dyn IEventHandler<TestEvent>>(|_| Arc::new(FailingEventHandler))
         .build()
         .unwrap();
-    let mediator = Mediator::new(provider);
+    let mediator = TestMediator::new(provider);
     let result = mediator
         .publish(TestEvent {
             payload: "will-fail".into(),
@@ -284,7 +322,7 @@ async fn mediator_publish_handler_returns_error() {
 
 #[tokio::test]
 async fn mediator_publish_empty_handler_list() {
-    let mediator = Mediator::new(build_provider());
+    let mediator = TestMediator::new(build_provider());
     let result = mediator
         .publish(TestEvent {
             payload: "no-handlers".into(),
@@ -395,7 +433,7 @@ async fn mediator_send_uses_per_call_scope_for_scoped_services() {
         })
         .build()
         .unwrap();
-    let mediator = Mediator::new(provider);
+    let mediator = TestMediator::new(provider);
 
     let r1 = mediator
         .send(ScopeProbeRequest)
@@ -422,13 +460,13 @@ async fn mediator_send_uses_per_call_scope_for_scoped_services() {
     assert_eq!(r2.first_id, 2, "second send should observe instance #2");
 }
 
-// --- Pipeline behavior chain tests ---
+// --- Legacy erased pipeline behavior chain tests ---
 //
-// Verifies P0-3: IPipelineBehavior chain construction and execution.
-// Behaviors wrap the handler in a MediatR-style chain: each behavior can
+// Verifies the deprecated `IErasedPipelineBehavior` chain still executes
+// (outer chain, one release of compatibility): each behavior can
 // inspect/modify the request, short-circuit, or pass through to the next.
 
-use webx_core::pipeline::{BoxedNextFn, IPipelineBehavior};
+use webx_core::pipeline::{BoxedNextFn, IErasedPipelineBehavior};
 
 struct BehaviorProbeRequest;
 
@@ -492,7 +530,7 @@ struct TrackingBehavior {
 }
 
 #[async_trait::async_trait]
-impl IPipelineBehavior for TrackingBehavior {
+impl IErasedPipelineBehavior for TrackingBehavior {
     async fn handle(
         &self,
         req: Box<dyn std::any::Any + Send>,
@@ -507,7 +545,7 @@ impl IPipelineBehavior for TrackingBehavior {
 struct ShortCircuitBehavior;
 
 #[async_trait::async_trait]
-impl IPipelineBehavior for ShortCircuitBehavior {
+impl IErasedPipelineBehavior for ShortCircuitBehavior {
     async fn handle(
         &self,
         _req: Box<dyn std::any::Any + Send>,
@@ -528,12 +566,12 @@ async fn mediator_send_pipeline_behavior_executes_before_handler() {
     });
 
     let provider = ServiceCollection::new()
-        .singleton::<dyn IPipelineBehavior>(move |_| {
-            Arc::clone(&behavior) as Arc<dyn IPipelineBehavior>
+        .singleton::<dyn IErasedPipelineBehavior>(move |_| {
+            Arc::clone(&behavior) as Arc<dyn IErasedPipelineBehavior>
         })
         .build()
         .unwrap();
-    let mediator = Mediator::new(provider);
+    let mediator = TestMediator::new(provider);
 
     let rsp = mediator
         .send(BehaviorProbeRequest)
@@ -552,12 +590,12 @@ async fn mediator_send_pipeline_behavior_executes_before_handler() {
 #[tokio::test]
 async fn mediator_send_pipeline_behavior_can_short_circuit() {
     let provider = ServiceCollection::new()
-        .singleton::<dyn IPipelineBehavior>(|_| {
-            Arc::new(ShortCircuitBehavior) as Arc<dyn IPipelineBehavior>
+        .singleton::<dyn IErasedPipelineBehavior>(|_| {
+            Arc::new(ShortCircuitBehavior) as Arc<dyn IErasedPipelineBehavior>
         })
         .build()
         .unwrap();
-    let mediator = Mediator::new(provider);
+    let mediator = TestMediator::new(provider);
 
     let rsp = mediator
         .send(BehaviorProbeRequest)
@@ -575,7 +613,7 @@ async fn mediator_send_pipeline_behavior_can_short_circuit() {
 async fn mediator_send_pipeline_empty_chain_works() {
     // No behaviors registered — chain is just the terminal handler.
     let provider = build_provider();
-    let mediator = Mediator::new(provider);
+    let mediator = TestMediator::new(provider);
 
     let rsp = mediator
         .send(BehaviorProbeRequest)
@@ -605,7 +643,7 @@ struct InjectedDependencyBehavior {
 }
 
 #[async_trait::async_trait]
-impl IPipelineBehavior for InjectedDependencyBehavior {
+impl IErasedPipelineBehavior for InjectedDependencyBehavior {
     async fn handle(
         &self,
         req: Box<dyn std::any::Any + Send>,
@@ -635,12 +673,12 @@ async fn mediator_send_pipeline_behavior_gets_constructor_injected_dependencies(
                 .expect("register BehaviorDependency before the pipeline");
             Arc::new(InjectedDependencyBehavior {
                 source: dependency.source.clone(),
-            }) as Arc<dyn IPipelineBehavior>
+            }) as Arc<dyn IErasedPipelineBehavior>
         })
         .build()
         .expect("provider must build");
 
-    let mediator = Mediator::new(provider);
+    let mediator = TestMediator::new(provider);
     let rsp = mediator
         .send(BehaviorProbeRequest)
         .await
@@ -659,7 +697,7 @@ async fn mediator_send_pipeline_behavior_gets_constructor_injected_dependencies(
 struct WrongResponseTypeBehavior;
 
 #[async_trait::async_trait]
-impl IPipelineBehavior for WrongResponseTypeBehavior {
+impl IErasedPipelineBehavior for WrongResponseTypeBehavior {
     async fn handle(
         &self,
         _req: Box<dyn std::any::Any + Send>,
@@ -672,12 +710,12 @@ impl IPipelineBehavior for WrongResponseTypeBehavior {
 #[tokio::test]
 async fn mediator_send_pipeline_behavior_wrong_response_type_is_explained() {
     let provider = ServiceCollection::new()
-        .singleton::<dyn IPipelineBehavior>(|_| {
-            Arc::new(WrongResponseTypeBehavior) as Arc<dyn IPipelineBehavior>
+        .singleton::<dyn IErasedPipelineBehavior>(|_| {
+            Arc::new(WrongResponseTypeBehavior) as Arc<dyn IErasedPipelineBehavior>
         })
         .build()
         .expect("provider must build");
-    let mediator = Mediator::new(provider);
+    let mediator = TestMediator::new(provider);
 
     let err = mediator
         .send(BehaviorProbeRequest)
@@ -694,8 +732,12 @@ async fn mediator_send_pipeline_behavior_wrong_response_type_is_explained() {
         "the error must include the handler's response type: {message}"
     );
     assert!(
-        message.contains("Box::new(())") && message.contains("next"),
-        "the error must explain the fix (return the handler's type or call next): {message}"
+        message.contains("short-circuit") && message.contains("next"),
+        "the error must explain the fix (do not short-circuit with another type; call next): {message}"
+    );
+    assert!(
+        message.contains("IErasedPipelineBehavior"),
+        "the error must name the misbehaving legacy trait: {message}"
     );
     assert_eq!(
         err.status_code(),

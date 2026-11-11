@@ -11,7 +11,7 @@ use hyper_util::rt::TokioIo;
 use rust_dix::{ServiceCollection, ServiceProvider};
 use webx_core::app::IHost;
 use webx_core::config::{self, AppOptions};
-use webx_core::error::Result;
+use webx_core::error::{Error, Result};
 use webx_core::handler::IHostedService;
 use webx_core::http::IHttpContext;
 use webx_core::localization::{IStringLocalizer, LocalizationOptions, StringLocalizer};
@@ -360,19 +360,6 @@ impl HostBuilder {
         self
     }
 
-    /// Deprecated: route authorization is enforced from endpoint metadata.
-    ///
-    /// Every endpoint that declares `#[authorize]` is checked by the endpoint
-    /// itself, after routing; there is no separate policy switch. This method
-    /// does nothing and will be removed in a future major release.
-    #[deprecated(
-        since = "0.6.0",
-        note = "Route authorization is enforced from endpoint metadata; remove this call"
-    )]
-    pub fn use_resource_authorization(self) -> Self {
-        self
-    }
-
     /// Register a memory cache instance for use via `IDistributedCache` trait.
     ///
     /// The cache is registered as a singleton in the DI container.
@@ -482,7 +469,22 @@ impl HostBuilder {
         self
     }
 
-    pub fn build(self) -> Host {
+    /// Build the host, reporting configuration problems as `Err` instead of
+    /// panicking.
+    ///
+    /// This is the non-panicking form of [`HostBuilder::build`]. Production
+    /// guards (missing/weak JWT secret, wildcard CORS), a failing DI provider
+    /// build, invalid localization resources and inconsistent route/handler
+    /// metadata all come back as [`Error::Di`] carrying the same operator-facing
+    /// message [`HostBuilder::build`] panics with.
+    ///
+    /// ```ignore
+    /// match Host::builder().mode(AppMode::Production).try_build() {
+    ///     Ok(host) => host.run().await?,
+    ///     Err(error) => eprintln!("invalid configuration: {error}"),
+    /// }
+    /// ```
+    pub fn try_build(self) -> Result<Host> {
         // Initialize structured logging based on app mode.
         // This is idempotent —subsequent calls are no-ops.
         let env_filter = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into());
@@ -516,7 +518,7 @@ impl HostBuilder {
         let localization = self.localization.unwrap_or_else(LocalizationOptions::none);
         let localizer: Arc<dyn IStringLocalizer> = Arc::new(
             StringLocalizer::new(default_culture, &localization)
-                .unwrap_or_else(|error| panic!("Invalid localization resources: {error}")),
+                .map_err(|error| Error::Di(format!("Invalid localization resources: {error}")))?,
         );
         let endpoints: Arc<dyn IEndpointCatalog> = Arc::new(EndpointCatalog::from_inventory());
 
@@ -535,12 +537,12 @@ impl HostBuilder {
         let localizer_for_di = Arc::clone(&localizer);
         svc = svc.singleton::<dyn IStringLocalizer>(move |_| Arc::clone(&localizer_for_di));
 
-        let provider = svc.build().unwrap_or_else(|e| {
-            panic!(
+        let provider = svc.build().map_err(|e| {
+            Error::Di(format!(
                 "Failed to build ServiceProvider: {}. Check your DI registrations.",
                 e
-            )
-        });
+            ))
+        })?;
 
         // Per-host dispatch runtime (provider + handler registry).
         let handler_cache = Arc::new(webx_core::route::scan::HandlerCache::build());
@@ -691,22 +693,24 @@ impl HostBuilder {
             && self.auth_enabled
             && is_weak_jwt_secret(&options.jwt.secret)
         {
-            panic!(
+            return Err(Error::Di(
                 "Production requires a strong JWT secret. Set APP__Jwt__Secret or JWT_SECRET env var (min 32 chars, not a placeholder)."
-            );
+                    .to_string(),
+            ));
         }
 
         // Security: fail fast in production when CORS allows all origins
         if self.mode == AppMode::Production && options.cors.origins.iter().any(|o| o == "*") {
-            panic!(
+            return Err(Error::Di(
                 "Production forbids CORS origin '*'. Set explicit origins via Cors.Origins or APP__Cors__Origins."
-            );
+                    .to_string(),
+            ));
         }
 
         let mut router = Router::new();
         let mut route_count = 0usize;
 
-        crate::diagnostics::assert_route_configuration_valid();
+        crate::diagnostics::validate_route_configuration()?;
 
         // Build dispatch map: handler_type → dispatch function
         let mut dispatch_map: std::collections::HashMap<
@@ -837,7 +841,7 @@ impl HostBuilder {
         let hosted_services: Vec<Arc<dyn IHostedService>> =
             provider.get_all::<dyn IHostedService>();
 
-        Host {
+        Ok(Host {
             provider,
             dispatch_runtime,
             options,
@@ -851,7 +855,31 @@ impl HostBuilder {
             spa_source,
             shutdown: Arc::new(tokio::sync::watch::channel(false).0),
             hosted_services,
+        })
+    }
+
+    /// Build the host, panicking on configuration errors (fail fast at startup).
+    ///
+    /// Equivalent to [`HostBuilder::try_build`] followed by a panic that keeps
+    /// the historical message, so a misconfigured deployment stops the process
+    /// instead of serving with weakened guards. Call `try_build` directly when
+    /// the caller wants to handle the error itself.
+    pub fn build(self) -> Host {
+        match self.try_build() {
+            Ok(host) => host,
+            // `Error::Di` carries the operator-facing text without a variant
+            // prefix, keeping the panic message identical to pre-0.10 builds.
+            Err(error) => panic!("{}", build_failure_message(&error)),
         }
+    }
+}
+
+/// Operator-facing text of a `try_build` failure, without the `Error` variant
+/// prefix (the `build()` panic message must not change in 0.10).
+fn build_failure_message(error: &Error) -> String {
+    match error {
+        Error::Di(message) => message.clone(),
+        other => other.to_string(),
     }
 }
 

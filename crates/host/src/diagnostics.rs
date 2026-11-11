@@ -11,7 +11,23 @@ use webx_core::route::scan::{RouteDispatch, RouteEntry};
 /// - a route exists without a matching `#[handler]` registration
 /// - a `#[handler]` exists without a matching route
 /// - a route has a handler but no generated `RouteDispatch` bridge
+///
+/// `HostBuilder::try_build()` calls [`validate_route_configuration`] instead, so
+/// it can report the same problem as an `Err`.
 pub fn assert_route_configuration_valid() {
+    if let Err(error) = validate_route_configuration() {
+        // Keep the historical panic text: the raw report, no `Error` prefix.
+        let message = match error {
+            webx_core::error::Error::Di(message) => message,
+            other => other.to_string(),
+        };
+        panic!("{message}");
+    }
+}
+
+/// Validate route/handler consistency, returning the same report as
+/// [`assert_route_configuration_valid`] would panic with.
+pub fn validate_route_configuration() -> webx_core::error::Result<()> {
     let orphan_route_rows = orphan_route_details();
     let missing_routes = orphan_handlers();
 
@@ -29,7 +45,7 @@ pub fn assert_route_configuration_valid() {
     }
 
     if orphan_route_rows.is_empty() && missing_routes.is_empty() && missing_dispatch.is_empty() {
-        return;
+        return Ok(());
     }
 
     let mut message = String::from("Route configuration errors:\n");
@@ -64,7 +80,7 @@ pub fn assert_route_configuration_valid() {
         }
     }
     message.push_str("\nRun: cargo run -p <host-crate> -- --doctor");
-    panic!("{message}");
+    Err(webx_core::error::Error::Di(message))
 }
 
 /// Log route table and warn on orphan routes/handlers.

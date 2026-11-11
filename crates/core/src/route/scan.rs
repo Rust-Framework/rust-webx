@@ -13,59 +13,6 @@ use crate::localization::TextRef;
 use crate::routing::HttpMethod;
 use std::any::Any;
 use std::collections::HashMap;
-use std::sync::{Arc, OnceLock, RwLock};
-
-// --- Deprecated process-wide fallback (prefer [`DispatchRuntime`] on `Host`) ---
-
-static GLOBAL_PROVIDER: RwLock<Option<Arc<rust_dix::ServiceProvider>>> = RwLock::new(None);
-
-/// Deprecated shim: set a process-wide `ServiceProvider` fallback.
-///
-/// `Host::build()` no longer calls this. Prefer `Host::provider()` or run work
-/// inside `Host::dispatch_runtime().run()` so `dispatch_provider()` resolves
-/// from the active runtime.
-#[deprecated(
-    since = "0.2.0",
-    note = "Use Host::provider() or dispatch_provider() within an active DispatchRuntime"
-)]
-pub fn set_global_provider(provider: Arc<rust_dix::ServiceProvider>) {
-    let mut guard = GLOBAL_PROVIDER
-        .write()
-        .expect("global provider lock poisoned");
-    if guard.is_some() {
-        tracing::warn!(
-            "Replacing deprecated global ServiceProvider. \
-             Prefer Host::dispatch_runtime() for per-host isolation."
-        );
-    }
-    *guard = Some(provider);
-}
-
-/// Deprecated shim: read the process-wide `ServiceProvider` fallback.
-///
-/// Panics when no shim was set and no [`DispatchRuntime`](crate::DispatchRuntime)
-/// is active on this task.
-#[deprecated(
-    since = "0.2.0",
-    note = "Use Host::provider() or dispatch_provider() within an active DispatchRuntime"
-)]
-pub fn global_provider() -> Arc<rust_dix::ServiceProvider> {
-    try_global_provider().unwrap_or_else(|| {
-        panic!(
-            "global_provider() is deprecated and not set. \
-             Use host.provider() for the host instance, or dispatch_provider() \
-             inside Host::dispatch_runtime().run() (HTTP and hosted services are scoped automatically)."
-        )
-    })
-}
-
-/// Internal fallback for `dispatch_provider()` when no task-local runtime is active.
-pub(crate) fn try_global_provider() -> Option<Arc<rust_dix::ServiceProvider>> {
-    GLOBAL_PROVIDER
-        .read()
-        .expect("global provider lock poisoned")
-        .clone()
-}
 
 /// Metadata about a request parameter for OpenAPI generation.
 #[derive(Debug, Clone)]
@@ -591,9 +538,6 @@ pub struct HandlerCache {
     pub entries_by_id: HashMap<std::any::TypeId, HandlerEntry>,
 }
 
-/// Deprecated process-wide handler registry fallback (inventory is process-wide).
-static HANDLER_CACHE: OnceLock<Arc<HandlerCache>> = OnceLock::new();
-
 impl HandlerCache {
     /// Build the cache from all `HandlerRegistration` inventory items.
     pub fn build() -> Self {
@@ -611,18 +555,6 @@ impl HandlerCache {
             entries,
             entries_by_id,
         }
-    }
-
-    /// Deprecated shim: lazy-build the process-wide handler registry.
-    ///
-    /// `Host::build()` uses `HandlerCache::build()` per instance. This remains only
-    /// as a fallback for in-process `Mediator::send` without an active runtime.
-    #[deprecated(
-        since = "0.2.0",
-        note = "Prefer dispatch_handler_cache() within an active DispatchRuntime"
-    )]
-    pub fn get_or_init() -> Arc<Self> {
-        Arc::clone(HANDLER_CACHE.get_or_init(|| Arc::new(Self::build())))
     }
 
     /// Look up a handler entry by request type name (route / OpenAPI diagnostics).

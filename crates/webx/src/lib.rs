@@ -55,7 +55,10 @@ pub use webx_core::pagination::{PagedRequest, PagedResponse};
 pub use webx_core::paths::{
     app_base, framework_root, looks_like_app_base, looks_like_framework_root,
 };
-pub use webx_core::pipeline::{BoxedNextFn, BoxedPipelineFuture, IPipelineBehavior};
+#[allow(deprecated)]
+pub use webx_core::pipeline::{
+    BoxedNextFn, BoxedPipelineFuture, IErasedPipelineBehavior, IPipelineBehavior, Next,
+};
 pub use webx_core::problem::{FieldError, ProblemDetails};
 pub use webx_core::request_context::RequestContext;
 pub use webx_core::route::catalog::{
@@ -71,11 +74,9 @@ pub use webx_core::routing::{HttpMethod, IEndpoint, IRouter, RouteMeta};
 pub use webx_core::route::binding;
 pub use webx_core::route::binding::RequestModel;
 pub use webx_core::route::ext::{is_mediator_active, should_scan_endpoints, IServiceCollectionExt};
-#[allow(deprecated)]
 pub use webx_core::route::scan::{
-    global_provider, set_global_provider, AuthorizeRule, HandlerCache, HandlerEntry,
-    HandlerRegistration, HandlerRegistry, ParamMeta, RequestParamEntry, ResponseData,
-    RouteDispatch, RouteDispatchFn, RouteEntry,
+    AuthorizeRule, HandlerCache, HandlerEntry, HandlerRegistration, HandlerRegistry, ParamMeta,
+    RequestParamEntry, ResponseData, RouteDispatch, RouteDispatchFn, RouteEntry,
 };
 
 // --- HTTP layer ---

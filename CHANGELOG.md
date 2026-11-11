@@ -3,6 +3,43 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [Unreleased] — 0.10.0
+
+### Breaking
+
+- **`IPipelineBehavior` is typed.** The pipeline trait is now
+  `IPipelineBehavior<Req, Rsp>` with
+  `async fn handle(&self, req: Req, next: Next<Req, Rsp>) -> Result<Rsp>`: the request and
+  response are real types, and a behavior that short-circuits returns the handler's response
+  type at compile time instead of being downcast from `Box<dyn Any + Send>` at runtime. The old
+  type-erased trait is renamed `IErasedPipelineBehavior` and deprecated; it keeps running for
+  one release, with its chain wrapped outermost around the typed chain (1.0 removes it).
+- **Typed pipeline registration.** `IServiceCollectionExt::add_typed_pipeline::<B, Req, Rsp>()`
+  (Default-constructed) and `add_typed_pipeline_with::<F, Req, Rsp>(factory)` (constructor
+  injection) register typed behaviors. `add_pipeline` / `add_pipeline_with` still compile but
+  now register `IErasedPipelineBehavior` and are deprecated.
+- **`HostBuilder::use_resource_authorization()` is removed.** It had been a deprecated no-op
+  since 0.6; authorization is enforced from endpoint metadata and `#[authorize]`.
+- **The process-global provider shim is removed.** `set_global_provider`,
+  `try_global_provider` and the `global_provider` fallback are gone. `dispatch_provider()`
+  resolves only from the active `DispatchRuntime` and panics with the fix in the message when
+  none is active; `Host::provider()` is the single source of truth for the host instance.
+
+### Added
+
+- **`HostBuilder::try_build() -> Result<Host, Error>`.** Production guards (weak or placeholder
+  JWT secret, CORS `*`) now return an error instead of panicking, so a deployment can exit with
+  a readable message. `build()` stays fail-fast: it delegates to `try_build()` and panics on
+  the same conditions as before.
+
+### Planned
+
+- **Dyn-compatible `IMediator`** (0.10 target, tracked): `send_boxed` / `publish_boxed` so an
+  injected `Arc<dyn IMediator>` can dispatch; the generic `send` / `publish` stay. This entry
+  moves out of "Planned" only when the final 0.10.0 cut includes it; otherwise it names the
+  next version.
+
+
 ## [0.9.0] — 2026-11-10
 
 ### Breaking

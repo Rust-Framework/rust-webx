@@ -2,13 +2,14 @@
 //!
 //! `Host` stores a [`DispatchRuntime`] and scopes it to each HTTP request via
 //! a task-local. Macro-generated dispatch and `Mediator` read from the active
-//! runtime when present, falling back to process-wide globals for backward
-//! compatibility (in-process `Mediator::send` without HTTP context).
+//! runtime; there is **no** process-wide fallback in 0.10 — code that runs
+//! outside HTTP dispatch (in-process `Mediator::send`, tests, background work)
+//! must enter a runtime explicitly with [`DispatchRuntime::run`].
 
 use std::future::Future;
 use std::sync::Arc;
 
-use crate::route::scan::{try_global_provider, HandlerCache};
+use crate::route::scan::HandlerCache;
 
 tokio::task_local! {
     static ACTIVE_RUNTIME: Option<Arc<DispatchRuntime>>;
@@ -80,9 +81,11 @@ impl DispatchRuntime {
 
 /// Provider for HTTP dispatch and `#[handler(inject)]` factories.
 ///
-/// Prefers the active [`DispatchRuntime`] (HTTP requests and hosted services started
-/// by `Host`). Falls back to the deprecated process-wide shim when
-/// [`set_global_provider`](crate::route::scan::set_global_provider) was called manually.
+/// Resolves from the active [`DispatchRuntime`]: the scope opened by
+/// [`DispatchRuntime::run_in_scope`] (hosted services) first, else the runtime
+/// itself. Hosts scope their runtime around every HTTP request, so endpoint
+/// code always has one; a call from a thread/task with no runtime is a
+/// programming error and panics.
 pub fn dispatch_provider() -> Arc<rust_dix::ServiceProvider> {
     // A scope opened by `run_in_scope` (hosted service start/stop) wins: its
     // provider owns the scoped cache, so scoped dependencies stay per-scope.
@@ -96,25 +99,20 @@ pub fn dispatch_provider() -> Arc<rust_dix::ServiceProvider> {
         return provider;
     }
 
-    if let Some(provider) = try_global_provider() {
-        tracing::warn!(
-            "dispatch_provider() using deprecated global ServiceProvider shim; \
-             prefer Host::dispatch_runtime().run() or host.provider()"
-        );
-        return provider;
-    }
-
     panic!(
-        "No active DispatchRuntime and no deprecated global ServiceProvider. \
-         HTTP and hosted services run inside Host::dispatch_runtime().run(); \
-         for tests use host.dispatch_runtime().run with an async block, or host.provider()."
+        "No active DispatchRuntime. HTTP requests and hosted services run inside \
+         Host::dispatch_runtime().run(); for in-process calls (Mediator::send, tests, \
+         background work) enter one explicitly with `runtime.run(...)` / \
+         `host.dispatch_runtime().run(...)`, or use `host.provider()` when no \
+         task-local runtime is needed."
     );
 }
 
 /// Handler registry for the active dispatch context.
 ///
-/// Prefers the active [`DispatchRuntime`]; falls back to a lazy-built process-wide
-/// registry (inventory is process-wide; contents are identical per host).
+/// The registry is per host (`Host::build()` builds it once) and reached through
+/// the active [`DispatchRuntime`]; there is no process-wide fallback, so calling
+/// this outside a runtime panics like [`dispatch_provider`].
 pub fn dispatch_handler_cache() -> Arc<HandlerCache> {
     if let Ok(Some(cache)) =
         ACTIVE_RUNTIME.try_with(|rt| rt.as_ref().map(|r| Arc::clone(&r.handler_cache)))
@@ -122,10 +120,11 @@ pub fn dispatch_handler_cache() -> Arc<HandlerCache> {
         return cache;
     }
 
-    #[allow(deprecated)]
-    {
-        HandlerCache::get_or_init()
-    }
+    panic!(
+        "No active DispatchRuntime. Handler dispatch requires a host runtime: run \
+         `Host::dispatch_runtime().run(...)` around the call (HTTP requests and hosted \
+         services already do), or `host.dispatch_runtime()` for the host instance."
+    );
 }
 
 #[cfg(test)]

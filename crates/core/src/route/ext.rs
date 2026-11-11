@@ -414,6 +414,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn try_add_keeps_the_existing_registration() {
+        let provider = ServiceCollection::new()
+            .instance(Arc::new(1u32))
+            .try_add(|_| Arc::new(2u32))
+            .build()
+            .expect("provider must build");
+
+        let value = provider.get::<u32>().expect("registered");
+        assert_eq!(
+            *value, 1,
+            "try_add must not replace an earlier registration (MEDI TryAdd); rust-dix 0.8+ resolves the last registration otherwise"
+        );
+    }
+
+    #[tokio::test]
     async fn typed_behavior_may_short_circuit_with_its_response_type() {
         let out = ShortCircuit
             .handle(1, string_terminal())

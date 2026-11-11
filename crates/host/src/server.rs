@@ -164,6 +164,9 @@ pub struct HostBuilder {
     /// Middlewares registered through the builder, kept with their slot so
     /// ordering does not depend on DI enumeration order.
     middleware_specs: Vec<MiddlewareSpec>,
+    /// Opt back into the pre-1.0 lenient root-scope behavior (rust-dix 0.7).
+    /// Migration-only: 1.0 defaults to strict scope validation.
+    lenient_scope_validation: bool,
 }
 
 #[allow(clippy::type_complexity)]
@@ -202,6 +205,7 @@ impl HostBuilder {
             localization: None,
             health_registry: HealthCheckRegistry::new(),
             middleware_specs: Vec::new(),
+            lenient_scope_validation: false,
         }
     }
 
@@ -226,6 +230,20 @@ impl HostBuilder {
 
     pub fn mode(mut self, mode: AppMode) -> Self {
         self.mode = mode;
+        self
+    }
+
+    /// Keep the pre-1.0 (rust-dix 0.7) lenient root-scope behavior.
+    ///
+    /// 1.0 defaults to **strict** scope validation (MEDI `ValidateScopes = true`):
+    /// resolving a Scoped service from the root `ServiceProvider` returns
+    /// [`webx::Error::Di`](crate::Error) instead of silently caching it on the
+    /// root. Existing code that resolves Scoped services from
+    /// `host.provider()` can opt back in here while it migrates to explicit
+    /// scopes (`provider.scope()` / `get_owned`) — see
+    /// `docs/rust-webx/16-migration/upgrade-to-1.0.md`.
+    pub fn lenient_scope_validation(mut self) -> Self {
+        self.lenient_scope_validation = true;
         self
     }
 
@@ -527,17 +545,23 @@ impl HostBuilder {
             svc = cfg(svc);
         }
 
-        // Register HealthCheckRegistry as a singleton for handler injection.
+        // Host-provided defaults use `try_add*`: rust-dix 0.8+ resolves the *last*
+        // registration, so an earlier user registration must win over these.
         let health_registry = Arc::clone(&self.health_registry);
-        svc = svc.instance(health_registry);
+        svc = svc.try_add(move |_| Arc::clone(&health_registry));
 
         // Endpoint metadata and localization are host services, not globals.
         let endpoints_for_di = Arc::clone(&endpoints);
-        svc = svc.singleton::<dyn IEndpointCatalog>(move |_| Arc::clone(&endpoints_for_di));
+        svc = svc.try_add_singleton::<dyn IEndpointCatalog>(move |_| Arc::clone(&endpoints_for_di));
         let localizer_for_di = Arc::clone(&localizer);
-        svc = svc.singleton::<dyn IStringLocalizer>(move |_| Arc::clone(&localizer_for_di));
+        svc = svc.try_add_singleton::<dyn IStringLocalizer>(move |_| Arc::clone(&localizer_for_di));
 
-        let provider = svc.build().map_err(|e| {
+        let provider_options = if self.lenient_scope_validation {
+            rust_dix::ServiceProviderOptions::lenient()
+        } else {
+            rust_dix::ServiceProviderOptions::default()
+        };
+        let provider = svc.build_with(provider_options).map_err(|e| {
             Error::Di(format!(
                 "Failed to build ServiceProvider: {}. Check your DI registrations.",
                 e

@@ -6,6 +6,7 @@
 //! `Mediator::publish` resolves `IEventHandler<T>` from the DI container and
 //! invokes all registered handlers.
 
+use std::any::Any;
 use std::sync::Arc;
 
 use rust_dix::ScopeFactory;
@@ -37,6 +38,18 @@ impl IMediator for Mediator {
         R: Send + 'static,
     {
         dispatch::dispatch(&self.provider, req).await
+    }
+
+    async fn send_boxed(&self, req: Box<dyn Any + Send>) -> Result<Box<dyn Any + Send>> {
+        let type_id = (*req).type_id();
+        let cache = crate::dispatch_runtime::dispatch_handler_cache();
+        let dispatch_fn = cache.boxed_dispatch(type_id).ok_or_else(|| {
+            crate::Error::Di(format!(
+                "No #[handler] with a boxed dispatch bridge is registered for request type {:?}",
+                type_id
+            ))
+        })?;
+        dispatch_fn(Arc::clone(&self.provider), req).await
     }
 
     async fn publish<T: IEventRequest>(&self, event: T) -> Result<()> {

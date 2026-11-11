@@ -48,6 +48,7 @@ pub use webx_core::localization::{
     IStringLocalizer, LocalizationOptions, LocalizedString, StringLocalizer, TextRef,
 };
 pub use webx_core::mediator::build_pipeline_chain;
+pub use webx_core::mediator::dispatch;
 pub use webx_core::mediator::{IEventRequest, IMediator, IRequest};
 pub use webx_core::middleware::{IMiddleware, MiddlewareSlot};
 pub use webx_core::mode::AppMode;
@@ -75,8 +76,9 @@ pub use webx_core::route::binding;
 pub use webx_core::route::binding::RequestModel;
 pub use webx_core::route::ext::{is_mediator_active, should_scan_endpoints, IServiceCollectionExt};
 pub use webx_core::route::scan::{
-    AuthorizeRule, HandlerCache, HandlerEntry, HandlerRegistration, HandlerRegistry, ParamMeta,
-    RequestParamEntry, ResponseData, RouteDispatch, RouteDispatchFn, RouteEntry,
+    AuthorizeRule, BoxedDispatch, BoxedDispatchFn, BoxedDispatchFuture, HandlerCache, HandlerEntry,
+    HandlerRegistration, HandlerRegistry, ParamMeta, RequestParamEntry, ResponseData,
+    RouteDispatch, RouteDispatchFn, RouteEntry,
 };
 
 // --- HTTP layer ---

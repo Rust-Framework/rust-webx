@@ -525,6 +525,35 @@ impl RouteEntry {
 
 // --- Handler Cache ---
 
+/// Boxed future returned by a type-erased handler dispatch.
+pub type BoxedDispatchFuture = std::pin::Pin<
+    Box<
+        dyn std::future::Future<Output = crate::error::Result<Box<dyn std::any::Any + Send>>>
+            + Send,
+    >,
+>;
+
+/// Type-erased dispatch function for one request type.
+///
+/// `#[handler]` generates one per `impl IRequestHandler<T, R>`: it downcasts the
+/// boxed request to `T`, runs the typed dispatch (pipeline + handler) and boxes
+/// the `R` response. This is what lets `IMediator::send_boxed` work through
+/// `Arc<dyn IMediator>` without knowing `T`/`R` at the call site.
+pub type BoxedDispatchFn = fn(
+    std::sync::Arc<rust_dix::ServiceProvider>,
+    Box<dyn std::any::Any + Send>,
+) -> BoxedDispatchFuture;
+
+/// Inventory item tying a request type to its type-erased dispatch function.
+pub struct BoxedDispatch {
+    /// The request type's `TypeId`.
+    pub req_type_id: std::any::TypeId,
+    /// Dispatch for that request type.
+    pub dispatch: BoxedDispatchFn,
+}
+
+inventory::collect!(BoxedDispatch);
+
 /// Runtime registry of compiled handler registrations.
 ///
 /// Built at startup from `HandlerRegistration` inventory items.
@@ -536,6 +565,7 @@ impl RouteEntry {
 pub struct HandlerCache {
     pub entries: HashMap<&'static str, HandlerEntry>,
     pub entries_by_id: HashMap<std::any::TypeId, HandlerEntry>,
+    boxed_dispatch: HashMap<std::any::TypeId, BoxedDispatchFn>,
 }
 
 impl HandlerCache {
@@ -551,9 +581,14 @@ impl HandlerCache {
             entries.insert(reg.req_type_name, entry.clone());
             entries_by_id.insert(reg.req_type_id, entry);
         }
+        let mut boxed_dispatch = HashMap::new();
+        for reg in inventory::iter::<BoxedDispatch> {
+            boxed_dispatch.insert(reg.req_type_id, reg.dispatch);
+        }
         Self {
             entries,
             entries_by_id,
+            boxed_dispatch,
         }
     }
 
@@ -565,6 +600,14 @@ impl HandlerCache {
     /// Look up a handler entry by request type id (Mediator / in-process dispatch).
     pub fn get_by_type_id(&self, type_id: std::any::TypeId) -> Option<&HandlerEntry> {
         self.entries_by_id.get(&type_id)
+    }
+
+    /// Type-erased dispatch for `IMediator::send_boxed`.
+    ///
+    /// `None` when the request type has no `#[handler]` (or a hand-written
+    /// handler registration without the boxed bridge).
+    pub fn boxed_dispatch(&self, type_id: std::any::TypeId) -> Option<BoxedDispatchFn> {
+        self.boxed_dispatch.get(&type_id).copied()
     }
 }
 

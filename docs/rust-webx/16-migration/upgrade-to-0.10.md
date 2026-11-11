@@ -5,9 +5,8 @@
 的响应类型对齐；同一批还删掉了 0.6 起就不再生效的 no-op 全局 API，并新增
 `HostBuilder::try_build()`。
 
-> 本文按 0.10.0 的**目标 API** 编写；最终签名以 0.10.0 代码为准
-> （`crates/core/src/pipeline.rs`、`crates/core/src/route/ext.rs`、`crates/host/src/server.rs`）。
-> 标注“计划中”的条目若未包含在本次发布，会在这里与 CHANGELOG 中改为对应版本。
+> 本文对应 **rust-webx 0.10.0 已发布 API**（`crates/core/src/pipeline.rs`、
+> `crates/core/src/route/ext.rs`、`crates/host/src/server.rs`、`crates/core/src/mediator.rs`）。
 
 ## 必须改代码的 Breaking
 
@@ -78,7 +77,7 @@ impl IPipelineBehavior<CreateOrderRequest, OrderView> for RequireNote {
 - 一个行为只对它声明的 `<Req, Rsp>` 生效；不同请求类型注册各自的实例；
 - 链顺序：先注册的最外层（请求先看到、响应后看到）。
 
-> 以上 trait 签名与改名**以 0.10.0 代码为准**（`crates/core/src/pipeline.rs`）。
+> 以上 trait 签名与改名即 0.10.0 发布形态（`crates/core/src/pipeline.rs`）。
 
 ### 2. 注册 API：`add_typed_pipeline*`
 
@@ -110,7 +109,7 @@ svc.add_typed_pipeline_with::<_, CreateOrderRequest, OrderView>(|resolver| {
 迁移建议：先把旧 impl 机械改名（deprecated warning 可接受一个版本），需要 typed 请求的行为
 再逐个换成 `IPipelineBehavior<Req, Rsp>` + `add_typed_pipeline*`；1.0 会删除 erased trait。
 
-> 注册函数名与泛型顺序**以 0.10.0 代码为准**（`crates/core/src/route/ext.rs`）。
+> 注册函数名与泛型顺序即 0.10.0 发布形态（`crates/core/src/route/ext.rs`）。
 
 ### 3. 删除 `HostBuilder::use_resource_authorization()`
 
@@ -168,9 +167,11 @@ host.dispatch_runtime()
   };
   ```
 
-- **`IMediator` 的 dyn 兼容（0.10 计划中）**：新增 `send_boxed` / `publish_boxed`，让
-  `Arc<dyn IMediator>` 可以注入并调度，泛型 `send` / `publish` 保持不变。该条目标记为
-  “计划中”：若 0.10.0 未包含，会移到下一版本并在 CHANGELOG 注明。
+- **`IMediator` 支持 `Arc<dyn IMediator>`（0.10 已交付）**：新增
+  `send_boxed(Box<dyn Any + Send>) -> Result<Box<dyn Any + Send>>`，请求按 `TypeId`
+  （`#[handler]` 生成的 boxed dispatch）走与 `send` 相同的 pipeline + handler 路径，调用方
+  downcast 响应。泛型 `send`/`publish` 加 `where Self: Sized` 后不再进入 vtable；`publish`
+  仍保持泛型（事件处理器按具体 `IEventHandler<T>` 从 DI 解析），boxed publish 不在 0.10 范围。
 
 - 行为内不再提供 DI resolver（行为是 singleton，构造期注入）——需要依赖时用
   `add_typed_pipeline_with` 的工厂参数。
@@ -193,5 +194,5 @@ grep -rn "set_global_provider\|try_global_provider\|global_provider" src
 2. 进程级 provider 兜底删除后，后台任务必须通过 `Host::dispatch_runtime().run(...)` 或
    注入的 scope 获取依赖，`set_global_provider` 时代“先设置再随便取”的写法不再可用；
 3. deprecated 的 erased pipeline 只保留一个版本（计划 1.0 移除），本轮迁移可以避免下次断裂；
-4. 若通过 `Arc<dyn IMediator>` 注入（等 `send_boxed` 落地后），确认该条目已在发行说明中
-   标注为已交付。
+4. 若需要 `Arc<dyn IMediator>` 注入，改用 `send_boxed` 并 downcast 响应；泛型
+   `send`/`publish` 只在具体 `Mediator` 上调用。

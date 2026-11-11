@@ -3,7 +3,7 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
-## [Unreleased] — 0.10.0
+## [0.10.0] — 2026-11-11
 
 ### Breaking
 
@@ -27,17 +27,18 @@ All notable changes to **rust-webx** are documented in this file.
 
 ### Added
 
+- **`Arc<dyn IMediator>` dispatch via `send_boxed`.** The mediator trait is now
+  dyn-compatible for type-erased callers: `send_boxed(Box<dyn Any + Send>) -> Result<Box<dyn Any + Send>>`
+  looks the request up by `TypeId` (one boxed dispatch per `#[handler]`), runs the same typed
+  pipeline + handler path, and returns a boxed response to downcast. The generic `send`/`publish`
+  gain `where Self: Sized`; `publish` stays generic (event handlers are resolved by concrete
+  `IEventHandler<T>`), so boxed publish is not part of 0.10.
 - **`HostBuilder::try_build() -> Result<Host, Error>`.** Production guards (weak or placeholder
   JWT secret, CORS `*`) now return an error instead of panicking, so a deployment can exit with
   a readable message. `build()` stays fail-fast: it delegates to `try_build()` and panics on
   the same conditions as before.
 
-### Planned
 
-- **Dyn-compatible `IMediator`** (0.10 target, tracked): `send_boxed` / `publish_boxed` so an
-  injected `Arc<dyn IMediator>` can dispatch; the generic `send` / `publish` stay. This entry
-  moves out of "Planned" only when the final 0.10.0 cut includes it; otherwise it names the
-  next version.
 
 
 ## [0.9.0] — 2026-11-10

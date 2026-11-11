@@ -106,7 +106,7 @@ graph BT
 
 ```toml
 [dependencies]
-rust-webx = "0.9"
+rust-webx = "0.10"
 ```
 
 ```rust

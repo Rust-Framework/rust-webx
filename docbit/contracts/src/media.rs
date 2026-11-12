@@ -42,4 +42,4 @@ pub struct GetMediaRequest {
 }
 
 #[get("/api/media/{*path}")]
-impl IRequest<ResponseData> for GetMediaRequest {}
+impl IRequest<Response> for GetMediaRequest {}

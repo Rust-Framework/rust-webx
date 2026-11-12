@@ -11,7 +11,7 @@ pub struct ExportInventoryRequest;
 
 #[get("/api/inventory/export")]
 #[authorize(role = "admin")]
-impl IRequest<ResponseData> for ExportInventoryRequest {}
+impl IRequest<Response> for ExportInventoryRequest {}
 
 #[derive(WebxRequestMeta)]
 pub struct ImportInventoryRequest {

@@ -258,6 +258,39 @@ async fn delete_returns_204_no_content() {
 }
 
 // ---------------------------------------------------------------------------
+// An action result controls the status code
+// ---------------------------------------------------------------------------
+
+#[derive(Default, WebxRequestMeta)]
+struct StatusOnlyRequest;
+
+#[get("/status-only")]
+impl IRequest<Response> for StatusOnlyRequest {}
+
+#[derive(Default)]
+struct StatusOnlyHandler;
+
+#[handler]
+#[async_trait::async_trait]
+impl IRequestHandler<StatusOnlyRequest, Response> for StatusOnlyHandler {
+    async fn handle(&mut self, _req: StatusOnlyRequest) -> ActionResult<Response> {
+        Ok(Box::new(StatusCodeResult(202)))
+    }
+}
+
+#[tokio::test]
+async fn action_result_sets_the_status_code() {
+    let port = find_free_port();
+    spawn_host(port).await;
+
+    let resp = reqwest::get(format!("http://127.0.0.1:{}/status-only", port))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status().as_u16(), 202);
+}
+
+// ---------------------------------------------------------------------------
 // 405 Method Not Allowed
 // ---------------------------------------------------------------------------
 

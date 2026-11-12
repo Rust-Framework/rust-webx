@@ -115,16 +115,7 @@ impl IEndpoint for StubEndpoint {
             }
 
             let response = dispatch(&mut *ctx).await?;
-
-            ctx.response_mut().set_status(response.status);
-            if !response.content_type.is_empty() {
-                ctx.response_mut()
-                    .set_header("content-type", &response.content_type);
-            }
-            for (key, value) in &response.headers {
-                ctx.response_mut().set_header(key, value);
-            }
-            ctx.response_mut().write_body(response.body).await?;
+            response.execute(&mut *ctx).await?;
             return Ok(());
         }
 

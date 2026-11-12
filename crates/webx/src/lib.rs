@@ -18,6 +18,10 @@
 //! `rust-webx-spa` → `webx_spa`, `rust-webx-openapi` → `webx_openapi`).
 
 // --- Core traits ---
+pub use webx_core::action::{
+    ContentResult, FileResult, IActionResult, JsonResult, NoContentResult, Response,
+    StatusCodeResult,
+};
 pub use webx_core::app::IHost;
 pub use webx_core::auth::{
     IAuthenticationHandler, IAuthorizationPolicy, IClaims, IDynamicAuthorizer, IdentityUser,
@@ -41,7 +45,7 @@ pub use webx_core::form::{
 pub use webx_core::handler::{IEventHandler, IHostedService, IRequestHandler};
 pub use webx_core::http::{
     content_disposition_value, read_json_body, write_json_response, ByteRange, Disposition,
-    FileBody, FileSource, HttpStatus, IClaimsExt, IHttpContext, IHttpRequest, IHttpResponse, Json,
+    FileBody, FileSource, HttpStatus, IClaimsExt, IHttpContext, IHttpRequest, IHttpResponse,
     ResponseBody, SeekableReader, STREAM_BUF_SIZE,
 };
 pub use webx_core::localization::{
@@ -74,8 +78,8 @@ pub use webx_core::route::binding::RequestModel;
 pub use webx_core::route::ext::{is_mediator_active, should_scan_endpoints, IServiceCollectionExt};
 pub use webx_core::route::scan::{
     AuthorizeRule, BoxedDispatch, BoxedDispatchFn, BoxedDispatchFuture, HandlerCache, HandlerEntry,
-    HandlerRegistration, HandlerRegistry, ParamMeta, RequestParamEntry, ResponseData,
-    RouteDispatch, RouteDispatchFn, RouteEntry,
+    HandlerRegistration, HandlerRegistry, ParamMeta, RequestParamEntry, RouteDispatch,
+    RouteDispatchFn, RouteEntry,
 };
 
 // --- HTTP layer ---

@@ -7,8 +7,8 @@
 | 能力 | 用什么 |
 |------|--------|
 | 接收 `multipart/form-data` | 请求结构体加 `FormFile` 字段，并派生 `#[derive(WebxRequestMeta)]` |
-| 返回文件（流式） | 响应类型写 `ResponseData`，返回 `ResponseData::file(...)` |
-| 返回内存字节 | 响应类型写 `ResponseData`，返回 `ResponseData::bytes(...)` / `::text(...)` |
+| 返回文件（流式） | 响应类型写 `Response`，返回 `FileResult::path(...)` / `::stream(...)` |
+| 返回内存字节 | 响应类型写 `Response`，返回 `ContentResult::bytes(...)` / `::text(...)` |
 
 ---
 
@@ -190,10 +190,11 @@ pub struct UploadRequest {
 
 ## 二、下载
 
-### 2.1 `ResponseData`：自己掌控响应
+### 2.1 `IActionResult`：自己掌控响应
 
 绝大多数 Handler 返回可序列化的 DTO，框架写 JSON。需要自己决定状态码、响应头与响应体时，
-把响应类型写成 `ResponseData`：
+把响应类型写成 `Response`（`Box<dyn IActionResult>`），返回一个 action result——和
+ASP.NET Core 的 `IActionResult` / `File()` / `Content()` 是同一个模型：
 
 ```rust
 use webx::*;
@@ -205,16 +206,18 @@ pub struct DownloadReportRequest {
 }
 
 #[get("/api/reports/{id}/download")]
-impl IRequest<ResponseData> for DownloadReportRequest {}
+impl IRequest<Response> for DownloadReportRequest {}
 
 #[handler]
 #[async_trait]
-impl IRequestHandler<DownloadReportRequest, ResponseData> for DownloadReportHandler {
-    async fn handle(&mut self, req: DownloadReportRequest) -> ActionResult<ResponseData> {
+impl IRequestHandler<DownloadReportRequest, Response> for DownloadReportHandler {
+    async fn handle(&mut self, req: DownloadReportRequest) -> ActionResult<Response> {
         let path = self.reports.path_for(&req.id)?;
-        Ok(ResponseData::file(path)
-            .content_type("application/pdf")
-            .download_name("季度报表.pdf"))
+        Ok(Box::new(
+            FileResult::path(path)
+                .content_type("application/pdf")
+                .download_name("季度报表.pdf"),
+        ))
     }
 }
 ```
@@ -228,56 +231,59 @@ impl IRequestHandler<DownloadReportRequest, ResponseData> for DownloadReportHand
 
 | 你有的东西 | 构造方法 |
 |-----------|----------|
-| 磁盘路径 | `ResponseData::file(path)` |
-| 未知长度的异步读取器 | `ResponseData::file_stream(reader, ct)` |
-| 已知长度且可 seek 的读取器 | `ResponseData::file_seekable_stream(reader, len, ct)` |
-| 内存字节 | `ResponseData::bytes(v)` / `::text(s)` |
-| 完全自定义 | `ResponseData::with_file(FileBody::...)` |
+| 磁盘路径 | `FileResult::path(path)` |
+| 未知长度的异步读取器 | `FileResult::stream(reader).content_type(ct)` |
+| 已知长度且可 seek 的读取器 | `FileResult::seekable_stream(reader, len).content_type(ct)` |
+| 内存字节 | `ContentResult::bytes(v, ct)` / `ContentResult::text(s)` |
+| 完全自定义 | `FileResult::with_body(FileBody::...)` |
 
 流式下载（内容边生成边发送，总量未知）：
 
 ```rust
 #[handler]
 #[async_trait]
-impl IRequestHandler<ExportZipRequest, ResponseData> for ExportZipHandler {
-    async fn handle(&mut self, req: ExportZipRequest) -> ActionResult<ResponseData> {
+impl IRequestHandler<ExportZipRequest, Response> for ExportZipHandler {
+    async fn handle(&mut self, req: ExportZipRequest) -> ActionResult<Response> {
         // duplex() 把「写端」交给生产者任务，「读端」直接交给响应。
         let (reader, writer) = tokio::io::duplex(64 * 1024);
         tokio::spawn(async move { self.zip_into(writer, req).await });
-        Ok(ResponseData::file_stream(reader, "application/zip")
-            .download_name("导出.zip"))
+        Ok(Box::new(
+            FileResult::stream(reader)
+                .content_type("application/zip")
+                .download_name("导出.zip"),
+        ))
     }
 }
 ```
 
-对象存储 / 数据库 LOB 这类**能 seek、也知道长度**的句柄，用
-`file_seekable_stream` 就能同时拿到精确的 `Content-Length` 和断点续传：
+对象存储 / 数据库 LOB 这类**能 seek、也知道长度**的句柄，用 `FileResult::seekable_stream`
+就能同时拿到精确的 `Content-Length` 和断点续传：
 
 ```rust
 let object = store.get(&key).await?;          // 实现 AsyncRead + AsyncSeek
-Ok(ResponseData::with_file(
+Ok(Box::new(FileResult::with_body(
     FileBody::seekable_stream(object, len)
         .content_type("video/mp4")
         .entity_tag(etag)                     // 让客户端能发 If-None-Match / If-Range
         .download_name("录像.mp4"),
-))
+)))
 ```
 
 ### 2.3 构造方法与文件级开关
 
 | 构造 | 响应体 | 默认 `Content-Type` |
 |------|--------|---------------------|
-| `ResponseData::json(&value)` | `serde_json` 序列化 | `application/json` |
-| `ResponseData::text(s)` | UTF-8 文本 | `text/plain; charset=utf-8` |
-| `ResponseData::html(s)` | UTF-8 文本 | `text/html; charset=utf-8` |
-| `ResponseData::bytes(v)` | 二进制（内存） | `application/octet-stream` |
-| `ResponseData::no_content()` | 空 | `application/json`（状态 204） |
-| `ResponseData::file(path)` | 流式发送文件 | 按扩展名推断 |
-| `ResponseData::file_stream(r, ct)` | 流式转发读取器 | 显式指定 |
-| `ResponseData::file_seekable_stream(r, len, ct)` | 流式转发 + 支持 Range | 显式指定 |
-| `ResponseData::with_file(FileBody)` | 全部可控 | 按来源推断 |
+| `JsonResult::new(value)` | `serde_json` 序列化 | `application/json` |
+| `ContentResult::text(s)` | UTF-8 文本 | `text/plain; charset=utf-8` |
+| `ContentResult::html(s)` | UTF-8 文本 | `text/html; charset=utf-8` |
+| `ContentResult::bytes(v, ct)` | 二进制（内存） | 显式指定 |
+| `NoContentResult` | 空 | 状态 204 |
+| `FileResult::path(path)` | 流式发送文件 | 按扩展名推断 |
+| `FileResult::stream(r)` + `.content_type(ct)` | 流式转发读取器 | 显式指定 |
+| `FileResult::seekable_stream(r, len)` + `.content_type(ct)` | 流式转发 + 支持 Range | 显式指定 |
+| `FileResult::with_body(FileBody)` | 全部可控 | 按来源推断 |
 
-`ResponseData` 的链式方法：
+`FileResult` / `ContentResult` 的链式方法：
 
 | 方法 | 作用 |
 |------|------|
@@ -286,11 +292,11 @@ Ok(ResponseData::with_file(
 | `.header("cache-control", "private, max-age=60")` | 追加响应头 |
 | `.download_name("导出.csv")` | 触发「另存为」，并设置文件名 |
 | `.inline_name("预览.png")` | 内联展示，并设置文件名 |
-| `.enable_range_processing(false)` | 关闭 Range（仅对文件响应有效） |
-| `.entity_tag("\"v1\"")` | 显式 `ETag`（文件响应写入校验器，其它写入响应头） |
-| `.last_modified(t)` | 显式 `Last-Modified` |
+| `.enable_range_processing(false)` | 关闭 Range（仅 `FileResult`） |
+| `.entity_tag("\"v1\"")` | 显式 `ETag`（仅 `FileResult`） |
+| `.last_modified(t)` | 显式 `Last-Modified`（仅 `FileResult`） |
 
-`FileBody` 上还有同样的三个文件级开关，用 `with_file` 时直接写：
+`FileBody` 上还有同样的文件级开关，用 `FileResult::with_body` 时直接写：
 
 ```rust
 FileBody::path(p)
@@ -376,8 +382,8 @@ curl -C - -H 'If-Range: "2bc0e0-18d5a82de3e3ec00"' -o video.mp4 https://example.
 > 两者都只在响应没有设过 `cache-control` 时生效，`.header("cache-control", ...)`
 > 始终优先。
 >
-> `ResponseData::bytes` / `::text` 是即时生成的内存内容，框架不会替你计算校验器；
-> 需要断点续传或条件请求的内容请落到文件，或用 `file_seekable_stream`。
+> `ContentResult::bytes` / `::text` 是即时生成的内存内容，框架不会替你计算校验器；
+> 需要断点续传或条件请求的内容请落到文件，或用 `FileResult::seekable_stream`。
 
 ### 2.7 下载内存里的内容
 
@@ -386,12 +392,13 @@ curl -C - -H 'If-Range: "2bc0e0-18d5a82de3e3ec00"' -o video.mp4 https://example.
 ```rust
 #[handler]
 #[async_trait]
-impl IRequestHandler<ExportInventoryRequest, ResponseData> for ExportInventoryHandler {
-    async fn handle(&mut self, _: ExportInventoryRequest) -> ActionResult<ResponseData> {
+impl IRequestHandler<ExportInventoryRequest, Response> for ExportInventoryHandler {
+    async fn handle(&mut self, _: ExportInventoryRequest) -> ActionResult<Response> {
         let csv = self.render_csv().await?;
-        Ok(ResponseData::bytes(csv.into_bytes())
-            .content_type("text/csv; charset=utf-8")
-            .download_name("清单.csv"))
+        Ok(Box::new(
+            ContentResult::bytes(csv.into_bytes(), "text/csv; charset=utf-8")
+                .download_name("清单.csv"),
+        ))
     }
 }
 ```
@@ -404,7 +411,7 @@ impl IRequestHandler<ExportInventoryRequest, ResponseData> for ExportInventoryHa
 ```rust
 #[get("/api/documents/{id}/download")]
 #[authorize(permission = "documents.read")]
-impl IRequest<ResponseData> for DownloadDocumentRequest {}
+impl IRequest<Response> for DownloadDocumentRequest {}
 ```
 
 > 用 `Authorization` 头传令牌的 SPA 无法用普通 `<a href>` 下载（链接带不上请求头）。
@@ -532,7 +539,7 @@ socket ──▶ hyper Incoming ──▶ multer 逐块解析 ──▶ FormFile
 | 上传 100 KB 文件 | ≈ 100 KB（留在内存） |
 | 下载 10 GB 文件（路径） | 64 KiB 读缓冲 |
 | 下载未知长度流 | 64 KiB 读缓冲 |
-| `ResponseData::bytes(v)` | 整个 `v`（本来就已在内存里） |
+| `ContentResult::bytes(v, ct)` | 整个 `v`（本来就已在内存里） |
 
 ### 5.4 明确的边界
 
@@ -542,9 +549,9 @@ socket ──▶ hyper Incoming ──▶ multer 逐块解析 ──▶ FormFile
 
 ### 5.5 实践建议
 
-* 大文件**不要**用 `read_bytes()` 读进内存再 `bytes()` 返回；用 `file()` /
-  `file_stream()` / `file_seekable_stream()`。
-* 从对象存储回源时，如果 SDK 能返回可 seek 的读取器，用 `file_seekable_stream`——
+* 大文件**不要**用 `read_bytes()` 读进内存再 `ContentResult::bytes()` 返回；用
+  `FileResult::path()` / `::stream()` / `::seekable_stream()`。
+* 从对象存储回源时，如果 SDK 能返回可 seek 的读取器，用 `FileResult::seekable_stream()`——
   断点续传能让客户端少下很多字节。
 * 把 `MemoryThreshold` 调到比典型小文件略大一点，可以避免为头像这类请求碰磁盘。
 
@@ -557,7 +564,7 @@ socket ──▶ hyper Incoming ──▶ multer 逐块解析 ──▶ FormFile
 3. **按需调低限制**：默认值面向通用场景，图片上传可以把 `MaxFileSize` 收到几 MiB。
 4. **落盘目录要可写且定期清理**：未及时 `save_as` 的临时文件在请求结束时删除；
    已 `save_as` 的文件由你的应用负责生命周期。
-5. **敏感文件不要放 `wwwroot`**：那里的文件不经过授权检查。用 `ResponseData::file` + `#[authorize]`。
+5. **敏感文件不要放 `wwwroot`**：那里的文件不经过授权检查。用 `FileResult::path` + `#[authorize]`。
 
 ---
 
@@ -565,8 +572,8 @@ socket ──▶ hyper Incoming ──▶ multer 逐块解析 ──▶ FormFile
 
 * 上传：请求结构体里写 `FormFile` 并派生 `WebxRequestMeta`，不需要额外中间件。
 * 文件流式接收、按阈值落盘、自动清理，内存占用与文件大小无关。
-* 下载：响应类型写 `ResponseData`；按手上有的东西选 `file` / `file_stream` /
-  `file_seekable_stream`。
+* 下载：响应类型写 `Response`；按手上有的东西选 `FileResult::path` /
+  `FileResult::stream` / `FileResult::seekable_stream`。
 * 文件响应自带 `ETag` / `Last-Modified` / `Range` / `304` / `HEAD`，无需手工实现。
 * 断点续传开箱可用：`Accept-Ranges`、强校验器、`If-Range` 强比较、
   `multipart/byteranges`、区间合并与上限、`416` 语义都已就位。

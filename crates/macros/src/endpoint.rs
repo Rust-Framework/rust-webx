@@ -109,7 +109,7 @@ fn expand_endpoint(
         .collect();
 
     // Generate dispatch function
-    let is_raw_response = is_response_data(&rsp_type_str);
+    let is_raw_response = is_raw_response_type(&rsp_type_str);
     let dispatch_fn =
         generate_dispatch_fn(self_ty, &rsp_type, rsp_type_str == "()", is_raw_response);
 
@@ -154,7 +154,7 @@ fn expand_endpoint(
 /// OpenAPI metadata, and a request can mix path, query, header, claim, form and
 /// body values without the method-based heuristics the dispatch used to apply.
 ///
-/// When the response type is `ResponseData` the handler's value is used as the
+/// When the response type is `Response` (`Box<dyn IActionResult>`) the handler's value is used as the
 /// response verbatim, which is how an endpoint streams a file or sets custom
 /// headers. Otherwise the value is serialized as JSON.
 fn generate_dispatch_fn(
@@ -168,9 +168,17 @@ fn generate_dispatch_fn(
     let response_expr = if is_raw_response {
         quote! { ::std::result::Result::Ok(result) }
     } else if is_unit_response {
-        quote! { ::std::result::Result::Ok(::webx::ResponseData::no_content()) }
+        quote! {
+            ::std::result::Result::Ok(
+                ::std::boxed::Box::new(::webx::NoContentResult) as ::webx::Response
+            )
+        }
     } else {
-        quote! { ::webx::ResponseData::json(&result) }
+        quote! {
+            ::std::result::Result::Ok(
+                ::std::boxed::Box::new(::webx::JsonResult::new(result)) as ::webx::Response
+            )
+        }
     };
 
     quote! {
@@ -179,7 +187,7 @@ fn generate_dispatch_fn(
         ) -> ::std::pin::Pin<
             Box<
                 dyn ::std::future::Future<
-                        Output = ::webx::Result<::webx::ResponseData>,
+                        Output = ::webx::Result<::webx::Response>,
                     > + Send
                     + '__webx_dispatch,
             >,
@@ -222,16 +230,15 @@ fn generate_dispatch_fn(
     }
 }
 
-/// Whether the declared response type is the framework's raw response envelope.
+/// Whether the declared response type is the response-control type.
 ///
-/// Matches `ResponseData` and any qualified path ending in `ResponseData`, so
-/// `webx::ResponseData` and `::webx::ResponseData` both work.
-fn is_response_data(rsp_type: &str) -> bool {
-    rsp_type
-        .rsplit("::")
-        .next()
-        .map(|segment| segment.trim() == "ResponseData")
-        .unwrap_or(false)
+/// Matches the [`Response`](webx::Response) alias (`Box<dyn IActionResult>`) and
+/// any spelling of that type, so `Response`, `Box<dyn IActionResult>` and a
+/// qualified path all trigger the raw path — the handler's result already is
+/// the response, so the macro must not serialize it.
+fn is_raw_response_type(rsp_type: &str) -> bool {
+    let last = rsp_type.rsplit("::").next().unwrap_or(rsp_type);
+    last.trim() == "Response" || rsp_type.contains("IActionResult")
 }
 
 /// Extract the response type from `impl IRequest<UserModel> for GetUserRequest`.

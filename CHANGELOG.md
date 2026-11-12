@@ -3,6 +3,34 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [2.0.0] — 2026-11-12
+
+### Breaking
+
+- **`ResponseData` is replaced by the ASP.NET Core `IActionResult` family.** Endpoints that
+  control the HTTP response now declare `IRequest<Response>` (where `Response` is
+  `Box<dyn IActionResult>`) and return a result:
+  - `ResponseData::file(p)` → `FileResult::path(p)`
+  - `ResponseData::file_stream(r, ct)` → `FileResult::stream(r).content_type(ct)`
+  - `ResponseData::file_seekable_stream(r, len, ct)` →
+    `FileResult::seekable_stream(r, len).content_type(ct)`
+  - `ResponseData::with_file(body)` → `FileResult::with_body(body)`
+  - `ResponseData::bytes(v)` / `::text(s)` / `::html(s)` → `ContentResult::bytes(v, ct)` /
+    `::text(s)` / `::html(s)`
+  - `ResponseData::no_content()` → `NoContentResult`
+  - `ResponseData::json(v)` → `JsonResult::new(v)` (ordinary DTO responses do this
+    automatically)
+  - `status` / `header` / `download_name` / `inline_name` / `enable_range_processing` /
+    `entity_tag` / `last_modified` keep their names on the result types
+  e.g. `Ok(Box::new(FileResult::path(path).download_name("report.csv")))`.
+
+### Added
+
+- `IActionResult` trait, `Response` (`Box<dyn IActionResult>`), and the result types
+  `JsonResult<T>`, `ContentResult`, `FileResult`, `NoContentResult`, `StatusCodeResult` —
+  the ASP.NET Core result vocabulary, so an action reports the same shapes as
+  `File(...)`, `Content(...)`, `StatusCode(...)`, `NoContent()`.
+
 ## [1.0.2] — 2026-11-12
 
 ### Breaking
@@ -13,14 +41,8 @@ All notable changes to **rust-webx** are documented in this file.
   `Result<R, Error>` (`T` defaults to `()`), so `?` and `Err(...)` keep working; `Result<T>`
   remains the general fallible alias for infrastructure code. `IPipelineBehavior::handle`
   and `Next::run` follow the same name.
-
-### Added
-
-- **`OperationResult` can be adjusted while the operation runs**: `with_status`,
-  `with_message` and `with_result` (unit envelope → payload) sit next to the public fields,
-  so an outcome that different branches decide is set in place instead of rebuilt.
-
-## [1.0.1] — 2026-11-12
+- **`PagedResponse<T>` is removed in favour of `PagedResult<T>`** — the list envelope now
+  pairs with `OperationResult`.
 
 ### Added
 
@@ -31,11 +53,9 @@ All notable changes to **rust-webx** are documented in this file.
   (200 with the serialized body, `problem+json` for `Err(webx::Error)`), and `status` is
   whatever the business assigns. Constructors: `ok`, `ok_with_status`, `failed`, `success`,
   `success_with_status`.
-
-### Breaking
-
-- **`PagedResponse<T>` is removed in favour of `PagedResult<T>`** — the list envelope now
-  pairs with `OperationResult`.
+- **`OperationResult` can be adjusted while the operation runs**: `with_status`,
+  `with_message` and `with_result` (unit envelope → payload) sit next to the public fields,
+  so an outcome that different branches decide is set in place instead of rebuilt.
 
 ## [1.0.0] — 2026-11-11
 

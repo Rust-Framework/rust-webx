@@ -63,6 +63,7 @@ graph BT
 | `routing` | `IRouter`, `IEndpoint`, `RouteMeta`, `HttpMethod` |
 | `auth` | `IClaims`, `IAuthenticationHandler`, `IAuthorizationPolicy`, `IDynamicAuthorizer` |
 | `error` | `Error`, `Result`, `ActionResult` |
+| `action` | `IActionResult`, `Response`, `JsonResult`, `ContentResult`, `FileResult`, `NoContentResult`, `StatusCodeResult` |
 | `config` | `AppOptions`, `appsettings` 加载 |
 | `cache` | `IDistributedCache` |
 | `problem` | `ProblemDetails`, `FieldError` |

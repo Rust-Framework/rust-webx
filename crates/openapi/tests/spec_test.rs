@@ -498,3 +498,93 @@ fn same_named_request_types_do_not_share_parameters() {
         vec!["invoice"]
     );
 }
+
+// ---------------------------------------------------------------------------
+// Response schemas
+// ---------------------------------------------------------------------------
+
+inventory::submit! {
+    RouteEntry::new(
+        HttpMethod::Get,
+        "/api/schema/dto",
+        "SchemaDtoRequest",
+        "contracts::UserDto",
+        TextRef::text("DTO 响应"),
+        TextRef::text(""),
+        TextRef::text(""),
+        &[],
+        &[],
+    )
+}
+
+inventory::submit! {
+    RouteEntry::new(
+        HttpMethod::Get,
+        "/api/schema/response",
+        "SchemaResponseRequest",
+        "Response",
+        TextRef::text("自控响应"),
+        TextRef::text(""),
+        TextRef::text(""),
+        &[],
+        &[],
+    )
+}
+
+#[test]
+fn response_control_endpoints_are_opaque_instead_of_dangling() {
+    let spec = generate_openapi_spec("Test API", "1.0.0", &localizer("zh-CN"));
+    let schema = &spec["paths"]["/api/schema/response"]["get"]["responses"]["200"]["content"]
+        ["application/json"]["schema"];
+
+    assert_eq!(schema["type"], "object");
+    assert!(
+        schema.get("$ref").is_none(),
+        "a Response endpoint must not $ref a schema: {schema}"
+    );
+}
+
+#[test]
+fn every_schema_ref_resolves_to_a_component() {
+    let spec = generate_openapi_spec("Test API", "1.0.0", &localizer("zh-CN"));
+
+    let dto = &spec["paths"]["/api/schema/dto"]["get"]["responses"]["200"]["content"]
+        ["application/json"]["schema"];
+    assert_eq!(dto["$ref"], "#/components/schemas/contracts_UserDto");
+    assert_eq!(
+        spec["components"]["schemas"]["contracts_UserDto"]["type"],
+        "object"
+    );
+
+    let mut refs = Vec::new();
+    collect_refs(&spec, &mut refs);
+    assert!(!refs.is_empty(), "the spec should reference DTO schemas");
+    for reference in refs {
+        let name = reference
+            .strip_prefix("#/components/schemas/")
+            .unwrap_or_else(|| panic!("unexpected $ref: {reference}"));
+        assert!(
+            !spec["components"]["schemas"][name].is_null(),
+            "dangling $ref: {reference}"
+        );
+    }
+}
+
+fn collect_refs(value: &serde_json::Value, out: &mut Vec<String>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(serde_json::Value::String(reference)) = map.get("$ref") {
+                out.push(reference.clone());
+            }
+            for child in map.values() {
+                collect_refs(child, out);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_refs(item, out);
+            }
+        }
+        _ => {}
+    }
+}

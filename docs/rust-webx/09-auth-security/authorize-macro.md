@@ -27,7 +27,7 @@ impl IRequest<SettingsDto> for UpdateSettingsRequest {}
 #[post("/api/reports/export")]
 #[authorize(role = "admin")]
 #[authorize(permission = "reports:export")]
-impl IRequest<ResponseData> for ExportReportsRequest {}
+impl IRequest<Response> for ExportReportsRequest {}
 ```
 
 ## 模型：规则组

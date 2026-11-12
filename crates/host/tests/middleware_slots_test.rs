@@ -12,11 +12,12 @@ use std::net::TcpListener;
 use std::time::Duration;
 
 use std::ops::ControlFlow;
+use webx_core::action::{JsonResult, Response};
 use webx_core::error::Result;
 use webx_core::http::IHttpContext;
 use webx_core::localization::TextRef;
 use webx_core::middleware::{IMiddleware, MiddlewareSlot};
-use webx_core::route::scan::{HandlerRegistration, ResponseData, RouteDispatch, RouteEntry};
+use webx_core::route::scan::{HandlerRegistration, RouteDispatch, RouteEntry};
 use webx_core::routing::HttpMethod;
 
 const WHOAMI_PATH: &str = "/test/slots/whoami";
@@ -24,10 +25,10 @@ const BLOCKED_PATH: &str = "/test/slots/blocked";
 const TEST_SECRET: &[u8] = b"middleware-slot-test-secret-32-bytes-min!!";
 
 type DispatchFuture<'a> =
-    std::pin::Pin<Box<dyn std::future::Future<Output = Result<ResponseData>> + Send + 'a>>;
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<Response>> + Send + 'a>>;
 
 fn dispatch_ok(_ctx: &mut dyn IHttpContext) -> DispatchFuture<'_> {
-    Box::pin(async { ResponseData::json(&"ok") })
+    Box::pin(async { Ok(Box::new(JsonResult::new("ok")) as Response) })
 }
 
 fn noop_factory(

@@ -225,7 +225,7 @@ pub fn webx_request_meta(input: TokenStream) -> TokenStream {
 /// #[post("/api/reports/export")]
 /// #[authorize(role = "admin")]
 /// #[authorize(permission = "reports:export")]
-/// impl IRequest<ResponseData> for ExportReportsRequest {}
+/// impl IRequest<Response> for ExportReportsRequest {}
 /// ```
 #[proc_macro_attribute]
 pub fn authorize(_attr: TokenStream, item: TokenStream) -> TokenStream {

@@ -4,7 +4,7 @@
 //!
 //! * `multipart/form-data` binding into a typed request struct (`FormFile`),
 //! * memory vs. disk spooling of uploaded parts,
-//! * `ResponseData::file` downloads with `Content-Disposition`, `ETag`,
+//! * `FileResult::path` downloads with `Content-Disposition`, `ETag`,
 //!   `Last-Modified`, `Range` and conditional requests,
 //! * `HEAD`,
 //! * upload limits (`Form.MaxFileSize`, `Form.MaxRequestSize`, `Form.MaxFieldSize`).
@@ -147,7 +147,7 @@ struct DownloadRequest {
 }
 
 #[get("/test/download/{name}")]
-impl IRequest<ResponseData> for DownloadRequest {}
+impl IRequest<Response> for DownloadRequest {}
 
 #[derive(Inject)]
 struct DownloadHandler {
@@ -157,9 +157,11 @@ struct DownloadHandler {
 
 #[handler(inject)]
 #[async_trait::async_trait]
-impl IRequestHandler<DownloadRequest, ResponseData> for DownloadHandler {
-    async fn handle(&mut self, req: DownloadRequest) -> ActionResult<ResponseData> {
-        Ok(ResponseData::file(self.root.0.join(&req.name)).download_name("report.csv"))
+impl IRequestHandler<DownloadRequest, Response> for DownloadHandler {
+    async fn handle(&mut self, req: DownloadRequest) -> ActionResult<Response> {
+        Ok(Box::new(
+            FileResult::path(self.root.0.join(&req.name)).download_name("report.csv"),
+        ))
     }
 }
 
@@ -168,7 +170,7 @@ impl IRequestHandler<DownloadRequest, ResponseData> for DownloadHandler {
 struct MissingDownloadRequest;
 
 #[get("/test/download-missing")]
-impl IRequest<ResponseData> for MissingDownloadRequest {}
+impl IRequest<Response> for MissingDownloadRequest {}
 
 #[derive(Inject)]
 struct MissingDownloadHandler {
@@ -178,9 +180,11 @@ struct MissingDownloadHandler {
 
 #[handler(inject)]
 #[async_trait::async_trait]
-impl IRequestHandler<MissingDownloadRequest, ResponseData> for MissingDownloadHandler {
-    async fn handle(&mut self, _req: MissingDownloadRequest) -> ActionResult<ResponseData> {
-        Ok(ResponseData::file(self.root.0.join("does-not-exist.csv")))
+impl IRequestHandler<MissingDownloadRequest, Response> for MissingDownloadHandler {
+    async fn handle(&mut self, _req: MissingDownloadRequest) -> ActionResult<Response> {
+        Ok(Box::new(FileResult::path(
+            self.root.0.join("does-not-exist.csv"),
+        )))
     }
 }
 
@@ -190,18 +194,20 @@ impl IRequestHandler<MissingDownloadRequest, ResponseData> for MissingDownloadHa
 struct InlineCsvRequest;
 
 #[get("/test/inline-csv")]
-impl IRequest<ResponseData> for InlineCsvRequest {}
+impl IRequest<Response> for InlineCsvRequest {}
 
 #[derive(Default)]
 struct InlineCsvHandler;
 
 #[handler]
 #[async_trait::async_trait]
-impl IRequestHandler<InlineCsvRequest, ResponseData> for InlineCsvHandler {
-    async fn handle(&mut self, _req: InlineCsvRequest) -> ActionResult<ResponseData> {
-        Ok(ResponseData::text("a,b\n1,2\n")
-            .content_type("text/csv; charset=utf-8")
-            .download_name("导出.csv"))
+impl IRequestHandler<InlineCsvRequest, Response> for InlineCsvHandler {
+    async fn handle(&mut self, _req: InlineCsvRequest) -> ActionResult<Response> {
+        Ok(Box::new(
+            ContentResult::text("a,b\n1,2\n")
+                .content_type("text/csv; charset=utf-8")
+                .download_name("导出.csv"),
+        ))
     }
 }
 
@@ -210,15 +216,15 @@ impl IRequestHandler<InlineCsvRequest, ResponseData> for InlineCsvHandler {
 struct StreamDownloadRequest;
 
 #[get("/test/download-stream")]
-impl IRequest<ResponseData> for StreamDownloadRequest {}
+impl IRequest<Response> for StreamDownloadRequest {}
 
 #[derive(Default)]
 struct StreamDownloadHandler;
 
 #[handler]
 #[async_trait::async_trait]
-impl IRequestHandler<StreamDownloadRequest, ResponseData> for StreamDownloadHandler {
-    async fn handle(&mut self, _req: StreamDownloadRequest) -> ActionResult<ResponseData> {
+impl IRequestHandler<StreamDownloadRequest, Response> for StreamDownloadHandler {
+    async fn handle(&mut self, _req: StreamDownloadRequest) -> ActionResult<Response> {
         // A live producer: nothing is buffered, so the total size is unknown.
         let (reader, mut writer) = tokio::io::duplex(1024);
         tokio::spawn(async move {
@@ -228,9 +234,12 @@ impl IRequestHandler<StreamDownloadRequest, ResponseData> for StreamDownloadHand
             }
         });
 
-        Ok(ResponseData::file_stream(reader, "text/plain")
-            .download_name("stream.txt")
-            .header("x-produced-by", "test"))
+        Ok(Box::new(
+            FileResult::stream(reader)
+                .content_type("text/plain")
+                .download_name("stream.txt")
+                .header("x-produced-by", "test"),
+        ))
     }
 }
 
@@ -240,14 +249,14 @@ impl IRequestHandler<StreamDownloadRequest, ResponseData> for StreamDownloadHand
 struct SeekableDownloadRequest;
 
 #[get("/test/download-seekable")]
-impl IRequest<ResponseData> for SeekableDownloadRequest {}
+impl IRequest<Response> for SeekableDownloadRequest {}
 
 /// The same seekable source, but with `Range` processing switched off.
 #[derive(Debug, Default, Deserialize, WebxRequestMeta)]
 struct NonRangeDownloadRequest;
 
 #[get("/test/download-nonrange")]
-impl IRequest<ResponseData> for NonRangeDownloadRequest {}
+impl IRequest<Response> for NonRangeDownloadRequest {}
 
 const SEEKABLE_BODY: &[u8] = b"0123456789abcdef";
 
@@ -256,17 +265,17 @@ struct SeekableDownloadHandler;
 
 #[handler]
 #[async_trait::async_trait]
-impl IRequestHandler<SeekableDownloadRequest, ResponseData> for SeekableDownloadHandler {
-    async fn handle(&mut self, _req: SeekableDownloadRequest) -> ActionResult<ResponseData> {
+impl IRequestHandler<SeekableDownloadRequest, Response> for SeekableDownloadHandler {
+    async fn handle(&mut self, _req: SeekableDownloadRequest) -> ActionResult<Response> {
         // `Cursor<Vec<u8>>` is the simplest seekable reader; object-storage and
         // database LOB handles behave the same way.
         let cursor = std::io::Cursor::new(SEEKABLE_BODY.to_vec());
-        Ok(ResponseData::with_file(
+        Ok(Box::new(FileResult::with_body(
             FileBody::seekable_stream(cursor, SEEKABLE_BODY.len() as u64)
                 .content_type("application/octet-stream")
                 .entity_tag("\"seekable-v1\"")
                 .download_name("seekable.bin"),
-        ))
+        )))
     }
 }
 
@@ -275,14 +284,14 @@ struct NonRangeDownloadHandler;
 
 #[handler]
 #[async_trait::async_trait]
-impl IRequestHandler<NonRangeDownloadRequest, ResponseData> for NonRangeDownloadHandler {
-    async fn handle(&mut self, _req: NonRangeDownloadRequest) -> ActionResult<ResponseData> {
+impl IRequestHandler<NonRangeDownloadRequest, Response> for NonRangeDownloadHandler {
+    async fn handle(&mut self, _req: NonRangeDownloadRequest) -> ActionResult<Response> {
         let cursor = std::io::Cursor::new(SEEKABLE_BODY.to_vec());
-        Ok(ResponseData::with_file(
+        Ok(Box::new(FileResult::with_body(
             FileBody::seekable_stream(cursor, SEEKABLE_BODY.len() as u64)
                 .content_type("application/octet-stream")
                 .enable_range_processing(false),
-        ))
+        )))
     }
 }
 

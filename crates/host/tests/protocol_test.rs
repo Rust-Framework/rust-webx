@@ -17,12 +17,11 @@
 use std::net::TcpListener;
 use std::time::Duration;
 
+use webx_core::action::{JsonResult, Response};
 use webx_core::error::{Error, Result};
 use webx_core::http::IHttpContext;
 use webx_core::localization::TextRef;
-use webx_core::route::scan::{
-    AuthorizeRule, HandlerRegistration, ResponseData, RouteDispatch, RouteEntry,
-};
+use webx_core::route::scan::{AuthorizeRule, HandlerRegistration, RouteDispatch, RouteEntry};
 use webx_core::routing::HttpMethod;
 
 const TEST_SECRET: &[u8] = b"protocol-test-secret-key-for-single-401-path";
@@ -39,7 +38,7 @@ const PUBLIC_PATH: &str = "/test/protocol/public";
 /// Return type every route dispatch function uses (`RouteDispatchFn` is the
 /// function-pointer type that wraps it).
 type DispatchFuture<'a> =
-    std::pin::Pin<Box<dyn std::future::Future<Output = Result<ResponseData>> + Send + 'a>>;
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<Response>> + Send + 'a>>;
 
 // ---------------------------------------------------------------------------
 // Dispatch functions
@@ -47,7 +46,7 @@ type DispatchFuture<'a> =
 
 /// Reached only when the declarative `#[authorize]` rules pass.
 fn dispatch_authorized(_ctx: &mut dyn IHttpContext) -> DispatchFuture<'_> {
-    Box::pin(async { ResponseData::json(&"authorized") })
+    Box::pin(async { Ok(Box::new(JsonResult::new("authorized")) as Response) })
 }
 
 /// Mirrors the binding code `#[derive(WebxRequestMeta)]` emits for a required
@@ -61,14 +60,14 @@ fn dispatch_binding(ctx: &mut dyn IHttpContext) -> DispatchFuture<'_> {
                 "authentication required for this endpoint".to_string(),
             ));
         }
-        ResponseData::json(&"bound")
+        Ok(Box::new(JsonResult::new("bound")) as Response)
     })
 }
 
 /// Fails with an internal message that must never be echoed to the client.
 fn dispatch_failing(_ctx: &mut dyn IHttpContext) -> DispatchFuture<'_> {
     Box::pin(async {
-        let failed: Result<ResponseData> = Err(Error::Internal(
+        let failed: Result<Response> = Err(Error::Internal(
             "db connect failed for /var/lib/app/secret.db".to_string(),
         ));
         failed
@@ -78,7 +77,7 @@ fn dispatch_failing(_ctx: &mut dyn IHttpContext) -> DispatchFuture<'_> {
 /// Public endpoint: no `#[authorize]`, no identity field. It never looks at the
 /// claims, so a stale/invalid token must be irrelevant to it.
 fn dispatch_public(_ctx: &mut dyn IHttpContext) -> DispatchFuture<'_> {
-    Box::pin(async { ResponseData::json(&"public") })
+    Box::pin(async { Ok(Box::new(JsonResult::new("public")) as Response) })
 }
 
 // ---------------------------------------------------------------------------

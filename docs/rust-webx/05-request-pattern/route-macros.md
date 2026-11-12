@@ -323,7 +323,7 @@ impl IRequest<SettingsDto> for UpdateSettingsRequest {}
 #[post("/api/reports/export")]
 #[authorize(role = "admin")]
 #[authorize(permission = "reports:export")]
-impl IRequest<ResponseData> for ExportReportsRequest {}
+impl IRequest<Response> for ExportReportsRequest {}
 ```
 
 授权元数据在编译期收集为 `RouteEntry.authorization`（`&[AuthorizeRule]`）。每个 `#[authorize]` 是一条规则，所有规则全部满足才放行；规则内 `roles` / `permissions` 是 any-of 列表，两个维度同时存在时为 AND。`add_authentication()` 只负责启用 JWT；规则由 endpoint 在 dispatch 前执行。详见 [authorize 宏](../09-auth-security/authorize-macro.md)。

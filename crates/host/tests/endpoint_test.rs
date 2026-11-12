@@ -6,10 +6,11 @@ mod test_utils;
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use webx_core::action::{JsonResult, Response};
 use webx_core::auth::{IClaims, IDynamicAuthorizer};
 use webx_core::error::{Error, Result as LrwfResult};
 use webx_core::http::{IClaimsExt, IHttpContext};
-use webx_core::route::scan::{AuthorizeRule, ResponseData};
+use webx_core::route::scan::AuthorizeRule;
 use webx_core::routing::IEndpoint;
 use webx_host::authz::AuthorizerSet;
 use webx_host::endpoint::StubEndpoint;
@@ -59,8 +60,10 @@ impl IClaims for MockClaims {
 
 fn mock_dispatch_ok(
     _ctx: &mut dyn IHttpContext,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = LrwfResult<ResponseData>> + Send + '_>> {
-    Box::pin(async move { ResponseData::json(&serde_json::json!({"ok": true})) })
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = LrwfResult<Response>> + Send + '_>> {
+    Box::pin(
+        async move { Ok(Box::new(JsonResult::new(serde_json::json!({"ok": true}))) as Response) },
+    )
 }
 
 // â”€â”€ Mock dynamic authorizers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

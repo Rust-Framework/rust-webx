@@ -50,7 +50,7 @@ Host::builder().use_spa("wwwroot")
 `Cache-Control` 的取值见 [文件服务的生产部署](file-serving.md)。
 
 > `wwwroot` 下的文件**不经过授权检查**。需要鉴权的文件请放在可写目录，用
-> [`ResponseData::file`](../05-request-pattern/file-upload-download.md) + `#[authorize]` 提供。
+> [`FileResult::path`](../05-request-pattern/file-upload-download.md) + `#[authorize]` 提供。
 
 ### 目录结构
 

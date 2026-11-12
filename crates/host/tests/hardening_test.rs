@@ -13,19 +13,20 @@
 use std::net::TcpListener;
 use std::time::Duration;
 
+use webx_core::action::{JsonResult, Response};
 use webx_core::error::Result;
 use webx_core::http::IHttpContext;
 use webx_core::localization::TextRef;
-use webx_core::route::scan::{HandlerRegistration, ResponseData, RouteDispatch, RouteEntry};
+use webx_core::route::scan::{HandlerRegistration, RouteDispatch, RouteEntry};
 use webx_core::routing::HttpMethod;
 
 const JSON_PATH: &str = "/test/hardening/json";
 
 type DispatchFuture<'a> =
-    std::pin::Pin<Box<dyn std::future::Future<Output = Result<ResponseData>> + Send + 'a>>;
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<Response>> + Send + 'a>>;
 
 fn dispatch_json(_ctx: &mut dyn IHttpContext) -> DispatchFuture<'_> {
-    Box::pin(async { ResponseData::json(&serde_json::json!({ "ok": true })) })
+    Box::pin(async { Ok(Box::new(JsonResult::new(serde_json::json!({ "ok": true }))) as Response) })
 }
 
 fn noop_factory(

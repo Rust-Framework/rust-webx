@@ -166,7 +166,7 @@ impl std::fmt::Debug for FileBody {
 ///
 /// Build one with [`FileBody::path`], [`FileBody::stream`] or
 /// [`FileBody::seekable_stream`], then hand it to
-/// [`crate::route::scan::ResponseData::with_file`].
+/// [`crate::action::FileResult::with_body`].
 pub struct FileBody {
     /// Where the bytes come from.
     pub source: FileSource,
@@ -661,6 +661,3 @@ pub async fn read_json_body<T: serde::de::DeserializeOwned>(
     let bytes = req.body_bytes().await?;
     serde_json::from_slice(&bytes).map_err(crate::error::Error::Serialization)
 }
-
-/// Type alias for JSON responses in controller methods.
-pub type Json<T> = T;

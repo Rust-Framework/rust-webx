@@ -6,6 +6,7 @@
 //! `AppMode` — with **no HTTP engine dependency**. Custom middleware and tests
 //! can depend on `webx_core` alone.
 
+pub mod action;
 pub mod app;
 pub mod auth;
 pub mod cache;
@@ -28,6 +29,7 @@ pub mod request_context;
 pub mod route;
 pub mod routing;
 
+pub use action::*;
 pub use app::*;
 pub use auth::*;
 pub use cache::cache_ext::DistributedCacheExtensions;

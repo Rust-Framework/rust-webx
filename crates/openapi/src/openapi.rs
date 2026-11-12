@@ -25,6 +25,7 @@ pub fn generate_openapi_spec(
     let request_index = RequestParams::collect();
     let mut paths = serde_json::Map::new();
     let mut tags_set = BTreeSet::new();
+    let mut schema_names = BTreeSet::new();
 
     for entry in inventory::iter::<RouteEntry> {
         let entry = entry.clone();
@@ -84,7 +85,7 @@ pub fn generate_openapi_spec(
         let mut operation = json!({
             "operationId": operation_id,
             "summary": summary,
-            "responses": build_responses(entry.rsp_type),
+            "responses": build_responses(entry.rsp_type, &mut schema_names),
             "tags": [tag],
         });
 
@@ -130,6 +131,25 @@ pub fn generate_openapi_spec(
 
     let tags: Vec<JsonValue> = tags_set.iter().map(|t| json!({"name": t})).collect();
 
+    // The body shape of a DTO is not reflected at runtime (Rust has no
+    // reflection), so a `$ref` would dangle. Emit one placeholder component per
+    // referenced name: the document stays valid, and the endpoint's own
+    // `rsp_type` still names the type a reader should look up in the code.
+    let schemas: serde_json::Map<String, JsonValue> = schema_names
+        .into_iter()
+        .map(|name| {
+            (
+                name.clone(),
+                json!({
+                    "type": "object",
+                    "description": format!(
+                        "Placeholder for `{name}` — see the Rust type for its fields."
+                    ),
+                }),
+            )
+        })
+        .collect();
+
     json!({
         "openapi": "3.0.3",
         "info": {
@@ -139,6 +159,7 @@ pub fn generate_openapi_spec(
         "tags": tags,
         "paths": paths,
         "components": {
+            "schemas": schemas,
             "securitySchemes": {
                 "bearerAuth": {
                     "type": "http",
@@ -299,20 +320,11 @@ fn body_property_schema(type_hint: &str) -> JsonValue {
 }
 
 /// Build a responses object based on the response type name.
-fn build_responses(rsp_type: &str) -> JsonValue {
-    let schema = if rsp_type == "()" || rsp_type == "unknown" {
-        json!({ "type": "object" })
-    } else if rsp_type == "String" {
-        json!({ "type": "string" })
-    } else if rsp_type.starts_with("Vec<") {
-        let inner = &rsp_type[4..rsp_type.len() - 1];
-        json!({
-            "type": "array",
-            "items": { "$ref": format!("#/components/schemas/{}", inner) }
-        })
-    } else {
-        json!({ "$ref": format!("#/components/schemas/{}", rsp_type) })
-    };
+///
+/// `schema_names` collects every referenced component so the caller can emit a
+/// placeholder schema for it (this generator cannot reflect DTO fields).
+fn build_responses(rsp_type: &str, schema_names: &mut BTreeSet<String>) -> JsonValue {
+    let schema = response_schema(rsp_type, schema_names);
 
     json!({
         "200": {
@@ -325,6 +337,66 @@ fn build_responses(rsp_type: &str) -> JsonValue {
         "404": { "description": "Resource not found" },
         "500": { "description": "Internal server error" },
     })
+}
+
+/// The success-body schema for one declared response type.
+fn response_schema(rsp_type: &str, schema_names: &mut BTreeSet<String>) -> JsonValue {
+    if rsp_type == "()" || rsp_type == "unknown" {
+        return json!({ "type": "object" });
+    }
+    if rsp_type == "String" {
+        return json!({ "type": "string" });
+    }
+    // Response-control endpoints choose status, headers and body at runtime, so
+    // the document can only say "opaque"; advertising a `$ref` to a type named
+    // `Response` would be a dangling reference.
+    if rsp_type == "Response" || rsp_type.contains("IActionResult") {
+        return json!({
+            "type": "object",
+            "description": "Response written by the handler (IActionResult: status, headers and body are runtime values).",
+        });
+    }
+    if let Some(inner) = rsp_type
+        .strip_prefix("Vec<")
+        .and_then(|rest| rest.strip_suffix('>'))
+    {
+        return json!({
+            "type": "array",
+            "items": schema_ref(inner, schema_names),
+        });
+    }
+    schema_ref(rsp_type, schema_names)
+}
+
+/// A `$ref` to a placeholder component, named after the Rust type.
+fn schema_ref(rsp_type: &str, schema_names: &mut BTreeSet<String>) -> JsonValue {
+    let name = component_name(rsp_type);
+    schema_names.insert(name.clone());
+    json!({ "$ref": format!("#/components/schemas/{}", name) })
+}
+
+/// Turn a Rust type name into an OpenAPI component key.
+///
+/// Component keys allow `[A-Za-z0-9._-]` only, so generic parameters and paths
+/// (`Vec<UserDto>`, `contracts::UserDto`) are flattened to underscores.
+fn component_name(rsp_type: &str) -> String {
+    let mut name = String::with_capacity(rsp_type.len());
+    let mut last_underscore = false;
+    for ch in rsp_type.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '.' || ch == '-' {
+            name.push(ch);
+            last_underscore = false;
+        } else if !last_underscore {
+            name.push('_');
+            last_underscore = true;
+        }
+    }
+    let trimmed = name.trim_matches('_');
+    if trimmed.is_empty() {
+        "Unknown".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 /// Extract a tag name from a path for controller-style grouping.

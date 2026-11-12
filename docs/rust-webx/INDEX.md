@@ -141,6 +141,11 @@
 
 ### [第十六章 迁移指南](16-migration/INDEX.md)
 
+- [升级到 1.1（破坏性变更）](16-migration/upgrade-to-1.1.md)
+- [升级到 1.0（破坏性变更）](16-migration/upgrade-to-1.0.md)
+- [升级到 0.10（破坏性变更）](16-migration/upgrade-to-0.10.md)
+- [升级到 0.9（破坏性变更）](16-migration/upgrade-to-0.9.md)
+- [升级到 0.6（破坏性变更）](16-migration/upgrade-to-0.6.md)
 - [升级到 0.5（破坏性变更）](16-migration/upgrade-to-0.5.md)
 - [从 ASP.NET Core 迁移](16-migration/from-aspnet-core.md)
 - [从 Axum / Actix 迁移](16-migration/from-axum-actix.md)

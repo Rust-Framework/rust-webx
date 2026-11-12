@@ -3,7 +3,12 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
-## [2.0.0] — 2026-11-12
+## [1.1.0] — 2026-11-12
+
+> This release contains breaking changes (`ResponseData` removal). The project ships the
+> work on the 1.x line as **1.1.0** instead of opening a 2.0 major; the former 2.0
+> development branch is now `main`. Migration steps:
+> `docs/rust-webx/16-migration/upgrade-to-1.1.md`.
 
 ### Breaking
 

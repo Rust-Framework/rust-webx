@@ -1,6 +1,6 @@
-# rust-webx 公共 API 设计（2.0）
+# rust-webx 公共 API 设计（1.1）
 
-> 状态：**冻结草案**。2.0 的公共 API 以本文为准；任何新增/改名都要先改本文，再改代码。
+> 状态：**冻结草案**。1.1 的公共 API 以本文为准；任何新增/改名都要先改本文，再改代码。
 > 评估对象：`crates/core`、`crates/macros`、`crates/host`、`crates/webx` 的公开面。
 
 ## 1. 目标与非目标
@@ -92,7 +92,7 @@ return Err(Error::NotFound(format!("user {} not found", req.id)));
 | `PagedResult<T>` | core | 列表 DTO | 分页信封 |
 | `Error` / `ProblemDetails` | core | 失败模型 | RFC 7807 |
 
-**删除记录**：`ResponseData`（2.0 删除，由 `IActionResult` 族替代）、`PagedResponse`（1.0.2 改名
+**删除记录**：`ResponseData`（1.1 删除，由 `IActionResult` 族替代）、`PagedResponse`（1.0.2 改名
 `PagedResult`）、`Json<T> = T`（无引用别名）、各类 deprecated 别名（不保留）。
 
 ## 5. 与 ASP.NET Core / axum 的映射
@@ -122,7 +122,7 @@ axum 的对照：axum 用 `IntoResponse` 统一"值/响应/错误"，端点返�
 
 测量口径：一个端点从声明到可运行所需的**独立声明项**（type/impl/attribute）与**类型重复次数**。
 
-| 场景 | ASP.NET Core | rust-webx 2.0 | 差异原因 |
+| 场景 | ASP.NET Core | rust-webx 1.1 | 差异原因 |
 |------|--------------|---------------|----------|
 | 普通 GET | 1 方法 | 1 请求结构体 + 1 路由 impl + 1 Handler 结构体 + 1 处理器 impl | Mediator 需要请求类型；`#[get]` 挂在空 impl 上是宏的语法载体 |
 | 文件下载 | 1 方法 | 同上 + `Response` 类型 | Rust 需要 `Box<dyn IActionResult>` |
@@ -134,7 +134,7 @@ axum 的对照：axum 用 `IntoResponse` 统一"值/响应/错误"，端点返�
 
 | 摩擦 | 处置 |
 |------|------|
-| `#[async_trait]` 每个 impl 一行 | 2.0 保留（trait 仍是 async-trait 模型）；3.x 评估原生 AFIT |
+| `#[async_trait]` 每个 impl 一行 | 1.1 保留（trait 仍是 async-trait 模型）；后续版本评估原生 AFIT |
 | `Ok(Box::new(FileResult…))` | 保留（Box 是 trait object 的硬约束）；文档给最短写法 |
 | `IRequest<R>` 与 handler 的 `R` 重复 | 编译器强制一致（`T: IRequest<R>`），是安全网不是冗余 |
 | 双轨 | 文档化边界 + OpenAPI 对 `Response` 标记 opaque |
@@ -146,11 +146,12 @@ axum 的对照：axum 用 `IntoResponse` 统一"值/响应/错误"，端点返�
 2. typed action 的 `IRequest<T>` 与 handler 的 `R` 必须一致（编译器保证）。
 3. 业务错误用 `Err(Error)`；HTTP 控制用 `IActionResult`；业务结论用 `OperationResult`，三者不得混用。
 4. 文档/示例中 handler 上下文只出现 `ActionResult`，不出现裸 `Result`。
-5. 公共 API 变更必须先改本文，并按 semver 判定版本号。
+5. 公共 API 变更必须先改本文，并按 semver 判定版本号（1.1.0 的破坏性变更按项目决定并入
+   1.x 发布线，不走 2.0 大版本，见 `CHANGELOG.md`）。
 
-## 8. 迁移（1.0.2 → 2.0.0）
+## 8. 迁移（1.0.2 → 1.1.0）
 
-| 1.0.2 | 2.0.0 |
+| 1.0.2 | 1.1.0 |
 |-------|-------|
 | `ResponseData::file(p)` | `FileResult::path(p)` |
 | `ResponseData::file_stream(r, ct)` | `FileResult::stream(r).content_type(ct)` |

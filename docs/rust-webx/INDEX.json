@@ -15,7 +15,7 @@
     "demoUrl": "",
     "featured": true,
     "sortOrder": 1,
-    "version": "1.0.0",
+    "version": "1.1.0",
     "language": "zh-CN",
     "author": "Start",
     "logo": "logo.svg",
@@ -590,6 +590,13 @@
           "title": "迁移指南",
           "subtitle": "版本升级、ASP.NET Core 与 Axum / Actix 迁移",
           "sections": [
+            {
+              "id": "upgrade-to-1.1",
+              "title": "升级到 1.1（破坏性变更）",
+              "summary": "ResponseData 换成 IActionResult 族、IRequest<Response> 与 OpenAPI 占位组件",
+              "readingTime": 15,
+              "difficulty": "intermediate"
+            },
             {
               "id": "upgrade-to-1.0",
               "title": "升级到 1.0（破坏性变更）",

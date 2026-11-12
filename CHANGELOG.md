@@ -3,6 +3,46 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [1.1.1] — 2026-11-12
+
+### Fixed
+
+- **Response header names are case-insensitive again.** `IHttpResponse::set_header` /
+  `remove_header` / `header` normalize the name, so `.header("Content-Type", ...)` overrides the
+  framework's `content-type` instead of emitting a duplicate header (the backing map used to be
+  case-sensitive).
+- **OpenAPI response detection matches the runtime.** Qualified spellings such as
+  `IRequest<webx::Response>` and `std::string::String` now produce the same opaque/string schemas as
+  their bare spellings, instead of a placeholder `$ref` to the wrapper type.
+- **`publish.sh` no longer hides gate failures.** It runs under bash with `set -euo pipefail`, so a
+  failing `cargo clippy` / `check` / `test` in the release preflight aborts instead of being masked
+  by the `tail` at the end of the pipeline.
+- **`publish.yml` fails on a version/tag mismatch** instead of skipping crates with a warning; a
+  mistyped tag used to leave the workflow green with nothing published.
+
+### Added
+
+- **`rust-version = "1.95"`** in `[workspace.package]`, inherited by every published crate (the
+  MSRV claim in the docs and README is now machine-readable); CI gained an MSRV job that builds the
+  workspace with Rust 1.95.
+- **`scripts/check-docs.sh`** and a CI gate: relative Markdown links, `INDEX.json` ↔ handbook files,
+  removed API names in the live handbook and Cargo/CHANGELOG/INDEX version agreement are checked on
+  every push.
+
+### Docs
+
+- README (EN/zh): the file-response feature list uses the 1.1 `FileResult` / `ContentResult` API;
+  the error-mapping table covers all 17 `Error` variants and no longer claims 401/403 come from
+  `Error::Http`; the rust-ef handbook link points at crates.io / docs.rs; a 1.0.x → 1.1 upgrade
+  pointer was added.
+- New [upgrade to 1.0.2](docs/rust-webx/16-migration/upgrade-to-1.0.2.md) page (`ActionResult`
+  rename, `PagedResult`), so every breaking release has a migration page again.
+- Handbook: raw-response type spelling, framework-managed file headers, header-name
+  case-insensitivity, OpenAPI placeholder/opaque behaviour and a custom-`IActionResult` redirect
+  example are documented.
+- `docs/design/api.md`: the unit `()` → 204 rule is part of the frozen contract, the "CI 门禁"
+  heading is corrected to "compiler + review", and the stale "3.x" reference is gone.
+
 ## [1.1.0] — 2026-11-12
 
 > This release contains breaking changes (`ResponseData` removal). The project ships the
@@ -35,6 +75,18 @@ All notable changes to **rust-webx** are documented in this file.
   `JsonResult<T>`, `ContentResult`, `FileResult`, `NoContentResult`, `StatusCodeResult` —
   the ASP.NET Core result vocabulary, so an action reports the same shapes as
   `File(...)`, `Content(...)`, `StatusCode(...)`, `NoContent()`.
+
+### Removed
+
+- The unused `webx::Json<T>` alias (use `JsonResult<T>`); no deprecated shims remain.
+
+### Changed
+
+- OpenAPI now emits placeholder `components.schemas` entries for every referenced response type
+  (`$ref` no longer dangles) and marks `IRequest<Response>` endpoints opaque.
+- Internal plans/reviews moved out of the shipped docs tree; `publish.sh` and the publish workflow
+  share the crates.io index helpers (`scripts/crates-index.sh`); the phantom 1.0.1 changelog entry
+  is merged into 1.0.2.
 
 ## [1.0.2] — 2026-11-12
 

@@ -2,6 +2,7 @@
 name = "rust-webx"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 description = "rust-webx — A Rust WebApi framework inspired by ASP.NET Core"
 repository.workspace = true

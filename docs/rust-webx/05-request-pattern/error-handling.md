@@ -35,6 +35,8 @@ pub enum Error {
 | `Di` | 500 | DI 解析失败 |
 | `Routing` | 404 | 路由错误 |
 | `Serialization` | 400 | JSON 解析错误 |
+| `ResponseSerialization` | 500 | 响应序列化失败（服务端 DTO 缺陷，不归咎客户端） |
+| `State` | 500 | 服务端状态机 / 编程错误 |
 | `Internal` | 500 | 未预期内部错误 |
 | `Message` | 500 | 通用错误 |
 | `Validation` | 400 | 业务校验失败 |

@@ -236,6 +236,9 @@ fn generate_dispatch_fn(
 /// any spelling of that type, so `Response`, `Box<dyn IActionResult>` and a
 /// qualified path all trigger the raw path — the handler's result already is
 /// the response, so the macro must not serialize it.
+///
+/// Keep in sync with `is_response_control_type` in `rust-webx-openapi`, which
+/// makes the same decision for the OpenAPI response schema.
 fn is_raw_response_type(rsp_type: &str) -> bool {
     let last = rsp_type.rsplit("::").next().unwrap_or(rsp_type);
     last.trim() == "Response" || rsp_type.contains("IActionResult")

@@ -616,3 +616,81 @@ async fn json_response_has_correct_content_type() {
         .unwrap();
     assert!(ct.contains("application/json"));
 }
+
+// ---------------------------------------------------------------------------
+// JSON action result with an explicit status code (e.g. 201 Created)
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize, Deserialize)]
+struct CreatedDto {
+    id: u32,
+}
+
+#[derive(Default, WebxRequestMeta)]
+struct CreatedJsonRequest;
+
+#[get("/created-json")]
+impl IRequest<Response> for CreatedJsonRequest {}
+
+#[derive(Default)]
+struct CreatedJsonHandler;
+
+#[handler]
+#[async_trait::async_trait]
+impl IRequestHandler<CreatedJsonRequest, Response> for CreatedJsonHandler {
+    async fn handle(&mut self, _req: CreatedJsonRequest) -> ActionResult<Response> {
+        Ok(Box::new(JsonResult::new(CreatedDto { id: 7 }).status(201)))
+    }
+}
+
+#[tokio::test]
+async fn json_result_can_override_the_status_code() {
+    let port = find_free_port();
+    spawn_host(port).await;
+
+    let resp = reqwest::get(format!("http://127.0.0.1:{port}/created-json"))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status().as_u16(), 201);
+    assert_eq!(
+        resp.headers()["content-type"],
+        "application/json",
+        "ordinary JSON responses keep the JSON media type"
+    );
+    let body: CreatedDto = resp.json().await.unwrap();
+    assert_eq!(body.id, 7);
+}
+
+// ---------------------------------------------------------------------------
+// A qualified `webx::Response` is still detected as a response-control action
+// ---------------------------------------------------------------------------
+
+#[derive(Default, WebxRequestMeta)]
+struct QualifiedResponseRequest;
+
+#[get("/qualified-response")]
+impl IRequest<webx::Response> for QualifiedResponseRequest {}
+
+#[derive(Default)]
+struct QualifiedResponseHandler;
+
+#[handler]
+#[async_trait::async_trait]
+impl IRequestHandler<QualifiedResponseRequest, webx::Response> for QualifiedResponseHandler {
+    async fn handle(&mut self, _req: QualifiedResponseRequest) -> ActionResult<webx::Response> {
+        Ok(Box::new(StatusCodeResult(202)))
+    }
+}
+
+#[tokio::test]
+async fn qualified_response_type_uses_the_raw_path() {
+    let port = find_free_port();
+    spawn_host(port).await;
+
+    let resp = reqwest::get(format!("http://127.0.0.1:{port}/qualified-response"))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status().as_u16(), 202);
+}

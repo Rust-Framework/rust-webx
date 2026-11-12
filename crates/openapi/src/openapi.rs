@@ -344,13 +344,17 @@ fn response_schema(rsp_type: &str, schema_names: &mut BTreeSet<String>) -> JsonV
     if rsp_type == "()" || rsp_type == "unknown" {
         return json!({ "type": "object" });
     }
-    if rsp_type == "String" {
+    if last_type_segment(rsp_type) == "String" {
         return json!({ "type": "string" });
     }
     // Response-control endpoints choose status, headers and body at runtime, so
-    // the document can only say "opaque"; advertising a `$ref` to a type named
-    // `Response` would be a dangling reference.
-    if rsp_type == "Response" || rsp_type.contains("IActionResult") {
+    // the document can only say "opaque". Detection mirrors
+    // `is_raw_response_type` in `rust-webx-macros`
+    // (`crates/macros/src/endpoint.rs`): the last path segment is `Response`
+    // (bare or qualified) or the type mentions `IActionResult`. Otherwise a
+    // `$ref` would point at the wrapper type instead of the response the
+    // handler actually writes.
+    if is_response_control_type(rsp_type) {
         return json!({
             "type": "object",
             "description": "Response written by the handler (IActionResult: status, headers and body are runtime values).",
@@ -366,6 +370,19 @@ fn response_schema(rsp_type: &str, schema_names: &mut BTreeSet<String>) -> JsonV
         });
     }
     schema_ref(rsp_type, schema_names)
+}
+
+/// The last segment of a (possibly qualified) Rust type name.
+fn last_type_segment(rsp_type: &str) -> &str {
+    rsp_type.rsplit("::").next().unwrap_or(rsp_type).trim()
+}
+
+/// Whether the declared response type is the framework's response-control type.
+///
+/// Mirrors `is_raw_response_type` in `rust-webx-macros` so the generated spec
+/// and the runtime agree; keep the two in sync.
+fn is_response_control_type(rsp_type: &str) -> bool {
+    last_type_segment(rsp_type) == "Response" || rsp_type.contains("IActionResult")
 }
 
 /// A `$ref` to a placeholder component, named after the Rust type.

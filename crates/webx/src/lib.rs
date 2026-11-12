@@ -5,7 +5,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! rust-webx = "1.0"
+//! rust-webx = "1.1"
 //! ```
 //!
 //! ```ignore

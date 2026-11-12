@@ -24,6 +24,10 @@ let spec = generate_openapi_spec("My API", "1.0.0", host.localizer());
 OpenAPI 标准没有多语言 operation 文本；需要在另一种语言下发布时，用该语言作为
 `Culture.Default` 的 Host 构建，或直接用 `localizer.get_in(culture, ..)` 生成自定义规范。
 
+**响应体 schema 只有占位**：Rust 没有运行时反射，生成器为每个被引用的响应 DTO 名称写入一个
+占位 `components.schemas` 条目，保证 `$ref` 不悬空（字段请查 Rust 类型）。`IRequest<Response>`
+端点标记为 opaque：状态码、响应头与响应体由 handler 在运行时决定，文档不声明具体 schema。
+
 资源注册、`#[display]` / `#[description]` / `#[category]` 的写法与回退链见
 [路由宏](../05-request-pattern/route-macros.md#端点名称与描述资源键)。
 

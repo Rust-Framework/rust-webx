@@ -24,6 +24,12 @@
 //! (Rust needs the box; ASP.NET Core writes `IActionResult` directly). A value
 //! that needs no response control stays a plain DTO and never touches this
 //! module.
+//!
+//! Result builders accept a raw `u16` status and arbitrary header names. Both
+//! are validated by the transport when the response is finalised: an invalid
+//! status line or header value degrades to a `500 Internal Server Error` instead
+//! of failing to encode. Use the constants from `http` (or `200`/`201`/`204`)
+//! to avoid that path.
 
 use crate::error::Result;
 use crate::http::{content_disposition_value, Disposition, FileBody, IHttpContext, ResponseBody};

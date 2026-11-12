@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────
 # rust-webx crate publish script
 #
@@ -11,8 +11,8 @@
 #   ./publish.sh --check      # Check only (cargo publish --dry-run)
 #
 # Order (must respect dependency graph):
-#   1. rust-webx-core     (no internal deps)
-#   2. rust-webx-macros   (no internal deps)
+#   1. rust-webx-macros   (no internal deps)
+#   2. rust-webx-core     (no internal deps)
 #   3. rust-webx-build    (no internal deps; build-dependency of apps)
 #   4. rust-webx-spa      (depends on rust-webx-core)
 #   5. rust-webx-openapi  (depends on rust-webx-core)
@@ -20,7 +20,10 @@
 #   7. rust-webx          (depends on all above, umbrella crate)
 # ─────────────────────────────────────────────────────────────────
 
-set -e
+# `pipefail` is required: the gate commands below pipe into `tail`, and without
+# it a failing `cargo clippy`/`test` would only be observed as `tail`'s status
+# 0 — the release preflight would report success on a red tree.
+set -euo pipefail
 
 DO_PUBLISH=false
 DRY_RUN=true

@@ -68,7 +68,7 @@ rust-webx is **not** a full-stack UI framework (pair it with any frontend), **no
 - **Endpoint metadata service** — `IEndpointCatalog` exposes every endpoint at runtime (`all()` / `localized()`), so permission sync, admin navigation and OpenAPI share one source.
 - **Localization** — `#[display]` / `#[description]` / `#[category]` store resource keys; a host-wide `Culture.Default` selects the language, with `.json` resources or `include_str!` embedding.
 - **Production capabilities out of the box** — graceful shutdown, live health checks, security headers, request IDs, CORS, TLS, rate limiting, compression, OpenAPI + SPA hosting.
-- **File upload & download** — typed `FormFile` binding for `multipart/form-data` (streamed, spooled to disk, size-limited) and ASP.NET Core-shaped file responses (`file` / `file_stream` / `file_seekable_stream`) with `Content-Disposition`, `ETag`, `Last-Modified` and `Range`.
+- **File upload & download** — typed `FormFile` binding for `multipart/form-data` (streamed, spooled to disk, size-limited) and ASP.NET Core-shaped file responses (`FileResult::path` / `::stream` / `::seekable_stream`, `ContentResult`) with `Content-Disposition`, `ETag`, `Last-Modified` and `Range`.
 - **ORM-agnostic** — the framework does not depend on `rust-ef`; the `docbit` reference app wires it in with minimal glue.
 
 ## Architecture
@@ -103,7 +103,7 @@ The framework is split into a small set of focused crates, re-exported through t
 
 ```
 rust-webx/
-├── Cargo.toml                 # workspace root (v1.0.0)
+├── Cargo.toml                 # workspace root (v1.1.1)
 ├── crates/
 │   ├── core/                  # rust-webx-core  — traits, configuration
 │   ├── host/                  # rust-webx-host  — Host builder, middleware
@@ -307,7 +307,7 @@ $env:CARGO_PROFILE_DEV_INCREMENTAL = 'true'    # incremental compilation back on
 | OpenAPI UI | Development mode only |
 | Rate limiting / compression | app-layer opt-in (`use_middleware`) |
 | File uploads (streamed, disk-spooled, size-limited) | ✅ |
-| File downloads (`File(...)`-style, streamed, `Content-Disposition`, `ETag`, `Range`, `304`, `HEAD`) | ✅ |
+| File downloads (`FileResult`, streamed, `Content-Disposition`, `ETag`, `Range`, `304`, `HEAD`) | ✅ |
 | TLS | ✅ via `App.Urls` + `Tls.CertPath/KeyPath` |
 
 ## Environment Variables
@@ -325,19 +325,29 @@ See the configuration chapter under `docs/rust-webx/` for the full variable refe
 
 | `Error` variant | HTTP status | Meaning |
 |-----------------|-------------|---------|
-| `Error::NotFound(msg)` | 404 | Resource not found |
-| `Error::Validation(msg)` | 400 | Validation failure |
-| `Error::Serialization(e)` | 400 | (De)serialization error |
-| `Error::Http(msg)` | 400 | HTTP protocol error (incl. 401 Unauthorized, 403 Forbidden) |
+| `Error::Http(msg)` | 400 | HTTP protocol error |
+| `Error::Status(code, msg)` | `code` | Explicit status code |
+| `Error::Unauthorized(msg)` | 401 | Authentication failed / missing token |
+| `Error::Forbidden(msg)` | 403 | Insufficient permissions |
 | `Error::Di(msg)` | 500 | DI container error |
+| `Error::Routing(msg)` | 404 | Routing error |
+| `Error::Serialization(e)` | 400 | Request (de)serialization error |
+| `Error::ResponseSerialization(e)` | 500 | Response serialization failed (server-side DTO defect) |
+| `Error::State(msg)` | 500 | Server-side state / programming error |
 | `Error::Internal(msg)` | 500 | Internal error |
 | `Error::Message(msg)` | 500 | Generic error message |
-| `Error::Routing(msg)` | 404 | Routing error |
+| `Error::Validation(msg)` | 400 | Validation failure |
+| `Error::NotFound(msg)` | 404 | Resource not found |
+| `Error::Conflict(msg)` | 409 | Optimistic concurrency / state conflict |
+| `Error::PayloadTooLarge(msg)` | 413 | Request body or uploaded file too large |
+| `Error::UnsupportedMediaType(msg)` | 415 | Unsupported request content type |
+| `Error::Problem(details)` | `details.status` | Field-level binding/validation problem carrying `errors` |
 
 ## Documentation
 
 - **rust-webx developer's manual** — a progressive-disclosure book under [`docs/rust-webx/`](docs/rust-webx/INDEX.md) (16 chapters, Chinese): introduction, quick start, architecture, DI & lifecycle, middleware, mediator & events, auth & security, configuration, production, project structure, extensibility, best practices, case study and migration guides.
-- **rust-ef reference** — the ORM handbook under [`docs/rust-ef/`](docs/rust-ef/INDEX.md), used by the `docbit` example.
+- **Upgrading from 1.0.x** — 1.1.0 replaced `ResponseData` with the `IActionResult` family; follow the [1.0.2 → 1.1.0 migration guide](docs/rust-webx/16-migration/upgrade-to-1.1.md).
+- **rust-ef reference** — the ORM handbook lives with the [`rust-ef`](https://crates.io/crates/rust-ef) crate (see its [docs.rs](https://docs.rs/rust-ef) documentation), used by the `docbit` example.
 - The `docbit` reference app also serves these docs as a live website (`GET /api/docs/rust-webx/...`).
 
 ## License

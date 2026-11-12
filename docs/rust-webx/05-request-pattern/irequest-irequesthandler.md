@@ -121,6 +121,10 @@ impl IRequestHandler<DownloadReportRequest, Response> for DownloadReportHandler 
 `FileResult::seekable_stream(reader, len)`；需要完全自定义时用 `FileResult::with_body(FileBody)`。
 文件响应的 HTTP 细节见[文件上传与下载](file-upload-download.md)。
 
+> **响应类型必须按字面写**：宏在展开期按类型名判定「自控响应」（末段为 `Response`，或类型名含
+> `IActionResult`）。请写 `IRequest<Response>` 或 `IRequest<Box<dyn IActionResult>>`；`type Resp =
+> Response;` 这类别名、或把业务 DTO 命名为 `Response`，会被当作普通 JSON 响应并在编译期报错。
+
 ## IRequestHandler 的职责
 
 Handler 是**唯一执行业务逻辑**的地方：

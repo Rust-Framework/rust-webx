@@ -59,6 +59,25 @@ impl IEndpoint for WebhookEndpoint {
    impl IRequest<Response> for DownloadFileRequest {}
    ```
 
+   需要「空 body + 自定义响应头」（例如 `301 Location`、`401 WWW-Authenticate`）时，实现一个
+   极小的 `IActionResult` 即可——`StatusCodeResult` 只带状态码，不带响应头：
+
+   ```rust
+   struct Redirect(pub String);
+
+   #[async_trait]
+   impl IActionResult for Redirect {
+       async fn execute(self: Box<Self>, ctx: &mut dyn IHttpContext) -> Result<()> {
+           let resp = ctx.response_mut();
+           resp.set_status(301);
+           resp.set_header("location", &self.0);
+           Ok(())
+       }
+   }
+
+   // Handler：Ok(Box::new(Redirect("/api/new-path".into())))
+   ```
+
 2. **写中间件**：`IMiddleware` 拿得到 `&mut dyn IHttpContext`，可以在路由之前
    短路请求、直接写响应体，例如 `/robots.txt`、`/sitemap.xml` 这类非 API 路径。
 

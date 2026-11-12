@@ -15,7 +15,7 @@
     "demoUrl": "",
     "featured": true,
     "sortOrder": 1,
-    "version": "1.1.0",
+    "version": "1.1.1",
     "language": "zh-CN",
     "author": "Start",
     "logo": "logo.svg",
@@ -594,8 +594,15 @@
               "id": "upgrade-to-1.1",
               "title": "升级到 1.1（破坏性变更）",
               "summary": "ResponseData 换成 IActionResult 族、IRequest<Response> 与 OpenAPI 占位组件",
-              "readingTime": 15,
+              "readingTime": 20,
               "difficulty": "intermediate"
+            },
+            {
+              "id": "upgrade-to-1.0.2",
+              "title": "升级到 1.0.2（破坏性变更）",
+              "summary": "Handler 返回类型改名 ActionResult、PagedResponse 改名 PagedResult",
+              "readingTime": 8,
+              "difficulty": "beginner"
             },
             {
               "id": "upgrade-to-1.0",

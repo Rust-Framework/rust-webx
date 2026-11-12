@@ -296,6 +296,13 @@ Ok(Box::new(FileResult::with_body(
 | `.entity_tag("\"v1\"")` | 显式 `ETag`（仅 `FileResult`） |
 | `.last_modified(t)` | 显式 `Last-Modified`（仅 `FileResult`） |
 
+> **响应头名大小写不敏感**：框架在写入前把名称归一化为小写，`.header("Content-Type", ...)` 与
+> `.header("content-type", ...)` 等价，同名头不会重复发送。
+>
+> **文件响应由框架接管的头**：`FileResult` 会写入或覆盖 `content-length`、`etag`、`last-modified`、
+> `accept-ranges`（以及按 Range 生成的 `content-range`）。想自定义校验器请用
+> `.entity_tag(...)` / `.last_modified(...)`，不要用 `.header("etag", ...)`。
+
 `FileBody` 上还有同样的文件级开关，用 `FileResult::with_body` 时直接写：
 
 ```rust

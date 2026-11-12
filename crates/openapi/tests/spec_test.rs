@@ -588,3 +588,58 @@ fn collect_refs(value: &serde_json::Value, out: &mut Vec<String>) {
         _ => {}
     }
 }
+
+// ---------------------------------------------------------------------------
+// Qualified spellings produce the same schema as the bare ones
+// ---------------------------------------------------------------------------
+
+inventory::submit! {
+    RouteEntry::new(
+        HttpMethod::Get,
+        "/api/schema/qualified-response",
+        "QualifiedSchemaResponseRequest",
+        "webx::Response",
+        TextRef::text("限定路径自控响应"),
+        TextRef::text(""),
+        TextRef::text(""),
+        &[],
+        &[],
+    )
+}
+
+inventory::submit! {
+    RouteEntry::new(
+        HttpMethod::Get,
+        "/api/schema/qualified-string",
+        "QualifiedSchemaStringRequest",
+        "std::string::String",
+        TextRef::text("限定路径字符串响应"),
+        TextRef::text(""),
+        TextRef::text(""),
+        &[],
+        &[],
+    )
+}
+
+#[test]
+fn qualified_response_spelling_is_opaque_too() {
+    let spec = generate_openapi_spec("Test API", "1.0.0", &localizer("zh-CN"));
+    let schema = &spec["paths"]["/api/schema/qualified-response"]["get"]["responses"]["200"]
+        ["content"]["application/json"]["schema"];
+
+    assert_eq!(schema["type"], "object");
+    assert!(
+        schema.get("$ref").is_none(),
+        "a qualified Response endpoint must not $ref a schema: {schema}"
+    );
+}
+
+#[test]
+fn qualified_string_spelling_is_a_string_schema() {
+    let spec = generate_openapi_spec("Test API", "1.0.0", &localizer("zh-CN"));
+    let schema = &spec["paths"]["/api/schema/qualified-string"]["get"]["responses"]["200"]
+        ["content"]["application/json"]["schema"];
+
+    assert_eq!(schema["type"], "string");
+    assert!(schema.get("$ref").is_none());
+}

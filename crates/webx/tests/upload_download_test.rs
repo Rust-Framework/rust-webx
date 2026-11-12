@@ -1244,3 +1244,45 @@ async fn seekable_stream_download_serves_ranges_and_validators() {
     );
     assert_eq!(no_range.text().await.unwrap(), "0123456789abcdef");
 }
+
+// ---------------------------------------------------------------------------
+// Response header names are case-insensitive
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Default, Deserialize, WebxRequestMeta)]
+struct HeaderCaseRequest;
+
+#[get("/test/header-case")]
+impl IRequest<Response> for HeaderCaseRequest {}
+
+#[derive(Default)]
+struct HeaderCaseHandler;
+
+#[handler]
+#[async_trait::async_trait]
+impl IRequestHandler<HeaderCaseRequest, Response> for HeaderCaseHandler {
+    async fn handle(&mut self, _req: HeaderCaseRequest) -> ActionResult<Response> {
+        // Different casing than the framework's `content-type`: it must replace
+        // the default value instead of appending a second header.
+        Ok(Box::new(
+            ContentResult::text("a,b\n").header("Content-Type", "text/csv; charset=utf-8"),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn response_header_names_are_case_insensitive() {
+    let base = spawn(|_| {}).await;
+    let resp = reqwest::get(format!("{base}/test/header-case"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 200);
+
+    let values: Vec<_> = resp.headers().get_all("content-type").iter().collect();
+    assert_eq!(
+        values.len(),
+        1,
+        "content-type must not be duplicated: {values:?}"
+    );
+    assert_eq!(values[0], "text/csv; charset=utf-8");
+}

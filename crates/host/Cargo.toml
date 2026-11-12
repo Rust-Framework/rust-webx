@@ -2,6 +2,7 @@
 name = "rust-webx-host"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 description = "rust-webx HTTP layer: Host builder, middleware pipeline, Trie-based router, hyper integration"
 repository.workspace = true

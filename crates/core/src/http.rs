@@ -543,9 +543,13 @@ pub trait IHttpResponse: Send {
     /// Get the current HTTP status code.
     fn status(&self) -> u16;
     fn set_status(&mut self, code: u16);
+    /// Set (or replace) a response header.
+    ///
+    /// Header names are case-insensitive: setting the same name with different
+    /// casing replaces the previous value instead of emitting a duplicate.
     fn set_header(&mut self, key: &str, value: &str);
 
-    /// Remove a response header by name. Default is a no-op.
+    /// Remove a response header by name (case-insensitive). Default is a no-op.
     fn remove_header(&mut self, _key: &str) {}
 
     /// Whether a response body has been written.

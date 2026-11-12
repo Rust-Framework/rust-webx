@@ -1,6 +1,6 @@
 # rust-webx 公共 API 设计（1.1）
 
-> 状态：**冻结草案**。1.1 的公共 API 以本文为准；任何新增/改名都要先改本文，再改代码。
+> 状态：**冻结契约**（1.1 已发布）。1.1 的公共 API 以本文为准；任何新增/改名都要先改本文，再改代码。
 > 评估对象：`crates/core`、`crates/macros`、`crates/host`、`crates/webx` 的公开面。
 
 ## 1. 目标与非目标
@@ -36,7 +36,7 @@
 > **一个 action 返回 `ActionResult<T>`：`Ok(T)` 被序列化为 `200` JSON；`Err(Error)` 映射为
 > `problem+json`。需要控制 HTTP 的 action 把响应类型写成 `Response`，返回一个 `IActionResult`。**
 
-三种结局，没有第四种：
+三种结局，没有第四种（唯一特例是单元响应：`IRequest<()>` 由宏直接写成 `204`，不属于"值"序列化）：
 
 ```rust
 // ① 值（最常见）
@@ -63,11 +63,19 @@ impl IRequestHandler<DownloadReportRequest, Response> for DownloadReportHandler 
 return Err(Error::NotFound(format!("user {} not found", req.id)));
 ```
 
+**单元响应**：`IRequest<()>` 的 handler 返回 `Ok(())`，宏把它转成 `NoContentResult`（204 + 空 body）。
+这是 typed action 的唯一特例；OpenAPI 把 `()` 记为 `{ "type": "object" }`。
+
+**响应类型必须按字面写**：宏在编译期按类型名判定"自控响应"（末段为 `Response`，或类型名含
+`IActionResult`），因此请写 `IRequest<Response>` 或 `IRequest<Box<dyn IActionResult>>`。
+`type Resp = Response;` 之类的别名、或把业务 DTO 命名为 `Response`，都会被当成普通序列化类型
+并在编译期报错（这是宏的边界，不是运行时不变量）。
+
 **双轨边界（刻意保留）**
 
 | 轨道 | 声明 | 能表达 | 不能表达 |
 |------|------|--------|----------|
-| typed action | `IRequest<T>` | 200 + 任意 `Serialize` 值；编译期知道 body 类型 | 非 200 状态码、非 JSON body、文件 |
+| typed action | `IRequest<T>` | 200 + 任意 `Serialize` 值（`()` 特例为 204）；编译期知道 body 类型 | 非 200 状态码、非 JSON body、文件 |
 | response-control action | `IRequest<Response>` | 任意状态码/头/body、文件流 | 声明式 body 类型（OpenAPI 只能标记为 opaque） |
 
 "201 + 带类型 body"属于跨轨道需求：用 `IRequest<Response>` + `JsonResult::new(dto).status(201)`，
@@ -140,7 +148,7 @@ axum 的对照：axum 用 `IntoResponse` 统一"值/响应/错误"，端点返�
 | 双轨 | 文档化边界 + OpenAPI 对 `Response` 标记 opaque |
 | 概念多 | 概念表 + 每个类型一句职责；删除死别名 |
 
-## 7. 不变量（CI 门禁）
+## 7. 不变量（编译器保证 + 评审检查）
 
 1. handler 的返回类型只能是 `ActionResult<T>`；基础设施返回 `Result<T>`。
 2. typed action 的 `IRequest<T>` 与 handler 的 `R` 必须一致（编译器保证）。
@@ -149,15 +157,18 @@ axum 的对照：axum 用 `IntoResponse` 统一"值/响应/错误"，端点返�
 5. 公共 API 变更必须先改本文，并按 semver 判定版本号（1.1.0 的破坏性变更按项目决定并入
    1.x 发布线，不走 2.0 大版本，见 `CHANGELOG.md`）。
 
-## 8. 迁移（1.0.2 → 1.1.0）
+其中第 1、2 条由 trait 签名与编译器强制；第 3–5 条是评审约定，CI 的 `scripts/check-docs.sh`
+只守版本/链接/索引一致性，不做语义检查。
 
-| 1.0.2 | 1.1.0 |
+## 8. 迁移（1.0.2 → 1.1）
+
+| 1.0.2 | 1.1 |
 |-------|-------|
 | `ResponseData::file(p)` | `FileResult::path(p)` |
 | `ResponseData::file_stream(r, ct)` | `FileResult::stream(r).content_type(ct)` |
 | `ResponseData::file_seekable_stream(r, len, ct)` | `FileResult::seekable_stream(r, len).content_type(ct)` |
 | `ResponseData::with_file(b)` | `FileResult::with_body(b)` |
-| `ResponseData::bytes/text/html` | `ContentResult::bytes/text/html` |
+| `ResponseData::bytes/text/html` | `ContentResult::bytes(v, ct)` / `::text(s)` / `::html(s)` |
 | `ResponseData::no_content()` | `NoContentResult` |
 | `IRequest<ResponseData>` | `IRequest<Response>` |
 | `webx::Json<T>`（别名） | 已删除，用 `JsonResult<T>` |
@@ -168,7 +179,7 @@ axum 的对照：axum 用 `IntoResponse` 统一"值/响应/错误"，端点返�
   文档明确标注字段需查 Rust 类型。
 - **发布脚本**：`publish.sh` 与 `.github/workflows/publish.yml` 的索引轮询逻辑已抽到
   `scripts/crates-index.sh`，两份路径共享同一实现（2026-11-12 收口）。
-- **`IRequest<T>` 的空 impl**：宏需要承载属性；3.x 评估 `#[request(GET, "/path")]` 派生式写法。
+- **`IRequest<T>` 的空 impl**：宏需要承载属性；后续版本评估 `#[request(GET, "/path")]` 派生式写法。
 - **`INDEX.md` / `INDEX.json`**：手工双维护，尚无生成器；下一步用脚本从 `INDEX.md` 生成 JSON。
 - **两套文档树**：`docs/rust-webx`（使用者手册）与 `docs/design`（维护者设计），属有意拆分。
 - **`docs/reviews/`**：内部计划/复盘记录已从对外文档树删除（历史保留在 git 中）。

@@ -142,6 +142,7 @@
 ### [第十六章 迁移指南](16-migration/INDEX.md)
 
 - [升级到 1.1（破坏性变更）](16-migration/upgrade-to-1.1.md)
+- [升级到 1.0.2（破坏性变更）](16-migration/upgrade-to-1.0.2.md)
 - [升级到 1.0（破坏性变更）](16-migration/upgrade-to-1.0.md)
 - [升级到 0.10（破坏性变更）](16-migration/upgrade-to-0.10.md)
 - [升级到 0.9（破坏性变更）](16-migration/upgrade-to-0.9.md)

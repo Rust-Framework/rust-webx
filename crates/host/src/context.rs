@@ -576,11 +576,15 @@ impl IHttpResponse for HttpResponse {
     }
 
     fn set_header(&mut self, key: &str, value: &str) {
-        self.headers.insert(key.to_string(), value.to_string());
+        // HTTP header names are case-insensitive but this map is not. Normalize
+        // on the way in so `Content-Type` and `content-type` cannot coexist
+        // (which would emit duplicate headers when the map is written to hyper).
+        self.headers
+            .insert(key.to_ascii_lowercase(), value.to_string());
     }
 
     fn remove_header(&mut self, key: &str) {
-        self.headers.remove(key);
+        self.headers.remove(&key.to_ascii_lowercase());
     }
 
     async fn write_bytes(&mut self, data: Vec<u8>) -> Result<()> {
@@ -607,7 +611,9 @@ impl IHttpResponse for HttpResponse {
     }
 
     fn header(&self, key: &str) -> Option<&str> {
-        self.headers.get(key).map(|s| s.as_str())
+        self.headers
+            .get(&key.to_ascii_lowercase())
+            .map(|s| s.as_str())
     }
 }
 

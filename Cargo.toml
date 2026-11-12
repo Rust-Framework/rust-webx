@@ -99,3 +99,34 @@ lto = "fat"
 codegen-units = 1
 strip = true
 panic = "abort"
+
+# ── Dev/test build hygiene ───────────────────────────────────────────────
+# Windows MSVC emits one .pdb per linked binary, and with the default
+# `debug = 2` on *every* dependency a single integration-test binary needs
+# ~200 MB (rust-webx full `cargo test --workspace` produced >100 GB of
+# stale artifacts in target/debug over a couple of months).
+#
+# Keep full debug info for workspace crates (stepping through framework code
+# still works) but drop it for third-party deps: their type/line tables are
+# what gets copied into every test binary's .pdb.
+[profile.dev.package."*"]
+debug = false
+
+[profile.test.package."*"]
+debug = false
+
+# Workspace crates keep line tables (file:line in backtraces) without the
+# full type information that dominates MSVC .pdb size.
+[profile.dev]
+debug = "line-tables-only"
+# Incremental compilation is the other space hog: every source change creates
+# a new session directory under target/debug/incremental (~40 GB observed).
+# Opt back in for a heavy edit cycle with CARGO_PROFILE_DEV_INCREMENTAL=true.
+incremental = false
+
+[profile.test]
+debug = "line-tables-only"
+incremental = false
+
+[profile.bench]
+incremental = false

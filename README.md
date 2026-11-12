@@ -26,6 +26,7 @@ A type-safe, convention-over-configuration platform where *requests are endpoint
 - [Core Concepts](#core-concepts)
 - [Example Applications](#example-applications)
 - [Quick Start](#quick-start)
+- [Development](#development)
 - [Production Readiness](#production-readiness)
 - [Environment Variables](#environment-variables)
 - [Error Mapping](#error-mapping)
@@ -260,6 +261,37 @@ docker build -f docbit/Dockerfile .
 cp docbit/.env.example docbit/.env     # edit JWT_SECRET
 docker compose -f docbit/docker-compose.yml --env-file docbit/.env up --build
 # → http://localhost:8100
+```
+
+## Development
+
+Run the full suite from the workspace root:
+
+```bash
+cargo test --workspace --no-fail-fast
+```
+
+### Disk usage (large Windows checkouts)
+
+`target/` is disposable, but Cargo never deletes artifacts that belong to an old
+fingerprint, so every full rebuild (toolchain bump, `Cargo.lock` update,
+`RUSTFLAGS` change, switching feature sets) leaves its whole universe behind.
+The dev/test profiles in [`Cargo.toml`](Cargo.toml) keep *new* builds small
+(no debug info for dependencies, line tables only for workspace crates, no
+incremental sessions). If `target/` has already grown, report and reclaim it:
+
+```powershell
+.\scripts\clean-target.ps1              # report sizes, change nothing
+.\scripts\clean-target.ps1 -Incremental # drop the incremental compile cache only
+.\scripts\clean-target.ps1 -All         # cargo clean (everything is rebuildable)
+```
+
+For a debugging or fast-edit session, override the committed profile for that
+shell only:
+
+```powershell
+$env:CARGO_PROFILE_DEV_DEBUG = '2'             # full debug info for workspace crates
+$env:CARGO_PROFILE_DEV_INCREMENTAL = 'true'    # incremental compilation back on
 ```
 
 ## Production Readiness

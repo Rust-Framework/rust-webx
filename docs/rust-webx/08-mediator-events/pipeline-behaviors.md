@@ -7,7 +7,7 @@ pipeline 是**类型化**的：
 ```rust
 #[async_trait]
 pub trait IPipelineBehavior<Req: Send + 'static, Rsp: Send + 'static>: Send + Sync {
-    async fn handle(&self, req: Req, next: Next<Req, Rsp>) -> Result<Rsp>;
+    async fn handle(&self, req: Req, next: Next<Req, Rsp>) -> ActionResult<Rsp>;
 }
 ```
 
@@ -37,7 +37,7 @@ impl IPipelineBehavior<CreateOrderRequest, OrderView> for RequireNote {
         &self,
         req: CreateOrderRequest,
         next: Next<CreateOrderRequest, OrderView>,
-    ) -> Result<OrderView> {
+    ) -> ActionResult<OrderView> {
         if req.note.trim().is_empty() {
             return Err(Error::Validation("note is required".into()));
         }

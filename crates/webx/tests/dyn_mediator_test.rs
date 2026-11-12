@@ -28,7 +28,7 @@ struct DynHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<DynRequest, DynResponse> for DynHandler {
-    async fn handle(&mut self, req: DynRequest) -> Result<DynResponse> {
+    async fn handle(&mut self, req: DynRequest) -> ActionResult<DynResponse> {
         Ok(DynResponse { n: req.n * 2 })
     }
 }
@@ -42,7 +42,7 @@ impl IPipelineBehavior<DynRequest, DynResponse> for AddFive {
         &self,
         req: DynRequest,
         next: Next<DynRequest, DynResponse>,
-    ) -> Result<DynResponse> {
+    ) -> ActionResult<DynResponse> {
         next.run(DynRequest { n: req.n + 5 }).await
     }
 }

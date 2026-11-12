@@ -44,7 +44,7 @@ pub struct DeleteRoleHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ListRolesRequest, Vec<RoleModel>> for ListRolesHandler {
-    async fn handle(&mut self, _: ListRolesRequest) -> Result<Vec<RoleModel>> {
+    async fn handle(&mut self, _: ListRolesRequest) -> ActionResult<Vec<RoleModel>> {
         let roles = linq!(self.ctx.set::<Role>();).to_list().await.map_ef()?;
 
         Ok(roles.into_iter().map(RoleModel::from).collect())
@@ -54,7 +54,7 @@ impl IRequestHandler<ListRolesRequest, Vec<RoleModel>> for ListRolesHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<CreateRoleRequest, RoleModel> for CreateRoleHandler {
-    async fn handle(&mut self, req: CreateRoleRequest) -> Result<RoleModel> {
+    async fn handle(&mut self, req: CreateRoleRequest) -> ActionResult<RoleModel> {
         let now = now_secs();
         let id = new_id();
 
@@ -71,7 +71,7 @@ impl IRequestHandler<CreateRoleRequest, RoleModel> for CreateRoleHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<UpdateRoleRequest, RoleModel> for UpdateRoleHandler {
-    async fn handle(&mut self, req: UpdateRoleRequest) -> Result<RoleModel> {
+    async fn handle(&mut self, req: UpdateRoleRequest) -> ActionResult<RoleModel> {
         let id = parse_id(&req.id)?;
 
         let mut role = self
@@ -96,7 +96,7 @@ impl IRequestHandler<UpdateRoleRequest, RoleModel> for UpdateRoleHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<DeleteRoleRequest, String> for DeleteRoleHandler {
-    async fn handle(&mut self, req: DeleteRoleRequest) -> Result<String> {
+    async fn handle(&mut self, req: DeleteRoleRequest) -> ActionResult<String> {
         let id = parse_id(&req.id)?;
 
         let mut role = self
@@ -137,7 +137,7 @@ pub struct RevokeRoleHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<AssignRoleRequest, String> for AssignRoleHandler {
-    async fn handle(&mut self, req: AssignRoleRequest) -> Result<String> {
+    async fn handle(&mut self, req: AssignRoleRequest) -> ActionResult<String> {
         let user_id = req.user_id.clone();
         let role_id = req.role_id.clone();
         let exists_uid = user_id.clone();
@@ -176,7 +176,7 @@ impl IRequestHandler<AssignRoleRequest, String> for AssignRoleHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<RevokeRoleRequest, String> for RevokeRoleHandler {
-    async fn handle(&mut self, req: RevokeRoleRequest) -> Result<String> {
+    async fn handle(&mut self, req: RevokeRoleRequest) -> ActionResult<String> {
         let uid = parse_id(&req.user_id)?;
         let rid = parse_id(&req.role_id)?;
         let uid_q = uid.clone();
@@ -225,7 +225,7 @@ pub struct DeleteResourceHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ListResourcesRequest, Vec<ResourceModel>> for ListResourcesHandler {
-    async fn handle(&mut self, _: ListResourcesRequest) -> Result<Vec<ResourceModel>> {
+    async fn handle(&mut self, _: ListResourcesRequest) -> ActionResult<Vec<ResourceModel>> {
         let items = linq!(self.ctx.set::<Resource>();)
             .to_list()
             .await
@@ -238,7 +238,7 @@ impl IRequestHandler<ListResourcesRequest, Vec<ResourceModel>> for ListResources
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<CreateResourceRequest, ResourceModel> for CreateResourceHandler {
-    async fn handle(&mut self, req: CreateResourceRequest) -> Result<ResourceModel> {
+    async fn handle(&mut self, req: CreateResourceRequest) -> ActionResult<ResourceModel> {
         let now = now_secs();
         let id = new_id();
 
@@ -255,7 +255,7 @@ impl IRequestHandler<CreateResourceRequest, ResourceModel> for CreateResourceHan
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<UpdateResourceRequest, ResourceModel> for UpdateResourceHandler {
-    async fn handle(&mut self, req: UpdateResourceRequest) -> Result<ResourceModel> {
+    async fn handle(&mut self, req: UpdateResourceRequest) -> ActionResult<ResourceModel> {
         let id = parse_id(&req.id)?;
 
         let mut res = self
@@ -280,7 +280,7 @@ impl IRequestHandler<UpdateResourceRequest, ResourceModel> for UpdateResourceHan
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<DeleteResourceRequest, String> for DeleteResourceHandler {
-    async fn handle(&mut self, req: DeleteResourceRequest) -> Result<String> {
+    async fn handle(&mut self, req: DeleteResourceRequest) -> ActionResult<String> {
         let id = parse_id(&req.id)?;
 
         let mut res = self
@@ -327,7 +327,7 @@ pub struct DeleteAuthorizeHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ListAuthorizesRequest, Vec<AuthorizeModel>> for ListAuthorizesHandler {
-    async fn handle(&mut self, _: ListAuthorizesRequest) -> Result<Vec<AuthorizeModel>> {
+    async fn handle(&mut self, _: ListAuthorizesRequest) -> ActionResult<Vec<AuthorizeModel>> {
         let items = self
             .ctx
             .set::<Authorize>()
@@ -343,7 +343,7 @@ impl IRequestHandler<ListAuthorizesRequest, Vec<AuthorizeModel>> for ListAuthori
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<CreateAuthorizeRequest, AuthorizeModel> for CreateAuthorizeHandler {
-    async fn handle(&mut self, req: CreateAuthorizeRequest) -> Result<AuthorizeModel> {
+    async fn handle(&mut self, req: CreateAuthorizeRequest) -> ActionResult<AuthorizeModel> {
         let role_id = req.role_id.clone();
         let resource_id = req.resource_id.clone();
         let exists_role = role_id.clone();
@@ -376,7 +376,7 @@ impl IRequestHandler<CreateAuthorizeRequest, AuthorizeModel> for CreateAuthorize
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<DeleteAuthorizeRequest, String> for DeleteAuthorizeHandler {
-    async fn handle(&mut self, req: DeleteAuthorizeRequest) -> Result<String> {
+    async fn handle(&mut self, req: DeleteAuthorizeRequest) -> ActionResult<String> {
         let id = parse_id(&req.id)?;
         let q = id.clone();
 

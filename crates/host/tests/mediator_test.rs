@@ -19,7 +19,7 @@
 
 use rust_dix::ServiceCollection;
 use std::sync::{Arc, Mutex};
-use webx_core::error::{Error, Result as LrwfResult};
+use webx_core::error::{ActionResult, Error, Result as LrwfResult};
 use webx_core::handler::{IEventHandler, IRequestHandler};
 use webx_core::mediator::Mediator;
 use webx_core::mediator::{IEventRequest, IMediator, IRequest};
@@ -46,7 +46,7 @@ struct HelloHandler;
 
 #[async_trait::async_trait]
 impl IRequestHandler<HelloRequest, HelloResponse> for HelloHandler {
-    async fn handle(&mut self, _req: HelloRequest) -> LrwfResult<HelloResponse> {
+    async fn handle(&mut self, _req: HelloRequest) -> ActionResult<HelloResponse> {
         Ok(HelloResponse {
             message: "hello".into(),
         })
@@ -96,7 +96,7 @@ struct FailingHandler;
 
 #[async_trait::async_trait]
 impl IRequestHandler<FailingHelloRequest, HelloResponse> for FailingHandler {
-    async fn handle(&mut self, _req: FailingHelloRequest) -> LrwfResult<HelloResponse> {
+    async fn handle(&mut self, _req: FailingHelloRequest) -> ActionResult<HelloResponse> {
         Err(Error::Internal("handler failure".into()))
     }
 }

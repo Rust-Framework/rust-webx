@@ -642,8 +642,9 @@ fn percent_encode_ext_value(value: &str) -> String {
 /// Helper: build a JSON response by serializing a value and writing it.
 ///
 /// A serialization failure is a server-side defect in the response DTO, so it
-/// surfaces as [`Error::ResponseSerialization`] (500), not the request-parse
-/// [`Error::Serialization`] (400).
+/// surfaces as [`Error::ResponseSerialization`](crate::error::Error::ResponseSerialization)
+/// (500), not the request-parse
+/// [`Error::Serialization`](crate::error::Error::Serialization) (400).
 pub async fn write_json_response<T: serde::Serialize + Send>(
     resp: &mut dyn IHttpResponse,
     value: &T,

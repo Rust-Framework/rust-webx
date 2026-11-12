@@ -135,8 +135,18 @@ impl Error {
     }
 }
 
-/// Shorthand for Result<T, Error>.
+/// Shorthand for `Result<T, Error>` — the general fallible type used by
+/// infrastructure code, helpers and middleware.
 pub type Result<T> = std::result::Result<T, Error>;
+
+/// The result of a request handler — the framework-level counterpart of
+/// ASP.NET Core's `ActionResult<T>`.
+///
+/// Same underlying type as [`Result`]; the name is the handler-facing one:
+/// `IRequestHandler::handle`, `IPipelineBehavior::handle` and `Next::run`
+/// return it, so action code reads like the ASP.NET Core action it
+/// corresponds to. `T` defaults to `()` for an action without a body.
+pub type ActionResult<T = ()> = std::result::Result<T, Error>;
 
 #[cfg(test)]
 mod tests {

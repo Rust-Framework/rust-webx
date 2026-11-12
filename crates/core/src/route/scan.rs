@@ -227,7 +227,7 @@ pub struct RouteDispatch {
 /// — for example to stream a file:
 ///
 /// ```ignore
-/// async fn handle(&mut self, req: DownloadReportRequest) -> Result<ResponseData> {
+/// async fn handle(&mut self, req: DownloadReportRequest) -> ActionResult<ResponseData> {
 ///     Ok(ResponseData::file(self.reports.path_for(&req.id)?)
 ///         .content_type("text/csv")
 ///         .download_name("report.csv"))

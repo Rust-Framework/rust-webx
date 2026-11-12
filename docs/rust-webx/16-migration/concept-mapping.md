@@ -48,7 +48,7 @@
 | `UseCors()` | `use_cors()` | CORS |
 | `UseStaticFiles()` | `use_spa()` | 静态文件 |
 | `Controller` | 无（Request 即端点） | 路由处理 |
-| `ActionResult<T>` | `Result<T>` | 返回类型 |
+| `ActionResult<T>` | `ActionResult<T>`（= `Result<T, Error>` 别名） | 返回类型 |
 | `NotFound()` | `Error::NotFound` | 404 |
 | `BadRequest()` | `Error::Validation` | 400 |
 | `IApplicationBuilder` | `HostBuilder`（`use_middleware` / `use_middleware_with`） | 应用配置 |

@@ -1,6 +1,6 @@
 //! Typed pipeline behaviors: `IPipelineBehavior<Req, Rsp>`.
 
-use crate::error::Result;
+use crate::error::{ActionResult, Result};
 use std::future::Future;
 use std::pin::Pin;
 
@@ -42,7 +42,7 @@ where
     }
 
     /// Run the rest of the chain (and the handler) with `req`.
-    pub async fn run(self, req: Req) -> Result<Rsp> {
+    pub async fn run(self, req: Req) -> ActionResult<Rsp> {
         (self.call)(req).await
     }
 }
@@ -65,7 +65,7 @@ where
 ///         &self,
 ///         req: CreateOrderRequest,
 ///         next: Next<CreateOrderRequest, OrderView>,
-///     ) -> Result<OrderView> {
+///     ) -> ActionResult<OrderView> {
 ///         if req.note.is_empty() {
 ///             return Err(Error::Validation("note is required".into()));
 ///         }
@@ -85,5 +85,5 @@ where
 ///     crate::route::ext::IServiceCollectionExt::add_typed_pipeline_with
 #[async_trait::async_trait]
 pub trait IPipelineBehavior<Req: Send + 'static, Rsp: Send + 'static>: Send + Sync {
-    async fn handle(&self, req: Req, next: Next<Req, Rsp>) -> Result<Rsp>;
+    async fn handle(&self, req: Req, next: Next<Req, Rsp>) -> ActionResult<Rsp>;
 }

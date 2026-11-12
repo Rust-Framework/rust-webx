@@ -51,7 +51,7 @@ pub struct InfoHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ListUsersRequest, Vec<UserModel>> for ListUsersHandler {
-    async fn handle(&mut self, _: ListUsersRequest) -> Result<Vec<UserModel>> {
+    async fn handle(&mut self, _: ListUsersRequest) -> ActionResult<Vec<UserModel>> {
         let users = linq!(self.ctx.set::<User>(); include u.roles; order_by u.created_at desc)
             .to_list()
             .await
@@ -64,7 +64,7 @@ impl IRequestHandler<ListUsersRequest, Vec<UserModel>> for ListUsersHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<GetUserRequest, UserModel> for GetUserHandler {
-    async fn handle(&mut self, req: GetUserRequest) -> Result<UserModel> {
+    async fn handle(&mut self, req: GetUserRequest) -> ActionResult<UserModel> {
         let id = parse_id(&req.id)?;
         let q = id.clone();
 
@@ -81,7 +81,7 @@ impl IRequestHandler<GetUserRequest, UserModel> for GetUserHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<CreateUserRequest, UserModel> for CreateUserHandler {
-    async fn handle(&mut self, req: CreateUserRequest) -> Result<UserModel> {
+    async fn handle(&mut self, req: CreateUserRequest) -> ActionResult<UserModel> {
         let now = now_secs();
         let user_id = new_id();
 
@@ -119,7 +119,7 @@ impl IRequestHandler<CreateUserRequest, UserModel> for CreateUserHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<UpdateUserRequest, UserModel> for UpdateUserHandler {
-    async fn handle(&mut self, req: UpdateUserRequest) -> Result<UserModel> {
+    async fn handle(&mut self, req: UpdateUserRequest) -> ActionResult<UserModel> {
         let id = parse_id(&req.id)?;
 
         let mut user = self
@@ -152,7 +152,7 @@ impl IRequestHandler<UpdateUserRequest, UserModel> for UpdateUserHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<DeleteUserRequest, String> for DeleteUserHandler {
-    async fn handle(&mut self, req: DeleteUserRequest) -> Result<String> {
+    async fn handle(&mut self, req: DeleteUserRequest) -> ActionResult<String> {
         let id = parse_id(&req.id)?;
 
         let mut user = self
@@ -180,7 +180,7 @@ impl IRequestHandler<DeleteUserRequest, String> for DeleteUserHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<InfoRequest, String> for InfoHandler {
-    async fn handle(&mut self, _: InfoRequest) -> Result<String> {
+    async fn handle(&mut self, _: InfoRequest) -> ActionResult<String> {
         let count = linq!(self.ctx.set::<User>(); count).await.map_ef()?;
 
         Ok(format!("Total users: {}", count))

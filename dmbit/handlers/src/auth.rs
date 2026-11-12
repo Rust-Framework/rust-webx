@@ -93,7 +93,7 @@ pub struct ChangePasswordHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
-    async fn handle(&mut self, req: LoginRequest) -> Result<AuthResponse> {
+    async fn handle(&mut self, req: LoginRequest) -> ActionResult<AuthResponse> {
         let user = load_user_by_email(&mut self.ctx, &req.email)
             .await?
             .ok_or_else(|| Error::Http("邮箱或密码错误".into()))?;
@@ -115,7 +115,7 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<AuthMeRequest, UserView> for AuthMeHandler {
-    async fn handle(&mut self, _req: AuthMeRequest) -> Result<UserView> {
+    async fn handle(&mut self, _req: AuthMeRequest) -> ActionResult<UserView> {
         let uid = operator_id().ok_or_else(|| Error::Http("未登录".into()))?;
         let user = load_user_by_id(&mut self.ctx, &uid)
             .await?
@@ -127,7 +127,7 @@ impl IRequestHandler<AuthMeRequest, UserView> for AuthMeHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ChangePasswordRequest, ChangePasswordResponse> for ChangePasswordHandler {
-    async fn handle(&mut self, req: ChangePasswordRequest) -> Result<ChangePasswordResponse> {
+    async fn handle(&mut self, req: ChangePasswordRequest) -> ActionResult<ChangePasswordResponse> {
         if req.new_password.len() < 6 {
             return Err(Error::Http("新密码至少 6 位".into()));
         }

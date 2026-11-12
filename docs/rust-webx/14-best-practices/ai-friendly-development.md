@@ -24,7 +24,7 @@ AI 生成的代码可直接放入 `contracts/blog.rs`（DTO + `IRequest`）+ `ha
 | 四步端点模式 | 生成模板固定 |
 | contracts/handlers 分层 | 文件放置明确 |
 | `#[handler]` 自动注册 | 无需修改 main.rs |
-| `Result<Error>` 错误处理 | 无需猜测错误模式 |
+| `ActionResult<T>` 返回与 `Error` 映射 | 无需猜测错误模式 |
 
 ### 3. 编译器验证 AI 输出
 
@@ -62,7 +62,7 @@ handlers/blog/
 - 使用 #[get]/#[post] 标注 impl IRequest<T>
 - Handler 需要数据库时用 #[inject(owned)] ctx: DbContext；需要服务时注入 Arc<dyn I…Service>，用 #[handler(inject)]
 - 错误使用 Error::NotFound / Error::Validation
-- 返回 Result<T>
+- 返回 ActionResult<T>
 
 请实现：{你的需求描述}
 ```

@@ -37,7 +37,7 @@ struct CreateBlogHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<CreateBlogRequest, String> for CreateBlogHandler {
-    async fn handle(&mut self, _req: CreateBlogRequest) -> Result<String> {
+    async fn handle(&mut self, _req: CreateBlogRequest) -> ActionResult<String> {
         Ok("created".into())
     }
 }
@@ -59,7 +59,7 @@ struct GetBlogHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<GetBlogRequest, String> for GetBlogHandler {
-    async fn handle(&mut self, req: GetBlogRequest) -> Result<String> {
+    async fn handle(&mut self, req: GetBlogRequest) -> ActionResult<String> {
         Ok(req.slug)
     }
 }
@@ -76,7 +76,7 @@ struct PingHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<PingRequest, String> for PingHandler {
-    async fn handle(&mut self, _req: PingRequest) -> Result<String> {
+    async fn handle(&mut self, _req: PingRequest) -> ActionResult<String> {
         Ok("pong".into())
     }
 }
@@ -98,7 +98,7 @@ struct OrderHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<OrderRequest, String> for OrderHandler {
-    async fn handle(&mut self, _req: OrderRequest) -> Result<String> {
+    async fn handle(&mut self, _req: OrderRequest) -> ActionResult<String> {
         Ok("ordered".into())
     }
 }

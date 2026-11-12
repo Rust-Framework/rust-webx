@@ -22,7 +22,7 @@ struct HelloHandler;
 #[handler]
 #[async_trait]
 impl IRequestHandler<HelloRequest, String> for HelloHandler {
-    async fn handle(&mut self, _req: HelloRequest) -> Result<String> {
+    async fn handle(&mut self, _req: HelloRequest) -> ActionResult<String> {
         Ok("Hello, World! Welcome to rust-webx.".to_string())
     }
 }
@@ -81,7 +81,7 @@ struct HelloHandler;
 #[handler]
 #[async_trait]
 impl IRequestHandler<HelloRequest, String> for HelloHandler {
-    async fn handle(&mut self, _req: HelloRequest) -> Result<String> { ... }
+    async fn handle(&mut self, _req: HelloRequest) -> ActionResult<String> { ... }
 }
 ```
 
@@ -137,7 +137,7 @@ sequenceDiagram
 impl IRequest<()> for DeleteItemRequest {}
 
 impl IRequestHandler<DeleteItemRequest, ()> for DeleteItemHandler {
-    async fn handle(&mut self, req: DeleteItemRequest) -> Result<()> {
+    async fn handle(&mut self, req: DeleteItemRequest) -> ActionResult<()> {
         // 删除逻辑
         Ok(())
     }

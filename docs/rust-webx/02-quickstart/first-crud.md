@@ -101,7 +101,7 @@ struct ListUsersHandler;
 #[handler]
 #[async_trait]
 impl IRequestHandler<ListUsersRequest, Vec<UserDto>> for ListUsersHandler {
-    async fn handle(&mut self, _req: ListUsersRequest) -> Result<Vec<UserDto>> {
+    async fn handle(&mut self, _req: ListUsersRequest) -> ActionResult<Vec<UserDto>> {
         // 实际项目中通过 DI 注入 store
         Ok(vec![])
     }
@@ -120,7 +120,7 @@ struct CreateUserHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<CreateUserRequest, UserDto> for CreateUserHandler {
-    async fn handle(&mut self, req: CreateUserRequest) -> Result<UserDto> {
+    async fn handle(&mut self, req: CreateUserRequest) -> ActionResult<UserDto> {
         let id = uuid::Uuid::new_v4().to_string();
         let user = UserDto {
             id: id.clone(),
@@ -177,7 +177,7 @@ curl -X DELETE http://localhost:5000/api/users/{id}
 ## 错误处理示例
 
 ```rust
-async fn handle(&mut self, req: GetUserRequest) -> Result<UserDto> {
+async fn handle(&mut self, req: GetUserRequest) -> ActionResult<UserDto> {
     self.store
         .get(&req.id)
         .await
@@ -205,7 +205,7 @@ impl IRequest<UserDto> for UpdateProfileRequest {}
 ```
 
 ```rust
-async fn handle(&mut self, req: UpdateProfileRequest) -> Result<UserDto> {
+async fn handle(&mut self, req: UpdateProfileRequest) -> ActionResult<UserDto> {
     let user = req.require_user()?;
     self.store
         .update_profile(&user.id, &user.tenant_id, req.display_name)

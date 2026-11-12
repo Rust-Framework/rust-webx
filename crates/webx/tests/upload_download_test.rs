@@ -104,7 +104,7 @@ struct UploadHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<UploadRequest, UploadSummary> for UploadHandler {
-    async fn handle(&mut self, req: UploadRequest) -> Result<UploadSummary> {
+    async fn handle(&mut self, req: UploadRequest) -> ActionResult<UploadSummary> {
         let bytes = req.avatar.read_bytes().await?;
         Ok(UploadSummary {
             title: req.title,
@@ -158,7 +158,7 @@ struct DownloadHandler {
 #[handler(inject)]
 #[async_trait::async_trait]
 impl IRequestHandler<DownloadRequest, ResponseData> for DownloadHandler {
-    async fn handle(&mut self, req: DownloadRequest) -> Result<ResponseData> {
+    async fn handle(&mut self, req: DownloadRequest) -> ActionResult<ResponseData> {
         Ok(ResponseData::file(self.root.0.join(&req.name)).download_name("report.csv"))
     }
 }
@@ -179,7 +179,7 @@ struct MissingDownloadHandler {
 #[handler(inject)]
 #[async_trait::async_trait]
 impl IRequestHandler<MissingDownloadRequest, ResponseData> for MissingDownloadHandler {
-    async fn handle(&mut self, _req: MissingDownloadRequest) -> Result<ResponseData> {
+    async fn handle(&mut self, _req: MissingDownloadRequest) -> ActionResult<ResponseData> {
         Ok(ResponseData::file(self.root.0.join("does-not-exist.csv")))
     }
 }
@@ -198,7 +198,7 @@ struct InlineCsvHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<InlineCsvRequest, ResponseData> for InlineCsvHandler {
-    async fn handle(&mut self, _req: InlineCsvRequest) -> Result<ResponseData> {
+    async fn handle(&mut self, _req: InlineCsvRequest) -> ActionResult<ResponseData> {
         Ok(ResponseData::text("a,b\n1,2\n")
             .content_type("text/csv; charset=utf-8")
             .download_name("导出.csv"))
@@ -218,7 +218,7 @@ struct StreamDownloadHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<StreamDownloadRequest, ResponseData> for StreamDownloadHandler {
-    async fn handle(&mut self, _req: StreamDownloadRequest) -> Result<ResponseData> {
+    async fn handle(&mut self, _req: StreamDownloadRequest) -> ActionResult<ResponseData> {
         // A live producer: nothing is buffered, so the total size is unknown.
         let (reader, mut writer) = tokio::io::duplex(1024);
         tokio::spawn(async move {
@@ -257,7 +257,7 @@ struct SeekableDownloadHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<SeekableDownloadRequest, ResponseData> for SeekableDownloadHandler {
-    async fn handle(&mut self, _req: SeekableDownloadRequest) -> Result<ResponseData> {
+    async fn handle(&mut self, _req: SeekableDownloadRequest) -> ActionResult<ResponseData> {
         // `Cursor<Vec<u8>>` is the simplest seekable reader; object-storage and
         // database LOB handles behave the same way.
         let cursor = std::io::Cursor::new(SEEKABLE_BODY.to_vec());
@@ -276,7 +276,7 @@ struct NonRangeDownloadHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<NonRangeDownloadRequest, ResponseData> for NonRangeDownloadHandler {
-    async fn handle(&mut self, _req: NonRangeDownloadRequest) -> Result<ResponseData> {
+    async fn handle(&mut self, _req: NonRangeDownloadRequest) -> ActionResult<ResponseData> {
         let cursor = std::io::Cursor::new(SEEKABLE_BODY.to_vec());
         Ok(ResponseData::with_file(
             FileBody::seekable_stream(cursor, SEEKABLE_BODY.len() as u64)

@@ -169,7 +169,7 @@ struct ListEndpointsHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ListEndpointsRequest, Vec<EndpointDescriptor>> for ListEndpointsHandler {
-    async fn handle(&mut self, _req: ListEndpointsRequest) -> Result<Vec<EndpointDescriptor>> {
+    async fn handle(&mut self, _req: ListEndpointsRequest) -> ActionResult<Vec<EndpointDescriptor>> {
         Ok(self.catalog.all().to_vec())
     }
 }
@@ -191,7 +191,7 @@ struct ListEndpointsHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ListEndpointsRequest, Vec<EndpointInfo>> for ListEndpointsHandler {
-    async fn handle(&mut self, _req: ListEndpointsRequest) -> Result<Vec<EndpointInfo>> {
+    async fn handle(&mut self, _req: ListEndpointsRequest) -> ActionResult<Vec<EndpointInfo>> {
         Ok(self.catalog.localized(&*self.localizer))
     }
 }

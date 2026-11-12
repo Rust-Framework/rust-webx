@@ -197,7 +197,7 @@ pub struct UserDto {
 }
 
 // 需要完全控制状态码/响应头/流式响应时返回 ResponseData
-async fn handle(&mut self, req: MyRequest) -> Result<ResponseData> { ... }
+async fn handle(&mut self, req: MyRequest) -> ActionResult<ResponseData> { ... }
 ```
 
 下一节：[错误处理与 ProblemDetails](error-handling.md)

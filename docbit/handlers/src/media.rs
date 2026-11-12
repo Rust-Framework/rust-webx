@@ -86,7 +86,7 @@ pub struct UploadMediaHandler;
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<UploadMediaRequest, MediaAsset> for UploadMediaHandler {
-    async fn handle(&mut self, req: UploadMediaRequest) -> Result<MediaAsset> {
+    async fn handle(&mut self, req: UploadMediaRequest) -> ActionResult<MediaAsset> {
         if req.file.is_empty() {
             return Err(Error::Validation("no file was uploaded".into()));
         }
@@ -149,7 +149,7 @@ pub struct GetMediaHandler;
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<GetMediaRequest, ResponseData> for GetMediaHandler {
-    async fn handle(&mut self, req: GetMediaRequest) -> Result<ResponseData> {
+    async fn handle(&mut self, req: GetMediaRequest) -> ActionResult<ResponseData> {
         let path = resolve_inside_uploads(&req.path)
             .ok_or_else(|| Error::Validation("invalid media path".into()))?;
 

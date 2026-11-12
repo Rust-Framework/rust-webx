@@ -12,11 +12,11 @@
 //! ```ignore
 //! #[async_trait]
 //! impl IRequestHandler<GetUserRequest, UserModel> for GetUserHandler {
-//!     async fn handle(&mut self, req: GetUserRequest) -> Result<UserModel> { ... }
+//!     async fn handle(&mut self, req: GetUserRequest) -> ActionResult<UserModel> { ... }
 //! }
 //! ```
 
-use crate::error::Result;
+use crate::error::{ActionResult, Result};
 use crate::mediator::{IEventRequest, IRequest};
 
 /// Handles a single `IRequest<R>`, producing its associated response `R`.
@@ -37,7 +37,7 @@ use crate::mediator::{IEventRequest, IRequest};
 /// ```ignore
 /// #[async_trait]
 /// impl IRequestHandler<GetUserRequest, UserModel> for GetUserHandler {
-///     async fn handle(&mut self, req: GetUserRequest) -> Result<UserModel> { ... }
+///     async fn handle(&mut self, req: GetUserRequest) -> ActionResult<UserModel> { ... }
 /// }
 /// ```
 #[async_trait::async_trait]
@@ -47,7 +47,7 @@ where
     R: Send + 'static,
 {
     /// Handle the request.
-    async fn handle(&mut self, req: T) -> Result<R>;
+    async fn handle(&mut self, req: T) -> ActionResult<R>;
 }
 
 /// Handles a single `IEventRequest`, performing side effects.

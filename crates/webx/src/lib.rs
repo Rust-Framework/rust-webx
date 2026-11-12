@@ -33,7 +33,7 @@ pub use webx_core::config::{
     IAppOptions, JwtSection, MetricsSection, RateLimitSection, TlsSection,
 };
 pub use webx_core::dispatch_runtime::DispatchRuntime;
-pub use webx_core::error::{Error, Result};
+pub use webx_core::error::{ActionResult, Error, Result};
 pub use webx_core::form::{
     sanitize_file_name, set_spool_root, spool_root, FormField, FormFile, FormFileBuilder,
     MultipartForm, SPOOL_FILE_PREFIX,

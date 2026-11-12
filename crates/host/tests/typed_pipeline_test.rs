@@ -10,7 +10,7 @@ use std::any::Any;
 use std::sync::{Arc, Mutex};
 
 use rust_dix::ServiceCollection;
-use webx_core::error::{Error, Result};
+use webx_core::error::{ActionResult, Error, Result};
 use webx_core::handler::IRequestHandler;
 use webx_core::mediator::{IMediator, IRequest, Mediator};
 use webx_core::pipeline::{IPipelineBehavior, Next};
@@ -51,7 +51,7 @@ struct PingHandler {
 
 #[async_trait::async_trait]
 impl IRequestHandler<PingRequest, PingResponse> for PingHandler {
-    async fn handle(&mut self, req: PingRequest) -> Result<PingResponse> {
+    async fn handle(&mut self, req: PingRequest) -> ActionResult<PingResponse> {
         self.log.lock().unwrap().push("handler".to_string());
         Ok(PingResponse { n: req.n * 10 })
     }
@@ -99,7 +99,7 @@ impl IPipelineBehavior<PingRequest, PingResponse> for AddOne {
         &self,
         req: PingRequest,
         next: Next<PingRequest, PingResponse>,
-    ) -> Result<PingResponse> {
+    ) -> ActionResult<PingResponse> {
         next.run(PingRequest { n: req.n + 1 }).await
     }
 }
@@ -113,7 +113,7 @@ impl IPipelineBehavior<PingRequest, PingResponse> for ShortCircuit {
         &self,
         _req: PingRequest,
         _next: Next<PingRequest, PingResponse>,
-    ) -> Result<PingResponse> {
+    ) -> ActionResult<PingResponse> {
         Ok(PingResponse { n: 999 })
     }
 }
@@ -129,7 +129,7 @@ impl IPipelineBehavior<PingRequest, PingResponse> for LogBehavior {
         &self,
         req: PingRequest,
         next: Next<PingRequest, PingResponse>,
-    ) -> Result<PingResponse> {
+    ) -> ActionResult<PingResponse> {
         self.log
             .lock()
             .unwrap()

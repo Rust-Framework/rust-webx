@@ -87,7 +87,7 @@ pub struct DeleteProductHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ListProductsRequest, Vec<ProductModel>> for ListProductsHandler {
-    async fn handle(&mut self, _: ListProductsRequest) -> Result<Vec<ProductModel>> {
+    async fn handle(&mut self, _: ListProductsRequest) -> ActionResult<Vec<ProductModel>> {
         let mut products = linq!(self.ctx.set::<Product>();).to_list().await.map_ef()?;
         products.sort_by(|a, b| a.sort_order.cmp(&b.sort_order).then(a.name.cmp(&b.name)));
 
@@ -117,7 +117,7 @@ impl IRequestHandler<ListProductsRequest, Vec<ProductModel>> for ListProductsHan
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<GetProductRequest, ProductModel> for GetProductHandler {
-    async fn handle(&mut self, req: GetProductRequest) -> Result<ProductModel> {
+    async fn handle(&mut self, req: GetProductRequest) -> ActionResult<ProductModel> {
         let id = parse_id(&req.id)?;
         let p =
             crate::ef_require_by_id!(self.ctx, Product, id, Error::NotFound("产品不存在".into()));
@@ -148,7 +148,7 @@ impl IRequestHandler<GetProductRequest, ProductModel> for GetProductHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<CreateProductRequest, ProductModel> for CreateProductHandler {
-    async fn handle(&mut self, req: CreateProductRequest) -> Result<ProductModel> {
+    async fn handle(&mut self, req: CreateProductRequest) -> ActionResult<ProductModel> {
         let name = require_text("产品名称", &req.name, MAX_PRODUCT_NAME)?;
         let code = require_text("产品编码", &req.code, MAX_PRODUCT_CODE)?;
         let remark = optional_text("备注", &req.remark, MAX_PRODUCT_REMARK)?;
@@ -182,7 +182,7 @@ impl IRequestHandler<CreateProductRequest, ProductModel> for CreateProductHandle
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<UpdateProductRequest, ProductModel> for UpdateProductHandler {
-    async fn handle(&mut self, req: UpdateProductRequest) -> Result<ProductModel> {
+    async fn handle(&mut self, req: UpdateProductRequest) -> ActionResult<ProductModel> {
         let id = parse_id(&req.id)?;
         let mut p =
             crate::ef_require_by_id!(self.ctx, Product, id, Error::NotFound("产品不存在".into()));
@@ -236,7 +236,7 @@ impl IRequestHandler<UpdateProductRequest, ProductModel> for UpdateProductHandle
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<DeleteProductRequest, String> for DeleteProductHandler {
-    async fn handle(&mut self, req: DeleteProductRequest) -> Result<String> {
+    async fn handle(&mut self, req: DeleteProductRequest) -> ActionResult<String> {
         let id = parse_id(&req.id)?;
         let mut p =
             crate::ef_require_by_id!(self.ctx, Product, id, Error::NotFound("产品不存在".into()));

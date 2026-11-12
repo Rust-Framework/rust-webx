@@ -138,7 +138,7 @@ struct HelloHandler;
 #[handler] // 编译时注册进 DI 容器
 #[async_trait]
 impl IRequestHandler<HelloRequest, String> for HelloHandler {
-    async fn handle(&self, _req: HelloRequest) -> Result<String> {
+    async fn handle(&mut self, _req: HelloRequest) -> ActionResult<String> {
         Ok("Hello, World! Welcome to Rust WebX.".to_string())
     }
 }

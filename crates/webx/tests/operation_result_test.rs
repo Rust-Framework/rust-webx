@@ -55,7 +55,7 @@ struct CreateOrderHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<CreateOrderRequest, OperationResult<OrderDto>> for CreateOrderHandler {
-    async fn handle(&mut self, req: CreateOrderRequest) -> Result<OperationResult<OrderDto>> {
+    async fn handle(&mut self, req: CreateOrderRequest) -> ActionResult<OperationResult<OrderDto>> {
         Ok(OperationResult::ok(
             OrderDto {
                 id: "o-1".into(),
@@ -112,7 +112,7 @@ struct DeleteOrderHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<DeleteOrderRequest, OperationResult> for DeleteOrderHandler {
-    async fn handle(&mut self, req: DeleteOrderRequest) -> Result<OperationResult> {
+    async fn handle(&mut self, req: DeleteOrderRequest) -> ActionResult<OperationResult> {
         Ok(OperationResult::success(format!(
             "order {} deleted",
             req.id
@@ -160,7 +160,7 @@ struct CancelOrderHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<CancelOrderRequest, OperationResult> for CancelOrderHandler {
-    async fn handle(&mut self, req: CancelOrderRequest) -> Result<OperationResult> {
+    async fn handle(&mut self, req: CancelOrderRequest) -> ActionResult<OperationResult> {
         Ok(OperationResult::failed(
             1001,
             format!("order {} already shipped", req.id),

@@ -19,7 +19,7 @@ pub struct CacheStatsHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<CacheStatsRequest, String> for CacheStatsHandler {
-    async fn handle(&mut self, _: CacheStatsRequest) -> Result<String> {
+    async fn handle(&mut self, _: CacheStatsRequest) -> ActionResult<String> {
         let opts = DistributedCacheEntryOptions::new()
             .set_absolute_expiration_relative_to_now(Duration::from_secs(30));
 

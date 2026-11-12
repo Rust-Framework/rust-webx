@@ -25,7 +25,7 @@ sequenceDiagram
         Endpoint->>Handler: HandlerCache 查找（经 DI 构造依赖）
         Endpoint->>Mediator: send(request)
         Mediator->>Handler: handle(request)
-        Handler-->>Mediator: Result<Response>
+        Handler-->>Mediator: ActionResult<Response>
         Mediator-->>Endpoint: Response
         Endpoint-->>Client: JSON 序列化 + HTTP 200
     else 未匹配

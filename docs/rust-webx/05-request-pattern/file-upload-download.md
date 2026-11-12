@@ -47,7 +47,7 @@ pub struct UploadAvatarHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<UploadAvatarRequest, AvatarDto> for UploadAvatarHandler {
-    async fn handle(&mut self, req: UploadAvatarRequest) -> Result<AvatarDto> {
+    async fn handle(&mut self, req: UploadAvatarRequest) -> ActionResult<AvatarDto> {
         // `user_id` 来自路由，`avatar` 来自 multipart 文件部分
         let key = format!("{}/{}", req.user_id, req.avatar.file_name());
 
@@ -210,7 +210,7 @@ impl IRequest<ResponseData> for DownloadReportRequest {}
 #[handler]
 #[async_trait]
 impl IRequestHandler<DownloadReportRequest, ResponseData> for DownloadReportHandler {
-    async fn handle(&mut self, req: DownloadReportRequest) -> Result<ResponseData> {
+    async fn handle(&mut self, req: DownloadReportRequest) -> ActionResult<ResponseData> {
         let path = self.reports.path_for(&req.id)?;
         Ok(ResponseData::file(path)
             .content_type("application/pdf")
@@ -240,7 +240,7 @@ impl IRequestHandler<DownloadReportRequest, ResponseData> for DownloadReportHand
 #[handler]
 #[async_trait]
 impl IRequestHandler<ExportZipRequest, ResponseData> for ExportZipHandler {
-    async fn handle(&mut self, req: ExportZipRequest) -> Result<ResponseData> {
+    async fn handle(&mut self, req: ExportZipRequest) -> ActionResult<ResponseData> {
         // duplex() 把「写端」交给生产者任务，「读端」直接交给响应。
         let (reader, writer) = tokio::io::duplex(64 * 1024);
         tokio::spawn(async move { self.zip_into(writer, req).await });
@@ -387,7 +387,7 @@ curl -C - -H 'If-Range: "2bc0e0-18d5a82de3e3ec00"' -o video.mp4 https://example.
 #[handler]
 #[async_trait]
 impl IRequestHandler<ExportInventoryRequest, ResponseData> for ExportInventoryHandler {
-    async fn handle(&mut self, _: ExportInventoryRequest) -> Result<ResponseData> {
+    async fn handle(&mut self, _: ExportInventoryRequest) -> ActionResult<ResponseData> {
         let csv = self.render_csv().await?;
         Ok(ResponseData::bytes(csv.into_bytes())
             .content_type("text/csv; charset=utf-8")

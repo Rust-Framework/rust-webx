@@ -36,7 +36,7 @@ pub struct ListBlogPostsHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ListBlogPostsRequest, Vec<BlogPostSummary>> for ListBlogPostsHandler {
-    async fn handle(&mut self, _: ListBlogPostsRequest) -> Result<Vec<BlogPostSummary>> {
+    async fn handle(&mut self, _: ListBlogPostsRequest) -> ActionResult<Vec<BlogPostSummary>> {
         let blogs = linq!(self.ctx.set::<Blog>();).to_list().await.map_ef()?;
         Ok(blogs.into_iter().map(BlogPostSummary::from).collect())
     }
@@ -69,7 +69,7 @@ impl IHostedService for DbInitService {
 ## 模式 4：薄 Handler + 厚 Service 实现
 
 ```rust
-async fn handle(&mut self, req: GetDocIndexRequest) -> Result<DocIndex> {
+async fn handle(&mut self, req: GetDocIndexRequest) -> ActionResult<DocIndex> {
     self.docs.index(&req.work).map_err(Error::NotFound)
 }
 ```

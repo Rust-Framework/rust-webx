@@ -34,7 +34,7 @@ struct QueryModelHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<QueryModel, serde_json::Value> for QueryModelHandler {
-    async fn handle(&mut self, req: QueryModel) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: QueryModel) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({
             "a": req.a,
             "b": req.b,
@@ -69,7 +69,7 @@ struct HeaderModelHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<HeaderModel, serde_json::Value> for HeaderModelHandler {
-    async fn handle(&mut self, req: HeaderModel) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: HeaderModel) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({
             "id": req.id,
             "required": req.required,
@@ -102,7 +102,7 @@ struct ClaimModelHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<ClaimModel, serde_json::Value> for ClaimModelHandler {
-    async fn handle(&mut self, req: ClaimModel) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: ClaimModel) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({
             "sub": req.sub,
             "roles": req.roles,
@@ -132,7 +132,7 @@ struct FormModelHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<FormModel, serde_json::Value> for FormModelHandler {
-    async fn handle(&mut self, req: FormModel) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: FormModel) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({
             "title": req.title,
             "confirm": req.confirm,
@@ -167,7 +167,7 @@ struct BodyModelHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<BodyModel, serde_json::Value> for BodyModelHandler {
-    async fn handle(&mut self, req: BodyModel) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: BodyModel) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({
             "id": req.id,
             "name": req.name,
@@ -204,7 +204,7 @@ struct CompositeGetHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<CompositeGetModel, serde_json::Value> for CompositeGetHandler {
-    async fn handle(&mut self, _req: CompositeGetModel) -> Result<serde_json::Value> {
+    async fn handle(&mut self, _req: CompositeGetModel) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({}))
     }
 }
@@ -226,7 +226,7 @@ struct OptionalCompositeGetHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<OptionalCompositeGetModel, serde_json::Value> for OptionalCompositeGetHandler {
-    async fn handle(&mut self, _req: OptionalCompositeGetModel) -> Result<serde_json::Value> {
+    async fn handle(&mut self, _req: OptionalCompositeGetModel) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({}))
     }
 }
@@ -259,7 +259,7 @@ struct RenamedHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<RenamedModel, serde_json::Value> for RenamedHandler {
-    async fn handle(&mut self, req: RenamedModel) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: RenamedModel) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({
             "id": req.id,
             "display_name": req.display_name,
@@ -292,7 +292,7 @@ struct FlattenHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<FlattenModel, serde_json::Value> for FlattenHandler {
-    async fn handle(&mut self, req: FlattenModel) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: FlattenModel) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({
             "id": req.id,
             "name": req.name,
@@ -323,7 +323,7 @@ struct NamedModelHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<NamedModel, serde_json::Value> for NamedModelHandler {
-    async fn handle(&mut self, req: NamedModel) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: NamedModel) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({ "user_id": req.user_id, "keyword": req.keyword }))
     }
 }
@@ -345,7 +345,7 @@ struct NamedUploadHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<NamedUpload, serde_json::Value> for NamedUploadHandler {
-    async fn handle(&mut self, req: NamedUpload) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: NamedUpload) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({
             "size": req.picture.size(),
             "caption": req.caption,
@@ -370,7 +370,7 @@ struct StrictHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<StrictModel, serde_json::Value> for StrictHandler {
-    async fn handle(&mut self, req: StrictModel) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: StrictModel) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({ "id": req.id, "name": req.name }))
     }
 }
@@ -392,7 +392,7 @@ struct NullHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<NullModel, serde_json::Value> for NullHandler {
-    async fn handle(&mut self, req: NullModel) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: NullModel) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({ "id": req.id, "name": req.name, "nickname": req.nickname }))
     }
 }
@@ -422,7 +422,7 @@ struct CustomSerdeHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<CustomSerdeModel, serde_json::Value> for CustomSerdeHandler {
-    async fn handle(&mut self, req: CustomSerdeModel) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: CustomSerdeModel) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({ "id": req.id, "name": req.name }))
     }
 }
@@ -465,7 +465,7 @@ struct AlphaDetailHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<alpha::DetailRequest, serde_json::Value> for AlphaDetailHandler {
-    async fn handle(&mut self, req: alpha::DetailRequest) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: alpha::DetailRequest) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({ "alpha_marker": req.alpha_marker }))
     }
 }
@@ -479,7 +479,7 @@ struct BetaDetailHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<beta::DetailRequest, serde_json::Value> for BetaDetailHandler {
-    async fn handle(&mut self, req: beta::DetailRequest) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: beta::DetailRequest) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({ "beta_marker": req.beta_marker }))
     }
 }

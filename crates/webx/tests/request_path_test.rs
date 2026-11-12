@@ -63,7 +63,7 @@ struct GetUserHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<GetUserRequest, UserResponse> for GetUserHandler {
-    async fn handle(&mut self, req: GetUserRequest) -> Result<UserResponse> {
+    async fn handle(&mut self, req: GetUserRequest) -> ActionResult<UserResponse> {
         Ok(UserResponse {
             id: req.id.clone(),
             name: format!("User-{}", req.id),
@@ -112,7 +112,7 @@ struct CreateUserHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<CreateUserRequest, CreateUserResponse> for CreateUserHandler {
-    async fn handle(&mut self, req: CreateUserRequest) -> Result<CreateUserResponse> {
+    async fn handle(&mut self, req: CreateUserRequest) -> ActionResult<CreateUserResponse> {
         Ok(CreateUserResponse {
             id: 1,
             name: req.name,
@@ -191,7 +191,7 @@ struct UpdateUserHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<UpdateUserRequest, UpdateUserResponse> for UpdateUserHandler {
-    async fn handle(&mut self, req: UpdateUserRequest) -> Result<UpdateUserResponse> {
+    async fn handle(&mut self, req: UpdateUserRequest) -> ActionResult<UpdateUserResponse> {
         Ok(UpdateUserResponse {
             id: req.id,
             name: req.name,
@@ -237,7 +237,7 @@ struct DeleteUserHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<DeleteUserRequest, ()> for DeleteUserHandler {
-    async fn handle(&mut self, _req: DeleteUserRequest) -> Result<()> {
+    async fn handle(&mut self, _req: DeleteUserRequest) -> ActionResult<()> {
         Ok(())
     }
 }
@@ -326,7 +326,7 @@ struct GetPostHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<GetPostRequest, PostResponse> for GetPostHandler {
-    async fn handle(&mut self, req: GetPostRequest) -> Result<PostResponse> {
+    async fn handle(&mut self, req: GetPostRequest) -> ActionResult<PostResponse> {
         Ok(PostResponse {
             user_id: req.user_id.clone(),
             post_id: req.post_id.clone(),
@@ -418,7 +418,7 @@ struct SearchHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<SearchRequest, SearchResponse> for SearchHandler {
-    async fn handle(&mut self, req: SearchRequest) -> Result<SearchResponse> {
+    async fn handle(&mut self, req: SearchRequest) -> ActionResult<SearchResponse> {
         Ok(SearchResponse {
             q: req.q,
             page: req.page,
@@ -464,7 +464,7 @@ struct FailHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<FailRequest, FailResponse> for FailHandler {
-    async fn handle(&mut self, req: FailRequest) -> Result<FailResponse> {
+    async fn handle(&mut self, req: FailRequest) -> ActionResult<FailResponse> {
         match req.code.as_str() {
             "401" => Err(Error::Unauthorized("custom unauthorized".into())),
             "403" => Err(Error::Forbidden("custom forbidden".into())),

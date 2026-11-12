@@ -34,7 +34,7 @@ struct QueryHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<QueryRequest, serde_json::Value> for QueryHandler {
-    async fn handle(&mut self, req: QueryRequest) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: QueryRequest) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({
             "q": req.q,
             "page": req.page,
@@ -70,7 +70,7 @@ struct HeaderHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<HeaderRequest, serde_json::Value> for HeaderHandler {
-    async fn handle(&mut self, req: HeaderRequest) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: HeaderRequest) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({
             "id": req.id,
             "tenant": req.tenant,
@@ -103,7 +103,7 @@ struct ClaimHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<ClaimRequest, serde_json::Value> for ClaimHandler {
-    async fn handle(&mut self, req: ClaimRequest) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: ClaimRequest) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({
             "user": req.user,
             "roles": req.roles,
@@ -131,7 +131,7 @@ struct IdentityUserHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<IdentityUserRequest, serde_json::Value> for IdentityUserHandler {
-    async fn handle(&mut self, req: IdentityUserRequest) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: IdentityUserRequest) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({
             "id": req.user.id,
             "name": req.user.name,
@@ -163,7 +163,10 @@ struct OptionalIdentityUserHandler;
 impl IRequestHandler<OptionalIdentityUserRequest, serde_json::Value>
     for OptionalIdentityUserHandler
 {
-    async fn handle(&mut self, req: OptionalIdentityUserRequest) -> Result<serde_json::Value> {
+    async fn handle(
+        &mut self,
+        req: OptionalIdentityUserRequest,
+    ) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({
             "user_id": req.user_id(),
             "anonymous": req.current_user().is_none(),
@@ -193,7 +196,7 @@ struct MixedHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<MixedRequest, serde_json::Value> for MixedHandler {
-    async fn handle(&mut self, req: MixedRequest) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: MixedRequest) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({
             "id": req.id,
             "name": req.name,
@@ -222,7 +225,7 @@ struct QueryAllHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<QueryAllRequest, serde_json::Value> for QueryAllHandler {
-    async fn handle(&mut self, req: QueryAllRequest) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: QueryAllRequest) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({ "term": req.term, "limit": req.limit }))
     }
 }
@@ -245,7 +248,7 @@ struct PriorityGetHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<PriorityGetRequest, serde_json::Value> for PriorityGetHandler {
-    async fn handle(&mut self, req: PriorityGetRequest) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: PriorityGetRequest) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({ "key": req.key }))
     }
 }
@@ -266,7 +269,7 @@ struct PriorityWriteHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<PriorityWriteRequest, serde_json::Value> for PriorityWriteHandler {
-    async fn handle(&mut self, req: PriorityWriteRequest) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: PriorityWriteRequest) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({ "id": req.id, "key": req.key }))
     }
 }
@@ -311,7 +314,7 @@ struct ComplexHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<ComplexRequest, serde_json::Value> for ComplexHandler {
-    async fn handle(&mut self, req: ComplexRequest) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: ComplexRequest) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({
             "id": req.id,
             "city": req.address.city,
@@ -358,7 +361,7 @@ struct CustomScalarHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<CustomScalarRequest, serde_json::Value> for CustomScalarHandler {
-    async fn handle(&mut self, req: CustomScalarRequest) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: CustomScalarRequest) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({ "id": req.id.0, "filter": req.filter.0 }))
     }
 }
@@ -386,7 +389,7 @@ struct RawIdentHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<RawIdentRequest, serde_json::Value> for RawIdentHandler {
-    async fn handle(&mut self, req: RawIdentRequest) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: RawIdentRequest) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({ "id": req.id, "type": req.r#type }))
     }
 }
@@ -409,7 +412,7 @@ struct ClaimsNamedHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<ClaimsNamedRequest, serde_json::Value> for ClaimsNamedHandler {
-    async fn handle(&mut self, req: ClaimsNamedRequest) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: ClaimsNamedRequest) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({ "id": req.id, "claims": req.claims }))
     }
 }

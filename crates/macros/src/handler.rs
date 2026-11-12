@@ -18,7 +18,7 @@ use syn::{parse_macro_input, GenericArgument, ItemImpl, PathArguments, Type};
 /// #[handler(inject)]
 /// #[async_trait]
 /// impl IRequestHandler<MyReq, MyRsp> for MyHandler {
-///     async fn handle(&mut self, req: MyReq) -> Result<MyRsp> { ... }
+///     async fn handle(&mut self, req: MyReq) -> ActionResult<MyRsp> { ... }
 /// }
 /// ```
 ///

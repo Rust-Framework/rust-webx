@@ -3,6 +3,23 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [1.0.2] — 2026-11-12
+
+### Breaking
+
+- **`IRequestHandler::handle` returns `ActionResult<R>`** — the framework-level name for
+  ASP.NET Core's `ActionResult<T>`: `Ok(value)` is the response payload, `Err(Error)` is
+  mapped to the HTTP status and `problem+json` by the framework. It is the same type as
+  `Result<R, Error>` (`T` defaults to `()`), so `?` and `Err(...)` keep working; `Result<T>`
+  remains the general fallible alias for infrastructure code. `IPipelineBehavior::handle`
+  and `Next::run` follow the same name.
+
+### Added
+
+- **`OperationResult` can be adjusted while the operation runs**: `with_status`,
+  `with_message` and `with_result` (unit envelope → payload) sit next to the public fields,
+  so an outcome that different branches decide is set in place instead of rebuilt.
+
 ## [1.0.1] — 2026-11-12
 
 ### Added

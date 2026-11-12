@@ -86,7 +86,7 @@ async fn get_user(id: String) -> Result<Json<User>, AppError> {
 ### rust-webx
 
 ```rust
-async fn handle(&mut self, req: GetUserRequest) -> Result<UserDto> {
+async fn handle(&mut self, req: GetUserRequest) -> ActionResult<UserDto> {
     // Error 自动映射 HTTP 状态码
 }
 ```

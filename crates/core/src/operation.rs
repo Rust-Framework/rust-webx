@@ -10,7 +10,7 @@
 //! #[put("/users/{id}")]
 //! impl IRequest<OperationResult<UserDto>> for UpdateUserRequest {}
 //!
-//! async fn handle(&mut self, req: UpdateUserRequest) -> Result<OperationResult<UserDto>> {
+//! async fn handle(&mut self, req: UpdateUserRequest) -> ActionResult<OperationResult<UserDto>> {
 //!     let user = self.update(req).await?;
 //!     Ok(OperationResult::ok(user, "user updated"))
 //! }
@@ -23,6 +23,21 @@
 //! framework never interprets it. `OperationResult` serializes as
 //! `{"success":true,"status":0,"message":"ok"}`; `OperationResult<T>` adds the
 //! `result` member.
+//!
+//! The outcome is often decided while the operation runs, so the envelope can be
+//! adjusted after it is created — fields are public and [`with_status`] /
+//! [`with_message`] chain:
+//!
+//! ```ignore
+//! let mut outcome = OperationResult::success("published");
+//! if already_published {
+//!     outcome = outcome.with_status(1001).with_message("already published");
+//! }
+//! Ok(outcome)
+//! ```
+//!
+//! [`with_status`]: OperationResult::with_status
+//! [`with_message`]: OperationResult::with_message
 
 use serde::Serialize;
 
@@ -76,6 +91,22 @@ impl<T> OperationResult<T> {
             result: None,
         }
     }
+
+    /// Replace the business status, keeping `success` and the message.
+    ///
+    /// Use it when the outcome is only known part-way through the operation
+    /// (`result = result.with_status(1001)`); the fields are public as well, so
+    /// `result.status = 1001` works too.
+    pub fn with_status(mut self, status: i32) -> Self {
+        self.status = status;
+        self
+    }
+
+    /// Replace the message, keeping `success` and the business status.
+    pub fn with_message(mut self, message: impl Into<String>) -> Self {
+        self.message = message.into();
+        self
+    }
 }
 
 impl OperationResult<()> {
@@ -93,6 +124,18 @@ impl OperationResult<()> {
             status,
             message: message.into(),
             result: None,
+        }
+    }
+
+    /// Attach the business payload once it is known, turning the unit envelope
+    /// into [`OperationResult<T>`](OperationResult); success, status and message
+    /// are kept.
+    pub fn with_result<T>(self, result: T) -> OperationResult<T> {
+        OperationResult {
+            success: self.success,
+            status: self.status,
+            message: self.message,
+            result: Some(result),
         }
     }
 }
@@ -145,6 +188,43 @@ mod tests {
                 "success": false,
                 "status": 1001,
                 "message": "state conflict"
+            })
+        );
+    }
+
+    #[test]
+    fn setters_adjust_an_outcome_decided_while_the_operation_runs() {
+        let mut outcome = OperationResult::success("published");
+        if true {
+            outcome = outcome.with_status(1001).with_message("already published");
+        }
+        // The fields stay public for in-place adjustment too.
+        outcome.status = 1001;
+
+        let value = serde_json::to_value(outcome).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "success": true,
+                "status": 1001,
+                "message": "already published"
+            })
+        );
+    }
+
+    #[test]
+    fn with_result_attaches_the_payload_to_a_unit_envelope() {
+        let value = serde_json::to_value(
+            OperationResult::success("created").with_result(UserDto { id: 9 }),
+        )
+        .unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "success": true,
+                "status": 0,
+                "message": "created",
+                "result": { "id": 9 }
             })
         );
     }

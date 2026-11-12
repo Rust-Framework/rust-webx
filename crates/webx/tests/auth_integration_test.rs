@@ -77,7 +77,7 @@ struct ProtectedHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<ProtectedRequest, String> for ProtectedHandler {
-    async fn handle(&mut self, _: ProtectedRequest) -> Result<String> {
+    async fn handle(&mut self, _: ProtectedRequest) -> ActionResult<String> {
         Ok("admin-area".to_string())
     }
 }
@@ -95,7 +95,7 @@ struct MeHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<MeRequest, String> for MeHandler {
-    async fn handle(&mut self, _: MeRequest) -> Result<String> {
+    async fn handle(&mut self, _: MeRequest) -> ActionResult<String> {
         Ok("authenticated".to_string())
     }
 }

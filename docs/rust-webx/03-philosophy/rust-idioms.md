@@ -66,7 +66,7 @@ Rust 的 async trait 通过 `async-trait` crate 实现：
 ```rust
 #[async_trait]
 impl IRequestHandler<HelloRequest, String> for HelloHandler {
-    async fn handle(&mut self, req: HelloRequest) -> Result<String> { ... }
+    async fn handle(&mut self, req: HelloRequest) -> ActionResult<String> { ... }
 }
 ```
 

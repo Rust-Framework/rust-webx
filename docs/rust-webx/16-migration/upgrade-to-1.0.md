@@ -88,7 +88,7 @@ impl IErasedPipelineBehavior for X { /* req: Box<dyn Any>, next: BoxedNextFn */ 
 #[async_trait]
 impl IPipelineBehavior<CreateOrderRequest, OrderView> for RequireNote {
     async fn handle(&self, req: CreateOrderRequest, next: Next<CreateOrderRequest, OrderView>)
-        -> Result<OrderView> { next.run(req).await }
+        -> ActionResult<OrderView> { next.run(req).await }
 }
 svc.add_typed_pipeline::<RequireNote, CreateOrderRequest, OrderView>();
 ```

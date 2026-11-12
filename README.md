@@ -141,7 +141,7 @@ struct HelloHandler;
 #[handler] // compile-time registration into the DI container
 #[async_trait]
 impl IRequestHandler<HelloRequest, String> for HelloHandler {
-    async fn handle(&self, _req: HelloRequest) -> Result<String> {
+    async fn handle(&mut self, _req: HelloRequest) -> ActionResult<String> {
         Ok("Hello, World! Welcome to Rust WebX.".to_string())
     }
 }

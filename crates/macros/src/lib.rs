@@ -137,7 +137,7 @@ pub fn delete(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// #[handler]
 /// #[async_trait]
 /// impl IRequestHandler<HelloRequest, String> for HelloHandler {
-///     async fn handle(&mut self, _req: HelloRequest) -> Result<String> { ... }
+///     async fn handle(&mut self, _req: HelloRequest) -> ActionResult<String> { ... }
 /// }
 /// ```
 #[proc_macro_attribute]

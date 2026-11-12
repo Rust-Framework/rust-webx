@@ -93,7 +93,7 @@ struct HelloHandler;
 #[handler]  // 编译时向 inventory 注册
 #[async_trait]
 impl IRequestHandler<HelloRequest, String> for HelloHandler {
-    async fn handle(&mut self, _req: HelloRequest) -> Result<String> {
+    async fn handle(&mut self, _req: HelloRequest) -> ActionResult<String> {
         Ok("Hello, World!".to_string())
     }
 }

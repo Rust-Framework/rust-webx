@@ -33,7 +33,7 @@ pub struct GetDocContentHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ListDocWorksRequest, Vec<String>> for ListDocWorksHandler {
-    async fn handle(&mut self, _: ListDocWorksRequest) -> Result<Vec<String>> {
+    async fn handle(&mut self, _: ListDocWorksRequest) -> ActionResult<Vec<String>> {
         self.docs.list_works().map_err(Error::Internal)
     }
 }
@@ -41,7 +41,7 @@ impl IRequestHandler<ListDocWorksRequest, Vec<String>> for ListDocWorksHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<GetDocIndexRequest, DocIndex> for GetDocIndexHandler {
-    async fn handle(&mut self, req: GetDocIndexRequest) -> Result<DocIndex> {
+    async fn handle(&mut self, req: GetDocIndexRequest) -> ActionResult<DocIndex> {
         self.docs.index(&req.work).map_err(Error::NotFound)
     }
 }
@@ -49,7 +49,7 @@ impl IRequestHandler<GetDocIndexRequest, DocIndex> for GetDocIndexHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<GetDocContentRequest, DocContent> for GetDocContentHandler {
-    async fn handle(&mut self, req: GetDocContentRequest) -> Result<DocContent> {
+    async fn handle(&mut self, req: GetDocContentRequest) -> ActionResult<DocContent> {
         // `{*path}` captures real slashes; legacy clients used `:` as `/`.
         let path = percent_decode(&req.path).replace(':', "/");
 

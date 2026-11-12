@@ -41,14 +41,15 @@ pub trait IServiceCollectionExt: Sized {
     /// #[async_trait::async_trait]
     /// impl IPipelineBehavior<CreateOrderRequest, OrderView> for AuditBehavior {
     ///     async fn handle(&self, req: CreateOrderRequest, next: Next<CreateOrderRequest, OrderView>)
-    ///         -> Result<OrderView> { next.run(req).await }
+    ///         -> ActionResult<OrderView> { next.run(req).await }
     /// }
     ///
     /// svc.add_typed_pipeline::<AuditBehavior, CreateOrderRequest, OrderView>();
     /// ```
     ///
     /// The behavior only runs for that request/response pair. Short-circuiting is
-    /// type-checked: return `Rsp` without calling [`Next::run`].
+    /// type-checked: return `Rsp` without calling
+    /// [`Next::run`](crate::pipeline::Next::run).
     fn add_typed_pipeline<B, Req, Rsp>(self) -> Self
     where
         B: IPipelineBehavior<Req, Rsp> + Default + 'static,
@@ -183,6 +184,7 @@ pub fn is_mediator_active() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::ActionResult;
     use crate::pipeline::{IPipelineBehavior, Next};
     use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -203,7 +205,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl IPipelineBehavior<u32, String> for Uppercase {
-        async fn handle(&self, req: u32, next: Next<u32, String>) -> crate::error::Result<String> {
+        async fn handle(&self, req: u32, next: Next<u32, String>) -> ActionResult<String> {
             let inner = next.run(req + 1).await?;
             Ok(inner.to_uppercase())
         }
@@ -242,7 +244,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl IPipelineBehavior<u32, u32> for TickBehavior {
-        async fn handle(&self, req: u32, next: Next<u32, u32>) -> crate::error::Result<u32> {
+        async fn handle(&self, req: u32, next: Next<u32, u32>) -> ActionResult<u32> {
             self.ticks.fetch_add(1, Ordering::SeqCst);
             next.run(req).await
         }
@@ -274,11 +276,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl IPipelineBehavior<u32, String> for ShortCircuit {
-        async fn handle(
-            &self,
-            _req: u32,
-            _next: Next<u32, String>,
-        ) -> crate::error::Result<String> {
+        async fn handle(&self, _req: u32, _next: Next<u32, String>) -> ActionResult<String> {
             Ok("short".to_string())
         }
     }

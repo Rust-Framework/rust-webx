@@ -45,7 +45,7 @@ pub struct DeleteExhibitionHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ListExhibitionsRequest, Vec<ExhibitionModel>> for ListExhibitionsHandler {
-    async fn handle(&mut self, _: ListExhibitionsRequest) -> Result<Vec<ExhibitionModel>> {
+    async fn handle(&mut self, _: ListExhibitionsRequest) -> ActionResult<Vec<ExhibitionModel>> {
         let items =
             linq!(self.ctx.set::<Exhibition>(); include e.category; order_by e.sort_order asc)
                 .to_list()
@@ -59,7 +59,7 @@ impl IRequestHandler<ListExhibitionsRequest, Vec<ExhibitionModel>> for ListExhib
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<GetExhibitionRequest, ExhibitionModel> for GetExhibitionHandler {
-    async fn handle(&mut self, req: GetExhibitionRequest) -> Result<ExhibitionModel> {
+    async fn handle(&mut self, req: GetExhibitionRequest) -> ActionResult<ExhibitionModel> {
         let slug = req.slug.clone();
         let q = slug.clone();
 
@@ -77,7 +77,7 @@ impl IRequestHandler<GetExhibitionRequest, ExhibitionModel> for GetExhibitionHan
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<UpsertExhibitionRequest, ExhibitionModel> for UpsertExhibitionHandler {
-    async fn handle(&mut self, req: UpsertExhibitionRequest) -> Result<ExhibitionModel> {
+    async fn handle(&mut self, req: UpsertExhibitionRequest) -> ActionResult<ExhibitionModel> {
         let now = now_secs();
         let slug = req.slug.clone();
         let q = slug.clone();
@@ -123,7 +123,7 @@ impl IRequestHandler<UpsertExhibitionRequest, ExhibitionModel> for UpsertExhibit
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<DeleteExhibitionRequest, String> for DeleteExhibitionHandler {
-    async fn handle(&mut self, req: DeleteExhibitionRequest) -> Result<String> {
+    async fn handle(&mut self, req: DeleteExhibitionRequest) -> ActionResult<String> {
         let now = now_secs();
         let slug = req.slug.clone();
         let q = slug.clone();

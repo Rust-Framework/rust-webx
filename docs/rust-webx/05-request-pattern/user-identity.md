@@ -27,7 +27,7 @@ pub struct CreateOrderRequest {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<CreateOrderRequest, OrderView> for CreateOrderHandler {
-    async fn handle(&mut self, req: CreateOrderRequest) -> Result<OrderView> {
+    async fn handle(&mut self, req: CreateOrderRequest) -> ActionResult<OrderView> {
         if req.user_id.is_empty() {
             return Err(Error::Unauthorized("login required".into()));
         }
@@ -60,7 +60,7 @@ Handler 只剩业务：
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<CreateOrderRequest, OrderView> for CreateOrderHandler {
-    async fn handle(&mut self, req: CreateOrderRequest) -> Result<OrderView> {
+    async fn handle(&mut self, req: CreateOrderRequest) -> ActionResult<OrderView> {
         let user = req.require_user()?;   // &IdentityUser
         let order = self
             .orders

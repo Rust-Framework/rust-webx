@@ -42,7 +42,7 @@ pub struct MyHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<MyRequest, MyResponse> for MyHandler {
-    async fn handle(&mut self, req: MyRequest) -> Result<MyResponse> { ... }
+    async fn handle(&mut self, req: MyRequest) -> ActionResult<MyResponse> { ... }
 }
 ```
 

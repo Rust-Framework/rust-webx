@@ -252,7 +252,7 @@ impl HostBuilder {
     ///
     /// 1.0 defaults to **strict** scope validation (MEDI `ValidateScopes = true`):
     /// resolving a Scoped service from the root `ServiceProvider` returns
-    /// [`webx::Error::Di`](crate::Error) instead of silently caching it on the
+    /// [`webx::Error::Di`](webx_core::error::Error::Di) instead of silently caching it on the
     /// root. Existing code that resolves Scoped services from
     /// `host.provider()` can opt back in here while it migrates to explicit
     /// scopes (`provider.scope()` / `get_owned`) — see

@@ -18,9 +18,17 @@ where
     T: IRequest<R> + Send + 'static,
     R: Send + 'static,
 {
-    async fn handle(&mut self, req: T) -> Result<R>;
+    async fn handle(&mut self, req: T) -> ActionResult<R>;
 }
 ```
+
+### 返回类型：`ActionResult<T>`
+
+`handle` 返回 **`ActionResult<T>`** —— 框架级类型，对标 ASP.NET Core 的 `ActionResult<T>`：
+`Ok(value)` 是成功的响应数据（框架序列化为 JSON），`Err(webx::Error)` 由框架映射为
+`problem+json` 并用对应状态码写出。它与通用错误别名 `Result<T>` 是同一个类型
+（`ActionResult<T> = Result<T, Error>`），区别只在命名面向"端点动作"：Handler、管道行为、
+`Next::run` 用 `ActionResult<T>`，基础设施代码（host、中间件、缓存）继续用 `Result<T>`。
 
 ## 类型绑定规则（铁律）
 
@@ -50,6 +58,8 @@ impl IRequestHandler<GetUserRequest, UserDto> for GetUserHandler { ... }
 
 ### 响应类型语义
 
+下表是 `ActionResult<T>` 中 `T` 的取值语义。
+
 | 响应类型 | HTTP 行为 |
 |---------|----------|
 | `String`, `UserDto`, `Vec<T>` 等（`Serialize`） | 200 + JSON body |
@@ -67,7 +77,7 @@ impl IRequestHandler<GetUserRequest, UserDto> for GetUserHandler { ... }
 impl IRequest<OperationResult<UserDto>> for UpdateUserRequest {}
 
 impl IRequestHandler<UpdateUserRequest, OperationResult<UserDto>> for UpdateUserHandler {
-    async fn handle(&mut self, req: UpdateUserRequest) -> Result<OperationResult<UserDto>> {
+    async fn handle(&mut self, req: UpdateUserRequest) -> ActionResult<OperationResult<UserDto>> {
         let user = self.update(req).await?;
         Ok(OperationResult::ok(user, "user updated"))
     }
@@ -78,7 +88,9 @@ impl IRequestHandler<UpdateUserRequest, OperationResult<UserDto>> for UpdateUser
 不是 HTTP 状态码；HTTP 状态仍由框架决定——正常返回 `200` + 信封 JSON，
 `Err(webx::Error)` 仍写 `problem+json`（见[错误处理](error-handling.md)）。构造器：
 `ok` / `ok_with_status` / `failed` / `success` / `success_with_status`；不带泛型的
-`OperationResult` 没有 `result` 成员。
+`OperationResult` 没有 `result` 成员。结果常在业务执行过程中才确定，因此创建后可以继续调整：
+`with_status` / `with_message` / `with_result`（把无数据信封升级为带 `result` 的形态），
+或直接给公开字段赋值。
 
 ## IRequestHandler 的职责
 
@@ -87,7 +99,7 @@ Handler 是**唯一执行业务逻辑**的地方：
 ```rust
 #[async_trait]
 impl IRequestHandler<CreateUserRequest, UserDto> for CreateUserHandler {
-    async fn handle(&mut self, req: CreateUserRequest) -> Result<UserDto> {
+    async fn handle(&mut self, req: CreateUserRequest) -> ActionResult<UserDto> {
         // 1. 校验（或用 PipelineBehavior）
         // 2. 调用领域服务
         // 3. 返回结果或 Error

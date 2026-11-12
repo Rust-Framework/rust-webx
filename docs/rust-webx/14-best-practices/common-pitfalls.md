@@ -76,7 +76,7 @@ svc.singleton::<dyn IRequestHandler<HelloRequest, String>>(
 
 ## 9. 找不到「所有路由」的 API
 
-`webx::endpoints()` 已移除。使用：
+使用：
 
 ```rust
 let catalog = host.endpoints();                 // &dyn IEndpointCatalog

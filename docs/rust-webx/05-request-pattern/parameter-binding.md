@@ -139,7 +139,7 @@ Handler 里直接用 `req.user.id`、`req.user.tenant_id`、`req.user.is_in_role
 - body 字段类型错误会立即以该字段的 400 返回（无法为该类型构造占位值）；query/header 等字符串来源的错误会一次性汇总。
 - 有**必填** `#[fromclaim]` 字段而请求未认证 → `401`。
 - 表单端点收到非 `multipart/form-data` → `415`；JSON 端点收到 multipart 同理。
-- 绑定阶段不再有"静默 `Default`"：字段缺失或非法一定会出现在 `errors` 里。
+- 绑定阶段没有「静默 `Default`」：字段缺失或非法一定会出现在 `errors` 里。
 
 ## OpenAPI
 

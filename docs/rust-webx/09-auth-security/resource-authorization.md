@@ -38,9 +38,8 @@ Host::builder()
 声明的一部分，由 `StubEndpoint` 在路由匹配后逐条执行（规则之间 AND，规则内 any-of），不需要
 构建额外策略，也没有第二个开关。
 
-> 旧写法 `.use_resource_authorization()` 与 `build_resource_policy_from_routes()` 已在 1.0 **删除**
-> （前者 0.10 起为 no-op，后者 0.6 起 deprecated）：端点直接执行 `#[authorize]` 规则，策略式
-> “每 path 一组角色/权限”无法忠实表达同一端点的多条规则。
+> 端点直接执行 `#[authorize]` 规则；策略式「每 path 一组角色/权限」无法忠实表达同一端点的
+> 多条规则，因此框架不提供策略构建入口。
 
 当前 HTTP 应用的常见做法：
 

@@ -23,7 +23,7 @@ graph LR
 ```
 
 - `start()` 在 HTTP 监听器启动**之前**执行；任一服务 `start()` 失败时，已启动的服务按**逆序**回滚 `stop()`，然后 `run()` 返回错误
-- 1.0 起没有 ambient DI：服务若需要 Scoped 依赖（`DbContext`、事务、连接），注入 rust-dix 内建的
+- 没有 ambient DI：服务若需要 Scoped 依赖（`DbContext`、事务、连接），注入 rust-dix 内建的
   `#[inject] services: Arc<dyn ScopeFactory>`，在 `start()`/后台循环里显式
   `let scope = services.create_scope(); let mut ctx: DbContext = scope.get_owned()?;`，scope 释放即释放依赖
 - Host 停机顺序：连接排空 → `stop()` 逆序 → **`provider.dispose()`**（rust-dix 逆序释放 singleton 并标记 disposed）

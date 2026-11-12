@@ -1,8 +1,8 @@
-# IPipelineBehavior 拦截链（1.0 typed）
+# IPipelineBehavior 拦截链
 
 ## 接口
 
-1.0 起 pipeline 是**类型化**的（0.10 引入、1.0 删除旧 erased 兼容层）：
+pipeline 是**类型化**的：
 
 ```rust
 #[async_trait]
@@ -12,7 +12,7 @@ pub trait IPipelineBehavior<Req: Send + 'static, Rsp: Send + 'static>: Send + Sy
 ```
 
 `req` / `Rsp` 是真实类型；`next.run(req)` 继续执行剩余链与 Handler。不调用 `next` 即**短路**，
-返回值必须就是 Handler 的响应类型——**编译期检查**，不再有 `Box<dyn Any>` 与运行时 downcast。
+返回值必须就是 Handler 的响应类型——**编译期检查**，没有 `Box<dyn Any>` 与运行时 downcast。
 
 ## 用途
 

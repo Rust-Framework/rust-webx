@@ -10,7 +10,7 @@
 请为 rust-webx 创建「获取博客文章列表」端点：
 - 路由：GET /api/blog/posts
 - 支持分页
-- 返回 PagedResponse<BlogPostDto>
+- 返回 PagedResult<BlogPostDto>
 ```
 
 AI 生成的代码可直接放入 `contracts/blog.rs`（DTO + `IRequest`）+ `handlers/blog.rs`（Handler 通过 mediator 直接操作 `DbContext`）。博客模块不需要 Service 抽象；只有需要可替换实现时才定义 `I…Service`（如 `IDocumentService`），见 [可复用的模式提炼](../15-case-study/docbit-patterns.md)。

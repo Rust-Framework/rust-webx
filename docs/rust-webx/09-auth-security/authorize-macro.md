@@ -65,7 +65,7 @@ pub struct AuthorizeRule {
 
 `add_authentication()` 只负责启用 JWT 认证，让受保护端点能拿到 claims；`#[authorize]` 的规则
 由 endpoint 自己执行，不依赖额外开关。未启用认证时，受保护路由因无 claims 返回 401，规则
-并非只收集不执行。旧的 `.use_resource_authorization()` 已过时，端点直接执行规则。
+并非只收集不执行。
 
 ## 在 Handler 里读取身份
 

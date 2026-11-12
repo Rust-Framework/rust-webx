@@ -3,6 +3,23 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [1.0.1] — 2026-11-12
+
+### Added
+
+- **`OperationResult` / `OperationResult<T>`** — a framework-provided business result DTO:
+  `success`, business `status`, `message` and an optional `result` (`OperationResult` has no
+  `result` member). It saves every module from defining its own `{ success, status, message }`
+  envelope. It is an ordinary DTO, not a transport shape: the HTTP status stays the framework's
+  (200 with the serialized body, `problem+json` for `Err(webx::Error)`), and `status` is
+  whatever the business assigns. Constructors: `ok`, `ok_with_status`, `failed`, `success`,
+  `success_with_status`.
+
+### Breaking
+
+- **`PagedResponse<T>` is removed in favour of `PagedResult<T>`** — the list envelope now
+  pairs with `OperationResult`.
+
 ## [1.0.0] — 2026-11-11
 
 ### Breaking

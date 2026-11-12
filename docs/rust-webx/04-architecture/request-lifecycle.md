@@ -101,7 +101,7 @@ RouteDispatch → Mediator::send(request) → dispatch → HandlerCache → IReq
 
 每个 `Host` 持有实例级 `DispatchRuntime`（`ServiceProvider` + `HandlerCache`），它只是显式句柄：
 HTTP 请求通过 `IHttpContext::dispatch_runtime()` 取得该句柄，宏生成的 `RouteDispatch` 用其中的
-provider + registry 构造 `Mediator`；1.0 起不再有 task-local / `dispatch_provider()` 全局入口。
+provider + registry 构造 `Mediator`；没有 task-local 全局入口。
 
 多 Host 集成测试：`host.dispatch_runtime()` / `host.provider()` 直接使用；后台任务通过注入的
 `Arc<dyn ScopeFactory>`（rust-dix 内建）显式 `create_scope()`。

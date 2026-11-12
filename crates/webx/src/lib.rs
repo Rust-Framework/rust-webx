@@ -5,7 +5,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! rust-webx = "0.8"
+//! rust-webx = "1.0"
 //! ```
 //!
 //! ```ignore
@@ -51,7 +51,8 @@ pub use webx_core::mediator::dispatch;
 pub use webx_core::mediator::{IEventRequest, IMediator, IRequest};
 pub use webx_core::middleware::{IMiddleware, MiddlewareSlot};
 pub use webx_core::mode::AppMode;
-pub use webx_core::pagination::{PagedRequest, PagedResponse};
+pub use webx_core::operation::OperationResult;
+pub use webx_core::pagination::{PagedRequest, PagedResult};
 pub use webx_core::paths::{
     app_base, framework_root, looks_like_app_base, looks_like_framework_root,
 };

@@ -54,7 +54,31 @@ impl IRequestHandler<GetUserRequest, UserDto> for GetUserHandler { ... }
 |---------|----------|
 | `String`, `UserDto`, `Vec<T>` 等（`Serialize`） | 200 + JSON body |
 | `()` | 204 No Content，空 body |
+| `PagedResult<T>` | 200 + `{items, total, page, page_size, total_pages}` |
+| `OperationResult<T>` | 200 + `{success, status, message, result}` |
+| `OperationResult` | 200 + `{success, status, message}` |
 | `ResponseData` | Handler 自行掌控状态码、响应头与响应体 |
+
+`PagedResult<T>` 与 `OperationResult` 是框架随附的两个业务 DTO 信封：列表用前者，
+更新/删除/状态流转等操作结果用后者，业务模块不必再各自定义 `{success, status, message}`。
+
+```rust
+#[put("/users/{id}")]
+impl IRequest<OperationResult<UserDto>> for UpdateUserRequest {}
+
+impl IRequestHandler<UpdateUserRequest, OperationResult<UserDto>> for UpdateUserHandler {
+    async fn handle(&mut self, req: UpdateUserRequest) -> Result<OperationResult<UserDto>> {
+        let user = self.update(req).await?;
+        Ok(OperationResult::ok(user, "user updated"))
+    }
+}
+```
+
+`OperationResult` 的 `status` 是**业务状态码**（错误码、流程状态，含义由业务定义），
+不是 HTTP 状态码；HTTP 状态仍由框架决定——正常返回 `200` + 信封 JSON，
+`Err(webx::Error)` 仍写 `problem+json`（见[错误处理](error-handling.md)）。构造器：
+`ok` / `ok_with_status` / `failed` / `success` / `success_with_status`；不带泛型的
+`OperationResult` 没有 `result` 成员。
 
 ## IRequestHandler 的职责
 

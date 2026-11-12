@@ -66,7 +66,8 @@ graph BT
 | `config` | `AppOptions`, `appsettings` 加载 |
 | `cache` | `IDistributedCache` |
 | `problem` | `ProblemDetails`, `FieldError` |
-| `pagination` | `PagedRequest`, `PagedResponse` |
+| `pagination` | `PagedRequest`, `PagedResult` |
+| `operation` | `OperationResult`（含 `OperationResult<T>`） |
 
 ### rust-webx-host
 

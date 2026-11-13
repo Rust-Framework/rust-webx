@@ -448,6 +448,28 @@ pub trait IHttpContext: IClaimsExt + Send {
     ) -> Option<&std::sync::Arc<crate::dispatch_runtime::DispatchRuntime>> {
         None
     }
+
+    /// The trace id assigned to this request, if any.
+    ///
+    /// Set by the tracing middleware (`webx_host::RequestTracing`) **before**
+    /// the endpoint runs, so the binder, the handler and the response header
+    /// all agree on one value. Handlers read it through
+    /// [`RequestContext::trace_id`](crate::request_context::RequestContext::trace_id),
+    /// which the endpoint adapter scopes from this value.
+    ///
+    /// Returns `None` for alternative hosts that never assign a trace id and
+    /// for requests that did not pass the tracing middleware.
+    fn trace_id(&self) -> Option<&str> {
+        None
+    }
+
+    /// Record the trace id for this request.
+    ///
+    /// Called by the tracing middleware's `invoke`, which then echoes the same
+    /// value in the `x-trace-id` response header. The default is a no-op so
+    /// existing/alternative context implementations keep compiling; such hosts
+    /// simply have no trace id.
+    fn set_trace_id(&mut self, _trace_id: &str) {}
 }
 
 /// HTTP request abstraction.

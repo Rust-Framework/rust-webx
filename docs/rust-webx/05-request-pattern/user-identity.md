@@ -218,6 +218,29 @@ entity.updated_by = operator.unwrap_or_else(|| "system".to_string());
 - HostedService / 后台任务默认没有身份（`operator_id()` 为 `None`），应显式记录为 System，
   或在需要时用 `RequestContext::run(Some(Arc::new(system_identity)), ...)` 包裹。 
 
+## 场景六：请求 id / trace id（审计与访问日志对齐）
+
+开启 `RequestTracing` 中间件后，框架为每个请求分配一个 trace id，写入 `x-trace-id` 响应头；
+**同一个值**也在请求上下文里，Handler 和审计 helper 可以直接读：
+
+```rust
+// 在任意 Handler / 审计 helper 中读取（无需把 id 放进 Request 字段）
+let trace_id = webx::RequestContext::trace_id();  // Option<Arc<str>>
+entity.trace_id = trace_id.as_deref().unwrap_or_default().to_string();
+```
+
+- 写入时机：`RequestTracing` 在 endpoint 之前 `set_trace_id()`，endpoint 适配器再把它带入
+  Handler 作用域，因此 Handler 读到的值与响应头 **逐字节一致**，跨中间件不会丢；
+- 上游网关已下发 `x-request-id` 时，`RequestTracing` 复用它（`x-trace-id` 与 Handler 读到的都是该值），
+  便于跨服务串联；
+- 中间件内可直接用 `ctx.trace_id()` 读，或用 `ctx.set_trace_id()` 覆盖（例如接入 W3C `traceparent`）；
+- **不要**用 `#[fromheader("x-trace-id")]` 读框架生成的 trace id：`fromheader` 读的是**入站请求头**，
+  而框架的 trace id 只在响应头/请求上下文里；要从入站请求头取 id，用
+  `#[fromheader("x-request-id")] upstream_id: Option<String>` 或
+  `#[fromheader("traceparent")] ...`；
+- 未启用 `RequestTracing` 的主机没有 trace id：`trace_id()` 返回 `None`，业务应记录为空/System；
+- `RequestContext::run(...)` 嵌套（审计 helper 换身份）**保留**外层 trace id。
+
 ## 收益对照
 
 | 维度 | 手动解析 claims | `IdentityUser` 字段 |

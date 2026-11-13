@@ -15,6 +15,7 @@ pub mod dispatch_runtime;
 pub mod error;
 pub mod form;
 pub mod handler;
+pub mod hosted;
 pub mod http;
 pub mod localization;
 pub mod mediator;
@@ -41,6 +42,9 @@ pub use dispatch_runtime::DispatchRuntime;
 pub use error::*;
 pub use form::*;
 pub use handler::*;
+pub use hosted::{
+    BackgroundService, BackgroundServiceHost, CancellationToken, PeriodicBackgroundService,
+};
 pub use http::*;
 pub use localization::*;
 pub use mediator::*;

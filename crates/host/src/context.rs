@@ -130,6 +130,10 @@ pub struct HttpContext {
     early_error: Option<Error>,
     /// Host DI handles (provider + handler registry) for endpoint dispatch.
     dispatch_runtime: Option<Arc<webx_core::DispatchRuntime>>,
+    /// Trace id assigned by the tracing middleware; the same value the
+    /// `x-trace-id` response header carries and handlers read via
+    /// `RequestContext::trace_id()`.
+    trace_id: Option<String>,
 }
 
 impl HttpContext {
@@ -203,6 +207,7 @@ impl HttpContext {
             claims: None,
             early_error,
             dispatch_runtime: Some(dispatch_runtime),
+            trace_id: None,
         }
     }
 
@@ -246,6 +251,14 @@ impl IHttpContext for HttpContext {
 
     fn dispatch_runtime(&self) -> Option<&Arc<webx_core::DispatchRuntime>> {
         self.dispatch_runtime.as_ref()
+    }
+
+    fn trace_id(&self) -> Option<&str> {
+        self.trace_id.as_deref()
+    }
+
+    fn set_trace_id(&mut self, trace_id: &str) {
+        self.trace_id = Some(trace_id.to_string());
     }
 }
 

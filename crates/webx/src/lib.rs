@@ -43,6 +43,11 @@ pub use webx_core::form::{
     MultipartForm, SPOOL_FILE_PREFIX,
 };
 pub use webx_core::handler::{IEventHandler, IHostedService, IRequestHandler};
+pub use webx_core::hosted::{
+    BackgroundService, BackgroundServiceHost, CancellationToken, PeriodicBackgroundService,
+};
+/// Background worker helpers: `BackgroundService`, `delay`, `CancellationToken`.
+pub use webx_core::hosted as background;
 pub use webx_core::http::{
     content_disposition_value, read_json_body, write_json_response, ByteRange, Disposition,
     FileBody, FileSource, HttpStatus, IClaimsExt, IHttpContext, IHttpRequest, IHttpResponse,

@@ -12,7 +12,7 @@
 | Resource Auth | 自动（端点上的 `#[authorize]`） | 基于端点元数据的授权 |
 | RateLimit | 配置 `RateLimit.enabled` | 请求速率限制 |
 | SPA | `use_spa("wwwroot")` | 静态文件托管 |
-| RequestTracing | 需手动 `use_middleware::<RequestTracing>()` | 请求日志、注入 `x-trace-id` |
+| RequestTracing | 需手动 `use_middleware::<RequestTracing>()` | 请求日志、注入 `x-trace-id`，并写入请求上下文（Handler 用 `RequestContext::trace_id()` 读取） |
 | Timing | 需手动 `use_middleware::<TimingMiddleware>()` | 注入 `x-request-count` |
 | Compression | 需手动 `use_middleware::<CompressionMiddleware>()` | Gzip 压缩 |
 

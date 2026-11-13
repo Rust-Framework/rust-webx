@@ -22,6 +22,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["sync", "macros"] }
+tokio-util.workspace = true
 rust-dix.workspace = true
 inventory.workspace = true
 tracing.workspace = true

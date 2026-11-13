@@ -37,6 +37,10 @@ impl IMiddleware for RequestTracing {
             .header("x-request-id")
             .map(|s| s.to_string())
             .unwrap_or_else(next_trace_id);
+        // Store on the context *and* echo in the header: handlers read the same
+        // value through `RequestContext::trace_id()`, so an audit row can be
+        // joined with the access log line for this request.
+        ctx.set_trace_id(&tid);
         ctx.response_mut().set_header("x-trace-id", &tid);
         Ok(ControlFlow::Continue(()))
     }

@@ -84,7 +84,7 @@ fn expand_endpoint(
     let name = localized_name(&item_impl.attrs, &doc, &req_type_name)?;
     let description = localized_description(&item_impl.attrs, &doc)?;
     let category = localized_category(&item_impl.attrs)?;
-    let authorization = extract_authorization(&item_impl.attrs)?;
+    let (authorization, authorization_dynamic) = extract_authorization(&item_impl.attrs)?;
 
     // Parse response type back to a Type for use in generated code
     let rsp_type: syn::Type =
@@ -115,6 +115,30 @@ fn expand_endpoint(
 
     let dispatch_fn_name = format_ident!("__lrwf_dispatch_{}", req_type_name.replace("::", "_"));
 
+    // `#[authorize(dynamic)]` flips the endpoint to "static gate = authenticated
+    // only, rules delegated to IDynamicAuthorizer". Emitted only for dynamic
+    // endpoints, so the metadata of every other route is byte-for-byte
+    // unchanged.
+    let route_entry = quote! {
+        ::webx::RouteEntry::with_type_id(
+            ::webx::HttpMethod::#method_ident,
+            #path_str,
+            ::std::any::TypeId::of::<#self_ty>(),
+            #req_type_name,
+            #rsp_type_str,
+            #name,
+            #description,
+            #category,
+            &[#(#params_tokens),*],
+            #authorization,
+        )
+    };
+    let route_entry = if authorization_dynamic {
+        quote! { #route_entry.with_dynamic_authorization() }
+    } else {
+        route_entry
+    };
+
     let expanded = quote! {
         #item_impl
 
@@ -128,18 +152,7 @@ fn expand_endpoint(
         }
 
         ::webx::inventory::submit! {
-            ::webx::RouteEntry::with_type_id(
-                ::webx::HttpMethod::#method_ident,
-                #path_str,
-                ::std::any::TypeId::of::<#self_ty>(),
-                #req_type_name,
-                #rsp_type_str,
-                #name,
-                #description,
-                #category,
-                &[#(#params_tokens),*],
-                #authorization,
-            )
+            #route_entry
         }
     };
 
@@ -570,6 +583,11 @@ fn doc_first_line(doc: &str) -> Option<String> {
 struct AuthorizeArgs {
     roles: Vec<String>,
     permissions: Vec<String>,
+    /// `#[authorize(dynamic)]` — delegate the decision to `IDynamicAuthorizer`.
+    /// The flag is endpoint-level: one dynamic declaration puts the whole
+    /// endpoint in dynamic mode even when other `#[authorize]` attributes are
+    /// mixed in.
+    dynamic: bool,
 }
 
 impl Parse for AuthorizeArgs {
@@ -577,17 +595,33 @@ impl Parse for AuthorizeArgs {
         let mut args = Self::default();
         while !input.is_empty() {
             let key: syn::Ident = input.parse()?;
-            input.parse::<Token![=]>()?;
-            match key.to_string().as_str() {
-                "role" | "roles" => parse_string_list(input, &mut args.roles)?,
-                "permission" | "permissions" => parse_string_list(input, &mut args.permissions)?,
-                other => {
+            if key == "dynamic" {
+                if input.peek(Token![=]) {
                     return Err(syn::Error::new(
                         key.span(),
-                        format!(
-                        "unknown `#[authorize]` key `{other}`; expected role(s) or permission(s)"
-                    ),
-                    ))
+                        "`dynamic` is a flag, not a key; write `#[authorize(dynamic)]`",
+                    ));
+                }
+                if args.dynamic {
+                    return Err(syn::Error::new(key.span(), "duplicate `dynamic`"));
+                }
+                args.dynamic = true;
+            } else {
+                input.parse::<Token![=]>()?;
+                match key.to_string().as_str() {
+                    "role" | "roles" => parse_string_list(input, &mut args.roles)?,
+                    "permission" | "permissions" => {
+                        parse_string_list(input, &mut args.permissions)?
+                    }
+                    other => {
+                        return Err(syn::Error::new(
+                            key.span(),
+                            format!(
+                                "unknown `#[authorize]` key `{other}`; expected `dynamic`, \
+                                 role(s) or permission(s)"
+                            ),
+                        ))
+                    }
                 }
             }
             if input.peek(Token![,]) {
@@ -612,24 +646,37 @@ fn parse_string_list(input: ParseStream, out: &mut Vec<String>) -> syn::Result<(
     Ok(())
 }
 
-/// Render the `&[AuthorizeRule]` literal for the generated code.
-fn extract_authorization(attrs: &[Attribute]) -> syn::Result<proc_macro2::TokenStream> {
+/// Render the `&[AuthorizeRule]` literal for the generated code, plus whether
+/// any `#[authorize]` declaration carried the `dynamic` flag.
+///
+/// Every attribute still contributes exactly one rule — `#[authorize(dynamic)]`
+/// on its own contributes the "any authenticated user" rule, which is what the
+/// dynamic mode's static gate enforces anyway. `dynamic` only changes *who*
+/// evaluates the rules (the registered `IDynamicAuthorizer` instead of the
+/// claim snapshot), never the declaration itself.
+fn extract_authorization(
+    attrs: &[Attribute],
+) -> syn::Result<(proc_macro2::TokenStream, bool)> {
     let mut rules = Vec::new();
+    let mut dynamic = false;
     for attr in attrs {
         if !attr.path().is_ident("authorize") {
             continue;
         }
-        match &attr.meta {
+        let parsed = match &attr.meta {
             // Bare `#[authorize]`: any authenticated principal.
-            Meta::Path(_) => rules.push(AuthorizeArgs::default()),
-            Meta::List(list) => rules.push(syn::parse2::<AuthorizeArgs>(list.tokens.clone())?),
+            Meta::Path(_) => AuthorizeArgs::default(),
+            Meta::List(list) => syn::parse2::<AuthorizeArgs>(list.tokens.clone())?,
             Meta::NameValue(meta) => {
                 return Err(syn::Error::new_spanned(
                     meta,
-                    "use `#[authorize]` or `#[authorize(role = \"...\", permission = \"...\")]`",
+                    "use `#[authorize]`, `#[authorize(dynamic)]` or \
+                     `#[authorize(role = \"...\", permission = \"...\")]`",
                 ))
             }
-        }
+        };
+        dynamic |= parsed.dynamic;
+        rules.push(parsed);
     }
 
     let rendered = rules.iter().map(|rule| {
@@ -643,7 +690,7 @@ fn extract_authorization(attrs: &[Attribute]) -> syn::Result<proc_macro2::TokenS
         }
     });
 
-    Ok(quote! { &[#(#rendered),*] })
+    Ok((quote! { &[#(#rendered),*] }, dynamic))
 }
 
 /// Extract `///` doc comments from a list of attributes.

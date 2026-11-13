@@ -235,6 +235,11 @@ impl AuthorizerSet {
     /// Run all registered authorizers in sequence, handing them the matched
     /// endpoint's `#[authorize]` declaration.
     ///
+    /// **Legacy since 1.3.0** — the host now calls
+    /// [`AuthorizerSet::authorize_with_declared_rules`], which passes the raw
+    /// `&'static [AuthorizeRule]` slice. This wrapper stays for source
+    /// compatibility with 1.2.0 callers.
+    ///
     /// Returns `Ok(())` if ALL authorizers pass. Returns the first `Err` if any denies.
     pub async fn authorize_with_rules(
         &self,
@@ -246,6 +251,32 @@ impl AuthorizerSet {
         for authorizer in &self.authorizers {
             authorizer
                 .authorize_with_rules(claims, route_pattern, method, declared)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Run all registered authorizers in sequence, handing them the matched
+    /// endpoint's `#[authorize]` declaration as the raw slice the route
+    /// metadata owns (`RouteEntry.authorization`).
+    ///
+    /// This is the 1.3.0 primary path — zero allocation, and the declaration is
+    /// the same `&'static [AuthorizeRule]` a dynamic endpoint delegates in full
+    /// (`#[authorize(dynamic)]`). Implementations that override only the legacy
+    /// `authorize` / `authorize_with_rules` methods keep working through the
+    /// trait's default forwarding.
+    ///
+    /// Returns `Ok(())` if ALL authorizers pass. Returns the first `Err` if any denies.
+    pub async fn authorize_with_declared_rules(
+        &self,
+        claims: &dyn IClaims,
+        route_pattern: &str,
+        method: &str,
+        declared: &'static [webx_core::route::scan::AuthorizeRule],
+    ) -> Result<()> {
+        for authorizer in &self.authorizers {
+            authorizer
+                .authorize_with_declared_rules(claims, route_pattern, method, declared)
                 .await?;
         }
         Ok(())

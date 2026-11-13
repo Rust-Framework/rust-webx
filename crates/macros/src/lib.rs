@@ -226,6 +226,14 @@ pub fn webx_request_meta(input: TokenStream) -> TokenStream {
 /// #[authorize(role = "admin")]
 /// #[authorize(permission = "reports:export")]
 /// impl IRequest<Response> for ExportReportsRequest {}
+///
+/// // Dynamic mode: the static gate only requires authentication; the declared
+/// // rules are handed to the registered `IDynamicAuthorizer` to decide (e.g. a
+/// // database-backed permission check). `dynamic` combines with role/permission,
+/// // and makes the whole endpoint dynamic when mixed with other `#[authorize]`s.
+/// #[delete("/api/orders/{id}")]
+/// #[authorize(dynamic, permission = "order.delete")]
+/// impl IRequest<()> for DeleteOrderRequest {}
 /// ```
 #[proc_macro_attribute]
 pub fn authorize(_attr: TokenStream, item: TokenStream) -> TokenStream {

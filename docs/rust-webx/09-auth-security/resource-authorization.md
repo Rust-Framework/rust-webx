@@ -45,6 +45,7 @@ Host::builder()
 
 - `add_authentication()` → JWT 中间件
 - `#[authorize]` / `#[authorize(role = "…")]` / `#[authorize(permission = "…")]` → 端点规则，由 endpoint 执行
+- `#[authorize(dynamic, …)]` → 静态 gate 只要求已认证，声明交给 `IDynamicAuthorizer`（"DB 为权限真相"）
 - `IDynamicAuthorizer` → 应用自定义的动态路由授权（如 docbit `RoleAuthorizer`），详见[动态授权](authorize-macro.md#动态授权idynamicauthorizer)
 - `ResourceAuthorization` + `resource_auth_middleware` → 仅用于自定义 `IAuthorizationPolicy`
 

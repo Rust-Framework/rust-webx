@@ -664,6 +664,9 @@ impl HostBuilder {
             modifier(&mut options);
         }
 
+        // XR-2: resolve Jwt.SecretFile into Jwt.Secret (env/code secret wins; fail fast).
+        crate::auth_jwt::apply_jwt_secret_file(&mut options)?;
+
         let default_culture = if options.culture.default.trim().is_empty() {
             "en".to_string()
         } else {
@@ -956,6 +959,7 @@ impl HostBuilder {
                 handler_type: entry.handler_type,
                 dispatch_fn: dispatch_map.get(entry.handler_type).copied(),
                 authorization: entry.authorization,
+                authorization_dynamic: entry.authorization_dynamic,
                 authorizers: collect_authorizers(provider.as_ref()),
             });
             router.register(entry.method, entry.path, stub);

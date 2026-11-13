@@ -38,7 +38,7 @@ impl IRequest<()> for DeleteUserRequest {}
 | `#[display(...)]` | 端点名称（资源键/字面量） |
 | `#[description(...)]` | 端点长描述 |
 | `#[category(...)]` | 可选分组标签 |
-| `#[authorize(...)]` | 授权规则（详见[授权宏](#授权宏)） |
+| `#[authorize(...)]` | 授权规则（详见[授权宏](#授权宏)；`dynamic` 表示委托动态授权器） |
 
 ## 端点名称与描述：资源键
 
@@ -324,11 +324,22 @@ impl IRequest<SettingsDto> for UpdateSettingsRequest {}
 #[authorize(role = "admin")]
 #[authorize(permission = "reports:export")]
 impl IRequest<Response> for ExportReportsRequest {}
+
+// 动态委托：静态 gate 只要求已认证，声明规则交给 IDynamicAuthorizer 裁决
+#[delete("/api/orders/{id}")]
+#[authorize(dynamic, permission = "order.delete")]
+impl IRequest<()> for DeleteOrderRequest {}
 ```
 
-授权元数据在编译期收集为 `RouteEntry.authorization`（`&[AuthorizeRule]`）。每个 `#[authorize]` 是一条规则，所有规则全部满足才放行；规则内 `roles` / `permissions` 是 any-of 列表，两个维度同时存在时为 AND。`add_authentication()` 只负责启用 JWT；规则由 endpoint 在 dispatch 前执行。详见 [authorize 宏](../09-auth-security/authorize-macro.md)。
+授权元数据在编译期收集为 `RouteEntry.authorization`（`&[AuthorizeRule]`）与
+`RouteEntry.authorization_dynamic`（`#[authorize(dynamic)]` 为 `true`）。每个 `#[authorize]`
+是一条规则，所有规则全部满足才放行；规则内 `roles` / `permissions` 是 any-of 列表，两个维度
+同时存在时为 AND。`add_authentication()` 只负责启用 JWT；规则由 endpoint 在 dispatch 前执行。
+静态模式下由 claims 快照判定；`#[authorize(dynamic)]` 端点跳过该 gate（无 claims 仍 401），
+把整条声明交给注册的 `IDynamicAuthorizer`。详见 [authorize 宏](../09-auth-security/authorize-macro.md)。
 
-需要 DB/cache 驱动的路由授权时，注册 [IDynamicAuthorizer](../09-auth-security/authorize-macro.md#动态授权idynamicauthorizer)；它只在声明了 `#[authorize]` 的路由上运行。
+需要 DB/cache 驱动的路由授权时，注册 [IDynamicAuthorizer](../09-auth-security/authorize-macro.md#动态授权idynamicauthorizer)
+并用 `#[authorize(dynamic)]` 声明；它只在声明了 `#[authorize]` 的路由上运行。
 
 ## 常见错误
 

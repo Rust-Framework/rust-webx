@@ -134,6 +134,12 @@ pub trait IAuthorizationPolicy: Send + Sync {
 /// a bare `#[authorize]` has one rule with both lists empty.
 ///
 /// New in 1.2.0; additive — `authorize` keeps its 1.1 signature.
+///
+/// **Legacy view (1.3.0):** the framework now hands the authorizer the
+/// endpoint's `&'static [AuthorizeRule]` slice directly through
+/// [`IDynamicAuthorizer::authorize_with_declared_rules`], so this wrapper no
+/// longer needs to be built on the hot path. It stays for source compatibility
+/// and is scheduled for removal in 2.0 — new code should take the raw slice.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DeclaredRules<'a> {
     rules: &'a [crate::route::scan::AuthorizeRule],
@@ -187,19 +193,34 @@ impl<'a> DeclaredRules<'a> {
 /// ```
 ///
 /// The framework automatically detects registered `IDynamicAuthorizer` implementations
-/// and invokes them on every route that has `#[authorize]`.
-/// If no implementations are registered, authorization is pass-through (no dynamic checks).
+/// and invokes them on every route that has `#[authorize]` — static and
+/// `#[authorize(dynamic)]` alike. If no implementations are registered,
+/// authorization is pass-through (no dynamic checks; a dynamic endpoint then
+/// only requires an authenticated principal, so the application must enforce
+/// its permissions elsewhere or register an authorizer).
 ///
 /// # Methods
 ///
+/// * `authorize_with_declared_rules` — the primary path since 1.3.0. Receives
+///   the endpoint's `&'static [AuthorizeRule]` slice directly (zero allocation,
+///   the same slice as `RouteEntry.authorization`). Override this to see *which*
+///   role/permission codes the endpoint declared.
+/// * `authorize_with_rules` — 1.2.0 signature taking a [`DeclaredRules`] view.
+///   Kept for source compatibility; the host no longer calls it. Scheduled for
+///   removal in 2.0. The default forwards to `authorize`.
 /// * `authorize` — receives the user's claims, matched route pattern, and HTTP
-///   method. Returns `Ok(())` if allowed, or `Err` with details if denied.
-///   Kept for source compatibility with 1.1.
-/// * `authorize_with_rules` — same, plus the endpoint's [`DeclaredRules`] (the
-///   rules written in `#[authorize]`, AND-preserved per attribute). The
-///   framework calls this one; the default implementation forwards to
-///   `authorize`, so an implementation that only overrides `authorize` keeps
-///   working unchanged.
+///   method. Kept for source compatibility with 1.1; the default implementation
+///   of both methods above ends up here, so an implementation that only
+///   overrides `authorize` keeps working unchanged.
+///
+/// # Dynamic endpoints
+///
+/// On a route declared `#[authorize(dynamic)]` the static gate stops at
+/// "authenticated" (no claims → 401) and the declaration in
+/// `RouteEntry.authorization` is passed to the authorizers instead of being
+/// evaluated against `claims.permissions()`. That makes an authorizer backed by
+/// the database ("DB is the source of truth") authoritative per request, without
+/// shipping a permission snapshot in the token.
 #[async_trait::async_trait]
 pub trait IDynamicAuthorizer: Send + Sync {
     /// Validate whether the authenticated user can access the resource.
@@ -212,13 +233,14 @@ pub trait IDynamicAuthorizer: Send + Sync {
 
     /// Validate access with the endpoint's declared role / permission codes.
     ///
-    /// Override this instead of `authorize` when the authorization backend must
-    /// know *which* permission the endpoint declared (resource-instance checks,
-    /// permission-to-policy mapping, audit). Calls made through this method never
-    /// reach the overridden `authorize` when this one is overridden.
+    /// **Legacy since 1.3.0** — the host now calls
+    /// [`IDynamicAuthorizer::authorize_with_declared_rules`], which passes the
+    /// raw slice. This method is kept for source compatibility (existing
+    /// implementations that override it still receive the rules through the new
+    /// method's default forwarding) and is scheduled for removal in 2.0.
     ///
-    /// The default forwards to [`IDynamicAuthorizer::authorize`], which keeps
-    /// 1.1 implementations wire-compatible.
+    /// A default implementation forwarding to `authorize` keeps 1.1
+    /// implementations wire-compatible.
     async fn authorize_with_rules(
         &self,
         claims: &dyn IClaims,
@@ -227,6 +249,30 @@ pub trait IDynamicAuthorizer: Send + Sync {
         _declared: &DeclaredRules<'_>,
     ) -> Result<()> {
         self.authorize(claims, route_pattern, method).await
+    }
+
+    /// Validate access with the endpoint's declared `#[authorize]` rules.
+    ///
+    /// The zero-allocation primary path (new in 1.3.0): `declared` is the
+    /// endpoint's `RouteEntry.authorization` slice itself, borrowed for the
+    /// whole process. Every item is one `#[authorize]` attribute and all of
+    /// them must hold (AND); inside one item the role and permission lists are
+    /// any-of. On a `#[authorize(dynamic)]` endpoint the static gate does not
+    /// evaluate these rules — this method decides.
+    ///
+    /// The default forwards to [`IDynamicAuthorizer::authorize_with_rules`]
+    /// (which forwards to [`IDynamicAuthorizer::authorize`]), so an existing
+    /// implementation that overrides either legacy method works unchanged.
+    async fn authorize_with_declared_rules(
+        &self,
+        claims: &dyn IClaims,
+        route_pattern: &str,
+        method: &str,
+        declared: &'static [crate::route::scan::AuthorizeRule],
+    ) -> Result<()> {
+        let declared = DeclaredRules::new(declared);
+        self.authorize_with_rules(claims, route_pattern, method, &declared)
+            .await
     }
 }
 
@@ -594,5 +640,118 @@ mod tests {
         let err = request.require_tenant().unwrap_err();
         assert!(matches!(&err, Error::Forbidden(_)), "got {err:?}");
         assert_eq!(err.status_code(), 403);
+    }
+
+    // ── WEBX-19: `authorize_with_declared_rules` primary path ──────────────
+
+    const TWO_RULES: &[crate::route::scan::AuthorizeRule] = &[
+        crate::route::scan::AuthorizeRule {
+            roles: &["admin"],
+            permissions: &[],
+        },
+        crate::route::scan::AuthorizeRule {
+            roles: &[],
+            permissions: &["order.create"],
+        },
+    ];
+
+    struct TestClaims;
+
+    impl IClaims for TestClaims {
+        fn subject(&self) -> &str {
+            "user-1"
+        }
+        fn roles(&self) -> &[String] {
+            &[]
+        }
+        fn permissions(&self) -> &[String] {
+            &[]
+        }
+        fn claims(&self) -> &HashMap<String, String> {
+            static EMPTY: std::sync::OnceLock<HashMap<String, String>> = std::sync::OnceLock::new();
+            EMPTY.get_or_init(HashMap::new)
+        }
+        fn clone_box(&self) -> Box<dyn IClaims> {
+            Box::new(TestClaims)
+        }
+    }
+
+    /// 1.1-style implementation: overrides only `authorize`.
+    #[derive(Default)]
+    struct LegacyAuthorizeOnly {
+        calls: std::sync::Mutex<Vec<(String, String)>>,
+    }
+
+    #[async_trait::async_trait]
+    impl IDynamicAuthorizer for LegacyAuthorizeOnly {
+        async fn authorize(
+            &self,
+            _claims: &dyn IClaims,
+            route_pattern: &str,
+            method: &str,
+        ) -> Result<()> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push((route_pattern.to_string(), method.to_string()));
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn declared_rules_default_forwards_to_authorize() {
+        let authorizer = LegacyAuthorizeOnly::default();
+        authorizer
+            .authorize_with_declared_rules(&TestClaims, "/api/orders", "POST", TWO_RULES)
+            .await
+            .expect("the default must reach a 1.1 `authorize` implementation");
+        assert_eq!(
+            authorizer.calls.lock().unwrap().as_slice(),
+            &[("/api/orders".to_string(), "POST".to_string())],
+            "the new method default keeps the 1.1 `authorize` implementation working"
+        );
+    }
+
+    /// 1.2.0-style implementation: overrides only `authorize_with_rules`.
+    #[derive(Default)]
+    struct LegacyRulesOnly {
+        seen: std::sync::Mutex<Vec<crate::route::scan::AuthorizeRule>>,
+    }
+
+    #[async_trait::async_trait]
+    impl IDynamicAuthorizer for LegacyRulesOnly {
+        async fn authorize(
+            &self,
+            _claims: &dyn IClaims,
+            _route_pattern: &str,
+            _method: &str,
+        ) -> Result<()> {
+            panic!("authorize() must not run when authorize_with_rules is overridden");
+        }
+
+        async fn authorize_with_rules(
+            &self,
+            _claims: &dyn IClaims,
+            _route_pattern: &str,
+            _method: &str,
+            declared: &DeclaredRules<'_>,
+        ) -> Result<()> {
+            self.seen.lock().unwrap().extend_from_slice(declared.rules());
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn declared_rules_default_forwards_to_the_legacy_rules_method() {
+        let authorizer = LegacyRulesOnly::default();
+        authorizer
+            .authorize_with_declared_rules(&TestClaims, "/api/orders", "POST", TWO_RULES)
+            .await
+            .expect("the default must reach a 1.2.0 `authorize_with_rules` implementation");
+        assert_eq!(
+            authorizer.seen.lock().unwrap().as_slice(),
+            TWO_RULES,
+            "the raw declaration reaches the legacy method unchanged, AND structure included"
+        );
     }
 }

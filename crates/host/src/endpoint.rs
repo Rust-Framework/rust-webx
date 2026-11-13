@@ -2,7 +2,6 @@
 
 use serde_json;
 use std::sync::Arc;
-use webx_core::auth::DeclaredRules;
 use webx_core::error::Result;
 use webx_core::http::IHttpContext;
 use webx_core::routing::IEndpoint;
@@ -60,10 +59,19 @@ pub struct StubEndpoint {
     pub handler_type: &'static str,
     pub dispatch_fn: Option<webx_core::route::scan::RouteDispatchFn>,
     /// Rules collected from `#[authorize]`; empty means the endpoint is public.
-    /// Every rule must be satisfied.
+    /// Every rule must be satisfied (statically, or by the dynamic authorizers
+    /// when [`Self::authorization_dynamic`] is `true`).
     pub authorization: &'static [webx_core::route::scan::AuthorizeRule],
+    /// `true` when the endpoint declared `#[authorize(dynamic)]`.
+    ///
+    /// The static gate then only requires an authenticated principal (no claims
+    /// → 401) and [`Self::authorization`] is handed to the dynamic authorizers,
+    /// which decide. `false` — the default for every other route — means the
+    /// claim snapshot must satisfy the rules before dispatch.
+    pub authorization_dynamic: bool,
     /// Dynamic authorizers (from `IDynamicAuthorizer` DI registrations).
-    /// Checked after the declarative rules and before handler dispatch.
+    /// Checked after the declarative rules (or instead of them on a dynamic
+    /// endpoint) and before handler dispatch.
     /// When `None`, no dynamic authorization checks run (pass-through).
     pub authorizers: Option<Arc<AuthorizerSet>>,
 }
@@ -73,34 +81,44 @@ impl IEndpoint for StubEndpoint {
     async fn handle(&self, ctx: &mut dyn IHttpContext) -> Result<()> {
         if let Some(dispatch) = self.dispatch_fn {
             // ── Declarative authorization from `#[authorize]` ──
-            if !self.authorization.is_empty() {
-                let denied = match ctx.claims() {
-                    None => {
-                        // Single 401 write path: bubble the error up to the host
-                        // so every unauthenticated response (declarative
-                        // `#[authorize]`, binding layer, middleware) is written
-                        // by one place — including the `WWW-Authenticate`
-                        // challenge header.
-                        return Err(webx_core::error::Error::Unauthorized(
-                            "authentication required".to_string(),
-                        ));
-                    }
-                    Some(claims) => self
-                        .authorization
-                        .iter()
-                        .find(|rule| !rule.matches(claims.roles(), claims.permissions()))
-                        .map(|rule| (rule.roles, rule.permissions)),
-                };
+            // `authorization_dynamic` alone (hand-written metadata) also makes
+            // the route protected: dynamic means "authenticated, then delegated".
+            if !self.authorization.is_empty() || self.authorization_dynamic {
+                if ctx.claims().is_none() {
+                    // Single 401 write path: bubble the error up to the host
+                    // so every unauthenticated response (declarative
+                    // `#[authorize]`, binding layer, middleware) is written
+                    // by one place — including the `WWW-Authenticate`
+                    // challenge header.
+                    return Err(webx_core::error::Error::Unauthorized(
+                        "authentication required".to_string(),
+                    ));
+                }
 
-                if let Some((roles, permissions)) = denied {
-                    let mut ext = HashMap::new();
-                    ext.insert("required_roles".into(), serde_json::json!(roles));
-                    ext.insert(
-                        "required_permissions".into(),
-                        serde_json::json!(permissions),
-                    );
-                    write_forbidden(ctx, "Forbidden: insufficient permissions", ext).await;
-                    return Ok(());
+                // Static mode: the claim snapshot must satisfy every rule.
+                // `#[authorize(dynamic)]` skips this gate — the declaration is
+                // the dynamic authorizer's input, not a claim check.
+                if !self.authorization_dynamic {
+                    let denied = {
+                        let claims = ctx
+                            .claims()
+                            .expect("claims presence is checked above");
+                        self.authorization
+                            .iter()
+                            .find(|rule| !rule.matches(claims.roles(), claims.permissions()))
+                            .map(|rule| (rule.roles, rule.permissions))
+                    };
+
+                    if let Some((roles, permissions)) = denied {
+                        let mut ext = HashMap::new();
+                        ext.insert("required_roles".into(), serde_json::json!(roles));
+                        ext.insert(
+                            "required_permissions".into(),
+                            serde_json::json!(permissions),
+                        );
+                        write_forbidden(ctx, "Forbidden: insufficient permissions", ext).await;
+                        return Ok(());
+                    }
                 }
 
                 // ── Dynamic authorization via IDynamicAuthorizer ──
@@ -110,12 +128,18 @@ impl IEndpoint for StubEndpoint {
                             let resource_key = ctx.request().route_pattern().unwrap_or(self.path);
                             let method = ctx.request().method();
                             // Hand the endpoint's `#[authorize]` rules to the
-                            // backend. The route metadata is borrowed directly
-                            // (no per-request flattening), so multiple rules keep
-                            // their AND structure.
-                            let declared = DeclaredRules::new(self.authorization);
+                            // backend as the `&'static [AuthorizeRule]` slice
+                            // itself (no per-request flattening or wrapper), so
+                            // multiple rules keep their AND structure and a
+                            // dynamic endpoint's whole declaration reaches the
+                            // authorizer.
                             authorizers
-                                .authorize_with_rules(claims, resource_key, method, &declared)
+                                .authorize_with_declared_rules(
+                                    claims,
+                                    resource_key,
+                                    method,
+                                    self.authorization,
+                                )
                                 .await?;
                         }
                     }

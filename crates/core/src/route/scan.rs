@@ -138,7 +138,23 @@ pub struct RouteEntry {
     pub params: &'static [ParamMeta],
 
     /// Authorization rules from `#[authorize]`; empty = public endpoint.
+    ///
+    /// When [`Self::authorization_dynamic`] is `true`, these rules are the
+    /// requirement handed to the dynamic authorizers rather than a gate the
+    /// endpoint enforces itself.
     pub authorization: &'static [AuthorizeRule],
+
+    /// `true` when the endpoint declared `#[authorize(dynamic)]`.
+    ///
+    /// In that mode the static gate only requires an authenticated principal
+    /// (no claims → 401), and the rules in [`Self::authorization`] are handed to
+    /// the registered [`IDynamicAuthorizer`](crate::auth::IDynamicAuthorizer)s,
+    /// which decide. This is what lets "the database is the source of truth for
+    /// permissions" work without a login-time claims snapshot.
+    ///
+    /// `false` for every other endpoint, including public ones: the rules are
+    /// then enforced statically, exactly as before 1.3.0.
+    pub authorization_dynamic: bool,
 }
 
 // Collect RouteEntry instances at compile time using `inventory`.
@@ -251,6 +267,7 @@ impl RouteEntry {
             category,
             params,
             authorization,
+            authorization_dynamic: false,
         }
     }
 
@@ -282,7 +299,20 @@ impl RouteEntry {
             category,
             params,
             authorization,
+            authorization_dynamic: false,
         }
+    }
+
+    /// Switch this entry to the `#[authorize(dynamic)]` mode.
+    ///
+    /// The endpoint macros emit this only when the declaration contains
+    /// `dynamic`; hand-written fixtures can chain it the same way:
+    /// `RouteEntry::new(....).with_dynamic_authorization()`.
+    ///
+    /// Const so it stays usable in `inventory::submit!`.
+    pub const fn with_dynamic_authorization(mut self) -> Self {
+        self.authorization_dynamic = true;
+        self
     }
 }
 
@@ -398,6 +428,50 @@ pub struct HandlerEntry {
 
 #[cfg(test)]
 mod tests {
+    use super::{AuthorizeRule, RouteEntry};
+    use crate::localization::TextRef;
+    use crate::routing::HttpMethod;
+
+    const AUTHENTICATED: &[AuthorizeRule] = &[AuthorizeRule::authenticated()];
+
+    const STATIC_ENTRY: RouteEntry = RouteEntry::new(
+        HttpMethod::Get,
+        "/static",
+        "StaticRequest",
+        "()",
+        TextRef::text("static"),
+        TextRef::text(""),
+        TextRef::text(""),
+        &[],
+        AUTHENTICATED,
+    );
+
+    const DYNAMIC_ENTRY: RouteEntry = STATIC_ENTRY.with_dynamic_authorization();
+
+    #[test]
+    fn route_entry_defaults_to_static_authorization() {
+        // Bind to a local so clippy keeps treating this as a runtime assertion
+        // (the value is a constant, but the intent is to test the default).
+        let entry: RouteEntry = STATIC_ENTRY;
+        assert!(
+            !entry.authorization_dynamic,
+            "hand-written entries and `RouteEntry::new` must stay static"
+        );
+        assert_eq!(entry.authorization, AUTHENTICATED);
+    }
+
+    #[test]
+    fn with_dynamic_authorization_flips_only_the_flag() {
+        let dynamic: RouteEntry = DYNAMIC_ENTRY;
+        let statik: RouteEntry = STATIC_ENTRY;
+        assert!(dynamic.authorization_dynamic);
+        assert_eq!(
+            dynamic.authorization, statik.authorization,
+            "the declared rules are untouched — they move to the dynamic authorizer"
+        );
+        assert_eq!(dynamic.path, "/static");
+    }
+
     /// A response DTO that cannot be represented in JSON — the stand-in for the
     /// server-side defect this mapping exists to catch.
     struct AlwaysFails;

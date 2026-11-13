@@ -95,6 +95,40 @@ Host::builder().add_localization().build();
 > 的请求按 `Form` 节度量，因为上传端点天然需要比 JSON 端点大得多的上限。
 > 详见[文件上传与下载](../05-request-pattern/file-upload-download.md)。
 
+### Jwt 密钥来源（1.3.0 起）
+
+`Jwt.Secret` 与 `Jwt.SecretFile` 二选一即可。启动时取**第一个非空**来源：
+
+| 顺序 | 来源 | 说明 |
+|------|------|------|
+| 1 | `APP__Jwt__Secret` / `JWT_SECRET` | 环境变量在加载阶段覆盖 `Jwt.Secret`，`APP__` 优先 |
+| 2 | `Jwt.Secret` | 配置里的明文密钥（生产守卫会拒绝弱值） |
+| 3 | `Jwt.SecretFile` | 密钥文件路径；文件内容被读作密钥 |
+
+```json
+{
+  "Jwt": {
+    "Secret": "",
+    "SecretFile": "data/jwt.key",
+    "ExpirationMinutes": 60
+  }
+}
+```
+
+`Jwt.SecretFile` 的读取与校验发生在**启动期**（`HostBuilder` 装配认证之前），失败即终止启动，
+不会带着坏密钥对外服务：
+
+- 文件缺失/不可读 → 启动失败，错误信息包含路径和修复建议；
+- 内容 trim 后为空或 **< 32 字节** → 启动失败（不足 256 bit 的 HS256 密钥可被暴力破解）；
+- 文件内容首尾空白会被去掉（`echo secret > jwt.key` 写入的换行不属于密钥）；
+- **Unix**：group/other 权限位必须为空（`chmod 600`；`0400`/`0700` 也可），否则启动失败；
+- **Windows**：不存在 POSIX mode，框架**不校验 ACL**，请自行把文件限定为服务账号 +
+  `Administrators` 可读；DPAPI 包装的密钥不在 1.3.0 支持范围（后续项）。
+- 框架**不创建**密钥文件：首次部署由安装器/运维生成（足够随机的 32+ 字节写入 `0600` 文件）。
+
+相对路径按**进程工作目录**解析（与 `Tls.CertPath`/`Tls.KeyPath` 一致）。优先级只影响密钥来源；
+token 生命周期仍由 `Jwt.ExpirationMinutes` 决定。
+
 ## 访问配置
 
 ```rust

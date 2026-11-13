@@ -8,6 +8,14 @@
 //! * [`IPasswordHasher`] — hash/verify passwords as PHC strings (Argon2id by
 //!   default).
 //!
+//! Two dependency-free primitives for the security-adjacent code every
+//! application writes at least once:
+//!
+//! * [`constant_time_eq`] — compare secrets without leaking where they differ.
+//! * [`OneTimeSecret`] — a TTL-bound secret consumed exactly once (installation
+//!   token, invite link, password reset), with a [`OneTimeSecretState`] for
+//!   telling 401 from 410.
+//!
 //! # How the framework uses these ports
 //!
 //! The ports exist so business crates write "call the port" code, never crypto
@@ -28,10 +36,12 @@
 //! (`JwtTokenIssuer`, `Argon2PasswordHasher`), while the ones that need nothing
 //! live here ([`InMemorySessionStore`]).
 
+mod once;
 mod password;
 mod session;
 mod tokens;
 
+pub use once::{constant_time_eq, OneTimeSecret, OneTimeSecretState};
 pub use password::IPasswordHasher;
 pub use session::{ISessionStore, InMemorySessionStore};
 pub use tokens::{ITokenIssuer, IssuedToken, TokenClaims};

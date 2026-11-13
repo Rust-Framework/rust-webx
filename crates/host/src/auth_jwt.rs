@@ -17,6 +17,14 @@
 //!   middleware then rejects a token whose `jti` was revoked. Revocation is
 //!   opt-in: without a store the middleware only verifies signatures.
 //!
+//! # Secret sources (XR-2)
+//!
+//! The signing secret comes from the first non-empty of `APP__Jwt__Secret` /
+//! `JWT_SECRET`, `Jwt.Secret`, and `Jwt.SecretFile`. The last one is read by
+//! [`apply_jwt_secret_file`] during host start-up — a missing, unreadable,
+//! short or (on Unix) group/other-accessible file aborts start-up with a
+//! readable error instead of signing tokens with a broken key.
+//!
 //! ```ignore
 //! // login: issue and remember the jti (or give it to the client)
 //! let issued = token_issuer.issue(TokenClaims::new(&user.id)).await?;
@@ -41,9 +49,11 @@ use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation}
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ops::ControlFlow;
+use std::path::Path;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use webx_core::auth::{IAuthenticationHandler, IClaims};
+use webx_core::config::AppOptions;
 use webx_core::error::{Error, Result};
 use webx_core::http::IHttpContext;
 use webx_core::middleware::IMiddleware;
@@ -427,4 +437,167 @@ pub fn jwt_secret() -> &'static str {
     JWT_ENCODING_SECRET
         .get()
         .expect("init_jwt_secret must be called before jwt_secret")
+}
+
+// ---------------------------------------------------------------------------
+// Jwt.SecretFile resolution (XR-2)
+// ---------------------------------------------------------------------------
+
+/// Minimum accepted length, in bytes, of a JWT signing secret read from a file.
+///
+/// HS256 keys shorter than 256 bits are brute-forceable, so a too-short file is
+/// a startup error rather than a warning.
+pub const MIN_JWT_SECRET_LEN: usize = 32;
+
+/// Resolve `Jwt.SecretFile` into `Jwt.Secret`, failing fast on a bad file.
+///
+/// This is the third source in the documented priority chain — the first
+/// non-empty one wins:
+///
+/// 1. `APP__Jwt__Secret` / `JWT_SECRET` — applied over the JSON by
+///    `webx_core::config::load_appsettings`, so they are already in `Secret`;
+/// 2. `Jwt.Secret` — an explicit value in `appsettings.json` or a
+///    `HostBuilder` `useOptions` override;
+/// 3. `Jwt.SecretFile` — the path configured here, read from disk.
+///
+/// The host calls this once while preparing itself (before the default
+/// `ITokenIssuer` and the authentication middleware are built), so every later
+/// reader of `options.jwt.secret` — issuer, verifier, `init_jwt_secret`, the
+/// Production weak-secret guard — sees the resolved value.
+///
+/// # Behaviour
+///
+/// * No-op (`Ok(())`) when a secret is already configured or `SecretFile` is
+///   unset/blank, so existing appsettings are unaffected.
+/// * The file's content is trimmed; its surrounding whitespace (e.g. the
+///   trailing newline `echo` writes) is not part of the key.
+/// * Fails with [`Error::Di`] — a host startup error, never a panic — when the
+///   file is missing/unreadable, empty, shorter than [`MIN_JWT_SECRET_LEN`]
+///   bytes, or (on Unix) accessible by group/other. `Error::Di` is what the
+///   existing Production configuration guards return; the message names the
+///   path and the fix so an operator can act on it.
+/// * **Windows:** the ACL is *not* validated — the POSIX mode model does not
+///   exist there. Restrict the file to the service account (and
+///   `Administrators`) yourself. DPAPI-wrapped secrets are a future item, not
+///   part of this release.
+///
+/// # Example
+///
+/// ```
+/// use webx_core::config::AppOptions;
+/// use webx_host::auth_jwt::apply_jwt_secret_file;
+///
+/// let path = std::env::temp_dir().join(format!(
+///     "webx-jwt-secret-{}-{}.key",
+///     std::process::id(),
+///     std::time::SystemTime::now()
+///         .duration_since(std::time::UNIX_EPOCH)
+///         .unwrap()
+///         .as_nanos()
+/// ));
+/// # #[cfg(unix)]
+/// # {
+/// # use std::os::unix::fs::PermissionsExt;
+/// # std::fs::write(&path, b"test-only-secret-material-32-bytes\n").unwrap();
+/// # std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+/// # }
+/// # #[cfg(not(unix))]
+/// # std::fs::write(&path, b"test-only-secret-material-32-bytes\n").unwrap();
+///
+/// let mut options = AppOptions::default();
+/// options.jwt.secret_file = Some(path.to_string_lossy().into_owned());
+/// apply_jwt_secret_file(&mut options).unwrap();
+/// assert_eq!(options.jwt.secret, "test-only-secret-material-32-bytes");
+///
+/// # std::fs::remove_file(&path).ok();
+/// ```
+pub fn apply_jwt_secret_file(options: &mut AppOptions) -> Result<()> {
+    if !options.jwt.secret.trim().is_empty() {
+        if options.jwt.secret_file.is_some() {
+            // Deliberate, documented precedence — `Jwt.Secret` wins.
+            tracing::debug!("[Auth] Jwt.Secret is set; ignoring Jwt.SecretFile");
+        }
+        return Ok(());
+    }
+
+    let Some(path) = options
+        .jwt
+        .secret_file
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+    else {
+        return Ok(());
+    };
+
+    let secret = read_jwt_secret_file(Path::new(path))?;
+    tracing::info!(
+        "[Auth] JWT signing secret loaded from '{}' ({} bytes)",
+        path,
+        secret.len()
+    );
+    options.jwt.secret = secret;
+    Ok(())
+}
+
+fn read_jwt_secret_file(path: &Path) -> Result<String> {
+    verify_secret_file_permissions(path)?;
+
+    let content = std::fs::read_to_string(path).map_err(|error| {
+        Error::Di(format!(
+            "JWT secret file '{}' could not be read: {error}. \
+             Provision a readable file (at least {MIN_JWT_SECRET_LEN} bytes, Unix mode 0600), \
+             or set Jwt.Secret / APP__Jwt__Secret / JWT_SECRET.",
+            path.display()
+        ))
+    })?;
+    let secret = content.trim();
+    if secret.is_empty() {
+        return Err(Error::Di(format!(
+            "JWT secret file '{}' is empty; it must contain at least {MIN_JWT_SECRET_LEN} bytes of secret material.",
+            path.display()
+        )));
+    }
+    if secret.len() < MIN_JWT_SECRET_LEN {
+        return Err(Error::Di(format!(
+            "JWT secret file '{}' contains only {} bytes; at least {MIN_JWT_SECRET_LEN} bytes are required.",
+            path.display(),
+            secret.len()
+        )));
+    }
+    Ok(secret.to_string())
+}
+
+/// Reject a secret file that group/other can read or write (Unix only).
+///
+/// The POSIX analog of "the key file is private": anything but mode `0600`-or-
+/// stricter (e.g. `0400`, `0700` for the owner) is refused. On Windows the ACL
+/// is not inspected — start-up trusts the operator there.
+#[cfg(unix)]
+fn verify_secret_file_permissions(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let metadata = std::fs::metadata(path).map_err(|error| {
+        Error::Di(format!(
+            "JWT secret file '{}' could not be inspected: {error}. \
+             Provision it (at least {MIN_JWT_SECRET_LEN} bytes, Unix mode 0600), \
+             or set Jwt.Secret / APP__Jwt__Secret / JWT_SECRET.",
+            path.display()
+        ))
+    })?;
+    let mode = metadata.permissions().mode();
+    // 0o077 covers group/other read, write and execute bits.
+    if mode & 0o077 != 0 {
+        return Err(Error::Di(format!(
+            "JWT secret file '{}' has mode {mode:04o}; group/other access must be removed (`chmod 600`).",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+/// Windows (and other non-Unix targets): no permission model to inspect.
+#[cfg(not(unix))]
+fn verify_secret_file_permissions(_path: &Path) -> Result<()> {
+    Ok(())
 }

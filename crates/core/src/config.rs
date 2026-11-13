@@ -72,11 +72,36 @@ fn default_max_connections() -> usize {
 /// (or `APP__Jwt__ExpirationMinutes`). `ExpirationMinutes` drives the lifetime
 /// of tokens minted by the default `ITokenIssuer` that
 /// `HostBuilder::add_authentication()` registers.
+///
+/// # Where the signing secret comes from (XR-2)
+///
+/// First non-empty source wins, evaluated at host startup:
+///
+/// 1. `APP__Jwt__Secret` / `JWT_SECRET` env vars — applied over the JSON during
+///    `load_appsettings`, so they arrive here as `Secret`;
+/// 2. `Jwt.Secret` in `appsettings.json` (or a code-level `useOptions`
+///    override);
+/// 3. `Jwt.SecretFile` — a path to a file holding the secret, read by
+///    `rust_webx_host::auth_jwt::apply_jwt_secret_file`. The file must be at
+///    least 32 bytes of non-whitespace content and, on Unix, must not grant
+///    group/other permissions (`chmod 600`); a missing, unreadable, too short
+///    or over-permissive file fails host startup instead of running with a
+///    broken key.
 #[derive(Debug, Clone, Deserialize)]
 pub struct JwtSection {
     /// HMAC secret for signing/verifying JWT tokens.
     #[serde(default, rename = "Secret")]
     pub secret: String,
+
+    /// Optional path to a file holding the HMAC secret.
+    ///
+    /// Only used when `Secret` is empty, so an explicit secret (env or JSON)
+    /// always wins and existing appsettings keep working unchanged. The
+    /// framework does not create the file: provisioning the secret is an
+    /// operator/installer concern. DPAPI-wrapped secrets are not supported by
+    /// this release.
+    #[serde(default, rename = "SecretFile")]
+    pub secret_file: Option<String>,
 
     /// Lifetime of freshly issued tokens, in minutes. Default: 60.
     ///
@@ -97,6 +122,7 @@ impl Default for JwtSection {
     fn default() -> Self {
         Self {
             secret: String::new(),
+            secret_file: None,
             expiration_minutes: default_jwt_expiration_minutes(),
         }
     }
@@ -599,6 +625,31 @@ mod tests {
             "Jwt": { "Secret": "s", "ExpirationMinutes": 15 }
         }));
         assert_eq!(opts.jwt.expiration_minutes, 15);
+    }
+
+    #[test]
+    fn jwt_section_binds_secret_file_and_defaults_to_none() {
+        // XR-2: the new key must be optional so existing appsettings bind
+        // exactly as before.
+        let opts: AppOptions = bind_root(&serde_json::json!({}));
+        assert_eq!(opts.jwt.secret_file, None);
+        assert_eq!(JwtSection::default().secret_file, None);
+
+        let opts: AppOptions = bind_root(&serde_json::json!({
+            "Jwt": { "SecretFile": "data/jwt.key" }
+        }));
+        assert_eq!(opts.jwt.secret_file.as_deref(), Some("data/jwt.key"));
+        assert!(
+            opts.jwt.secret.is_empty(),
+            "binding records the path; the host reads the file"
+        );
+
+        // Both keys may coexist: resolution picks `Secret` first.
+        let opts: AppOptions = bind_root(&serde_json::json!({
+            "Jwt": { "Secret": "explicit-secret", "SecretFile": "data/jwt.key" }
+        }));
+        assert_eq!(opts.jwt.secret, "explicit-secret");
+        assert_eq!(opts.jwt.secret_file.as_deref(), Some("data/jwt.key"));
     }
 
     #[test]

@@ -12,7 +12,7 @@
 | 响应类型 | 默认 `Cache-Control` |
 |----------|---------------------|
 | 普通 API 响应 | `no-store` |
-| 文件响应（`ResponseData::file` 系列） | `public, max-age=0, must-revalidate` |
+| 文件响应（`FileResult` 系列） | `public, max-age=0, must-revalidate` |
 | `wwwroot` 下的 `/assets/**` | `public, max-age=31536000, immutable` |
 | `wwwroot` 下的其它静态文件 | `public, max-age=0, must-revalidate` |
 
@@ -23,16 +23,16 @@
 
 ```rust
 // 指纹化资源：内容变了 URL 就变，可以长期缓存
-Ok(ResponseData::file(path)
-    .header("cache-control", "public, max-age=31536000, immutable"))
+Ok(Box::new(FileResult::path(path)
+    .header("cache-control", "public, max-age=31536000, immutable")))
 
 // 含个人数据：只能私有缓存
-Ok(ResponseData::file(report)
-    .header("cache-control", "private, max-age=300"))
+Ok(Box::new(FileResult::path(report)
+    .header("cache-control", "private, max-age=300")))
 
 // 敏感单据：不落任何缓存
-Ok(ResponseData::file(payslip)
-    .header("cache-control", "no-store"))
+Ok(Box::new(FileResult::path(payslip)
+    .header("cache-control", "no-store")))
 ```
 
 ### 校验器怎么选
@@ -113,10 +113,9 @@ reverse_proxy 127.0.0.1:5000 {
 如果文件就在同一台机器上，让 nginx 用 `X-Accel-Redirect` 直接发会更省一次用户态拷贝：
 
 ```rust
-Ok(ResponseData::bytes(Vec::new())
+Ok(Box::new(ContentResult::bytes(Vec::new(), "application/pdf")
     .header("x-accel-redirect", "/internal-files/report.pdf")
-    .header("content-type", "application/pdf")
-    .download_name("报表.pdf"))
+    .download_name("报表.pdf")))
 ```
 
 代价是**授权只在应用里做一次**、真正的字节由 nginx 直接发出去——如果文件是敏感的，
@@ -164,7 +163,7 @@ Handler 里一定要在**请求结束前**调用 `save_as` / `copy_to` 把要保
 - [ ] `Form.MaxFileSize` / `MaxRequestSize` 按业务收紧（默认 128 MiB / 256 MiB 是通用值）
 - [ ] 反代关闭 `proxy_buffering` 与 `proxy_request_buffering`
 - [ ] `ulimit -n` ≥ 预期并发下载数 × 2
-- [ ] 敏感文件不在 `wwwroot` 下，走后端 `ResponseData::file` + `#[authorize]`
+- [ ] 敏感文件不在 `wwwroot` 下，走后端 `FileResult::path` + `#[authorize]`
 - [ ] 多实例部署时确认 `ETag` 策略一致（需要字节级一致就显式指定内容哈希）
 - [ ] CDN 已确认能透传 `Range` 并缓存 `206`
 - [ ] 反代/CDN 未二次压缩或剥离内嵌资源的 `Content-Encoding`，且按 `Vary: Accept-Encoding` 缓存

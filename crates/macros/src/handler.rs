@@ -18,7 +18,7 @@ use syn::{parse_macro_input, GenericArgument, ItemImpl, PathArguments, Type};
 /// #[handler(inject)]
 /// #[async_trait]
 /// impl IRequestHandler<MyReq, MyRsp> for MyHandler {
-///     async fn handle(&mut self, req: MyReq) -> Result<MyRsp> { ... }
+///     async fn handle(&mut self, req: MyReq) -> ActionResult<MyRsp> { ... }
 /// }
 /// ```
 ///
@@ -48,6 +48,11 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     let factory_fn = format_ident!("__lrwf_factory_{}", handler_ty_name.replace("::", "_"));
     // Generate call bridge function
     let call_fn = format_ident!("__lrwf_call_{}", handler_ty_name.replace("::", "_"));
+    // Generate type-erased dispatch used by `IMediator::send_boxed`
+    let boxed_fn = format_ident!(
+        "__lrwf_boxed_dispatch_{}",
+        handler_ty_name.replace("::", "_")
+    );
 
     // Choose factory body: DI injection vs Default
     //
@@ -111,6 +116,31 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
                 req_type_name: #req_ty_name,
                 factory: #factory_fn,
                 call: #call_fn,
+            }
+        }
+
+        #[doc(hidden)]
+        fn #boxed_fn(
+            provider: ::std::sync::Arc<::webx::rust_dix::ServiceProvider>,
+            handler_cache: ::std::sync::Arc<::webx::HandlerCache>,
+            request: ::std::boxed::Box<dyn ::std::any::Any + Send>,
+        ) -> ::webx::BoxedDispatchFuture {
+            ::std::boxed::Box::pin(async move {
+                let req = *request.downcast::<#req_ty>().map_err(|_| {
+                    ::webx::Error::Internal(format!(
+                        "Request downcast failed for: {}",
+                        #req_ty_name
+                    ))
+                })?;
+                let result: #rsp_ty = ::webx::dispatch(&provider, &handler_cache, req).await?;
+                Ok(::std::boxed::Box::new(result) as ::std::boxed::Box<dyn ::std::any::Any + Send>)
+            })
+        }
+
+        ::webx::inventory::submit! {
+            ::webx::BoxedDispatch {
+                req_type_id: ::std::any::TypeId::of::<#req_ty>(),
+                dispatch: #boxed_fn,
             }
         }
     };

@@ -27,7 +27,7 @@ pub struct CreateOrderRequest {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<CreateOrderRequest, OrderView> for CreateOrderHandler {
-    async fn handle(&mut self, req: CreateOrderRequest) -> Result<OrderView> {
+    async fn handle(&mut self, req: CreateOrderRequest) -> ActionResult<OrderView> {
         if req.user_id.is_empty() {
             return Err(Error::Unauthorized("login required".into()));
         }
@@ -60,7 +60,7 @@ Handler 只剩业务：
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<CreateOrderRequest, OrderView> for CreateOrderHandler {
-    async fn handle(&mut self, req: CreateOrderRequest) -> Result<OrderView> {
+    async fn handle(&mut self, req: CreateOrderRequest) -> ActionResult<OrderView> {
         let user = req.require_user()?;   // &IdentityUser
         let order = self
             .orders
@@ -93,7 +93,29 @@ impl IRequestHandler<CreateOrderRequest, OrderView> for CreateOrderHandler {
 user.is_in_role("admin");            // 角色判断
 user.has_permission("order:write");  // 权限判断
 user.display_name();                 // name，缺失时回退到 id
+user.tenant();                       // Option<&str>：没有租户声明时 None（单租户应用）
+user.require_tenant()?;              // 需要租户的操作；缺失返回 403
 ```
+
+### RequestUser：请求侧的访问器 trait
+
+`#[derive(WebxRequestMeta)]` 在请求带有身份字段时自动为它实现 `RequestUser`，
+Handler 不依赖字段名就能取身份：
+
+```rust
+req.current_user();                 // Option<&IdentityUser>
+req.user_id();                      // Option<&str>
+req.require_user()?;                // 未认证 → 401
+req.is_in_role("admin");            // 匿名/无该角色 → false（只做布尔分支）
+req.require_role("admin")?;         // 未认证 → 401；已认证无角色 → 403
+req.permissions();                  // &[String]，匿名空
+req.has_permission("order:write");
+req.tenant_id();                    // Option<&str>
+req.require_tenant()?;              // 未认证 → 401；无租户声明 → 403
+```
+
+需要区分“未登录（401）”与“已登录但不满足（403）”时用 `require_*`，
+不要用 `is_in_role` 的布尔结果反推。
 
 ## 场景一：必须登录
 
@@ -122,7 +144,7 @@ impl IRequest<ProfileView> for UpdateProfileRequest {}
 pub struct ProductDetailRequest {
     #[frompath]
     pub id: String,
-    #[fromclaim]
+    #[fromclaim(optional)]              // 显式声明：允许匿名
     pub viewer: Option<IdentityUser>,   // 游客为 None，不返回 401
 }
 ```
@@ -134,7 +156,9 @@ let favorited = match req.viewer {
 };
 ```
 
-`Option<IdentityUser>` 只在「身份可选」时使用；需要登录的接口不要用它来“兼容”匿名。
+**匿名访问必须显式声明**：`Option<IdentityUser>` 只写 `#[fromclaim]` 会编译失败，
+提示改用 `#[fromclaim(optional)]`。这样“不小心把受保护端点写成可选身份”会在编译期暴露，
+而不是运行期静默放行。一个请求类型只能有一个身份字段（`user` + `viewer` 同时存在会编译失败）。
 
 ## 场景三：角色与权限分支
 
@@ -174,6 +198,48 @@ let tenant = &req.user.tenant_id;
 ```
 
 把 `tenant_id` 放进 `IdentityUser` 后，仓储层可以统一加过滤条件，业务代码不需要每个查询都记得传。
+
+## 场景五：基础设施层也要同一份身份
+
+Handler 之外，审计字段、持久化回调、日志中间件也常需要“谁在操作”。框架把**同一个**
+`Arc<IdentityUser>` 放进请求作用域的 `RequestContext`：
+
+```rust
+// 审计 helper（domain/infrastructure 层，不需要 Request 参数）
+let operator = webx::RequestContext::operator_id();   // Option<String>，兼容旧代码
+let identity = webx::RequestContext::identity();      // Option<Arc<IdentityUser>>
+
+// 写入审计列
+entity.updated_by = operator.unwrap_or_else(|| "system".to_string());
+```
+
+- HTTP dispatch 在**绑定请求字段之前**建立上下文，因此 binder、Handler、审计 helper 读到的是同一份身份；
+- `RequestContext` 是 task-local：`tokio::spawn` 出去的任务不继承它，需要显式传递身份；
+- HostedService / 后台任务默认没有身份（`operator_id()` 为 `None`），应显式记录为 System，
+  或在需要时用 `RequestContext::run(Some(Arc::new(system_identity)), ...)` 包裹。 
+
+## 场景六：请求 id / trace id（审计与访问日志对齐）
+
+开启 `RequestTracing` 中间件后，框架为每个请求分配一个 trace id，写入 `x-trace-id` 响应头；
+**同一个值**也在请求上下文里，Handler 和审计 helper 可以直接读：
+
+```rust
+// 在任意 Handler / 审计 helper 中读取（无需把 id 放进 Request 字段）
+let trace_id = webx::RequestContext::trace_id();  // Option<Arc<str>>
+entity.trace_id = trace_id.as_deref().unwrap_or_default().to_string();
+```
+
+- 写入时机：`RequestTracing` 在 endpoint 之前 `set_trace_id()`，endpoint 适配器再把它带入
+  Handler 作用域，因此 Handler 读到的值与响应头 **逐字节一致**，跨中间件不会丢；
+- 上游网关已下发 `x-request-id` 时，`RequestTracing` 复用它（`x-trace-id` 与 Handler 读到的都是该值），
+  便于跨服务串联；
+- 中间件内可直接用 `ctx.trace_id()` 读，或用 `ctx.set_trace_id()` 覆盖（例如接入 W3C `traceparent`）；
+- **不要**用 `#[fromheader("x-trace-id")]` 读框架生成的 trace id：`fromheader` 读的是**入站请求头**，
+  而框架的 trace id 只在响应头/请求上下文里；要从入站请求头取 id，用
+  `#[fromheader("x-request-id")] upstream_id: Option<String>` 或
+  `#[fromheader("traceparent")] ...`；
+- 未启用 `RequestTracing` 的主机没有 trace id：`trace_id()` 返回 `None`，业务应记录为空/System；
+- `RequestContext::run(...)` 嵌套（审计 helper 换身份）**保留**外层 trace id。
 
 ## 收益对照
 
@@ -231,9 +297,11 @@ let order = handler.handle(req).await?;
 | 现象 | 原因 | 修正 |
 |------|------|------|
 | 编译错误提示 `IdentityUser` 必须标记来源 | 忘记 `#[fromclaim]` | 加 `#[fromclaim]` |
+| 编译错误提示 `anonymous access must be declared explicitly` | 可选身份只写了 `#[fromclaim]` | 改成 `#[fromclaim(optional)]` |
+| 编译错误提示 `only one identity field` | 请求里同时有 `user` 与 `viewer` | 只保留一个身份字段 |
 | 身份字段始终为空 | 路由没启用认证 / 令牌没有对应 claim | 检查 `add_authentication()` 与令牌内容 |
-| 客户端能读到别的租户数据 | 租户取自请求参数 | 一律取 `user.tenant_id` |
-| 匿名接口返回 401 | 用了 `IdentityUser` 而不是 `Option<IdentityUser>` | 按场景选择类型 |
+| 客户端能读到别的租户数据 | 租户取自请求参数 | 一律取 `user.tenant()` / `req.tenant_id()` |
+| 匿名接口返回 401 | 用了 `IdentityUser` 而不是 `Option<IdentityUser>` | 按场景选择类型（可选身份需 `#[fromclaim(optional)]`） |
 
 ## 小结
 

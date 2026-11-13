@@ -102,13 +102,14 @@ fn expand_endpoint(
                     source: "path",
                     type_hint: "string",
                     required: true,
+                    json_key: ::core::option::Option::None,
                 }
             }
         })
         .collect();
 
     // Generate dispatch function
-    let is_raw_response = is_response_data(&rsp_type_str);
+    let is_raw_response = is_raw_response_type(&rsp_type_str);
     let dispatch_fn =
         generate_dispatch_fn(self_ty, &rsp_type, rsp_type_str == "()", is_raw_response);
 
@@ -127,9 +128,10 @@ fn expand_endpoint(
         }
 
         ::webx::inventory::submit! {
-            ::webx::RouteEntry::new(
+            ::webx::RouteEntry::with_type_id(
                 ::webx::HttpMethod::#method_ident,
                 #path_str,
+                ::std::any::TypeId::of::<#self_ty>(),
                 #req_type_name,
                 #rsp_type_str,
                 #name,
@@ -152,7 +154,7 @@ fn expand_endpoint(
 /// OpenAPI metadata, and a request can mix path, query, header, claim, form and
 /// body values without the method-based heuristics the dispatch used to apply.
 ///
-/// When the response type is `ResponseData` the handler's value is used as the
+/// When the response type is `Response` (`Box<dyn IActionResult>`) the handler's value is used as the
 /// response verbatim, which is how an endpoint streams a file or sets custom
 /// headers. Otherwise the value is serialized as JSON.
 fn generate_dispatch_fn(
@@ -166,9 +168,17 @@ fn generate_dispatch_fn(
     let response_expr = if is_raw_response {
         quote! { ::std::result::Result::Ok(result) }
     } else if is_unit_response {
-        quote! { ::std::result::Result::Ok(::webx::ResponseData::no_content()) }
+        quote! {
+            ::std::result::Result::Ok(
+                ::std::boxed::Box::new(::webx::NoContentResult) as ::webx::Response
+            )
+        }
     } else {
-        quote! { ::webx::ResponseData::json(&result) }
+        quote! {
+            ::std::result::Result::Ok(
+                ::std::boxed::Box::new(::webx::JsonResult::new(result)) as ::webx::Response
+            )
+        }
     };
 
     quote! {
@@ -177,23 +187,46 @@ fn generate_dispatch_fn(
         ) -> ::std::pin::Pin<
             Box<
                 dyn ::std::future::Future<
-                        Output = ::webx::Result<::webx::ResponseData>,
+                        Output = ::webx::Result<::webx::Response>,
                     > + Send
                     + '__webx_dispatch,
             >,
         > {
             Box::pin(async move {
-                // One declaration on the request struct decides every field's
-                // source; failures come back as a 400 with `errors` per field.
-                let request: #ty =
-                    <#ty as ::webx::RequestModel>::bind(&mut *ctx).await?;
+                // One identity for the whole request: the binder, the handler and
+                // anything reading RequestContext (audit helpers, persistence
+                // callbacks) share this Arc instead of re-reading claims.
+                let identity = ctx.claims().map(|claims| {
+                    ::std::sync::Arc::new(::webx::IdentityUser::from_claims(claims))
+                });
+                // Same for the trace id: the tracing middleware stored it on the
+                // context before the endpoint ran, so the handler reads the very
+                // value that is written to the `x-trace-id` response header.
+                let trace_id = ctx
+                    .trace_id()
+                    .map(|id| ::std::sync::Arc::<str>::from(id));
 
-                let operator_id = ctx.claims().map(|c| c.subject().to_string());
+                ::webx::RequestContext::run_with_trace(identity, trace_id, async move {
+                    // One declaration on the request struct decides every field's
+                    // source; failures come back as a 400 with `errors` per field.
+                    let request: #ty =
+                        <#ty as ::webx::RequestModel>::bind(&mut *ctx).await?;
 
-                ::webx::RequestContext::run(operator_id, async move {
-                    // HTTP adapter: construct request, then dispatch via IMediator
-                    // (same path as in-process calls).
-                    let mediator = ::webx::Mediator::new(::webx::dispatch_provider());
+                    // HTTP adapter: construct request, then dispatch through the
+                    // host-provided DI handles (same path as in-process calls). No ambient
+                    // provider: the request context owns the handle.
+                    let (provider, handler_cache) = {
+                        let runtime = ctx.dispatch_runtime().ok_or_else(|| {
+                            ::webx::Error::Internal(
+                                "HTTP dispatch requires a request context built by webx::Host".to_string(),
+                            )
+                        })?;
+                        (
+                            ::std::sync::Arc::clone(runtime.provider()),
+                            ::std::sync::Arc::clone(runtime.handler_cache()),
+                        )
+                    };
+                    let mediator = ::webx::Mediator::new(provider, handler_cache);
                     let result: #rsp_type = mediator.send(request).await?;
                     #response_expr
                 })
@@ -203,16 +236,18 @@ fn generate_dispatch_fn(
     }
 }
 
-/// Whether the declared response type is the framework's raw response envelope.
+/// Whether the declared response type is the response-control type.
 ///
-/// Matches `ResponseData` and any qualified path ending in `ResponseData`, so
-/// `webx::ResponseData` and `::webx::ResponseData` both work.
-fn is_response_data(rsp_type: &str) -> bool {
-    rsp_type
-        .rsplit("::")
-        .next()
-        .map(|segment| segment.trim() == "ResponseData")
-        .unwrap_or(false)
+/// Matches the [`Response`](webx::Response) alias (`Box<dyn IActionResult>`) and
+/// any spelling of that type, so `Response`, `Box<dyn IActionResult>` and a
+/// qualified path all trigger the raw path — the handler's result already is
+/// the response, so the macro must not serialize it.
+///
+/// Keep in sync with `is_response_control_type` in `rust-webx-openapi`, which
+/// makes the same decision for the OpenAPI response schema.
+fn is_raw_response_type(rsp_type: &str) -> bool {
+    let last = rsp_type.rsplit("::").next().unwrap_or(rsp_type);
+    last.trim() == "Response" || rsp_type.contains("IActionResult")
 }
 
 /// Extract the response type from `impl IRequest<UserModel> for GetUserRequest`.

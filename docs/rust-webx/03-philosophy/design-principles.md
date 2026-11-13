@@ -99,10 +99,10 @@ struct GetUserHandler {
 
 ## 失败即数据（Errors as Values）
 
-Rust 的 `Result<T, Error>` 贯穿全栈：
+Rust 的 `Result<T, Error>` 贯穿全栈（端点动作返回 `ActionResult<T>`，同一类型的框架级命名）：
 
 ```rust
-async fn handle(&mut self, req: GetUserRequest) -> Result<UserDto> {
+async fn handle(&mut self, req: GetUserRequest) -> ActionResult<UserDto> {
     self.repo.find(&req.id)
         .ok_or_else(|| Error::NotFound(format!("User {}", req.id)))
 }

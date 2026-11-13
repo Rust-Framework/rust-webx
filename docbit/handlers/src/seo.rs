@@ -26,6 +26,10 @@ pub struct SeoHtmlMiddleware {
     docs: Arc<dyn IDocumentService>,
     #[inject]
     site: Arc<SiteConfig>,
+    /// rust-dix built-in scope factory: catalog/SSR reads open an explicit scope
+    /// instead of relying on a task-local ambient provider.
+    #[inject]
+    services: Arc<dyn ScopeFactory>,
 }
 
 #[inject]
@@ -381,9 +385,7 @@ impl SeoHtmlMiddleware {
     }
 
     async fn list_blog_summaries(&self) -> Vec<(String, String, String)> {
-        let Ok(mut ctx) = owned_db() else {
-            return Vec::new();
-        };
+        let (_scope, mut ctx) = owned_db(&self.services);
         let Ok(blogs) = linq!(ctx.set::<Blog>(); order_by b.published_at desc)
             .to_list()
             .await
@@ -398,7 +400,7 @@ impl SeoHtmlMiddleware {
     }
 
     async fn get_blog(&self, slug: &str) -> Option<(String, String, String)> {
-        let mut ctx = owned_db().ok()?;
+        let (_scope, mut ctx) = owned_db(&self.services);
         let q = slug.to_string();
         let blog = linq!(ctx.set::<Blog>(), |b: Blog| b.slug == q)
             .first_or_default()
@@ -447,12 +449,14 @@ impl SeoHtmlMiddleware {
     }
 }
 
-fn owned_db() -> Result<DbContext> {
-    let mut ctx: DbContext = dispatch_provider()
+fn owned_db(services: &Arc<dyn ScopeFactory>) -> (webx::rust_dix::Scope, DbContext) {
+    let scope = services.create_scope();
+    let mut ctx: DbContext = scope
         .get_owned()
-        .map_err(|e| Error::Internal(format!("DbContext resolution failed: {e}")))?;
+        .map_err(|e| Error::Internal(format!("DbContext resolution failed: {e}")))
+        .expect("DbContext must be registered for SEO middleware");
     prepare_context(&mut ctx);
-    Ok(ctx)
+    (scope, ctx)
 }
 
 fn spa_index_path() -> PathBuf {

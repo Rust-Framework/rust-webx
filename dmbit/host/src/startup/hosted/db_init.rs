@@ -1,6 +1,7 @@
 //! Schema ensure on host start (admin credentials logged for local demo).
 
 use rust_ef::db_context::DbContext;
+use std::sync::Arc;
 use webx::*;
 
 use dmbit_domain::configure_for_init;
@@ -30,7 +31,11 @@ fn is_schema_mismatch(err: &dyn std::fmt::Display) -> bool {
 }
 
 #[derive(Inject)]
-pub struct DbInitService;
+pub struct DbInitService {
+    /// rust-dix built-in scope factory: background work opens its own scope.
+    #[inject]
+    services: Arc<dyn ScopeFactory>,
+}
 
 #[inject]
 #[async_trait]
@@ -38,7 +43,8 @@ impl IHostedService for DbInitService {
     async fn start(&self) -> Result<()> {
         tracing::info!("[DbInit] Starting initialization...");
 
-        let mut ctx: DbContext = dispatch_provider()
+        let scope = self.services.create_scope();
+        let mut ctx: DbContext = scope
             .get_owned()
             .map_err(|e| Error::Internal(format!("DbContext resolution failed: {}", e)))?;
 

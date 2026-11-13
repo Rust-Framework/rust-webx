@@ -86,7 +86,7 @@ pub struct UploadMediaHandler;
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<UploadMediaRequest, MediaAsset> for UploadMediaHandler {
-    async fn handle(&mut self, req: UploadMediaRequest) -> Result<MediaAsset> {
+    async fn handle(&mut self, req: UploadMediaRequest) -> ActionResult<MediaAsset> {
         if req.file.is_empty() {
             return Err(Error::Validation("no file was uploaded".into()));
         }
@@ -148,8 +148,8 @@ pub struct GetMediaHandler;
 
 #[handler(inject)]
 #[async_trait]
-impl IRequestHandler<GetMediaRequest, ResponseData> for GetMediaHandler {
-    async fn handle(&mut self, req: GetMediaRequest) -> Result<ResponseData> {
+impl IRequestHandler<GetMediaRequest, Response> for GetMediaHandler {
+    async fn handle(&mut self, req: GetMediaRequest) -> ActionResult<Response> {
         let path = resolve_inside_uploads(&req.path)
             .ok_or_else(|| Error::Validation("invalid media path".into()))?;
 
@@ -167,14 +167,16 @@ impl IRequestHandler<GetMediaRequest, ResponseData> for GetMediaHandler {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
 
-        let response = ResponseData::file(path);
-        Ok(if INLINE_IMAGE_EXTENSIONS.contains(&ext.as_str()) {
-            response
-        } else {
-            // Anything not on the inline allowlist is handed over as a download,
-            // so a stored .svg/.html can never run in this origin.
-            response.download_name(name)
-        })
+        let result = FileResult::path(path);
+        Ok(Box::new(
+            if INLINE_IMAGE_EXTENSIONS.contains(&ext.as_str()) {
+                result
+            } else {
+                // Anything not on the inline allowlist is handed over as a download,
+                // so a stored .svg/.html can never run in this origin.
+                result.download_name(name)
+            },
+        ))
     }
 }
 

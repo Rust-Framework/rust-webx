@@ -237,7 +237,7 @@ async fn pipeline_short_circuit_on_invoke_error() {
 }
 
 #[tokio::test]
-async fn pipeline_after_hooks_skipped_on_final_handler_error() {
+async fn pipeline_after_hooks_run_on_final_handler_error() {
     struct ObserveMiddleware {
         after_ran: std::sync::Arc<std::sync::atomic::AtomicBool>,
     }
@@ -273,9 +273,10 @@ async fn pipeline_after_hooks_skipped_on_final_handler_error() {
 
     let result = pipeline.execute(&mut ctx, final_handler).await;
     assert!(result.is_err());
-    // after hooks are NOT called when the final handler returns Err
-    // (because `?` short-circuits before the reverse pass loop)
-    assert!(!after_ran.load(std::sync::atomic::Ordering::SeqCst));
+    // after hooks still run when the final handler returns Err, so metrics,
+    // tracing, gzip and cleanup observe the failed response; the original
+    // error is what `execute` returns.
+    assert!(after_ran.load(std::sync::atomic::Ordering::SeqCst));
 }
 
 #[tokio::test]

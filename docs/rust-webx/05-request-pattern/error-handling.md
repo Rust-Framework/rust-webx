@@ -35,6 +35,8 @@ pub enum Error {
 | `Di` | 500 | DI 解析失败 |
 | `Routing` | 404 | 路由错误 |
 | `Serialization` | 400 | JSON 解析错误 |
+| `ResponseSerialization` | 500 | 响应序列化失败（服务端 DTO 缺陷，不归咎客户端） |
+| `State` | 500 | 服务端状态机 / 编程错误 |
 | `Internal` | 500 | 未预期内部错误 |
 | `Message` | 500 | 通用错误 |
 | `Validation` | 400 | 业务校验失败 |
@@ -61,7 +63,7 @@ pub enum Error {
 ## Handler 中的错误处理
 
 ```rust
-async fn handle(&mut self, req: GetUserRequest) -> Result<UserDto> {
+async fn handle(&mut self, req: GetUserRequest) -> ActionResult<UserDto> {
     // 资源不存在
     let user = self.repo.find(&req.id)
         .ok_or_else(|| Error::NotFound(format!("User {} not found", req.id)))?;
@@ -123,6 +125,7 @@ return Err(ProblemDetails::validation(vec![
 
 ## 小结
 
-返回 `Result<T>` 即可，框架负责 Error → HTTP 的映射。需要结构化错误时使用 `ProblemDetails`。
+Handler 返回 `ActionResult<T>`：`Ok(T)` 就是响应数据，`Err(Error)` 由框架映射为 HTTP 状态码与
+`problem+json`。需要结构化错误时使用 `ProblemDetails`。
 
 下一章：[DI 与生命周期](../06-di-lifecycle/INDEX.md)

@@ -11,7 +11,7 @@ A type-safe, convention-over-configuration platform where *requests are endpoint
 [![Crates.io Version](https://img.shields.io/crates/v/rust-webx)](https://crates.io/crates/rust-webx)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![CI](https://github.com/Rust-Framework/rust-webx/actions/workflows/ci.yml/badge.svg)](https://github.com/Rust-Framework/rust-webx/actions/workflows/ci.yml)
-![Rust](https://img.shields.io/badge/rust-%3E%3D%201.81-orange.svg)
+![Rust](https://img.shields.io/badge/rust-%3E%3D%201.95-orange.svg)
 
 </div>
 
@@ -26,6 +26,7 @@ A type-safe, convention-over-configuration platform where *requests are endpoint
 - [Core Concepts](#core-concepts)
 - [Example Applications](#example-applications)
 - [Quick Start](#quick-start)
+- [Development](#development)
 - [Production Readiness](#production-readiness)
 - [Environment Variables](#environment-variables)
 - [Error Mapping](#error-mapping)
@@ -63,11 +64,11 @@ rust-webx is **not** a full-stack UI framework (pair it with any frontend), **no
 - **Compile-time scanning** — route metadata is collected at compile time via `inventory`; registered automatically in `Host::build()`.
 - **Zero-config handler registration** — the `#[handler]` attribute macro registers a handler with the DI container automatically.
 - **Authentication & authorization** — JWT Bearer auth + declarative, grouped route authorization (`#[authorize]`).
-- **Identity on the request** — `#[fromclaim] user: IdentityUser` binds the authenticated identity (id, name, email, tenant, roles) as a plain request field; handlers stop parsing tokens, and `Option<IdentityUser>` covers anonymous endpoints.
+- **Identity on the request** — `#[fromclaim] user: IdentityUser` binds the authenticated identity (id, name, email, tenant, roles) as a plain request field; handlers stop parsing tokens. `#[fromclaim(optional)] viewer: Option<IdentityUser>` covers anonymous endpoints (anonymous access must be declared explicitly).
 - **Endpoint metadata service** — `IEndpointCatalog` exposes every endpoint at runtime (`all()` / `localized()`), so permission sync, admin navigation and OpenAPI share one source.
 - **Localization** — `#[display]` / `#[description]` / `#[category]` store resource keys; a host-wide `Culture.Default` selects the language, with `.json` resources or `include_str!` embedding.
 - **Production capabilities out of the box** — graceful shutdown, live health checks, security headers, request IDs, CORS, TLS, rate limiting, compression, OpenAPI + SPA hosting.
-- **File upload & download** — typed `FormFile` binding for `multipart/form-data` (streamed, spooled to disk, size-limited) and ASP.NET Core-shaped file responses (`file` / `file_stream` / `file_seekable_stream`) with `Content-Disposition`, `ETag`, `Last-Modified` and `Range`.
+- **File upload & download** — typed `FormFile` binding for `multipart/form-data` (streamed, spooled to disk, size-limited) and ASP.NET Core-shaped file responses (`FileResult::path` / `::stream` / `::seekable_stream`, `ContentResult`) with `Content-Disposition`, `ETag`, `Last-Modified` and `Range`.
 - **ORM-agnostic** — the framework does not depend on `rust-ef`; the `docbit` reference app wires it in with minimal glue.
 
 ## Architecture
@@ -102,7 +103,7 @@ The framework is split into a small set of focused crates, re-exported through t
 
 ```
 rust-webx/
-├── Cargo.toml                 # workspace root (v0.8.0)
+├── Cargo.toml                 # workspace root (v1.1.1)
 ├── crates/
 │   ├── core/                  # rust-webx-core  — traits, configuration
 │   ├── host/                  # rust-webx-host  — Host builder, middleware
@@ -140,7 +141,7 @@ struct HelloHandler;
 #[handler] // compile-time registration into the DI container
 #[async_trait]
 impl IRequestHandler<HelloRequest, String> for HelloHandler {
-    async fn handle(&self, _req: HelloRequest) -> Result<String> {
+    async fn handle(&mut self, _req: HelloRequest) -> ActionResult<String> {
         Ok("Hello, World! Welcome to Rust WebX.".to_string())
     }
 }
@@ -262,6 +263,37 @@ docker compose -f docbit/docker-compose.yml --env-file docbit/.env up --build
 # → http://localhost:8100
 ```
 
+## Development
+
+Run the full suite from the workspace root:
+
+```bash
+cargo test --workspace --no-fail-fast
+```
+
+### Disk usage (large Windows checkouts)
+
+`target/` is disposable, but Cargo never deletes artifacts that belong to an old
+fingerprint, so every full rebuild (toolchain bump, `Cargo.lock` update,
+`RUSTFLAGS` change, switching feature sets) leaves its whole universe behind.
+The dev/test profiles in [`Cargo.toml`](Cargo.toml) keep *new* builds small
+(no debug info for dependencies, line tables only for workspace crates, no
+incremental sessions). If `target/` has already grown, report and reclaim it:
+
+```powershell
+.\scripts\clean-target.ps1              # report sizes, change nothing
+.\scripts\clean-target.ps1 -Incremental # drop the incremental compile cache only
+.\scripts\clean-target.ps1 -All         # cargo clean (everything is rebuildable)
+```
+
+For a debugging or fast-edit session, override the committed profile for that
+shell only:
+
+```powershell
+$env:CARGO_PROFILE_DEV_DEBUG = '2'             # full debug info for workspace crates
+$env:CARGO_PROFILE_DEV_INCREMENTAL = 'true'    # incremental compilation back on
+```
+
 ## Production Readiness
 
 | Capability | Status |
@@ -275,7 +307,7 @@ docker compose -f docbit/docker-compose.yml --env-file docbit/.env up --build
 | OpenAPI UI | Development mode only |
 | Rate limiting / compression | app-layer opt-in (`use_middleware`) |
 | File uploads (streamed, disk-spooled, size-limited) | ✅ |
-| File downloads (`File(...)`-style, streamed, `Content-Disposition`, `ETag`, `Range`, `304`, `HEAD`) | ✅ |
+| File downloads (`FileResult`, streamed, `Content-Disposition`, `ETag`, `Range`, `304`, `HEAD`) | ✅ |
 | TLS | ✅ via `App.Urls` + `Tls.CertPath/KeyPath` |
 
 ## Environment Variables
@@ -293,19 +325,29 @@ See the configuration chapter under `docs/rust-webx/` for the full variable refe
 
 | `Error` variant | HTTP status | Meaning |
 |-----------------|-------------|---------|
-| `Error::NotFound(msg)` | 404 | Resource not found |
-| `Error::Validation(msg)` | 400 | Validation failure |
-| `Error::Serialization(e)` | 400 | (De)serialization error |
-| `Error::Http(msg)` | 400 | HTTP protocol error (incl. 401 Unauthorized, 403 Forbidden) |
+| `Error::Http(msg)` | 400 | HTTP protocol error |
+| `Error::Status(code, msg)` | `code` | Explicit status code |
+| `Error::Unauthorized(msg)` | 401 | Authentication failed / missing token |
+| `Error::Forbidden(msg)` | 403 | Insufficient permissions |
 | `Error::Di(msg)` | 500 | DI container error |
+| `Error::Routing(msg)` | 404 | Routing error |
+| `Error::Serialization(e)` | 400 | Request (de)serialization error |
+| `Error::ResponseSerialization(e)` | 500 | Response serialization failed (server-side DTO defect) |
+| `Error::State(msg)` | 500 | Server-side state / programming error |
 | `Error::Internal(msg)` | 500 | Internal error |
 | `Error::Message(msg)` | 500 | Generic error message |
-| `Error::Routing(msg)` | 404 | Routing error |
+| `Error::Validation(msg)` | 400 | Validation failure |
+| `Error::NotFound(msg)` | 404 | Resource not found |
+| `Error::Conflict(msg)` | 409 | Optimistic concurrency / state conflict |
+| `Error::PayloadTooLarge(msg)` | 413 | Request body or uploaded file too large |
+| `Error::UnsupportedMediaType(msg)` | 415 | Unsupported request content type |
+| `Error::Problem(details)` | `details.status` | Field-level binding/validation problem carrying `errors` |
 
 ## Documentation
 
 - **rust-webx developer's manual** — a progressive-disclosure book under [`docs/rust-webx/`](docs/rust-webx/INDEX.md) (16 chapters, Chinese): introduction, quick start, architecture, DI & lifecycle, middleware, mediator & events, auth & security, configuration, production, project structure, extensibility, best practices, case study and migration guides.
-- **rust-ef reference** — the ORM handbook under [`docs/rust-ef/`](docs/rust-ef/INDEX.md), used by the `docbit` example.
+- **Upgrading from 1.0.x** — 1.1.0 replaced `ResponseData` with the `IActionResult` family; follow the [1.0.2 → 1.1.0 migration guide](docs/rust-webx/16-migration/upgrade-to-1.1.md).
+- **rust-ef reference** — the ORM handbook lives with the [`rust-ef`](https://crates.io/crates/rust-ef) crate (see its [docs.rs](https://docs.rs/rust-ef) documentation), used by the `docbit` example.
 - The `docbit` reference app also serves these docs as a live website (`GET /api/docs/rust-webx/...`).
 
 ## License

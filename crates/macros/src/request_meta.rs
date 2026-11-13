@@ -23,10 +23,17 @@ use syn::{
 /// | `#[fromfile("avatar")]` | a `multipart/form-data` file part |
 /// | `#[fromheader("X-Name")]` | an HTTP header (case-insensitive) |
 /// | `#[fromclaim("tenant")]` | a claim of the authenticated principal |
+/// | `#[fromclaim(optional)]` | an `Option<IdentityUser>` identity that may stay anonymous |
 ///
-/// Every marker except `#[frombody]` takes an optional source key; the field
-/// name is used when it is omitted (`x_request_id` → `x-request-id` for
-/// headers). `#[fromfile]` requires a `FormFile`-shaped field.
+/// Every marker except `#[frombody]` takes an optional source key, defaulting to
+/// the field name (with `_` → `-` for headers); `#[fromclaim]` additionally
+/// accepts the bare keywords `optional` and `identity`.
+///
+/// `#[fromclaim(optional)]` is the explicit opt-in for anonymous access to an
+/// `Option<IdentityUser>` field (**fail-closed**): declaring the field with a
+/// bare `#[fromclaim]` is a compile error, and so is `optional` on a required
+/// `IdentityUser` or on a plain claim. A request may carry at most one identity
+/// field. `#[fromfile]` requires a `FormFile`-shaped field.
 ///
 /// Unmarked fields follow the request method:
 ///
@@ -500,9 +507,102 @@ fn query_all_option(input: &DeriveInput) -> syn::Result<bool> {
     Ok(query_all)
 }
 
+/// A `#[from*]` declaration on a field.
+#[derive(Clone)]
+struct SourceDecl {
+    /// Where the value comes from.
+    src: Src,
+    /// The explicit source key; `None` falls back to the field name.
+    key: Option<String>,
+    /// `#[fromclaim(optional)]`: anonymous callers are explicitly allowed.
+    ///
+    /// Only meaningful on an `Option<IdentityUser>` identity field, where it is
+    /// the fail-closed opt-in for anonymous access.
+    optional: bool,
+    /// `#[fromclaim(identity)]`: reserved identity marker.
+    ///
+    /// An `IdentityUser` field already binds from the principal; the keyword is
+    /// parsed now so the syntax stays stable, and it is rejected elsewhere.
+    identity: bool,
+}
+
+impl SourceDecl {
+    fn new(src: Src) -> Self {
+        Self {
+            src,
+            key: None,
+            optional: false,
+            identity: false,
+        }
+    }
+}
+
+/// The parsed arguments of `#[fromclaim(...)]`.
+///
+/// A claim declaration accepts one optional string key plus the bare keywords
+/// `optional` and `identity`, separated by commas:
+/// `#[fromclaim("sub")]`, `#[fromclaim(optional)]`, `#[fromclaim(optional, identity)]`.
+struct ClaimArgs {
+    key: Option<String>,
+    optional: bool,
+    identity: bool,
+}
+
+impl syn::parse::Parse for ClaimArgs {
+    fn parse(input: syn::parse::ParseStream<'_>) -> syn::Result<Self> {
+        let mut args = Self {
+            key: None,
+            optional: false,
+            identity: false,
+        };
+
+        while !input.is_empty() {
+            if input.peek(LitStr) {
+                let lit: LitStr = input.parse()?;
+                let value = lit.value();
+                if value.is_empty() {
+                    return Err(syn::Error::new_spanned(
+                        &lit,
+                        "a source key must not be empty",
+                    ));
+                }
+                if args.key.is_some() {
+                    return Err(syn::Error::new_spanned(
+                        &lit,
+                        "`#[fromclaim]` takes at most one claim key",
+                    ));
+                }
+                args.key = Some(value);
+            } else {
+                let keyword: Ident = input.parse()?;
+                match keyword.to_string().as_str() {
+                    "optional" => args.optional = true,
+                    "identity" => args.identity = true,
+                    other => {
+                        return Err(syn::Error::new_spanned(
+                            &keyword,
+                            format!(
+                                "unknown `#[fromclaim]` option `{other}`; expected \
+                                 `optional`, `identity`, or a string claim key"
+                            ),
+                        ))
+                    }
+                }
+            }
+
+            if input.is_empty() {
+                break;
+            }
+            input.parse::<Token![,]>()?;
+        }
+
+        Ok(args)
+    }
+}
+
 /// The source declared on `field`, if any.
-fn declared_source(field: &Field) -> syn::Result<Option<(Src, Option<String>)>> {
-    let mut found: Option<(Src, Option<String>)> = None;
+fn declared_source(field: &Field) -> syn::Result<Option<SourceDecl>> {
+    let mut found: Option<SourceDecl> = None;
 
     for attr in &field.attrs {
         let src = if attr.path().is_ident("frompath") {
@@ -530,15 +630,22 @@ fn declared_source(field: &Field) -> syn::Result<Option<(Src, Option<String>)>> 
             ));
         }
 
-        let name = match (&attr.meta, src) {
-            (Meta::Path(_), _) => None,
-            (Meta::List(list), Src::Body) => {
+        let mut decl = SourceDecl::new(src);
+        match &attr.meta {
+            Meta::Path(_) => {}
+            Meta::List(list) if src == Src::Body => {
                 return Err(syn::Error::new_spanned(
                     list,
                     "`#[frombody]` takes no key; control the JSON key with `#[serde(rename)]`",
                 ))
             }
-            (Meta::List(list), _) => {
+            Meta::List(list) if src == Src::Claim => {
+                let args: ClaimArgs = list.parse_args()?;
+                decl.key = args.key;
+                decl.optional = args.optional;
+                decl.identity = args.identity;
+            }
+            Meta::List(list) => {
                 let lit: LitStr = list.parse_args()?;
                 let value = lit.value();
                 if value.is_empty() {
@@ -547,17 +654,17 @@ fn declared_source(field: &Field) -> syn::Result<Option<(Src, Option<String>)>> 
                         "a source key must not be empty",
                     ));
                 }
-                Some(value)
+                decl.key = Some(value);
             }
-            (Meta::NameValue(_), _) => {
+            Meta::NameValue(_) => {
                 return Err(syn::Error::new_spanned(
                     attr,
                     "pass the source key as an argument: `#[fromquery(\"q\")]`",
                 ))
             }
-        };
+        }
 
-        found = Some((src, name));
+        found = Some(decl);
     }
 
     Ok(found)
@@ -658,38 +765,18 @@ fn build_fields(
         let Some(ident) = field.ident.clone() else {
             continue;
         };
-        let name = ident.to_string();
+        // A raw identifier (`r#type`) is spelled `type` on the wire; every key
+        // derived from the field name (source, JSON, header, rename_all) must
+        // agree with serde, which unraws too. `ident` keeps the `r#` so the
+        // generated struct literal still compiles.
+        let name = ident.to_string().trim_start_matches("r#").to_string();
         let shape = shape_of(&field.ty);
         let serde = field_serde(&field.attrs)?;
         let declared = declared_source(field)?;
 
-        // The injected `claims` field is filled by the dispatcher, never bound.
-        if name == "claims" {
-            specs.push(FieldSpec {
-                ident,
-                ty: field.ty.clone(),
-                name,
-                shape,
-                src: Src::Auto,
-                source_key: String::new(),
-                json_key: String::new(),
-                aliases: Vec::new(),
-                body_kind: BodyKind::Normal,
-                default: None,
-                container_default: false,
-                skipped: true,
-                flattened: false,
-                required: false,
-                hint: "string",
-                custom: None,
-                helper: format_ident!("__WebxBody_claims"),
-            });
-            continue;
-        }
-
         let has_declared = declared.is_some();
-        let (src, extra) = match declared {
-            Some((src, arg)) => (src, arg),
+        let (src, extra) = match &declared {
+            Some(decl) => (decl.src, decl.key.clone()),
             None if query_all => (Src::Query, None),
             None if shape.is_file() => (Src::File, None),
             None => (Src::Auto, None),
@@ -697,18 +784,51 @@ fn build_fields(
 
         let skipped = !has_declared && serde.skip;
         if is_current_user(&field.ty) {
-            if src != Src::Claim {
+            let Some(decl) = declared.as_ref().filter(|decl| decl.src == Src::Claim) else {
                 return Err(syn::Error::new_spanned(
                     field,
                     "a `IdentityUser` field carries the authenticated identity; mark it \
                      `#[fromclaim]`",
                 ));
-            }
-            if extra.is_some() {
+            };
+            if decl.key.is_some() {
                 return Err(syn::Error::new_spanned(
                     field,
                     "`#[fromclaim]` on a `IdentityUser` field takes no key; the whole \
                      identity is bound from the principal",
+                ));
+            }
+            // Fail-closed: an optional identity lets anonymous callers through,
+            // so the endpoint must declare that explicitly.
+            if matches!(&shape, Shape::Optional(_)) {
+                if !decl.optional {
+                    return Err(syn::Error::new_spanned(
+                        field,
+                        "`Option<IdentityUser>` allows anonymous access, so the declaration \
+                         must be explicit: write `#[fromclaim(optional)]` — anonymous access \
+                         must be declared explicitly (fail-closed)",
+                    ));
+                }
+            } else if decl.optional {
+                return Err(syn::Error::new_spanned(
+                    field,
+                    "`optional` applies only to `Option<IdentityUser>`; a required \
+                     `IdentityUser` field rejects anonymous requests",
+                ));
+            }
+        } else if let Some(decl) = declared.as_ref() {
+            if decl.optional {
+                return Err(syn::Error::new_spanned(
+                    field,
+                    "`Option<T>` claims are already optional; `optional` applies only to \
+                     `Option<IdentityUser>`",
+                ));
+            }
+            if decl.identity {
+                return Err(syn::Error::new_spanned(
+                    field,
+                    "`identity` applies only to an `IdentityUser` field; bind a claim with \
+                     `#[fromclaim(\"key\")]`",
                 ));
             }
         }
@@ -793,12 +913,7 @@ fn build_fields(
             BodyKind::Normal => "Body",
         };
         let helper = Ident::new(
-            &format!(
-                "__WebxBody_{}_{}_{}",
-                type_ident,
-                name.replace("r#", ""),
-                suffix
-            ),
+            &format!("__WebxBody_{}_{}_{}", type_ident, name, suffix),
             ident.span(),
         );
 
@@ -821,6 +936,23 @@ fn build_fields(
             custom: serde.custom,
             helper,
         });
+    }
+
+    // `RequestUser` reads the one identity field; more than one would make the
+    // generated `current_user()` ambiguous and the authorization story unclear.
+    let identity_fields: Vec<&str> = specs
+        .iter()
+        .filter(|spec| is_current_user(&spec.ty))
+        .map(|spec| spec.name.as_str())
+        .collect();
+    if identity_fields.len() > 1 {
+        return Err(syn::Error::new_spanned(
+            type_ident,
+            format!(
+                "a request can carry only one identity field; found `{}` and `{}`",
+                identity_fields[0], identity_fields[1]
+            ),
+        ));
     }
 
     Ok(specs)
@@ -933,6 +1065,7 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
         ::webx::inventory::submit! {
             ::webx::RequestParamEntry {
                 request_type: ::core::stringify!(#type_ident),
+                req_type_id: ::std::any::TypeId::of::<#type_ident>(),
                 params: &[#(#meta),*],
             }
         }
@@ -978,49 +1111,98 @@ fn helper_structs(fields: &[FieldSpec]) -> TokenStream2 {
     quote! { #(#helpers)* }
 }
 
+/// The OpenAPI type of a body field's JSON value.
+///
+/// Body values are JSON, so a list is an `array` and a composite type is an
+/// `object`, even though neither has a string form for query/path binding.
+fn body_type_hint(field: &FieldSpec) -> &'static str {
+    match &field.shape {
+        Shape::Scalar(ty) | Shape::Optional(ty) => {
+            if is_known_scalar(ty) {
+                type_hint(ty)
+            } else {
+                "object"
+            }
+        }
+        Shape::Many(_) | Shape::OptionalMany(_) | Shape::Files => "array",
+        Shape::File | Shape::OptionalFile => "binary",
+    }
+}
+
 /// OpenAPI parameter metadata.
+///
+/// Every bindable field becomes one `ParamMeta`. A body field carries its
+/// resolved JSON key in `json_key` (serde `rename` / `rename_all` and `r#`
+/// unraw included) so the spec generator can describe the request body
+/// property by property. An unmarked field keeps `source: ""` — the route
+/// method decides between body and query — but still advertises the JSON key
+/// the write-method case needs.
 fn param_meta(fields: &[FieldSpec], has_form: bool) -> Vec<TokenStream2> {
     let mut entries = Vec::new();
-    let mut body_documented = false;
 
     for f in fields.iter().filter(|f| !f.skipped) {
         if is_current_user(&f.ty) {
             continue;
         }
+
+        // A field that can only bind from a body is documented by its JSON key
+        // and requiredness. `#[serde(flatten)]` has no key of its own: its
+        // inner properties are spread into the body object, so the entry is an
+        // opaque body marker (`json_key: None`) instead of a property.
         if f.src == Src::Body || f.body_only() {
-            body_documented = true;
-            // Auto fields are resolved by the route method, so leave their
-            // source empty; explicit body fields are documented once below.
-            if f.src != Src::Body {
-                continue;
-            }
+            let name = if f.flattened {
+                f.name.as_str()
+            } else {
+                f.json_key.as_str()
+            };
+            let hint = body_type_hint(f);
+            let required = f.required;
+            let json_key = if f.flattened {
+                quote! { ::core::option::Option::None }
+            } else {
+                let key = LitStr::new(&f.json_key, f.ident.span());
+                quote! { ::core::option::Option::Some(#key) }
+            };
+            entries.push(quote! {
+                ::webx::ParamMeta {
+                    name: #name,
+                    source: "body",
+                    type_hint: #hint,
+                    required: #required,
+                    json_key: #json_key,
+                }
+            });
             continue;
         }
+
         let source = if f.src == Src::Auto && has_form {
             "form"
         } else {
             f.src.as_str()
         };
         let name = f.public_name();
-        let hint = f.hint;
+        // An unmarked field on a write method binds from the JSON body first,
+        // so its hint follows the JSON shape; a list is an `array`, not the
+        // element's string form.
+        let hint = if f.src == Src::Auto && !has_form {
+            body_type_hint(f)
+        } else {
+            f.hint
+        };
         let required = f.required;
+        let json_key = if f.src == Src::Auto && !has_form {
+            let key = LitStr::new(&f.json_key, f.ident.span());
+            quote! { ::core::option::Option::Some(#key) }
+        } else {
+            quote! { ::core::option::Option::None }
+        };
         entries.push(quote! {
             ::webx::ParamMeta {
                 name: #name,
                 source: #source,
                 type_hint: #hint,
                 required: #required,
-            }
-        });
-    }
-
-    if body_documented {
-        entries.push(quote! {
-            ::webx::ParamMeta {
-                name: "body",
-                source: "body",
-                type_hint: "object",
-                required: true,
+                json_key: #json_key,
             }
         });
     }
@@ -1134,9 +1316,12 @@ fn bind_fn(fields: &[FieldSpec], plan: &BindingPlan) -> TokenStream2 {
         quote! {}
     };
 
+    // Every field that can only come from a JSON body is guarded, including
+    // optional ones: on a bodyless method `Option<NonScalar>` would otherwise
+    // bind as `None` without telling the caller why it is always absent.
     let complex_fields: Vec<&str> = fields
         .iter()
-        .filter(|f| !f.skipped && f.body_only() && f.required)
+        .filter(|f| f.body_only())
         .map(|f| f.name.as_str())
         .collect();
     let complex_guard = if complex_fields.is_empty() {
@@ -1146,8 +1331,9 @@ fn bind_fn(fields: &[FieldSpec], plan: &BindingPlan) -> TokenStream2 {
         quote! {
             if !__is_body_method && !__is_multipart {
                 return ::core::result::Result::Err(::webx::Error::Http(format!(
-                    "composite fields [{}] can only bind from a JSON body; \
-                     mark them `#[fromquery]`/`#[frompath]` or use POST/PUT/PATCH",
+                    "composite fields [{}] can only bind from a JSON body, and this \
+                     request method has no body; use POST/PUT/PATCH, or mark them \
+                     `#[fromquery]`/`#[frompath]` and implement `FromStr`",
                     #names
                 )));
             }
@@ -1308,7 +1494,7 @@ fn bind_field(f: &FieldSpec, plan: &BindingPlan) -> TokenStream2 {
                     }
                     ::core::option::Option::None => {
                         return ::core::result::Result::Err(::webx::Error::Unauthorized(
-                            "authentication required for this endpoint".to_string(),
+                            "authentication required".to_string(),
                         ));
                     }
                 }
@@ -1523,9 +1709,12 @@ fn many_chain(f: &FieldSpec, reads: &[Read]) -> TokenStream2 {
                 let fetch = list_fetch(f, other);
                 let missing = expr;
                 if optional_many {
+                    // "Present but empty" (`?ids=`) binds as `Some(vec![])`;
+                    // only a source without the key at all is "absent" (`None`).
+                    let present = list_present(f, other);
                     quote! {{
                         let __values = #fetch;
-                        if __values.is_empty() {
+                        if __values.is_empty() && !(#present) {
                             #missing
                         } else {
                             ::core::option::Option::Some(
@@ -1584,6 +1773,34 @@ fn list_fetch(f: &FieldSpec, read: &Read) -> TokenStream2 {
         Read::Claim(key) => {
             let key = LitStr::new(key, ident.span());
             quote! { __in.claim_list(#key) }
+        }
+    }
+}
+
+/// Whether the source carries the key, even when its value is empty.
+///
+/// [`list_fetch`] yields no values for an empty source value, so the
+/// `Option<Vec<T>>` path needs to tell "present but empty" from "absent".
+fn list_present(f: &FieldSpec, read: &Read) -> TokenStream2 {
+    let ident = &f.ident;
+    let key = LitStr::new(&f.source_key, ident.span());
+    match read {
+        Read::Body => unreachable!("body values are not string sources"),
+        Read::Query => quote! {
+            __in.query_multi.map_or(false, |__multi| __multi.contains_key(#key))
+                || __in.query.contains_key(#key)
+        },
+        Read::Form => quote! {
+            __in.form.map_or(false, |__form| __form.text(#key).is_some())
+        },
+        Read::Path => quote! { __in.path.contains_key(#key) },
+        Read::Header(lower) => {
+            let lower = LitStr::new(lower, ident.span());
+            quote! { __req.header(#lower).is_some() }
+        }
+        Read::Claim(key) => {
+            let key = LitStr::new(key, ident.span());
+            quote! { __in.claim(#key).is_some() }
         }
     }
 }
@@ -1700,13 +1917,130 @@ mod tests {
     }
 
     #[test]
-    fn accepts_the_standard_identity_field() {
+    fn accepts_a_required_identity_field() {
         ok(r#"
             struct Req {
                 #[fromclaim] user: IdentityUser,
-                #[fromclaim] viewer: Option<IdentityUser>,
             }
         "#);
+    }
+
+    #[test]
+    fn accepts_an_optional_identity_field() {
+        ok(r#"
+            struct Req {
+                #[fromclaim(optional)] user: Option<IdentityUser>,
+            }
+        "#);
+        // The reserved `identity` keyword parses too, and can be combined.
+        ok(r#"
+            struct Req {
+                #[fromclaim(optional, identity)] viewer: Option<IdentityUser>,
+            }
+        "#);
+        ok(r#"
+            struct Req {
+                #[fromclaim(identity)] user: IdentityUser,
+            }
+        "#);
+    }
+
+    #[test]
+    fn rejects_two_identity_fields() {
+        // The previous `accepts_the_standard_identity_field` case: one required
+        // and one optional identity are no longer allowed.
+        let message = err(r#"
+            struct Req {
+                #[fromclaim] user: IdentityUser,
+                #[fromclaim(optional)] viewer: Option<IdentityUser>,
+            }
+        "#);
+        assert!(
+            message.contains("a request can carry only one identity field"),
+            "{message}"
+        );
+        assert!(
+            message.contains("user") && message.contains("viewer"),
+            "{message}"
+        );
+
+        // Two required identities are rejected by the same rule.
+        let message = err(r#"
+            struct Req {
+                #[fromclaim] user: IdentityUser,
+                #[fromclaim] other: IdentityUser,
+            }
+        "#);
+        assert!(
+            message.contains("a request can carry only one identity field"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn rejects_an_undeclared_optional_identity() {
+        // Fail-closed: anonymous access must be visible in the declaration.
+        let message = err(r#"
+            struct Req {
+                #[fromclaim] user: Option<IdentityUser>,
+            }
+        "#);
+        assert!(message.contains("#[fromclaim(optional)]"), "{message}");
+        assert!(
+            message.contains("anonymous access must be declared explicitly"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn rejects_optional_on_a_required_identity() {
+        let message = err(r#"
+            struct Req {
+                #[fromclaim(optional)] user: IdentityUser,
+            }
+        "#);
+        assert!(
+            message.contains("`optional` applies only to `Option<IdentityUser>`"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn rejects_optional_on_a_plain_claim() {
+        let message = err(r#"
+            struct Req {
+                #[fromclaim(optional)] sub: String,
+            }
+        "#);
+        assert!(message.contains("already optional"), "{message}");
+        assert!(message.contains("Option<IdentityUser>"), "{message}");
+    }
+
+    #[test]
+    fn rejects_identity_on_a_plain_claim() {
+        let message = err(r#"
+            struct Req {
+                #[fromclaim(identity)] sub: String,
+            }
+        "#);
+        assert!(
+            message.contains("`identity` applies only to an `IdentityUser` field"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_fromclaim_options() {
+        let message = err(r#"
+            struct Req {
+                #[fromclaim(bogus)] user: IdentityUser,
+            }
+        "#);
+        assert!(
+            message.contains("unknown `#[fromclaim]` option"),
+            "{message}"
+        );
+        assert!(message.contains("optional"), "{message}");
     }
 
     #[test]
@@ -1737,5 +2071,192 @@ mod tests {
             }
         "#);
         assert!(message.contains("multipart"), "{message}");
+    }
+
+    fn code(source: &str) -> String {
+        let input: DeriveInput = syn::parse_str(source).expect("parse");
+        let generated = expand(&input).expect("expand");
+        generated.to_string()
+    }
+
+    #[test]
+    fn a_field_named_claims_is_an_ordinary_field() {
+        // `#[claims]` no longer exists, so the name alone means nothing: an
+        // explicitly marked `claims` field must participate in binding.
+        let marked = code(r#"struct Req { #[frombody] claims: Vec<String> }"#);
+        assert!(marked.contains("__f_claims"), "{marked}");
+
+        // An unmarked `claims` field is inferred from the request method like
+        // any other field instead of being silently defaulted.
+        let inferred = code(r#"struct Req { claims: String }"#);
+        assert!(inferred.contains("__f_claims"), "{inferred}");
+        assert!(inferred.contains("__is_body_method"), "{inferred}");
+    }
+
+    #[test]
+    fn raw_identifiers_use_their_unraw_name() {
+        let body = code(r#"struct Req { #[frombody] r#type: String }"#);
+        assert!(body.contains("\"type\""), "{body}");
+        assert!(!body.contains("\"r#type\""), "{body}");
+
+        let header = code(r#"struct Req { #[fromheader] r#accept: String }"#);
+        assert!(header.contains("\"accept\""), "{header}");
+        assert!(!header.contains("\"r#accept\""), "{header}");
+    }
+
+    #[test]
+    fn optional_composite_fields_are_guarded_without_a_body() {
+        let generated = code(r#"struct Req { payload: Option<Payload> }"#);
+        let guard = generated
+            .split("composite fields")
+            .nth(1)
+            .expect("expected a composite-field guard");
+        assert!(guard.contains("\"payload\""), "{guard}");
+    }
+
+    // -----------------------------------------------------------------------
+    // OpenAPI parameter metadata
+    // -----------------------------------------------------------------------
+
+    /// The generated `param_meta` entries, rendered one string per entry.
+    fn param_entries(source: &str) -> Vec<String> {
+        let generated = code(source);
+        let section = generated
+            .split("fn param_meta")
+            .nth(1)
+            .expect("generated param_meta");
+        let section = section.split("fn bind").next().expect("param_meta body");
+        section
+            .split(":: webx :: ParamMeta {")
+            .skip(1)
+            .map(str::to_string)
+            .collect()
+    }
+
+    fn entry_with<'a>(entries: &'a [String], text: &str) -> &'a String {
+        entries
+            .iter()
+            .find(|entry| entry.contains(text))
+            .unwrap_or_else(|| panic!("no param entry containing {text}: {entries:?}"))
+    }
+
+    #[test]
+    fn body_fields_document_json_keys_types_and_requiredness() {
+        let entries = param_entries(
+            r#"struct Req {
+                #[frompath] id: String,
+                #[frombody] title: String,
+                #[frombody] published: Option<bool>,
+                #[frombody] tags: Vec<String>,
+                #[serde(rename = "displayName")] #[frombody] display: String,
+                #[frombody] r#type: String,
+                #[frombody] address: Address,
+            }"#,
+        );
+        assert_eq!(entries.len(), 7, "{entries:?}");
+
+        // Path parameters carry no JSON key.
+        let path = entry_with(&entries, "\"id\"");
+        assert!(path.contains("source : \"path\""), "{path}");
+        assert!(
+            path.contains("json_key : :: core :: option :: Option :: None"),
+            "{path}"
+        );
+
+        let title = entry_with(&entries, "\"title\"");
+        assert!(title.contains("source : \"body\""), "{title}");
+        assert!(title.contains("type_hint : \"string\""), "{title}");
+        assert!(title.contains("required : true"), "{title}");
+        assert!(
+            title.contains("json_key : :: core :: option :: Option :: Some (\"title\")"),
+            "{title}"
+        );
+
+        let published = entry_with(&entries, "\"published\"");
+        assert!(published.contains("type_hint : \"boolean\""), "{published}");
+        assert!(published.contains("required : false"), "{published}");
+
+        // A JSON list is an `array`, not the element's string form.
+        let tags = entry_with(&entries, "\"tags\"");
+        assert!(tags.contains("type_hint : \"array\""), "{tags}");
+
+        // `#[serde(rename)]` decides the documented key.
+        let renamed = entry_with(&entries, "\"displayName\"");
+        assert!(renamed.contains("required : true"), "{renamed}");
+
+        // A raw identifier is documented without its `r#`.
+        let raw = entry_with(&entries, "\"type\"");
+        assert!(
+            raw.contains("json_key : :: core :: option :: Option :: Some (\"type\")"),
+            "{raw}"
+        );
+
+        // A composite type is a JSON object.
+        let composite = entry_with(&entries, "\"address\"");
+        assert!(composite.contains("type_hint : \"object\""), "{composite}");
+    }
+
+    #[test]
+    fn unmarked_fields_advertise_the_json_key_the_route_method_needs() {
+        let entries = param_entries(r#"struct Req { name: String, tags: Vec<String> }"#);
+        assert_eq!(entries.len(), 2, "{entries:?}");
+
+        let name = entry_with(&entries, "\"name\"");
+        // The route method decides between body and query, so the source stays
+        // empty …
+        assert!(name.contains("source : \"\""), "{name}");
+        // … but the JSON key is there for the write-method case.
+        assert!(
+            name.contains("json_key : :: core :: option :: Option :: Some (\"name\")"),
+            "{name}"
+        );
+
+        let tags = entry_with(&entries, "\"tags\"");
+        assert!(tags.contains("type_hint : \"array\""), "{tags}");
+        assert!(tags.contains("required : false"), "{tags}");
+    }
+
+    #[test]
+    fn rename_all_reaches_the_documented_json_key() {
+        let entries = param_entries(
+            r#"#[serde(rename_all = "camelCase")]
+               struct Req { #[frombody] display_name: String }"#,
+        );
+        let entry = entry_with(&entries, "\"displayName\"");
+        assert!(
+            entry.contains("json_key : :: core :: option :: Option :: Some (\"displayName\")"),
+            "{entry}"
+        );
+    }
+
+    #[test]
+    fn flattened_body_fields_are_opaque_body_markers() {
+        let entries = param_entries(
+            r#"struct Req {
+                #[serde(flatten)] paging: Paging,
+                key: String,
+            }"#,
+        );
+        let paging = entry_with(&entries, "\"paging\"");
+        assert!(paging.contains("source : \"body\""), "{paging}");
+        assert!(paging.contains("type_hint : \"object\""), "{paging}");
+        // No single JSON key: the inner properties are spread into the object.
+        assert!(
+            paging.contains("json_key : :: core :: option :: Option :: None"),
+            "{paging}"
+        );
+        // A non-optional flattened field is a required body field.
+        assert!(paging.contains("required : true"), "{paging}");
+    }
+
+    #[test]
+    fn form_fields_have_no_json_key() {
+        let entries = param_entries(r#"struct Req { avatar: FormFile, title: String }"#);
+        let title = entry_with(&entries, "\"title\"");
+        assert!(title.contains("source : \"form\""), "{title}");
+        assert!(
+            title.contains("json_key : :: core :: option :: Option :: None"),
+            "{title}"
+        );
     }
 }

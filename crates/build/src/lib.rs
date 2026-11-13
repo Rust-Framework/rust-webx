@@ -5,12 +5,12 @@
 //!
 //! # Payload sizes
 //!
-//! Compressible files are brotli-encoded (quality 11) before they enter the
-//! table, and the middleware serves them with `Content-Encoding: br` when the
-//! client accepts it. Media that is already compressed (PNG, WOFF2, ZIP, …) and
-//! files below 256 bytes are stored verbatim, because a second compression pass
-//! cannot shrink them. On a typical `wwwroot` this removes roughly 80% of the
-//! embedded footprint.
+//! Compressible files are brotli-encoded (quality 9 by default, tunable with
+//! `WEBX_BROTLI_QUALITY` 0-11) before they enter the table, and the middleware
+//! serves them with `Content-Encoding: br` when the client accepts it. Media
+//! that is already compressed (PNG, WOFF2, ZIP, …) and files below 256 bytes are
+//! stored verbatim, because a second compression pass cannot shrink them. On a
+//! typical `wwwroot` this removes roughly 80% of the embedded footprint.
 //!
 //! # Three deployment shapes
 //!

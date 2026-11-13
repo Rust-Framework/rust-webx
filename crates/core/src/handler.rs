@@ -12,11 +12,11 @@
 //! ```ignore
 //! #[async_trait]
 //! impl IRequestHandler<GetUserRequest, UserModel> for GetUserHandler {
-//!     async fn handle(&mut self, req: GetUserRequest) -> Result<UserModel> { ... }
+//!     async fn handle(&mut self, req: GetUserRequest) -> ActionResult<UserModel> { ... }
 //! }
 //! ```
 
-use crate::error::Result;
+use crate::error::{ActionResult, Result};
 use crate::mediator::{IEventRequest, IRequest};
 
 /// Handles a single `IRequest<R>`, producing its associated response `R`.
@@ -25,8 +25,10 @@ use crate::mediator::{IEventRequest, IRequest};
 /// free of auth concerns. Requests that need the caller declare
 /// `#[fromclaim] user: IdentityUser`; the binder fills it before `handle` runs.
 ///
-/// Register via `#[handler]` proc macro for compile-time collection,
-/// or use `register_handlers!` for manual DI registration.
+/// Register via `#[handler]` proc macro for compile-time collection; for
+/// non-HTTP Mediator use, register the handler in DI with rust-dix's
+/// `#[rust_dix::inject]` attribute (trait-impl registration) or
+/// `ServiceCollection::singleton`.
 ///
 /// `handle(&mut self, ...)` enables the EFCore-style owned-DbContext pattern:
 /// handlers declare a bare `ctx: DbContext` field, resolved per-request via
@@ -35,7 +37,7 @@ use crate::mediator::{IEventRequest, IRequest};
 /// ```ignore
 /// #[async_trait]
 /// impl IRequestHandler<GetUserRequest, UserModel> for GetUserHandler {
-///     async fn handle(&mut self, req: GetUserRequest) -> Result<UserModel> { ... }
+///     async fn handle(&mut self, req: GetUserRequest) -> ActionResult<UserModel> { ... }
 /// }
 /// ```
 #[async_trait::async_trait]
@@ -45,7 +47,7 @@ where
     R: Send + 'static,
 {
     /// Handle the request.
-    async fn handle(&mut self, req: T) -> Result<R>;
+    async fn handle(&mut self, req: T) -> ActionResult<R>;
 }
 
 /// Handles a single `IEventRequest`, performing side effects.
@@ -98,15 +100,42 @@ pub trait IEventHandler<T: IEventRequest>: Send + Sync {
 pub trait IHostedService: Send + Sync {
     /// Called when the host starts.
     ///
-    /// The host waits for all hosted services to finish `start()`
-    /// before beginning to accept incoming requests.
+    /// Services start in registration order (after sorting by [`order`](IHostedService::order))
+    /// and the host waits for all of them
+    /// before accepting requests. There is **no ambient DI context**: a hosted
+    /// service that needs scoped dependencies (DbContext, transactions, ...)
+    /// takes rust-dix's built-in `#[inject] services: Arc<dyn ScopeFactory>`
+    /// field and opens its own scope
+    /// (`let scope = services.create_scope();`), disposed with the scope.
+    /// If one `start()` fails, the services that already started are stopped
+    /// again in reverse order before the host reports the error.
     async fn start(&self) -> Result<()>;
 
     /// Called during a graceful shutdown.
     ///
-    /// The host calls `stop()` on all hosted services concurrently
-    /// after the HTTP server has stopped accepting new connections.
+    /// The host stops the services that started, in **reverse** start order
+    /// (the last dependency to start is the first to stop), with a timeout per
+    /// service so one stuck service cannot block the process forever. Like
+    /// `start()`, each `stop()` runs inside a fresh DI scope.
+    ///
+    /// Shutdown stops hosted services **before** in-flight connections are
+    /// drained, so a worker never keeps running against services that are about
+    /// to be torn down.
     async fn stop(&self) -> Result<()> {
         Ok(())
+    }
+
+    /// Start/stop priority. Lower starts first and stops last.
+    ///
+    /// Defaults to `0`; services with equal order keep their **registration
+    /// order** (the sort is stable). Use it when a dependency must be ready
+    /// before another: a migration/seed service at `-100`, cache warmup at `0`,
+    /// queue consumers at `100`.
+    ///
+    /// Register with order through `add_hosted_service_ordered` /
+    /// `add_hosted_service_with_ordered`; the default keeps the historical
+    /// registration-order behavior.
+    fn order(&self) -> i32 {
+        0
     }
 }

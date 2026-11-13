@@ -169,7 +169,7 @@ struct ListEndpointsHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ListEndpointsRequest, Vec<EndpointDescriptor>> for ListEndpointsHandler {
-    async fn handle(&mut self, _req: ListEndpointsRequest) -> Result<Vec<EndpointDescriptor>> {
+    async fn handle(&mut self, _req: ListEndpointsRequest) -> ActionResult<Vec<EndpointDescriptor>> {
         Ok(self.catalog.all().to_vec())
     }
 }
@@ -191,7 +191,7 @@ struct ListEndpointsHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ListEndpointsRequest, Vec<EndpointInfo>> for ListEndpointsHandler {
-    async fn handle(&mut self, _req: ListEndpointsRequest) -> Result<Vec<EndpointInfo>> {
+    async fn handle(&mut self, _req: ListEndpointsRequest) -> ActionResult<Vec<EndpointInfo>> {
         Ok(self.catalog.localized(&*self.localizer))
     }
 }
@@ -210,23 +210,9 @@ fn __rdi_try_construct_ListEndpointsHandler(
 }
 ```
 
-不想用构造注入时，也可以在 `handle` 里显式从当前请求容器取：
-
-```rust
-#[handler]
-#[async_trait]
-impl IRequestHandler<ListEndpointsRequest, Vec<EndpointDescriptor>> for ListEndpointsHandler {
-    async fn handle(&mut self, _req: ListEndpointsRequest) -> Result<Vec<EndpointDescriptor>> {
-        let catalog = dispatch_provider()
-            .get::<dyn IEndpointCatalog>()
-            .map_err(|error| Error::Di(error.to_string()))?;
-        Ok(catalog.all().to_vec())
-    }
-}
-```
-
-`dispatch_provider()` 只在 HTTP/Mediator 的 dispatch runtime 内有效；hosted service 等非请求场景
-优先使用构造注入。
+Handler 内**没有 ambient DI 入口**：需要容器服务的 handler 用
+**构造注入**——`#[handler(inject)]` + `#[derive(Inject)]` 的 `#[inject]` 字段（见上一节），或把依赖
+作为参数传给用例函数。后台任务（hosted service）注入 `Arc<dyn ScopeFactory>` 后自行开 scope。
 
 `IEndpointCatalog`、`EndpointDescriptor`、`EndpointInfo` 都由 `webx::*` 导出。`EndpointDescriptor`
 也实现了 `Serialize`，因此原始列表可直接作为 JSON 返回：
@@ -337,10 +323,10 @@ impl IRequest<SettingsDto> for UpdateSettingsRequest {}
 #[post("/api/reports/export")]
 #[authorize(role = "admin")]
 #[authorize(permission = "reports:export")]
-impl IRequest<ResponseData> for ExportReportsRequest {}
+impl IRequest<Response> for ExportReportsRequest {}
 ```
 
-授权元数据在编译期收集为 `RouteEntry.authorization`（`&[AuthorizeRule]`）。每个 `#[authorize]` 是一条规则，所有规则全部满足才放行；规则内 `roles` / `permissions` 是 any-of 列表，两个维度同时存在时为 AND。`add_authentication()` 只负责启用 JWT；规则由 endpoint 在 dispatch 前执行，不需要 `.use_resource_authorization()`（已过时）。详见 [authorize 宏](../09-auth-security/authorize-macro.md)。
+授权元数据在编译期收集为 `RouteEntry.authorization`（`&[AuthorizeRule]`）。每个 `#[authorize]` 是一条规则，所有规则全部满足才放行；规则内 `roles` / `permissions` 是 any-of 列表，两个维度同时存在时为 AND。`add_authentication()` 只负责启用 JWT；规则由 endpoint 在 dispatch 前执行。详见 [authorize 宏](../09-auth-security/authorize-macro.md)。
 
 需要 DB/cache 驱动的路由授权时，注册 [IDynamicAuthorizer](../09-auth-security/authorize-macro.md#动态授权idynamicauthorizer)；它只在声明了 `#[authorize]` 的路由上运行。
 

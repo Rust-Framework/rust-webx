@@ -137,7 +137,7 @@ pub fn delete(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// #[handler]
 /// #[async_trait]
 /// impl IRequestHandler<HelloRequest, String> for HelloHandler {
-///     async fn handle(&mut self, _req: HelloRequest) -> Result<String> { ... }
+///     async fn handle(&mut self, _req: HelloRequest) -> ActionResult<String> { ... }
 /// }
 /// ```
 #[proc_macro_attribute]
@@ -159,10 +159,30 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// `#[fromfile]`, `#[fromheader("Name")]`, `#[fromclaim("key")]`. Every marker
 /// except `#[frombody]` accepts an optional source key.
 ///
+/// # Identity fields (fail-closed)
+///
+/// The authenticated identity is a normal request field of type `IdentityUser`.
+/// Anonymous access must be declared explicitly, so a request that silently
+/// works for anonymous callers cannot happen by accident:
+///
+/// | Field | Declaration | Anonymous callers |
+/// |-------|-------------|-------------------|
+/// | `user: IdentityUser` | `#[fromclaim]` | rejected with `401` |
+/// | `user: Option<IdentityUser>` | `#[fromclaim(optional)]` | allowed, filled with `None` |
+///
+/// A bare `#[fromclaim]` on `Option<IdentityUser>` is a compile error, and so is
+/// `#[fromclaim(optional)]` on anything else. A request may carry at most one
+/// identity field. The derive also implements `RequestUser` for that field.
+///
 /// Unmarked fields follow the request method: `GET`/`HEAD`/`DELETE`/`OPTIONS`
 /// bind from the query string, then the route; `POST`/`PUT`/`PATCH` bind from
 /// the JSON body, then the form, then the query string. Headers and claims are
 /// opt-in only. `#[request(queryall)]` forces unmarked fields to the query.
+///
+/// The derive also registers the request type's `TypeId`, so OpenAPI resolves
+/// its parameter metadata unambiguously — a qualified `self_ty`
+/// (`contracts::ListOrdersRequest`) or two same-named request types in
+/// different modules/crates never lose or share parameters.
 #[proc_macro_derive(
     WebxRequestMeta,
     attributes(
@@ -205,7 +225,7 @@ pub fn webx_request_meta(input: TokenStream) -> TokenStream {
 /// #[post("/api/reports/export")]
 /// #[authorize(role = "admin")]
 /// #[authorize(permission = "reports:export")]
-/// impl IRequest<ResponseData> for ExportReportsRequest {}
+/// impl IRequest<Response> for ExportReportsRequest {}
 /// ```
 #[proc_macro_attribute]
 pub fn authorize(_attr: TokenStream, item: TokenStream) -> TokenStream {

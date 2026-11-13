@@ -126,7 +126,7 @@ src/ ──────> rust-webx (伞) ──> host / macros / spa / openapi �
 
 ```toml
 [dependencies]
-rust-webx = "0.8"
+rust-webx = "1.1"
 ```
 
 ```rust

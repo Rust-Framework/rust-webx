@@ -30,7 +30,7 @@ pub struct ListTrackingHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<GetTrackingSummaryRequest, TrackingSummary> for GetTrackingSummaryHandler {
-    async fn handle(&mut self, _: GetTrackingSummaryRequest) -> Result<TrackingSummary> {
+    async fn handle(&mut self, _: GetTrackingSummaryRequest) -> ActionResult<TrackingSummary> {
         let total: i64 = linq!(self.ctx.set::<Tracking>(); count).await.map_ef()?;
 
         let all = self
@@ -69,7 +69,7 @@ impl IRequestHandler<ListTrackingRequest, Vec<docbit_contracts::tracking::Tracki
     async fn handle(
         &mut self,
         _: ListTrackingRequest,
-    ) -> Result<Vec<docbit_contracts::tracking::TrackingModel>> {
+    ) -> ActionResult<Vec<docbit_contracts::tracking::TrackingModel>> {
         let items = linq!(self.ctx.set::<Tracking>(); order_by t.visited_at desc)
             .to_list()
             .await

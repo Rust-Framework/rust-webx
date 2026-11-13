@@ -45,7 +45,7 @@
 use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::sync::Arc;
-use webx_core::auth::{IAuthorizationPolicy, IClaims, IDynamicAuthorizer};
+use webx_core::auth::{DeclaredRules, IAuthorizationPolicy, IClaims, IDynamicAuthorizer};
 use webx_core::error::Result;
 use webx_core::http::IHttpContext;
 use webx_core::middleware::IMiddleware;
@@ -179,7 +179,7 @@ impl IMiddleware for ResourceAuthMiddleware {
                 .await
                 .map(|_| ControlFlow::Continue(())),
             None => Err(webx_core::error::Error::Unauthorized(
-                "no authentication claims found".to_string(),
+                "authentication required".to_string(),
             )),
         }
     }
@@ -217,14 +217,36 @@ impl AuthorizerSet {
     /// Run all registered authorizers in sequence.
     ///
     /// Returns `Ok(())` if ALL authorizers pass. Returns the first `Err` if any denies.
+    ///
+    /// **1.1 compatibility** — new code should call
+    /// [`AuthorizerSet::authorize_with_rules`] instead, which passes the
+    /// endpoint's declared rules. This method is equivalent to that call with an
+    /// empty declaration.
     pub async fn authorize(
         &self,
         claims: &dyn IClaims,
         route_pattern: &str,
         method: &str,
     ) -> Result<()> {
+        self.authorize_with_rules(claims, route_pattern, method, &DeclaredRules::empty())
+            .await
+    }
+
+    /// Run all registered authorizers in sequence, handing them the matched
+    /// endpoint's `#[authorize]` declaration.
+    ///
+    /// Returns `Ok(())` if ALL authorizers pass. Returns the first `Err` if any denies.
+    pub async fn authorize_with_rules(
+        &self,
+        claims: &dyn IClaims,
+        route_pattern: &str,
+        method: &str,
+        declared: &DeclaredRules<'_>,
+    ) -> Result<()> {
         for authorizer in &self.authorizers {
-            authorizer.authorize(claims, route_pattern, method).await?;
+            authorizer
+                .authorize_with_rules(claims, route_pattern, method, declared)
+                .await?;
         }
         Ok(())
     }
@@ -233,35 +255,6 @@ impl AuthorizerSet {
     pub fn is_empty(&self) -> bool {
         self.authorizers.is_empty()
     }
-}
-
-/// Build a [`ResourceAuthorization`] policy from compile-time route metadata.
-///
-/// Deprecated: each endpoint enforces its own `#[authorize]` rules after
-/// routing. A policy stores one role/permission set per path, so it cannot
-/// faithfully represent several rules on one endpoint; use an
-/// `IDynamicAuthorizer` for custom policies.
-#[deprecated(
-    since = "0.6.0",
-    note = "Endpoints enforce their declared authorization rules directly; use IDynamicAuthorizer for custom policies"
-)]
-pub fn build_resource_policy_from_routes() -> ResourceAuthorization {
-    use webx_core::route::scan::RouteEntry;
-
-    let mut policy = ResourceAuthorization::new();
-    for entry in inventory::iter::<RouteEntry> {
-        for rule in entry.authorization {
-            for role in rule.roles {
-                if *role != "authenticated" {
-                    policy = policy.allow_role(entry.path, *role);
-                }
-            }
-            for permission in rule.permissions {
-                policy = policy.allow_permission(entry.path, *permission);
-            }
-        }
-    }
-    policy
 }
 
 /// Result from collecting `IDynamicAuthorizer` instances from DI.

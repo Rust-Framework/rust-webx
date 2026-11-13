@@ -4,14 +4,18 @@
 //!
 //! * `multipart/form-data` binding into a typed request struct (`FormFile`),
 //! * memory vs. disk spooling of uploaded parts,
-//! * `ResponseData::file` downloads with `Content-Disposition`, `ETag`,
+//! * `FileResult::path` downloads with `Content-Disposition`, `ETag`,
 //!   `Last-Modified`, `Range` and conditional requests,
 //! * `HEAD`,
 //! * upload limits (`Form.MaxFileSize`, `Form.MaxRequestSize`, `Form.MaxFieldSize`).
 
+// rust-dix `#[derive(Inject)]` generates `__rdi_construct_*` symbols named after
+// the handler type (same reason docbit/handlers and docbit/host allow this).
+#![allow(non_snake_case)]
+
 use std::net::TcpListener;
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -39,9 +43,14 @@ async fn spawn(configure: impl Fn(&mut HostAppBuilder) + Send + Sync + 'static) 
         let base = format!("http://{addr}");
 
         let configure = std::sync::Arc::clone(&configure);
+        // A fresh download fixture directory per spawned host (i.e. per test),
+        // injected into the download handlers through DI. No test depends on
+        // another test having run first.
+        let download_root = Arc::new(DownloadRoot::new());
         let host = Host::builder()
             .mode(AppMode::Development)
             .no_spa()
+            .register(move |svc| svc.instance(Arc::clone(&download_root)))
             .configure(move |builder| configure(builder))
             .build();
         tokio::spawn(async move {
@@ -95,7 +104,7 @@ struct UploadHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<UploadRequest, UploadSummary> for UploadHandler {
-    async fn handle(&mut self, req: UploadRequest) -> Result<UploadSummary> {
+    async fn handle(&mut self, req: UploadRequest) -> ActionResult<UploadSummary> {
         let bytes = req.avatar.read_bytes().await?;
         Ok(UploadSummary {
             title: req.title,
@@ -110,7 +119,27 @@ impl IRequestHandler<UploadRequest, UploadSummary> for UploadHandler {
     }
 }
 
-static DOWNLOAD_DIR: OnceLock<PathBuf> = OnceLock::new();
+/// The directory the download handlers serve from.
+///
+/// It is built per spawned host and registered in that host's DI container by
+/// [`spawn`], so **every test gets its own fixture directory**. Previously a
+/// process-wide `static DOWNLOAD_DIR` was initialised lazily by whichever test
+/// ran first, which made tests fail when run alone or in a different order
+/// (`resumable_download_reassembles_the_file`, the range tests, ...).
+struct DownloadRoot(PathBuf);
+
+impl DownloadRoot {
+    fn new() -> Self {
+        static NEXT_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir =
+            std::env::temp_dir().join(format!("webx-download-test-{}-{id}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("data.csv"), b"col_a,col_b\n1,2\n").unwrap();
+        std::fs::write(dir.join("big.bin"), big_body()).unwrap();
+        Self(dir)
+    }
+}
 
 #[derive(Debug, Default, Deserialize, WebxRequestMeta)]
 struct DownloadRequest {
@@ -118,17 +147,21 @@ struct DownloadRequest {
 }
 
 #[get("/test/download/{name}")]
-impl IRequest<ResponseData> for DownloadRequest {}
+impl IRequest<Response> for DownloadRequest {}
 
-#[derive(Default)]
-struct DownloadHandler;
+#[derive(Inject)]
+struct DownloadHandler {
+    #[inject]
+    root: Arc<DownloadRoot>,
+}
 
-#[handler]
+#[handler(inject)]
 #[async_trait::async_trait]
-impl IRequestHandler<DownloadRequest, ResponseData> for DownloadHandler {
-    async fn handle(&mut self, req: DownloadRequest) -> Result<ResponseData> {
-        let dir = DOWNLOAD_DIR.get().expect("download dir is initialised");
-        Ok(ResponseData::file(dir.join(&req.name)).download_name("report.csv"))
+impl IRequestHandler<DownloadRequest, Response> for DownloadHandler {
+    async fn handle(&mut self, req: DownloadRequest) -> ActionResult<Response> {
+        Ok(Box::new(
+            FileResult::path(self.root.0.join(&req.name)).download_name("report.csv"),
+        ))
     }
 }
 
@@ -137,17 +170,21 @@ impl IRequestHandler<DownloadRequest, ResponseData> for DownloadHandler {
 struct MissingDownloadRequest;
 
 #[get("/test/download-missing")]
-impl IRequest<ResponseData> for MissingDownloadRequest {}
+impl IRequest<Response> for MissingDownloadRequest {}
 
-#[derive(Default)]
-struct MissingDownloadHandler;
+#[derive(Inject)]
+struct MissingDownloadHandler {
+    #[inject]
+    root: Arc<DownloadRoot>,
+}
 
-#[handler]
+#[handler(inject)]
 #[async_trait::async_trait]
-impl IRequestHandler<MissingDownloadRequest, ResponseData> for MissingDownloadHandler {
-    async fn handle(&mut self, _req: MissingDownloadRequest) -> Result<ResponseData> {
-        let dir = DOWNLOAD_DIR.get().expect("download dir is initialised");
-        Ok(ResponseData::file(dir.join("does-not-exist.csv")))
+impl IRequestHandler<MissingDownloadRequest, Response> for MissingDownloadHandler {
+    async fn handle(&mut self, _req: MissingDownloadRequest) -> ActionResult<Response> {
+        Ok(Box::new(FileResult::path(
+            self.root.0.join("does-not-exist.csv"),
+        )))
     }
 }
 
@@ -157,18 +194,20 @@ impl IRequestHandler<MissingDownloadRequest, ResponseData> for MissingDownloadHa
 struct InlineCsvRequest;
 
 #[get("/test/inline-csv")]
-impl IRequest<ResponseData> for InlineCsvRequest {}
+impl IRequest<Response> for InlineCsvRequest {}
 
 #[derive(Default)]
 struct InlineCsvHandler;
 
 #[handler]
 #[async_trait::async_trait]
-impl IRequestHandler<InlineCsvRequest, ResponseData> for InlineCsvHandler {
-    async fn handle(&mut self, _req: InlineCsvRequest) -> Result<ResponseData> {
-        Ok(ResponseData::text("a,b\n1,2\n")
-            .content_type("text/csv; charset=utf-8")
-            .download_name("导出.csv"))
+impl IRequestHandler<InlineCsvRequest, Response> for InlineCsvHandler {
+    async fn handle(&mut self, _req: InlineCsvRequest) -> ActionResult<Response> {
+        Ok(Box::new(
+            ContentResult::text("a,b\n1,2\n")
+                .content_type("text/csv; charset=utf-8")
+                .download_name("导出.csv"),
+        ))
     }
 }
 
@@ -177,15 +216,15 @@ impl IRequestHandler<InlineCsvRequest, ResponseData> for InlineCsvHandler {
 struct StreamDownloadRequest;
 
 #[get("/test/download-stream")]
-impl IRequest<ResponseData> for StreamDownloadRequest {}
+impl IRequest<Response> for StreamDownloadRequest {}
 
 #[derive(Default)]
 struct StreamDownloadHandler;
 
 #[handler]
 #[async_trait::async_trait]
-impl IRequestHandler<StreamDownloadRequest, ResponseData> for StreamDownloadHandler {
-    async fn handle(&mut self, _req: StreamDownloadRequest) -> Result<ResponseData> {
+impl IRequestHandler<StreamDownloadRequest, Response> for StreamDownloadHandler {
+    async fn handle(&mut self, _req: StreamDownloadRequest) -> ActionResult<Response> {
         // A live producer: nothing is buffered, so the total size is unknown.
         let (reader, mut writer) = tokio::io::duplex(1024);
         tokio::spawn(async move {
@@ -195,9 +234,12 @@ impl IRequestHandler<StreamDownloadRequest, ResponseData> for StreamDownloadHand
             }
         });
 
-        Ok(ResponseData::file_stream(reader, "text/plain")
-            .download_name("stream.txt")
-            .header("x-produced-by", "test"))
+        Ok(Box::new(
+            FileResult::stream(reader)
+                .content_type("text/plain")
+                .download_name("stream.txt")
+                .header("x-produced-by", "test"),
+        ))
     }
 }
 
@@ -207,14 +249,14 @@ impl IRequestHandler<StreamDownloadRequest, ResponseData> for StreamDownloadHand
 struct SeekableDownloadRequest;
 
 #[get("/test/download-seekable")]
-impl IRequest<ResponseData> for SeekableDownloadRequest {}
+impl IRequest<Response> for SeekableDownloadRequest {}
 
 /// The same seekable source, but with `Range` processing switched off.
 #[derive(Debug, Default, Deserialize, WebxRequestMeta)]
 struct NonRangeDownloadRequest;
 
 #[get("/test/download-nonrange")]
-impl IRequest<ResponseData> for NonRangeDownloadRequest {}
+impl IRequest<Response> for NonRangeDownloadRequest {}
 
 const SEEKABLE_BODY: &[u8] = b"0123456789abcdef";
 
@@ -223,17 +265,17 @@ struct SeekableDownloadHandler;
 
 #[handler]
 #[async_trait::async_trait]
-impl IRequestHandler<SeekableDownloadRequest, ResponseData> for SeekableDownloadHandler {
-    async fn handle(&mut self, _req: SeekableDownloadRequest) -> Result<ResponseData> {
+impl IRequestHandler<SeekableDownloadRequest, Response> for SeekableDownloadHandler {
+    async fn handle(&mut self, _req: SeekableDownloadRequest) -> ActionResult<Response> {
         // `Cursor<Vec<u8>>` is the simplest seekable reader; object-storage and
         // database LOB handles behave the same way.
         let cursor = std::io::Cursor::new(SEEKABLE_BODY.to_vec());
-        Ok(ResponseData::with_file(
+        Ok(Box::new(FileResult::with_body(
             FileBody::seekable_stream(cursor, SEEKABLE_BODY.len() as u64)
                 .content_type("application/octet-stream")
                 .entity_tag("\"seekable-v1\"")
                 .download_name("seekable.bin"),
-        ))
+        )))
     }
 }
 
@@ -242,14 +284,14 @@ struct NonRangeDownloadHandler;
 
 #[handler]
 #[async_trait::async_trait]
-impl IRequestHandler<NonRangeDownloadRequest, ResponseData> for NonRangeDownloadHandler {
-    async fn handle(&mut self, _req: NonRangeDownloadRequest) -> Result<ResponseData> {
+impl IRequestHandler<NonRangeDownloadRequest, Response> for NonRangeDownloadHandler {
+    async fn handle(&mut self, _req: NonRangeDownloadRequest) -> ActionResult<Response> {
         let cursor = std::io::Cursor::new(SEEKABLE_BODY.to_vec());
-        Ok(ResponseData::with_file(
+        Ok(Box::new(FileResult::with_body(
             FileBody::seekable_stream(cursor, SEEKABLE_BODY.len() as u64)
                 .content_type("application/octet-stream")
                 .enable_range_processing(false),
-        ))
+        )))
     }
 }
 
@@ -258,19 +300,6 @@ const BIG_LEN: usize = 64 * 1024 + 7;
 
 fn big_body() -> Vec<u8> {
     (0..BIG_LEN).map(|index| (index % 251) as u8).collect()
-}
-
-fn download_dir() -> PathBuf {
-    DOWNLOAD_DIR
-        .get_or_init(|| {
-            let dir =
-                std::env::temp_dir().join(format!("webx-download-test-{}", std::process::id()));
-            std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(dir.join("data.csv"), b"col_a,col_b\n1,2\n").unwrap();
-            std::fs::write(dir.join("big.bin"), big_body()).unwrap();
-            dir
-        })
-        .clone()
 }
 
 // ---------------------------------------------------------------------------
@@ -532,7 +561,6 @@ async fn oversized_text_field_is_rejected_with_413() {
 
 #[tokio::test]
 async fn file_download_sets_headers_and_streams_the_body() {
-    let _ = download_dir();
     let base = spawn(|_| {}).await;
 
     let resp = reqwest::Client::new()
@@ -575,7 +603,6 @@ async fn file_download_sets_headers_and_streams_the_body() {
 
 #[tokio::test]
 async fn range_request_returns_partial_content() {
-    let _ = download_dir();
     let base = spawn(|_| {}).await;
     let client = reqwest::Client::new();
 
@@ -619,7 +646,6 @@ async fn range_request_returns_partial_content() {
 
 #[tokio::test]
 async fn unsatisfiable_range_returns_416_with_content_range() {
-    let _ = download_dir();
     let base = spawn(|_| {}).await;
 
     let resp = reqwest::Client::new()
@@ -642,7 +668,6 @@ async fn unsatisfiable_range_returns_416_with_content_range() {
 
 #[tokio::test]
 async fn conditional_get_returns_304() {
-    let _ = download_dir();
     let base = spawn(|_| {}).await;
     let client = reqwest::Client::new();
     let url = format!("{base}/test/download/data.csv");
@@ -678,7 +703,6 @@ async fn conditional_get_returns_304() {
 
 #[tokio::test]
 async fn head_request_reports_headers_without_a_body() {
-    let _ = download_dir();
     let base = spawn(|_| {}).await;
 
     let resp = reqwest::Client::new()
@@ -701,7 +725,6 @@ async fn head_request_reports_headers_without_a_body() {
 
 #[tokio::test]
 async fn missing_download_target_returns_404() {
-    let _ = download_dir();
     let base = spawn(|_| {}).await;
 
     let resp = reqwest::Client::new()
@@ -830,7 +853,6 @@ async fn resumable_download_reassembles_the_file() {
 
 #[tokio::test]
 async fn if_range_with_a_stale_validator_restarts_from_the_whole_file() {
-    let _ = download_dir();
     let base = spawn(|_| {}).await;
     let url = format!("{base}/test/download/data.csv");
 
@@ -851,7 +873,6 @@ async fn if_range_with_a_stale_validator_restarts_from_the_whole_file() {
 
 #[tokio::test]
 async fn if_range_rejects_weak_validators() {
-    let _ = download_dir();
     let base = spawn(|_| {}).await;
     let url = format!("{base}/test/download/data.csv");
 
@@ -870,7 +891,6 @@ async fn if_range_rejects_weak_validators() {
 
 #[tokio::test]
 async fn if_range_with_a_matching_validator_serves_the_range() {
-    let _ = download_dir();
     let base = spawn(|_| {}).await;
     let client = reqwest::Client::new();
     let url = format!("{base}/test/download/data.csv");
@@ -923,7 +943,6 @@ async fn if_range_with_a_matching_validator_serves_the_range() {
 #[tokio::test]
 async fn multi_range_returns_multipart_byteranges() {
     let body = big_body();
-    let _ = download_dir();
     let base = spawn(|_| {}).await;
 
     let resp = reqwest::Client::new()
@@ -980,7 +999,6 @@ async fn multi_range_returns_multipart_byteranges() {
 
 #[tokio::test]
 async fn duplicate_ranges_are_coalesced_into_one_part() {
-    let _ = download_dir();
     let base = spawn(|_| {}).await;
 
     let resp = reqwest::Client::new()
@@ -1007,7 +1025,6 @@ async fn duplicate_ranges_are_coalesced_into_one_part() {
 #[tokio::test]
 async fn excessive_range_count_falls_back_to_the_whole_file() {
     let body = big_body();
-    let _ = download_dir();
     let base = spawn(|_| {}).await;
 
     // Nine disjoint parts is past the cap; all of them are satisfiable, so the
@@ -1031,7 +1048,6 @@ async fn excessive_range_count_falls_back_to_the_whole_file() {
 
 #[tokio::test]
 async fn unsatisfiable_members_are_dropped_from_a_range_set() {
-    let _ = download_dir();
     let base = spawn(|_| {}).await;
 
     // Only the first member overlaps the representation; the rest must not turn
@@ -1227,4 +1243,46 @@ async fn seekable_stream_download_serves_ranges_and_validators() {
         "none"
     );
     assert_eq!(no_range.text().await.unwrap(), "0123456789abcdef");
+}
+
+// ---------------------------------------------------------------------------
+// Response header names are case-insensitive
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Default, Deserialize, WebxRequestMeta)]
+struct HeaderCaseRequest;
+
+#[get("/test/header-case")]
+impl IRequest<Response> for HeaderCaseRequest {}
+
+#[derive(Default)]
+struct HeaderCaseHandler;
+
+#[handler]
+#[async_trait::async_trait]
+impl IRequestHandler<HeaderCaseRequest, Response> for HeaderCaseHandler {
+    async fn handle(&mut self, _req: HeaderCaseRequest) -> ActionResult<Response> {
+        // Different casing than the framework's `content-type`: it must replace
+        // the default value instead of appending a second header.
+        Ok(Box::new(
+            ContentResult::text("a,b\n").header("Content-Type", "text/csv; charset=utf-8"),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn response_header_names_are_case_insensitive() {
+    let base = spawn(|_| {}).await;
+    let resp = reqwest::get(format!("{base}/test/header-case"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 200);
+
+    let values: Vec<_> = resp.headers().get_all("content-type").iter().collect();
+    assert_eq!(
+        values.len(),
+        1,
+        "content-type must not be duplicated: {values:?}"
+    );
+    assert_eq!(values[0], "text/csv; charset=utf-8");
 }

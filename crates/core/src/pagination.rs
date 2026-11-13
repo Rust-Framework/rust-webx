@@ -43,7 +43,7 @@ impl PagedRequest {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct PagedResponse<T: Serialize> {
+pub struct PagedResult<T: Serialize> {
     pub items: Vec<T>,
     pub total: u64,
     pub page: u32,
@@ -51,7 +51,7 @@ pub struct PagedResponse<T: Serialize> {
     pub total_pages: u32,
 }
 
-impl<T: Serialize> PagedResponse<T> {
+impl<T: Serialize> PagedResult<T> {
     pub fn new(items: Vec<T>, total: u64, page: u32, page_size: u32) -> Self {
         let total_pages = if page_size > 0 {
             total.div_ceil(page_size as u64) as u32

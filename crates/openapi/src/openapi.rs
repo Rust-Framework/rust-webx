@@ -22,9 +22,10 @@ pub fn generate_openapi_spec(
     version: &str,
     localizer: &dyn IStringLocalizer,
 ) -> JsonValue {
-    let request_params = collect_request_params();
+    let request_index = RequestParams::collect();
     let mut paths = serde_json::Map::new();
     let mut tags_set = BTreeSet::new();
+    let mut schema_names = BTreeSet::new();
 
     for entry in inventory::iter::<RouteEntry> {
         let entry = entry.clone();
@@ -40,7 +41,7 @@ pub fn generate_openapi_spec(
         tags_set.insert(tag.clone());
 
         let mut parameters = Vec::new();
-        let mut has_body = false;
+        let mut body_params: Vec<ParamMeta> = Vec::new();
         let mut form_params: Vec<ParamMeta> = Vec::new();
 
         // An unmarked field (`source == ""`) is a body field on a method that
@@ -51,7 +52,8 @@ pub fn generate_openapi_spec(
             HttpMethod::Post | HttpMethod::Put | HttpMethod::Patch
         );
 
-        for param in merge_params(entry.handler_type, entry.params, &request_params) {
+        let request_params = request_index.for_route(entry.req_type_id, entry.handler_type);
+        for param in merge_params(entry.params, request_params) {
             let source = match param.source {
                 "" if body_method => "body",
                 "" => "query",
@@ -62,7 +64,7 @@ pub fn generate_openapi_spec(
                 // An upload endpoint describes its fields as multipart parts;
                 // the generic JSON body is not applicable.
                 "form" => form_params.push(param),
-                "body" => has_body = true,
+                "body" => body_params.push(param),
                 // Claims come from the principal, not from the request.
                 "claim" => {}
                 _ => {
@@ -83,7 +85,7 @@ pub fn generate_openapi_spec(
         let mut operation = json!({
             "operationId": operation_id,
             "summary": summary,
-            "responses": build_responses(entry.rsp_type),
+            "responses": build_responses(entry.rsp_type, &mut schema_names),
             "tags": [tag],
         });
 
@@ -105,14 +107,15 @@ pub fn generate_openapi_spec(
                     }
                 }
             });
-        } else if has_body {
+        } else if body_method && !body_params.is_empty() {
+            // Only write methods carry a JSON body. A read method (GET/DELETE/…)
+            // cannot bind these fields at runtime, so no request body is
+            // advertised for it.
             operation["requestBody"] = json!({
-                "required": true,
+                "required": body_params.iter().any(|param| param.required),
                 "content": {
                     "application/json": {
-                        "schema": {
-                            "type": "object",
-                        }
+                        "schema": body_schema(&body_params),
                     }
                 }
             });
@@ -128,6 +131,25 @@ pub fn generate_openapi_spec(
 
     let tags: Vec<JsonValue> = tags_set.iter().map(|t| json!({"name": t})).collect();
 
+    // The body shape of a DTO is not reflected at runtime (Rust has no
+    // reflection), so a `$ref` would dangle. Emit one placeholder component per
+    // referenced name: the document stays valid, and the endpoint's own
+    // `rsp_type` still names the type a reader should look up in the code.
+    let schemas: serde_json::Map<String, JsonValue> = schema_names
+        .into_iter()
+        .map(|name| {
+            (
+                name.clone(),
+                json!({
+                    "type": "object",
+                    "description": format!(
+                        "Placeholder for `{name}` — see the Rust type for its fields."
+                    ),
+                }),
+            )
+        })
+        .collect();
+
     json!({
         "openapi": "3.0.3",
         "info": {
@@ -137,6 +159,7 @@ pub fn generate_openapi_spec(
         "tags": tags,
         "paths": paths,
         "components": {
+            "schemas": schemas,
             "securitySchemes": {
                 "bearerAuth": {
                     "type": "http",
@@ -148,12 +171,45 @@ pub fn generate_openapi_spec(
     })
 }
 
-fn collect_request_params() -> HashMap<&'static str, &'static [ParamMeta]> {
-    let mut map = HashMap::new();
-    for entry in inventory::iter::<RequestParamEntry> {
-        map.insert(entry.request_type, entry.params);
+/// Request type → parameter metadata, indexed by `TypeId` first and by bare
+/// name only as a fallback for hand-written entries.
+struct RequestParams {
+    by_type: HashMap<std::any::TypeId, &'static [ParamMeta]>,
+    by_name: HashMap<&'static str, &'static [ParamMeta]>,
+}
+
+impl RequestParams {
+    fn collect() -> Self {
+        let mut by_type = HashMap::new();
+        let mut by_name = HashMap::new();
+        for entry in inventory::iter::<RequestParamEntry> {
+            by_name.insert(entry.request_type, entry.params);
+            // `TypeId::of::<()>()` is the "no type id" sentinel of hand-written
+            // entries (`RouteEntry::new`); it must not shadow a real type.
+            if entry.req_type_id != std::any::TypeId::of::<()>() {
+                by_type.insert(entry.req_type_id, entry.params);
+            }
+        }
+        Self { by_type, by_name }
     }
-    map
+
+    /// The parameter metadata for one route's request type.
+    ///
+    /// The `TypeId` is authoritative: a qualified `self_ty`
+    /// (`contracts::ListOrdersRequest`) and two same-named request types in
+    /// different modules or crates can never resolve to the wrong entry. The
+    /// request type name is a compatibility fallback for hand-written entries,
+    /// whose route entry carries the `()` sentinel instead of a real type id.
+    fn for_route(
+        &self,
+        req_type_id: std::any::TypeId,
+        request_type: &'static str,
+    ) -> Option<&'static [ParamMeta]> {
+        self.by_type
+            .get(&req_type_id)
+            .copied()
+            .or_else(|| self.by_name.get(request_type).copied())
+    }
 }
 
 /// Merge route-level params (path from the route template) with the request
@@ -164,14 +220,13 @@ fn collect_request_params() -> HashMap<&'static str, &'static [ParamMeta]> {
 /// struct's type hint wins, so `{id}` documents as `integer` when the field is
 /// an integer.
 fn merge_params(
-    request_type: &'static str,
     route_params: &'static [ParamMeta],
-    request_params: &HashMap<&'static str, &'static [ParamMeta]>,
+    request_params: Option<&'static [ParamMeta]>,
 ) -> Vec<ParamMeta> {
     let mut merged: Vec<ParamMeta> = route_params.to_vec();
 
-    if let Some(extra) = request_params.get(request_type) {
-        for param in *extra {
+    if let Some(extra) = request_params {
+        for param in extra {
             match merged
                 .iter_mut()
                 .find(|seen| seen.name == param.name && seen.source == param.source)
@@ -220,21 +275,56 @@ fn form_schema(params: &[ParamMeta]) -> JsonValue {
     })
 }
 
+/// Build the JSON request body schema from the field-level metadata.
+///
+/// Only entries carrying a `json_key` become named properties. A body field
+/// without one (`#[serde(flatten)]`) spreads its inner properties into the
+/// object, which this metadata cannot enumerate: those keys are reported via
+/// `additionalProperties: true` while the field's requiredness still counts
+/// towards `requestBody.required`.
+fn body_schema(params: &[ParamMeta]) -> JsonValue {
+    let mut properties = serde_json::Map::new();
+    let mut required = Vec::new();
+    let mut opaque = false;
+
+    for param in params {
+        match param.json_key {
+            Some(key) => {
+                properties.insert(key.to_string(), body_property_schema(param.type_hint));
+                if param.required {
+                    required.push(json!(key));
+                }
+            }
+            None => opaque = true,
+        }
+    }
+
+    let mut schema = json!({ "type": "object" });
+    if !properties.is_empty() {
+        schema["properties"] = JsonValue::Object(properties);
+        schema["required"] = json!(required);
+    }
+    if opaque {
+        schema["additionalProperties"] = json!(true);
+    }
+    schema
+}
+
+/// The schema of one JSON body property, from its type hint.
+fn body_property_schema(type_hint: &str) -> JsonValue {
+    match type_hint {
+        "binary" => json!({ "type": "string", "format": "binary" }),
+        "array" => json!({ "type": "array" }),
+        other => json!({ "type": other }),
+    }
+}
+
 /// Build a responses object based on the response type name.
-fn build_responses(rsp_type: &str) -> JsonValue {
-    let schema = if rsp_type == "()" || rsp_type == "unknown" {
-        json!({ "type": "object" })
-    } else if rsp_type == "String" {
-        json!({ "type": "string" })
-    } else if rsp_type.starts_with("Vec<") {
-        let inner = &rsp_type[4..rsp_type.len() - 1];
-        json!({
-            "type": "array",
-            "items": { "$ref": format!("#/components/schemas/{}", inner) }
-        })
-    } else {
-        json!({ "$ref": format!("#/components/schemas/{}", rsp_type) })
-    };
+///
+/// `schema_names` collects every referenced component so the caller can emit a
+/// placeholder schema for it (this generator cannot reflect DTO fields).
+fn build_responses(rsp_type: &str, schema_names: &mut BTreeSet<String>) -> JsonValue {
+    let schema = response_schema(rsp_type, schema_names);
 
     json!({
         "200": {
@@ -247,6 +337,83 @@ fn build_responses(rsp_type: &str) -> JsonValue {
         "404": { "description": "Resource not found" },
         "500": { "description": "Internal server error" },
     })
+}
+
+/// The success-body schema for one declared response type.
+fn response_schema(rsp_type: &str, schema_names: &mut BTreeSet<String>) -> JsonValue {
+    if rsp_type == "()" || rsp_type == "unknown" {
+        return json!({ "type": "object" });
+    }
+    if last_type_segment(rsp_type) == "String" {
+        return json!({ "type": "string" });
+    }
+    // Response-control endpoints choose status, headers and body at runtime, so
+    // the document can only say "opaque". Detection mirrors
+    // `is_raw_response_type` in `rust-webx-macros`
+    // (`crates/macros/src/endpoint.rs`): the last path segment is `Response`
+    // (bare or qualified) or the type mentions `IActionResult`. Otherwise a
+    // `$ref` would point at the wrapper type instead of the response the
+    // handler actually writes.
+    if is_response_control_type(rsp_type) {
+        return json!({
+            "type": "object",
+            "description": "Response written by the handler (IActionResult: status, headers and body are runtime values).",
+        });
+    }
+    if let Some(inner) = rsp_type
+        .strip_prefix("Vec<")
+        .and_then(|rest| rest.strip_suffix('>'))
+    {
+        return json!({
+            "type": "array",
+            "items": schema_ref(inner, schema_names),
+        });
+    }
+    schema_ref(rsp_type, schema_names)
+}
+
+/// The last segment of a (possibly qualified) Rust type name.
+fn last_type_segment(rsp_type: &str) -> &str {
+    rsp_type.rsplit("::").next().unwrap_or(rsp_type).trim()
+}
+
+/// Whether the declared response type is the framework's response-control type.
+///
+/// Mirrors `is_raw_response_type` in `rust-webx-macros` so the generated spec
+/// and the runtime agree; keep the two in sync.
+fn is_response_control_type(rsp_type: &str) -> bool {
+    last_type_segment(rsp_type) == "Response" || rsp_type.contains("IActionResult")
+}
+
+/// A `$ref` to a placeholder component, named after the Rust type.
+fn schema_ref(rsp_type: &str, schema_names: &mut BTreeSet<String>) -> JsonValue {
+    let name = component_name(rsp_type);
+    schema_names.insert(name.clone());
+    json!({ "$ref": format!("#/components/schemas/{}", name) })
+}
+
+/// Turn a Rust type name into an OpenAPI component key.
+///
+/// Component keys allow `[A-Za-z0-9._-]` only, so generic parameters and paths
+/// (`Vec<UserDto>`, `contracts::UserDto`) are flattened to underscores.
+fn component_name(rsp_type: &str) -> String {
+    let mut name = String::with_capacity(rsp_type.len());
+    let mut last_underscore = false;
+    for ch in rsp_type.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '.' || ch == '-' {
+            name.push(ch);
+            last_underscore = false;
+        } else if !last_underscore {
+            name.push('_');
+            last_underscore = true;
+        }
+    }
+    let trimmed = name.trim_matches('_');
+    if trimmed.is_empty() {
+        "Unknown".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 /// Extract a tag name from a path for controller-style grouping.

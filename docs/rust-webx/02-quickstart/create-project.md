@@ -16,7 +16,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-rust-webx = "0.8"
+rust-webx = "1.1"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 async-trait = "0.1"

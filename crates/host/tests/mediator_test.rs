@@ -19,11 +19,11 @@
 
 use rust_dix::ServiceCollection;
 use std::sync::{Arc, Mutex};
-use webx_core::error::{Error, Result as LrwfResult};
+use webx_core::error::{ActionResult, Error, Result as LrwfResult};
 use webx_core::handler::{IEventHandler, IRequestHandler};
 use webx_core::mediator::Mediator;
 use webx_core::mediator::{IEventRequest, IMediator, IRequest};
-use webx_core::route::scan::HandlerRegistration;
+use webx_core::route::scan::{HandlerCache, HandlerRegistration};
 
 // --- Request / Response Types ---
 
@@ -46,7 +46,7 @@ struct HelloHandler;
 
 #[async_trait::async_trait]
 impl IRequestHandler<HelloRequest, HelloResponse> for HelloHandler {
-    async fn handle(&mut self, _req: HelloRequest) -> LrwfResult<HelloResponse> {
+    async fn handle(&mut self, _req: HelloRequest) -> ActionResult<HelloResponse> {
         Ok(HelloResponse {
             message: "hello".into(),
         })
@@ -96,7 +96,7 @@ struct FailingHandler;
 
 #[async_trait::async_trait]
 impl IRequestHandler<FailingHelloRequest, HelloResponse> for FailingHandler {
-    async fn handle(&mut self, _req: FailingHelloRequest) -> LrwfResult<HelloResponse> {
+    async fn handle(&mut self, _req: FailingHelloRequest) -> ActionResult<HelloResponse> {
         Err(Error::Internal("handler failure".into()))
     }
 }
@@ -169,9 +169,37 @@ fn build_provider() -> Arc<rust_dix::ServiceProvider> {
     ServiceCollection::new().build().unwrap()
 }
 
+/// `Mediator` driven in-process over the compiled handler registry.
+///
+/// 1.0 removed the task-local dispatch runtime: the provider and registry are
+/// explicit handles, exactly as `Host::build` wires them.
+struct TestMediator {
+    mediator: Mediator,
+}
+
+impl TestMediator {
+    fn new(provider: Arc<rust_dix::ServiceProvider>) -> Self {
+        Self {
+            mediator: Mediator::new(provider, Arc::new(HandlerCache::build())),
+        }
+    }
+
+    async fn send<T, R>(&self, req: T) -> LrwfResult<R>
+    where
+        T: IRequest<R> + Send + 'static,
+        R: Send + 'static,
+    {
+        self.mediator.send(req).await
+    }
+
+    async fn publish<T: IEventRequest>(&self, event: T) -> LrwfResult<()> {
+        self.mediator.publish(event).await
+    }
+}
+
 #[tokio::test]
 async fn mediator_send_success() {
-    let mediator = Mediator::new(build_provider());
+    let mediator = TestMediator::new(build_provider());
     let result = mediator.send(HelloRequest).await;
     let rsp = result.expect("send should succeed");
     assert_eq!(rsp.message, "hello");
@@ -179,7 +207,7 @@ async fn mediator_send_success() {
 
 #[tokio::test]
 async fn mediator_send_handler_failure() {
-    let mediator = Mediator::new(build_provider());
+    let mediator = TestMediator::new(build_provider());
     let result = mediator.send(FailingHelloRequest).await;
     assert!(result.is_err());
     match result.unwrap_err() {
@@ -196,7 +224,7 @@ impl IRequest<UnregisteredResponse> for UnregisteredRequest {}
 
 #[tokio::test]
 async fn mediator_send_handler_not_registered() {
-    let mediator = Mediator::new(build_provider());
+    let mediator = TestMediator::new(build_provider());
     let result = mediator.send(UnregisteredRequest).await;
     assert!(result.is_err());
     match result.unwrap_err() {
@@ -220,7 +248,7 @@ async fn mediator_publish_single_handler() {
         })
         .build()
         .unwrap();
-    let mediator = Mediator::new(provider);
+    let mediator = TestMediator::new(provider);
     mediator
         .publish(TestEvent {
             payload: "event-1".into(),
@@ -252,7 +280,7 @@ async fn mediator_publish_multiple_handlers() {
         })
         .build()
         .unwrap();
-    let mediator = Mediator::new(provider);
+    let mediator = TestMediator::new(provider);
     mediator
         .publish(TestEvent {
             payload: "multi".into(),
@@ -272,7 +300,7 @@ async fn mediator_publish_handler_returns_error() {
         .singleton::<dyn IEventHandler<TestEvent>>(|_| Arc::new(FailingEventHandler))
         .build()
         .unwrap();
-    let mediator = Mediator::new(provider);
+    let mediator = TestMediator::new(provider);
     let result = mediator
         .publish(TestEvent {
             payload: "will-fail".into(),
@@ -283,7 +311,7 @@ async fn mediator_publish_handler_returns_error() {
 
 #[tokio::test]
 async fn mediator_publish_empty_handler_list() {
-    let mediator = Mediator::new(build_provider());
+    let mediator = TestMediator::new(build_provider());
     let result = mediator
         .publish(TestEvent {
             payload: "no-handlers".into(),
@@ -394,7 +422,7 @@ async fn mediator_send_uses_per_call_scope_for_scoped_services() {
         })
         .build()
         .unwrap();
-    let mediator = Mediator::new(provider);
+    let mediator = TestMediator::new(provider);
 
     let r1 = mediator
         .send(ScopeProbeRequest)
@@ -419,168 +447,4 @@ async fn mediator_send_uses_per_call_scope_for_scoped_services() {
     // Across sends, a new scope means a fresh scoped instance.
     assert_eq!(r1.first_id, 1, "first send should observe instance #1");
     assert_eq!(r2.first_id, 2, "second send should observe instance #2");
-}
-
-// --- Pipeline behavior chain tests ---
-//
-// Verifies P0-3: IPipelineBehavior chain construction and execution.
-// Behaviors wrap the handler in a MediatR-style chain: each behavior can
-// inspect/modify the request, short-circuit, or pass through to the next.
-
-use webx_core::pipeline::{BoxedNextFn, IPipelineBehavior};
-
-struct BehaviorProbeRequest;
-
-#[derive(Debug, serde::Serialize, serde::Deserialize, PartialEq)]
-struct BehaviorProbeResponse {
-    message: String,
-    source: String,
-}
-
-impl IRequest<BehaviorProbeResponse> for BehaviorProbeRequest {}
-
-#[derive(Default)]
-struct BehaviorProbeHandler;
-
-#[async_trait::async_trait]
-impl IRequestHandler<BehaviorProbeRequest, BehaviorProbeResponse> for BehaviorProbeHandler {
-    async fn handle(&mut self, _req: BehaviorProbeRequest) -> LrwfResult<BehaviorProbeResponse> {
-        Ok(BehaviorProbeResponse {
-            message: "from-handler".into(),
-            source: "handler".into(),
-        })
-    }
-}
-
-fn __factory_behavior_probe_handler(
-    _resolver: &dyn rust_dix::IServiceResolver,
-) -> LrwfResult<Box<dyn std::any::Any + Send>> {
-    Ok(Box::new(BehaviorProbeHandler) as Box<dyn std::any::Any + Send>)
-}
-
-fn __call_behavior_probe_handler(
-    handler: Box<dyn std::any::Any + Send>,
-    request: Box<dyn std::any::Any + Send>,
-) -> std::pin::Pin<
-    Box<dyn std::future::Future<Output = LrwfResult<Box<dyn std::any::Any + Send>>> + Send>,
-> {
-    Box::pin(async move {
-        let mut h = *handler
-            .downcast::<BehaviorProbeHandler>()
-            .map_err(|_| Error::Internal("Handler downcast failed".into()))?;
-        let req = *request
-            .downcast::<BehaviorProbeRequest>()
-            .map_err(|_| Error::Internal("Request downcast failed".into()))?;
-        let result: BehaviorProbeResponse = h.handle(req).await?;
-        Ok(Box::new(result) as Box<dyn std::any::Any + Send>)
-    })
-}
-
-inventory::submit! {
-    HandlerRegistration {
-        req_type_id: std::any::TypeId::of::<BehaviorProbeRequest>(),
-        req_type_name: "BehaviorProbeRequest",
-        factory: __factory_behavior_probe_handler,
-        call: __call_behavior_probe_handler,
-    }
-}
-
-/// Behavior that records the order it was called relative to the handler.
-struct TrackingBehavior {
-    called: Arc<AtomicU32>,
-}
-
-#[async_trait::async_trait]
-impl IPipelineBehavior for TrackingBehavior {
-    async fn handle(
-        &self,
-        req: Box<dyn std::any::Any + Send>,
-        next: BoxedNextFn,
-    ) -> LrwfResult<Box<dyn std::any::Any + Send>> {
-        self.called.fetch_add(1, Ordering::SeqCst);
-        next(req).await
-    }
-}
-
-/// Behavior that short-circuits the chain without calling next.
-struct ShortCircuitBehavior;
-
-#[async_trait::async_trait]
-impl IPipelineBehavior for ShortCircuitBehavior {
-    async fn handle(
-        &self,
-        _req: Box<dyn std::any::Any + Send>,
-        _next: BoxedNextFn,
-    ) -> LrwfResult<Box<dyn std::any::Any + Send>> {
-        Ok(Box::new(BehaviorProbeResponse {
-            message: "short-circuited".into(),
-            source: "behavior".into(),
-        }))
-    }
-}
-
-#[tokio::test]
-async fn mediator_send_pipeline_behavior_executes_before_handler() {
-    let behavior_called = Arc::new(AtomicU32::new(0));
-    let behavior = Arc::new(TrackingBehavior {
-        called: Arc::clone(&behavior_called),
-    });
-
-    let provider = ServiceCollection::new()
-        .singleton::<dyn IPipelineBehavior>(move |_| {
-            Arc::clone(&behavior) as Arc<dyn IPipelineBehavior>
-        })
-        .build()
-        .unwrap();
-    let mediator = Mediator::new(provider);
-
-    let rsp = mediator
-        .send(BehaviorProbeRequest)
-        .await
-        .expect("send failed");
-
-    assert_eq!(
-        behavior_called.load(Ordering::SeqCst),
-        1,
-        "behavior should be called once"
-    );
-    assert_eq!(rsp.source, "handler", "response should come from handler");
-    assert_eq!(rsp.message, "from-handler");
-}
-
-#[tokio::test]
-async fn mediator_send_pipeline_behavior_can_short_circuit() {
-    let provider = ServiceCollection::new()
-        .singleton::<dyn IPipelineBehavior>(|_| {
-            Arc::new(ShortCircuitBehavior) as Arc<dyn IPipelineBehavior>
-        })
-        .build()
-        .unwrap();
-    let mediator = Mediator::new(provider);
-
-    let rsp = mediator
-        .send(BehaviorProbeRequest)
-        .await
-        .expect("send failed");
-
-    assert_eq!(
-        rsp.source, "behavior",
-        "response should come from behavior (short-circuit)"
-    );
-    assert_eq!(rsp.message, "short-circuited");
-}
-
-#[tokio::test]
-async fn mediator_send_pipeline_empty_chain_works() {
-    // No behaviors registered — chain is just the terminal handler.
-    let provider = build_provider();
-    let mediator = Mediator::new(provider);
-
-    let rsp = mediator
-        .send(BehaviorProbeRequest)
-        .await
-        .expect("send failed");
-
-    assert_eq!(rsp.source, "handler");
-    assert_eq!(rsp.message, "from-handler");
 }

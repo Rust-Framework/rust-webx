@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────
 # rust-webx crate publish script
 #
@@ -11,8 +11,8 @@
 #   ./publish.sh --check      # Check only (cargo publish --dry-run)
 #
 # Order (must respect dependency graph):
-#   1. rust-webx-core     (no internal deps)
-#   2. rust-webx-macros   (no internal deps)
+#   1. rust-webx-macros   (no internal deps)
+#   2. rust-webx-core     (no internal deps)
 #   3. rust-webx-build    (no internal deps; build-dependency of apps)
 #   4. rust-webx-spa      (depends on rust-webx-core)
 #   5. rust-webx-openapi  (depends on rust-webx-core)
@@ -20,7 +20,10 @@
 #   7. rust-webx          (depends on all above, umbrella crate)
 # ─────────────────────────────────────────────────────────────────
 
-set -e
+# `pipefail` is required: the gate commands below pipe into `tail`, and without
+# it a failing `cargo clippy`/`test` would only be observed as `tail`'s status
+# 0 — the release preflight would report success on a red tree.
+set -euo pipefail
 
 DO_PUBLISH=false
 DRY_RUN=true
@@ -58,22 +61,11 @@ bump_version() {
 # rewrites path deps to registry deps, so on a fresh version bump it fails for
 # dependents purely because the deps are not live yet — not because the crate
 # is broken. These helpers let the check mode tell those two cases apart.
+# `index_path` / `index_has` / `workspace_version` / `wait_for_index` are shared
+# with the release workflow (`scripts/crates-index.sh`) so the two paths cannot
+# drift apart.
 
-index_path() {
-    local name="$1" len=${#1}
-    case "$len" in
-        1) echo "1/$name" ;;
-        2) echo "2/$name" ;;
-        3) echo "3/${name:0:1}/$name" ;;
-        *) echo "${name:0:2}/${name:2:2}/$name" ;;
-    esac
-}
-
-index_has() {
-    local name="$1" version="$2"
-    curl -fsS "https://index.crates.io/$(index_path "$name")" 2>/dev/null \
-        | grep -q "\"vers\":\"${version}\""
-}
+. "$(dirname "$0")/scripts/crates-index.sh"
 
 # Internal dependencies of a crate, in the order they appear in the workspace.
 internal_deps() {
@@ -94,25 +86,6 @@ internal_deps_ready() {
         index_has "$dep" "$version" || return 1
     done
     return 0
-}
-
-workspace_version() {
-    sed -n -E 's/^version = "(.*)"/\1/p' Cargo.toml | head -1
-}
-
-wait_for_index() {
-    local name="$1" version
-    version="$(workspace_version)"
-    for attempt in $(seq 1 60); do
-        if index_has "$name" "$version"; then
-            echo "  ✓ ${name} ${version} is visible in the index"
-            return 0
-        fi
-        echo "  … waiting for ${name} ${version} in the index (attempt ${attempt}/60)"
-        sleep 5
-    done
-    echo "  ✗ ${name} ${version} never appeared in the index"
-    return 1
 }
 
 # ── Publish a single crate ──

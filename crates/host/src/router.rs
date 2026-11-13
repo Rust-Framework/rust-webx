@@ -93,6 +93,38 @@ impl Router {
             || self.head.at(path).is_some()
             || self.options.at(path).is_some()
     }
+
+    /// The methods registered for `path`, for `Allow` headers and OPTIONS.
+    ///
+    /// `HEAD` is included when `GET` is registered because the router serves
+    /// HEAD through the GET route (RFC 9110 §9.3.2). The list is empty when the
+    /// path is unknown.
+    pub fn allowed_methods(&self, path: &str) -> Vec<&'static str> {
+        let mut methods = Vec::new();
+        if self.get.at(path).is_some() {
+            methods.push("GET");
+            methods.push("HEAD");
+        }
+        if self.post.at(path).is_some() {
+            methods.push("POST");
+        }
+        if self.put.at(path).is_some() {
+            methods.push("PUT");
+        }
+        if self.patch.at(path).is_some() {
+            methods.push("PATCH");
+        }
+        if self.delete.at(path).is_some() {
+            methods.push("DELETE");
+        }
+        if self.head.at(path).is_some() && !methods.contains(&"HEAD") {
+            methods.push("HEAD");
+        }
+        if self.options.at(path).is_some() {
+            methods.push("OPTIONS");
+        }
+        methods
+    }
 }
 
 #[async_trait::async_trait]

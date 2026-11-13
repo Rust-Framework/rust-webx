@@ -10,7 +10,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![CI](https://github.com/Rust-Framework/rust-webx/actions/workflows/ci.yml/badge.svg)](https://github.com/Rust-Framework/rust-webx/actions/workflows/ci.yml)
-![Rust](https://img.shields.io/badge/rust-%3E%3D%201.81-orange.svg)
+![Rust](https://img.shields.io/badge/rust-%3E%3D%201.95-orange.svg)
 
 </div>
 
@@ -62,11 +62,11 @@ rust-webx **不是** 全栈 UI 框架（可搭配任意前端）、**不是** OR
 - **编译时自动扫描** — 通过 `inventory` 在编译时收集路由元数据，在 `Host::build()` 时自动注册。
 - **零配置 Handler 注册** — `#[handler]` 属性宏自动向 DI 容器注册 Handler。
 - **认证与授权** — JWT Bearer 认证 + 声明式规则组授权（`#[authorize]`）。
-- **身份即请求字段** — `#[fromclaim] user: IdentityUser` 把认证身份（id、名称、邮箱、租户、角色）绑定为普通字段；Handler 不再解析 token，`Option<IdentityUser>` 覆盖匿名端点。
+- **身份即请求字段** — `#[fromclaim] user: IdentityUser` 把认证身份（id、名称、邮箱、租户、角色）绑定为普通字段；Handler 不再解析 token。`#[fromclaim(optional)] viewer: Option<IdentityUser>` 覆盖匿名端点（匿名访问必须显式声明）。
 - **端点元数据服务** — `IEndpointCatalog` 在运行时暴露全部端点（`all()` / `localized()`），权限同步、管理导航与 OpenAPI 共用一份元数据。
 - **本地化** — `#[display]` / `#[description]` / `#[category]` 存资源键，全局 `Culture.Default` 决定语言；支持 JSON 资源文件或 `include_str!` 嵌入。
 - **开箱即用的生产能力** — 优雅关闭、动态健康检查、安全响应头、请求 ID、CORS、TLS、速率限制、压缩、OpenAPI + SPA 托管。
-- **文件上传与下载** — `multipart/form-data` 以类型化 `FormFile` 绑定（流式接收、按阈值落盘、大小受控）；下载提供对齐 ASP.NET Core 的 `File(...)` 家族（`file` / `file_stream` / `file_seekable_stream`），自带 `Content-Disposition`、`ETag`、`Last-Modified` 与 `Range`。
+- **文件上传与下载** — `multipart/form-data` 以类型化 `FormFile` 绑定（流式接收、按阈值落盘、大小受控）；下载提供对齐 ASP.NET Core 的结果类型（`FileResult::path` / `::stream` / `::seekable_stream`、`ContentResult`），自带 `Content-Disposition`、`ETag`、`Last-Modified` 与 `Range`。
 - **ORM 无关** — 框架不依赖 `rust-ef`；`docbit` 参考应用用极少量胶水代码接入。
 
 ## 架构
@@ -101,7 +101,7 @@ rust-webx **不是** 全栈 UI 框架（可搭配任意前端）、**不是** OR
 
 ```
 rust-webx/
-├── Cargo.toml                 # workspace 根 (v0.8.0)
+├── Cargo.toml                 # workspace 根 (v1.1.1)
 ├── crates/
 │   ├── core/                  # rust-webx-core  — trait 与配置
 │   ├── host/                  # rust-webx-host  — Host 构建器、中间件管道
@@ -138,7 +138,7 @@ struct HelloHandler;
 #[handler] // 编译时注册进 DI 容器
 #[async_trait]
 impl IRequestHandler<HelloRequest, String> for HelloHandler {
-    async fn handle(&self, _req: HelloRequest) -> Result<String> {
+    async fn handle(&mut self, _req: HelloRequest) -> ActionResult<String> {
         Ok("Hello, World! Welcome to Rust WebX.".to_string())
     }
 }
@@ -273,7 +273,7 @@ docker compose -f docbit/docker-compose.yml --env-file docbit/.env up --build
 | OpenAPI UI | 仅 Development 模式 |
 | 速率限制 / 压缩 | 应用层 opt-in（`use_middleware`） |
 | 文件上传（流式、落盘、限流） | ✅ |
-| 文件下载（`File(...)` 形态、流式、`Content-Disposition`、`ETag`、`Range`、`304`、`HEAD`） | ✅ |
+| 文件下载（`FileResult` 形态、流式、`Content-Disposition`、`ETag`、`Range`、`304`、`HEAD`） | ✅ |
 | TLS | ✅ 通过 `App.Urls` + `Tls.CertPath/KeyPath` |
 
 ## 环境变量
@@ -291,19 +291,29 @@ docker compose -f docbit/docker-compose.yml --env-file docbit/.env up --build
 
 | `Error` 变体 | HTTP 状态码 | 说明 |
 |--------------|------------|------|
-| `Error::NotFound(msg)` | 404 | 资源未找到 |
-| `Error::Validation(msg)` | 400 | 校验失败 |
-| `Error::Serialization(e)` | 400 | （反）序列化错误 |
-| `Error::Http(msg)` | 400 | HTTP 协议错误（含 401 未认证、403 禁止访问） |
+| `Error::Http(msg)` | 400 | HTTP 协议错误 |
+| `Error::Status(code, msg)` | `code` | 显式指定状态码 |
+| `Error::Unauthorized(msg)` | 401 | 认证失败 / 缺少令牌 |
+| `Error::Forbidden(msg)` | 403 | 权限不足 |
 | `Error::Di(msg)` | 500 | DI 容器错误 |
+| `Error::Routing(msg)` | 404 | 路由错误 |
+| `Error::Serialization(e)` | 400 | （反）序列化错误 |
+| `Error::ResponseSerialization(e)` | 500 | 响应序列化失败（服务端 DTO 缺陷） |
+| `Error::State(msg)` | 500 | 服务端状态 / 编程错误 |
 | `Error::Internal(msg)` | 500 | 内部错误 |
 | `Error::Message(msg)` | 500 | 通用错误消息 |
-| `Error::Routing(msg)` | 404 | 路由错误 |
+| `Error::Validation(msg)` | 400 | 校验失败 |
+| `Error::NotFound(msg)` | 404 | 资源未找到 |
+| `Error::Conflict(msg)` | 409 | 乐观并发 / 状态冲突 |
+| `Error::PayloadTooLarge(msg)` | 413 | 请求体或上传文件超限 |
+| `Error::UnsupportedMediaType(msg)` | 415 | 请求内容类型不受支持 |
+| `Error::Problem(details)` | `details.status` | 字段级绑定/校验问题，携带 `errors` |
 
 ## 文档
 
 - **rust-webx 开发者手册** — 位于 [`docs/rust-webx/`](docs/rust-webx/INDEX.md) 的渐进式披露书籍（16 章，中文）：入门、快速上手、架构、DI 与生命周期、中间件、中介者与事件、认证与安全、配置、生产、项目结构、扩展、最佳实践、案例研究与迁移指南。
-- **rust-ef 参考** — 位于 [`docs/rust-ef/`](docs/rust-ef/INDEX.md) 的 ORM 手册，`docbit` 示例使用。
+- **从 1.0.x 升级** — 1.1.0 用 `IActionResult` 族替换了 `ResponseData`，请按 [1.0.2 → 1.1.0 迁移指南](docs/rust-webx/16-migration/upgrade-to-1.1.md) 改写。
+- **rust-ef 参考** — ORM 手册随 [`rust-ef`](https://crates.io/crates/rust-ef) crate 维护（见其 [docs.rs](https://docs.rs/rust-ef) 文档），`docbit` 示例使用。
 - `docbit` 参考应用也把这些文档作为实时网站提供（`GET /api/docs/rust-webx/...`）。Monorepo 开发时 `DocService` 按 slug 实时解析 sibling 仓库文档，无需将 sibling 文档复制到 `rust-webx/docs/`；standalone 发布时 `docbit/publish.*` 在打包时从源仓库复制文档进 bundle。可通过 `RUST_FRAMEWORK_ROOT` 显式指定 monorepo 根目录。
 
 ## 许可证

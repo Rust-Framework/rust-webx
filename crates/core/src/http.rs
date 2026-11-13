@@ -166,7 +166,7 @@ impl std::fmt::Debug for FileBody {
 ///
 /// Build one with [`FileBody::path`], [`FileBody::stream`] or
 /// [`FileBody::seekable_stream`], then hand it to
-/// [`crate::route::scan::ResponseData::with_file`].
+/// [`crate::action::FileResult::with_body`].
 pub struct FileBody {
     /// Where the bytes come from.
     pub source: FileSource,
@@ -424,6 +424,52 @@ pub trait IHttpContext: IClaimsExt + Send {
     fn request_mut(&mut self) -> &mut dyn IHttpRequest;
     fn response(&self) -> &dyn IHttpResponse;
     fn response_mut(&mut self) -> &mut dyn IHttpResponse;
+
+    /// Take a request rejection recorded while the context was built.
+    ///
+    /// The host records failures it can detect from the request line alone —
+    /// currently an oversized declared `Content-Length` — instead of writing a
+    /// response eagerly. The request then still travels through the middleware
+    /// pipeline (CORS, security headers, access log, metrics, rate limiting)
+    /// and the innermost handler turns the value into the normal error
+    /// response. A context without such a record returns `None`.
+    fn take_early_error(&mut self) -> Option<crate::error::Error> {
+        None
+    }
+
+    /// DI handles of the host that dispatched this request.
+    ///
+    /// Endpoint adapters use this to build the `Mediator` over the host's
+    /// service provider and handler registry. Contexts created by tests or
+    /// alternative hosts return `None`; dispatching an endpoint through such a
+    /// context is a programming error and is reported as `Error::Internal`.
+    fn dispatch_runtime(
+        &self,
+    ) -> Option<&std::sync::Arc<crate::dispatch_runtime::DispatchRuntime>> {
+        None
+    }
+
+    /// The trace id assigned to this request, if any.
+    ///
+    /// Set by the tracing middleware (`webx_host::RequestTracing`) **before**
+    /// the endpoint runs, so the binder, the handler and the response header
+    /// all agree on one value. Handlers read it through
+    /// [`RequestContext::trace_id`](crate::request_context::RequestContext::trace_id),
+    /// which the endpoint adapter scopes from this value.
+    ///
+    /// Returns `None` for alternative hosts that never assign a trace id and
+    /// for requests that did not pass the tracing middleware.
+    fn trace_id(&self) -> Option<&str> {
+        None
+    }
+
+    /// Record the trace id for this request.
+    ///
+    /// Called by the tracing middleware's `invoke`, which then echoes the same
+    /// value in the `x-trace-id` response header. The default is a no-op so
+    /// existing/alternative context implementations keep compiling; such hosts
+    /// simply have no trace id.
+    fn set_trace_id(&mut self, _trace_id: &str) {}
 }
 
 /// HTTP request abstraction.
@@ -438,6 +484,15 @@ pub trait IHttpRequest: Send {
     fn path(&self) -> &str;
     fn header(&self, name: &str) -> Option<&str>;
     fn query(&self) -> &HashMap<String, String>;
+
+    /// The peer address of the client connection, when the host exposes it.
+    ///
+    /// Rate limiting and audit code use this. The default reports `None` so
+    /// that test contexts and alternative hosts keep compiling; a `None` peer
+    /// must never be treated as "the same client as everyone else".
+    fn remote_addr(&self) -> Option<std::net::SocketAddr> {
+        None
+    }
 
     /// Every value per query key, in the order they appeared.
     ///
@@ -466,7 +521,8 @@ pub trait IHttpRequest: Send {
     /// Return the request body as a UTF-8 string.
     async fn body_text(&mut self) -> Result<String> {
         let bytes = self.body_bytes().await?;
-        String::from_utf8(bytes).map_err(|e| crate::error::Error::Http(e.to_string()))
+        String::from_utf8(bytes)
+            .map_err(|_| crate::error::Error::Validation("request body is not valid UTF-8".into()))
     }
 
     /// The request's media type, without parameters (e.g. `"multipart/form-data"`).
@@ -509,9 +565,13 @@ pub trait IHttpResponse: Send {
     /// Get the current HTTP status code.
     fn status(&self) -> u16;
     fn set_status(&mut self, code: u16);
+    /// Set (or replace) a response header.
+    ///
+    /// Header names are case-insensitive: setting the same name with different
+    /// casing replaces the previous value instead of emitting a duplicate.
     fn set_header(&mut self, key: &str, value: &str);
 
-    /// Remove a response header by name. Default is a no-op.
+    /// Remove a response header by name (case-insensitive). Default is a no-op.
     fn remove_header(&mut self, _key: &str) {}
 
     /// Whether a response body has been written.
@@ -606,11 +666,16 @@ fn percent_encode_ext_value(value: &str) -> String {
 }
 
 /// Helper: build a JSON response by serializing a value and writing it.
+///
+/// A serialization failure is a server-side defect in the response DTO, so it
+/// surfaces as [`Error::ResponseSerialization`](crate::error::Error::ResponseSerialization)
+/// (500), not the request-parse
+/// [`Error::Serialization`](crate::error::Error::Serialization) (400).
 pub async fn write_json_response<T: serde::Serialize + Send>(
     resp: &mut dyn IHttpResponse,
     value: &T,
 ) -> Result<()> {
-    let json = serde_json::to_vec(value)?;
+    let json = serde_json::to_vec(value).map_err(crate::error::Error::ResponseSerialization)?;
     resp.set_header("content-type", "application/json");
     resp.write_bytes(json).await
 }
@@ -622,6 +687,3 @@ pub async fn read_json_body<T: serde::de::DeserializeOwned>(
     let bytes = req.body_bytes().await?;
     serde_json::from_slice(&bytes).map_err(crate::error::Error::Serialization)
 }
-
-/// Type alias for JSON responses in controller methods.
-pub type Json<T> = T;

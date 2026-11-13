@@ -33,11 +33,13 @@
 | `List<IFormFile>` | `Vec<FormFile>` | 多文件上传 |
 | `IFormFile.CopyToAsync()` | `FormFile::save_as()` / `copy_to()` | 落盘 |
 | `FormOptions.MultipartBodyLengthLimit` | `Form.MaxFileSize` / `Form.MaxRequestSize` | 上传大小限制 |
-| `Results.File()` / `PhysicalFile()` | `ResponseData::file()` | 文件下载 |
-| `File(Stream, ...)` | `ResponseData::file_stream()` | 流式下载 |
-| `File(Stream, ...)` + `enableRangeProcessing` | `ResponseData::file_seekable_stream()` | 可 seek 流的断点续传 |
-| `fileDownloadName` | `ResponseData::download_name()` | 下载文件名 |
-| `enableRangeProcessing` | `ResponseData::enable_range_processing()` | 断点续传开关 |
+| `Results.File()` / `PhysicalFile()` | `FileResult::path()` | 文件下载 |
+| `File(Stream, ...)` | `FileResult::stream()` | 流式下载 |
+| `File(Stream, ...)` + `enableRangeProcessing` | `FileResult::seekable_stream()` | 可 seek 流的断点续传 |
+| `fileDownloadName` | `FileResult::download_name()` | 下载文件名 |
+| `enableRangeProcessing` | `FileResult::enable_range_processing()` | 断点续传开关 |
+| `IActionResult` | `IActionResult`（`Response` = `Box<dyn IActionResult>`） | 完全掌控响应 |
+| `Content(...)` / `Text(...)` | `ContentResult` | 文本/字节响应 |
 | `appsettings.json` | `appsettings.json` | 配置文件 |
 | `IConfiguration` | `AppOptions` | 配置访问 |
 | `ProblemDetails` | `ProblemDetails` | RFC 7807 |
@@ -48,7 +50,7 @@
 | `UseCors()` | `use_cors()` | CORS |
 | `UseStaticFiles()` | `use_spa()` | 静态文件 |
 | `Controller` | 无（Request 即端点） | 路由处理 |
-| `ActionResult<T>` | `Result<T>` | 返回类型 |
+| `ActionResult<T>` | `ActionResult<T>`（= `Result<T, Error>` 别名） | 返回类型 |
 | `NotFound()` | `Error::NotFound` | 404 |
 | `BadRequest()` | `Error::Validation` | 400 |
 | `IApplicationBuilder` | `HostBuilder`（`use_middleware` / `use_middleware_with`） | 应用配置 |
@@ -62,11 +64,11 @@
 | `State<T>` | DI 注入 | 状态共享 |
 | `Extension<T>` | DI 注入 | 请求扩展 |
 | `middleware::from_fn` | `IMiddleware` | 中间件 |
-| `Json<T>` | 自动序列化 | JSON 响应 |
+| `Json<T>` | `ActionResult<T>` 自动序列化 | JSON 响应 |
 | `Multipart` extractor | 请求结构体字段声明为 `FormFile` | multipart 上传 |
 | `field.bytes().await` | `FormFile::read_bytes().await` | 读取上传内容 |
-| `ServeFile` / `ServeDir` | `ResponseData::file()` / `use_spa()` | 文件与静态资源 |
-| `Body::from_stream` | `ResponseData::file_stream()` | 流式响应体 |
+| `ServeFile` / `ServeDir` | `FileResult::path()` / `use_spa()` | 文件与静态资源 |
+| `Body::from_stream` | `FileResult::stream()` | 流式响应体 |
 | `StatusCode` | `Error` 变体 | 状态码 |
 | `AppState` | `ServiceCollection` | 应用状态 |
 | `axum::serve` | `Host::run()` | 启动服务 |
@@ -83,7 +85,7 @@
 | 配置 | appsettings | 手动/env | appsettings 内置 |
 | 后台任务 | IHostedService | tokio::spawn | IHostedService |
 | 文件上传 | IFormFile | Multipart | FormFile |
-| 文件下载 | Results.File | ServeFile | ResponseData::file |
+| 文件下载 | Results.File | ServeFile | FileResult::path |
 
 ## 小结
 

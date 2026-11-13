@@ -675,9 +675,12 @@ async fn e2e_static_files_are_served_from_the_binary_without_wwwroot() {
         .unwrap();
     assert_eq!(conditional.status().as_u16(), 304);
 
-    // An unknown path falls back to the embedded index.html for SPA routing.
+    // A browser navigation to an unknown client-side route falls back to the
+    // embedded index.html for SPA routing (the fallback is post-routing and
+    // only applies when the client asked for HTML).
     let fallback = client
         .get(format!("{base}/some/client/route"))
+        .header("accept", "text/html")
         .send()
         .await
         .unwrap();
@@ -687,6 +690,15 @@ async fn e2e_static_files_are_served_from_the_binary_without_wwwroot() {
         etag,
         "the fallback must be the embedded index.html"
     );
+
+    // A data client asking for the same path gets a real 404, not the shell.
+    let not_found = client
+        .get(format!("{base}/some/client/route"))
+        .header("accept", "application/json")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(not_found.status().as_u16(), 404);
 
     server.teardown().await;
     tokio::time::sleep(Duration::from_millis(300)).await;

@@ -77,7 +77,7 @@ struct ProtectedHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<ProtectedRequest, String> for ProtectedHandler {
-    async fn handle(&mut self, _: ProtectedRequest) -> Result<String> {
+    async fn handle(&mut self, _: ProtectedRequest) -> ActionResult<String> {
         Ok("admin-area".to_string())
     }
 }
@@ -95,7 +95,7 @@ struct MeHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<MeRequest, String> for MeHandler {
-    async fn handle(&mut self, _: MeRequest) -> Result<String> {
+    async fn handle(&mut self, _: MeRequest) -> ActionResult<String> {
         Ok("authenticated".to_string())
     }
 }
@@ -133,7 +133,7 @@ async fn auth_no_token_returns_401() {
     assert_eq!(resp.status().as_u16(), 401);
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["status"], 401);
-    assert_eq!(body["detail"], "Authentication required");
+    assert_eq!(body["detail"], "authentication required");
     assert_eq!(body["title"], "Unauthorized");
 }
 
@@ -174,6 +174,10 @@ async fn auth_wrong_role_returns_403() {
     assert_eq!(body["required_roles"], serde_json::json!(["admin"]));
 }
 
+/// #18: an expired token does not fail authentication — it degrades the request
+/// to anonymous. The protected route's `#[authorize(role = "admin")]` then sees
+/// no principal and the single unauthorized writer answers 401 with the
+/// challenge (detail "authentication required", no decoder internals).
 #[tokio::test]
 async fn auth_expired_token_returns_401() {
     let port = find_free_port();
@@ -188,13 +192,25 @@ async fn auth_expired_token_returns_401() {
         .unwrap();
 
     assert_eq!(resp.status().as_u16(), 401);
+    let challenge = resp
+        .headers()
+        .get("www-authenticate")
+        .expect("401 must carry a WWW-Authenticate challenge")
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        challenge.to_ascii_lowercase().contains("bearer"),
+        "got {challenge}"
+    );
+
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["status"], 401);
-    assert!(body["detail"]
-        .as_str()
-        .unwrap()
-        .contains("invalid or expired token"));
     assert_eq!(body["title"], "Unauthorized");
+    assert_eq!(
+        body["detail"], "authentication required",
+        "an expired token is anonymous, not a token-validation error"
+    );
 }
 
 #[tokio::test]

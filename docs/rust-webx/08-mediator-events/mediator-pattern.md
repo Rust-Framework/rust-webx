@@ -22,7 +22,7 @@ pub struct CreateOrderHandler {
     mediator: Arc<Mediator>,
 }
 
-async fn handle(&mut self, req: CreateOrderRequest) -> Result<OrderDto> {
+async fn handle(&mut self, req: CreateOrderRequest) -> ActionResult<OrderDto> {
     let order = self.create_order(&req).await?;
 
     // 调度另一个请求

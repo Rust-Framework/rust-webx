@@ -27,7 +27,7 @@ impl IRequest<SettingsDto> for UpdateSettingsRequest {}
 #[post("/api/reports/export")]
 #[authorize(role = "admin")]
 #[authorize(permission = "reports:export")]
-impl IRequest<ResponseData> for ExportReportsRequest {}
+impl IRequest<Response> for ExportReportsRequest {}
 ```
 
 ## 模型：规则组
@@ -57,7 +57,7 @@ pub struct AuthorizeRule {
 元数据在编译期写入 `RouteEntry`；`StubEndpoint` 在 dispatch 前逐条检查 claims：
 
 - 没有规则（`authorization` 为空）→ 公开端点；
-- 有规则但无 claims → `401 Unauthorized`；
+- 有规则但无 claims → `401 Unauthorized`（统一由 host 写出，带 `WWW-Authenticate: Bearer` 挑战）；
 - 有 claims 但存在未满足的规则 → `403 Forbidden`，problem 扩展字段为
   `required_roles` / `required_permissions`（第一条未满足规则的数组）。
 
@@ -65,7 +65,7 @@ pub struct AuthorizeRule {
 
 `add_authentication()` 只负责启用 JWT 认证，让受保护端点能拿到 claims；`#[authorize]` 的规则
 由 endpoint 自己执行，不依赖额外开关。未启用认证时，受保护路由因无 claims 返回 401，规则
-并非只收集不执行。旧的 `.use_resource_authorization()` 已过时，端点直接执行规则。
+并非只收集不执行。
 
 ## 在 Handler 里读取身份
 
@@ -85,7 +85,7 @@ impl IRequest<ProfileView> for UpdateProfileRequest {}
 ```
 
 Handler 里 `req.user.id`、`req.user.tenant_id`、`req.user.is_in_role("admin")` 随取随用；
-匿名可访问的端点用 `Option<IdentityUser>`。详见
+匿名可访问的端点用 `#[fromclaim(optional)] viewer: Option<IdentityUser>`。详见
 [用户身份与多租户](../05-request-pattern/user-identity.md)。
 
 ## 动态授权：IDynamicAuthorizer

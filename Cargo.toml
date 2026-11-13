@@ -20,24 +20,25 @@ members = [
 ]
 
 [workspace.package]
-version = "0.8.0"
+version = "1.2.0"
 edition = "2021"
+rust-version = "1.95"
 license = "MIT"
 authors = ["Start"]
 homepage = "https://github.com/Rust-Framework/rust-webx"
 repository = "https://github.com/Rust-Framework/rust-webx"
 documentation = "https://docs.rs/rust-webx"
-description = "rust-webx — A Rust WebApi framework inspired by ASP.NET Core, built on DI + Mediator pattern"
+description = "rust-webx 鈥?A Rust WebApi framework inspired by ASP.NET Core, built on DI + Mediator pattern"
 
 [workspace.dependencies]
 # Internal crates
-rust-webx-core = { version = "0.8.0", path = "crates/core" }
-rust-webx-host = { version = "0.8.0", path = "crates/host" }
-rust-webx-macros = { version = "0.8.0", path = "crates/macros" }
-rust-webx = { version = "0.8.0", path = "crates/webx" }
-rust-webx-spa = { version = "0.8.0", path = "crates/spa" }
-rust-webx-build = { version = "0.8.0", path = "crates/build" }
-rust-webx-openapi = { version = "0.8.0", path = "crates/openapi" }
+rust-webx-core = { version = "1.2.0", path = "crates/core" }
+rust-webx-host = { version = "1.2.0", path = "crates/host" }
+rust-webx-macros = { version = "1.2.0", path = "crates/macros" }
+rust-webx = { version = "1.2.0", path = "crates/webx" }
+rust-webx-spa = { version = "1.2.0", path = "crates/spa" }
+rust-webx-build = { version = "1.2.0", path = "crates/build" }
+rust-webx-openapi = { version = "1.2.0", path = "crates/openapi" }
 
 # Docbit sub-crates
 docbit-contracts = { version = "0.1.0", path = "docbit/contracts" }
@@ -49,14 +50,14 @@ dmbit-contracts = { version = "0.1.0", path = "dmbit/contracts" }
 dmbit-domain = { version = "0.1.0", path = "dmbit/domain" }
 dmbit-handlers = { version = "0.1.0", path = "dmbit/handlers" }
 
-# DI framework (crates.io — no local path required)
-rust-dix = "0.7"
-rust-dix-macros = "0.7"
+# DI framework (crates.io 鈥?no local path required)
+rust-dix = "1.0"
+rust-dix-macros = "1.0"
 
-# rust-ef ORM (rust-dix 0.7 integration via add_dbcontext + owned resolution)
-rust-ef = "1.8.3"
-rust-ef-sqlite = "1.8.3"
-rust-ef-mysql = "1.8.3"
+# rust-ef ORM (rust-ef 2.3 / rust-dix 1.0 integration via add_dbcontext + owned resolution)
+rust-ef = "2.3.0"
+rust-ef-sqlite = "2.3.0"
+rust-ef-mysql = "2.3.0"
 
 # External dependencies
 async-trait = "0.1"
@@ -99,3 +100,34 @@ lto = "fat"
 codegen-units = 1
 strip = true
 panic = "abort"
+
+# 鈹€鈹€ Dev/test build hygiene 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+# Windows MSVC emits one .pdb per linked binary, and with the default
+# `debug = 2` on *every* dependency a single integration-test binary needs
+# ~200 MB (rust-webx full `cargo test --workspace` produced >100 GB of
+# stale artifacts in target/debug over a couple of months).
+#
+# Keep full debug info for workspace crates (stepping through framework code
+# still works) but drop it for third-party deps: their type/line tables are
+# what gets copied into every test binary's .pdb.
+[profile.dev.package."*"]
+debug = false
+
+[profile.test.package."*"]
+debug = false
+
+# Workspace crates keep line tables (file:line in backtraces) without the
+# full type information that dominates MSVC .pdb size.
+[profile.dev]
+debug = "line-tables-only"
+# Incremental compilation is the other space hog: every source change creates
+# a new session directory under target/debug/incremental (~40 GB observed).
+# Opt back in for a heavy edit cycle with CARGO_PROFILE_DEV_INCREMENTAL=true.
+incremental = false
+
+[profile.test]
+debug = "line-tables-only"
+incremental = false
+
+[profile.bench]
+incremental = false

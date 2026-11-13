@@ -63,8 +63,25 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all --check
 
+      - name: Check docs consistency
+        run: bash scripts/check-docs.sh
+
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+  msrv:
+    name: MSRV (1.95)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # rustup ships with the ubuntu runner; avoid depending on an action tag for
+      # a fixed toolchain version.
+      - name: Install MSRV toolchain
+        run: rustup toolchain install 1.95.0 --profile minimal
+
+      - name: Check workspace on MSRV
+        run: cargo +1.95.0 check --workspace --locked
 
   audit:
     name: Security Audit

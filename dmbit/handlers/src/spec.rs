@@ -72,7 +72,7 @@ pub struct DeleteSpecHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ListSpecsRequest, Vec<SpecModel>> for ListSpecsHandler {
-    async fn handle(&mut self, _: ListSpecsRequest) -> Result<Vec<SpecModel>> {
+    async fn handle(&mut self, _: ListSpecsRequest) -> ActionResult<Vec<SpecModel>> {
         let products = linq!(self.ctx.set::<Product>();).to_list().await.map_ef()?;
         let mut specs = linq!(self.ctx.set::<Spec>();).to_list().await.map_ef()?;
         specs.sort_by_key(|a| (a.sort_order, a.id.clone()));
@@ -99,7 +99,7 @@ impl IRequestHandler<ListSpecsRequest, Vec<SpecModel>> for ListSpecsHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ListProductSpecsRequest, Vec<SpecModel>> for ListProductSpecsHandler {
-    async fn handle(&mut self, req: ListProductSpecsRequest) -> Result<Vec<SpecModel>> {
+    async fn handle(&mut self, req: ListProductSpecsRequest) -> ActionResult<Vec<SpecModel>> {
         let product_id = parse_id(&req.id)?;
         let name = product_name(&mut self.ctx, &product_id).await?;
 
@@ -126,7 +126,7 @@ impl IRequestHandler<ListProductSpecsRequest, Vec<SpecModel>> for ListProductSpe
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<GetSpecRequest, SpecModel> for GetSpecHandler {
-    async fn handle(&mut self, req: GetSpecRequest) -> Result<SpecModel> {
+    async fn handle(&mut self, req: GetSpecRequest) -> ActionResult<SpecModel> {
         let id = parse_id(&req.id)?;
         let s = crate::ef_require_by_id!(self.ctx, Spec, id, Error::NotFound("规格不存在".into()));
         let name = product_name(&mut self.ctx, &s.product_id).await?;
@@ -137,7 +137,7 @@ impl IRequestHandler<GetSpecRequest, SpecModel> for GetSpecHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<CreateSpecRequest, SpecModel> for CreateSpecHandler {
-    async fn handle(&mut self, req: CreateSpecRequest) -> Result<SpecModel> {
+    async fn handle(&mut self, req: CreateSpecRequest) -> ActionResult<SpecModel> {
         let code = require_text("规格编码", &req.code, MAX_SPEC_CODE)?;
         let brand = require_text("品牌", &req.brand, MAX_BRAND)?;
         let unit = require_text("单位", &req.unit, MAX_UNIT)?;
@@ -180,7 +180,7 @@ impl IRequestHandler<CreateSpecRequest, SpecModel> for CreateSpecHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<UpdateSpecRequest, SpecModel> for UpdateSpecHandler {
-    async fn handle(&mut self, req: UpdateSpecRequest) -> Result<SpecModel> {
+    async fn handle(&mut self, req: UpdateSpecRequest) -> ActionResult<SpecModel> {
         let id = parse_id(&req.id)?;
         let mut s =
             crate::ef_require_by_id!(self.ctx, Spec, id, Error::NotFound("规格不存在".into()));
@@ -230,7 +230,7 @@ impl IRequestHandler<UpdateSpecRequest, SpecModel> for UpdateSpecHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<DeleteSpecRequest, String> for DeleteSpecHandler {
-    async fn handle(&mut self, req: DeleteSpecRequest) -> Result<String> {
+    async fn handle(&mut self, req: DeleteSpecRequest) -> ActionResult<String> {
         let id = parse_id(&req.id)?;
         let mut s =
             crate::ef_require_by_id!(self.ctx, Spec, id, Error::NotFound("规格不存在".into()));

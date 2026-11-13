@@ -38,7 +38,7 @@ pub struct DeleteCommentHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ListCommentsRequest, Vec<CommentModel>> for ListCommentsHandler {
-    async fn handle(&mut self, req: ListCommentsRequest) -> Result<Vec<CommentModel>> {
+    async fn handle(&mut self, req: ListCommentsRequest) -> ActionResult<Vec<CommentModel>> {
         let blog_id = parse_id(&req.blog_id)?;
         let q = blog_id.clone();
 
@@ -55,7 +55,7 @@ impl IRequestHandler<ListCommentsRequest, Vec<CommentModel>> for ListCommentsHan
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<CreateCommentRequest, CommentModel> for CreateCommentHandler {
-    async fn handle(&mut self, req: CreateCommentRequest) -> Result<CommentModel> {
+    async fn handle(&mut self, req: CreateCommentRequest) -> ActionResult<CommentModel> {
         let user = req.require_user()?;
         let user_id = user.id.clone();
         let user_name = if user.name.is_empty() {
@@ -96,7 +96,7 @@ impl IRequestHandler<CreateCommentRequest, CommentModel> for CreateCommentHandle
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<DeleteCommentRequest, String> for DeleteCommentHandler {
-    async fn handle(&mut self, req: DeleteCommentRequest) -> Result<String> {
+    async fn handle(&mut self, req: DeleteCommentRequest) -> ActionResult<String> {
         let id = parse_id(&req.id)?;
 
         let mut comment = self

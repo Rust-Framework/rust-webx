@@ -1,20 +1,28 @@
-//! Per-request dispatch runtime — instance-scoped provider and handler cache.
+//! Host-level DI handles: the service provider and the handler registry.
 //!
-//! `Host` stores a [`DispatchRuntime`] and scopes it to each HTTP request via
-//! a task-local. Macro-generated dispatch and `Mediator` read from the active
-//! runtime when present, falling back to process-wide globals for backward
-//! compatibility (in-process `Mediator::send` without HTTP context).
+//! Since 1.0 rust-webx passes DI explicitly instead of relying on a task-local
+//! ambient runtime:
+//!
+//! - [`Mediator`](crate::mediator::Mediator) holds the provider and the handler
+//!   registry it was built with;
+//! - [`IHttpContext`](crate::http::IHttpContext) exposes the
+//!   [`DispatchRuntime`] that dispatched the request, so endpoint adapters and
+//!   middleware can open scopes (`provider.scope()`) explicitly;
+//! - background work injects rust-dix's built-in `Arc<dyn ScopeFactory>` and
+//!   calls `ScopeFactory::create_scope()` itself.
+//!
+//! `Host` stores one [`DispatchRuntime`] per instance. There is no process-wide
+//! or task-local fallback: `rust-dix` owns scope lifetime, resolution and
+//! disposal, and rust-webx only keeps the per-host handle.
 
-use std::future::Future;
 use std::sync::Arc;
 
-use crate::route::scan::{try_global_provider, HandlerCache};
-
-tokio::task_local! {
-    static ACTIVE_RUNTIME: Option<Arc<DispatchRuntime>>;
-}
+use crate::route::scan::HandlerCache;
 
 /// Provider + handler registry for one host instance.
+///
+/// This is a plain handle: obtaining the provider or registry requires holding
+/// the runtime (or the `Host` that owns it), never an ambient task-local.
 #[derive(Clone)]
 pub struct DispatchRuntime {
     provider: Arc<rust_dix::ServiceProvider>,
@@ -29,63 +37,73 @@ impl DispatchRuntime {
         }
     }
 
+    /// The host's root service provider (rust-dix).
     pub fn provider(&self) -> &Arc<rust_dix::ServiceProvider> {
         &self.provider
     }
 
+    /// The compiled handler registry of this host.
     pub fn handler_cache(&self) -> &Arc<HandlerCache> {
         &self.handler_cache
     }
 
-    /// Run an async block with this runtime active for the current task.
-    pub async fn run<F, R>(&self, f: F) -> R
-    where
-        F: Future<Output = R>,
-    {
-        ACTIVE_RUNTIME.scope(Some(Arc::new(self.clone())), f).await
+    /// Open a fresh DI scope on this host's provider.
+    ///
+    /// Equivalent to `self.provider().scope()`; exposed for call sites that
+    /// already hold the runtime (HTTP dispatch, middleware, hosted services).
+    pub fn scope(&self) -> rust_dix::Scope {
+        self.provider.scope()
     }
 }
 
-/// Provider for HTTP dispatch and `#[handler(inject)]` factories.
-///
-/// Prefers the active [`DispatchRuntime`] (HTTP requests and hosted services started
-/// by `Host`). Falls back to the deprecated process-wide shim when
-/// [`set_global_provider`](crate::route::scan::set_global_provider) was called manually.
-pub fn dispatch_provider() -> Arc<rust_dix::ServiceProvider> {
-    if let Ok(Some(provider)) =
-        ACTIVE_RUNTIME.try_with(|rt| rt.as_ref().map(|r| Arc::clone(&r.provider)))
-    {
-        return provider;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_dix::ServiceCollection;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Debug)]
+    struct ScopedThing(usize);
+
+    fn runtime_with_scoped_counter() -> (Arc<DispatchRuntime>, Arc<AtomicUsize>) {
+        let created = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&created);
+        let provider = ServiceCollection::new()
+            .scoped::<ScopedThing>(move |_| {
+                let n = counter.fetch_add(1, Ordering::SeqCst);
+                Arc::new(ScopedThing(n))
+            })
+            .build()
+            .expect("provider");
+        (
+            Arc::new(DispatchRuntime::new(
+                provider,
+                Arc::new(HandlerCache::build()),
+            )),
+            created,
+        )
     }
 
-    if let Some(provider) = try_global_provider() {
-        tracing::warn!(
-            "dispatch_provider() using deprecated global ServiceProvider shim; \
-             prefer Host::dispatch_runtime().run() or host.provider()"
+    /// rust-dix owns strict scope validation: the runtime's handle resolves
+    /// Scoped services through an explicit scope, and root resolution fails.
+    #[tokio::test]
+    async fn runtime_scope_is_the_explicit_di_entry_point() {
+        let (runtime, created) = runtime_with_scoped_counter();
+
+        let scope = runtime.scope();
+        let first = scope.get::<ScopedThing>().expect("scoped in scope");
+        let second = scope.get::<ScopedThing>().expect("scoped in scope");
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "Scoped services are cached per scope"
         );
-        return provider;
-    }
+        assert_eq!(first.0, 0, "the scope created the service once");
+        assert_eq!(created.load(Ordering::SeqCst), 1);
 
-    panic!(
-        "No active DispatchRuntime and no deprecated global ServiceProvider. \
-         HTTP and hosted services run inside Host::dispatch_runtime().run(); \
-         for tests use host.dispatch_runtime().run with an async block, or host.provider()."
-    );
-}
-
-/// Handler registry for the active dispatch context.
-///
-/// Prefers the active [`DispatchRuntime`]; falls back to a lazy-built process-wide
-/// registry (inventory is process-wide; contents are identical per host).
-pub fn dispatch_handler_cache() -> Arc<HandlerCache> {
-    if let Ok(Some(cache)) =
-        ACTIVE_RUNTIME.try_with(|rt| rt.as_ref().map(|r| Arc::clone(&r.handler_cache)))
-    {
-        return cache;
-    }
-
-    #[allow(deprecated)]
-    {
-        HandlerCache::get_or_init()
+        let error = runtime
+            .provider()
+            .get::<ScopedThing>()
+            .expect_err("strict scope validation rejects Scoped services from the root");
+        assert!(error.to_string().contains("root provider"), "{error}");
     }
 }

@@ -98,7 +98,7 @@ fn attach_children(
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ListCategoriesRequest, Vec<CategoryTreeNode>> for ListCategoriesHandler {
-    async fn handle(&mut self, _: ListCategoriesRequest) -> Result<Vec<CategoryTreeNode>> {
+    async fn handle(&mut self, _: ListCategoriesRequest) -> ActionResult<Vec<CategoryTreeNode>> {
         let cats = linq!(self.ctx.set::<Category>();)
             .to_list()
             .await
@@ -112,7 +112,7 @@ impl IRequestHandler<ListCategoriesRequest, Vec<CategoryTreeNode>> for ListCateg
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<CreateCategoryRequest, CategoryModel> for CreateCategoryHandler {
-    async fn handle(&mut self, req: CreateCategoryRequest) -> Result<CategoryModel> {
+    async fn handle(&mut self, req: CreateCategoryRequest) -> ActionResult<CategoryModel> {
         let now = now_secs();
         let id = new_id();
 
@@ -130,7 +130,7 @@ impl IRequestHandler<CreateCategoryRequest, CategoryModel> for CreateCategoryHan
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<UpdateCategoryRequest, CategoryModel> for UpdateCategoryHandler {
-    async fn handle(&mut self, req: UpdateCategoryRequest) -> Result<CategoryModel> {
+    async fn handle(&mut self, req: UpdateCategoryRequest) -> ActionResult<CategoryModel> {
         let id = parse_id(&req.id)?;
 
         let mut cat = self
@@ -155,7 +155,7 @@ impl IRequestHandler<UpdateCategoryRequest, CategoryModel> for UpdateCategoryHan
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<DeleteCategoryRequest, String> for DeleteCategoryHandler {
-    async fn handle(&mut self, req: DeleteCategoryRequest) -> Result<String> {
+    async fn handle(&mut self, req: DeleteCategoryRequest) -> ActionResult<String> {
         let id = parse_id(&req.id)?;
 
         let mut cat = self

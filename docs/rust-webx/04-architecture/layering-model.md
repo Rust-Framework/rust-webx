@@ -70,7 +70,7 @@ pub struct LoginHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
-    async fn handle(&mut self, req: LoginRequest) -> Result<AuthResponse> {
+    async fn handle(&mut self, req: LoginRequest) -> ActionResult<AuthResponse> {
         // 领域查询经 DbContext，业务规则留在 domain
         ...
     }

@@ -62,11 +62,13 @@ graph BT
 | `middleware` | `IMiddleware` |
 | `routing` | `IRouter`, `IEndpoint`, `RouteMeta`, `HttpMethod` |
 | `auth` | `IClaims`, `IAuthenticationHandler`, `IAuthorizationPolicy`, `IDynamicAuthorizer` |
-| `error` | `Error`, `Result` |
+| `error` | `Error`, `Result`, `ActionResult` |
+| `action` | `IActionResult`, `Response`, `JsonResult`, `ContentResult`, `FileResult`, `NoContentResult`, `StatusCodeResult` |
 | `config` | `AppOptions`, `appsettings` 加载 |
 | `cache` | `IDistributedCache` |
 | `problem` | `ProblemDetails`, `FieldError` |
-| `pagination` | `PagedRequest`, `PagedResponse` |
+| `pagination` | `PagedRequest`, `PagedResult` |
+| `operation` | `OperationResult`（含 `OperationResult<T>`） |
 
 ### rust-webx-host
 
@@ -92,7 +94,9 @@ graph BT
 
 ### rust-webx-spa
 
-`SpaMiddleware`：托管静态文件，非 API 路径 fallback 到 `index.html`，支持前端 History 路由。
+`SpaMiddleware`：托管静态文件（磁盘 + 编译内嵌资源），支持前端 History 路由。
+`index.html` 回退在**路由未命中之后**执行，且只对显式请求 HTML 的 GET/HEAD 生效：
+`/api/*`、请求数据（`Accept: application/json` / `*/*`）的客户端得到真正的 404，而不是 200 HTML。
 
 ### rust-webx-openapi
 
@@ -104,7 +108,7 @@ graph BT
 
 ```toml
 [dependencies]
-rust-webx = "0.8"
+rust-webx = "1.1"
 ```
 
 ```rust

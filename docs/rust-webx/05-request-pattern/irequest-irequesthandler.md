@@ -18,9 +18,17 @@ where
     T: IRequest<R> + Send + 'static,
     R: Send + 'static,
 {
-    async fn handle(&mut self, req: T) -> Result<R>;
+    async fn handle(&mut self, req: T) -> ActionResult<R>;
 }
 ```
+
+### 返回类型：`ActionResult<T>`
+
+`handle` 返回 **`ActionResult<T>`** —— 框架级类型，对标 ASP.NET Core 的 `ActionResult<T>`：
+`Ok(value)` 是成功的响应数据（框架序列化为 JSON），`Err(webx::Error)` 由框架映射为
+`problem+json` 并用对应状态码写出。它与通用错误别名 `Result<T>` 是同一个类型
+（`ActionResult<T> = Result<T, Error>`），区别只在命名面向"端点动作"：Handler、管道行为、
+`Next::run` 用 `ActionResult<T>`，基础设施代码（host、中间件、缓存）继续用 `Result<T>`。
 
 ## 类型绑定规则（铁律）
 
@@ -50,11 +58,72 @@ impl IRequestHandler<GetUserRequest, UserDto> for GetUserHandler { ... }
 
 ### 响应类型语义
 
+下表是 `ActionResult<T>` 中 `T` 的取值语义。
+
 | 响应类型 | HTTP 行为 |
 |---------|----------|
 | `String`, `UserDto`, `Vec<T>` 等（`Serialize`） | 200 + JSON body |
 | `()` | 204 No Content，空 body |
-| `ResponseData` | Handler 自行掌控状态码、响应头与响应体 |
+| `PagedResult<T>` | 200 + `{items, total, page, page_size, total_pages}` |
+| `OperationResult<T>` | 200 + `{success, status, message, result}` |
+| `OperationResult` | 200 + `{success, status, message}` |
+| `Response` | Handler 返回 `IActionResult`（文件、自定义状态码/头/body） |
+
+`PagedResult<T>` 与 `OperationResult` 是框架随附的两个业务 DTO 信封：列表用前者，
+更新/删除/状态流转等操作结果用后者，业务模块不必再各自定义 `{success, status, message}`。
+
+```rust
+#[put("/users/{id}")]
+impl IRequest<OperationResult<UserDto>> for UpdateUserRequest {}
+
+impl IRequestHandler<UpdateUserRequest, OperationResult<UserDto>> for UpdateUserHandler {
+    async fn handle(&mut self, req: UpdateUserRequest) -> ActionResult<OperationResult<UserDto>> {
+        let user = self.update(req).await?;
+        Ok(OperationResult::ok(user, "user updated"))
+    }
+}
+```
+
+`OperationResult` 的 `status` 是**业务状态码**（错误码、流程状态，含义由业务定义），
+不是 HTTP 状态码；HTTP 状态仍由框架决定——正常返回 `200` + 信封 JSON，
+`Err(webx::Error)` 仍写 `problem+json`（见[错误处理](error-handling.md)）。构造器：
+`ok` / `ok_with_status` / `failed` / `success` / `success_with_status`；不带泛型的
+`OperationResult` 没有 `result` 成员。结果常在业务执行过程中才确定，因此创建后可以继续调整：
+`with_status` / `with_message` / `with_result`（把无数据信封升级为带 `result` 的形态），
+或直接给公开字段赋值。
+
+### 掌控响应：`IActionResult`
+
+`Response` 就是 ASP.NET Core 的 `IActionResult`：把响应类型写成 `Response`，Handler 返回一个
+action result，由结果自己写状态码、响应头与响应体（框架不序列化它）：
+
+```rust
+#[get("/reports/{id}/download")]
+impl IRequest<Response> for DownloadReportRequest {}
+
+impl IRequestHandler<DownloadReportRequest, Response> for DownloadReportHandler {
+    async fn handle(&mut self, req: DownloadReportRequest) -> ActionResult<Response> {
+        let path = self.reports.path_for(&req.id)?;
+        Ok(Box::new(FileResult::path(path).download_name("report.csv")))
+    }
+}
+```
+
+| 结果 | ASP.NET Core 对应 | 用途 |
+|------|------------------|------|
+| `JsonResult<T>` | `JsonResult` | JSON body（普通 DTO 由框架自动用它） |
+| `ContentResult` | `ContentResult` | 文本/HTML/字节，`.content_type(...)`、`.download_name(...)` |
+| `FileResult` | `PhysicalFile(...)` / `File(...)` | 磁盘/流/可 seek 流，自带 Range、ETag、304 |
+| `NoContentResult` | `NoContentResult` | 204 无 body |
+| `StatusCodeResult` | `StatusCodeResult` | 只有状态码 |
+
+`FileResult` 的三种来源：`FileResult::path(p)`、`FileResult::stream(reader)`、
+`FileResult::seekable_stream(reader, len)`；需要完全自定义时用 `FileResult::with_body(FileBody)`。
+文件响应的 HTTP 细节见[文件上传与下载](file-upload-download.md)。
+
+> **响应类型必须按字面写**：宏在展开期按类型名判定「自控响应」（末段为 `Response`，或类型名含
+> `IActionResult`）。请写 `IRequest<Response>` 或 `IRequest<Box<dyn IActionResult>>`；`type Resp =
+> Response;` 这类别名、或把业务 DTO 命名为 `Response`，会被当作普通 JSON 响应并在编译期报错。
 
 ## IRequestHandler 的职责
 
@@ -63,7 +132,7 @@ Handler 是**唯一执行业务逻辑**的地方：
 ```rust
 #[async_trait]
 impl IRequestHandler<CreateUserRequest, UserDto> for CreateUserHandler {
-    async fn handle(&mut self, req: CreateUserRequest) -> Result<UserDto> {
+    async fn handle(&mut self, req: CreateUserRequest) -> ActionResult<UserDto> {
         // 1. 校验（或用 PipelineBehavior）
         // 2. 调用领域服务
         // 3. 返回结果或 Error

@@ -121,20 +121,31 @@ impl ServiceCollectionExt for ServiceCollection {
 
 ## DbContext（rust-ef）
 
-`DbContext` 是 **Scoped** 依赖：每个请求，或每个 `IHostedService::start`，都解析一份自己的实例。
+`DbContext` 是 **Scoped** 依赖：每个请求作用域一份实例；后台任务用自己的 scope。
 
 ```rust
-// Handler：按请求解析
+// Handler：按请求解析（#[handler(inject)] 的 factory 在请求 scope 内 get_owned）
 #[derive(Inject)]
 struct SaveHandler {
     #[inject(owned)]
     ctx: DbContext,
 }
 
-// IHostedService：在框架建立的请求作用域内解析
-let mut ctx: DbContext = dispatch_provider()
-    .get_owned()
-    .map_err(|e| Error::Internal(format!("DbContext resolution failed: {}", e)))?;
+// IHostedService：注入 rust-dix 内建的 ScopeFactory，显式开 scope
+#[derive(Inject)]
+struct DbInitService {
+    #[inject]
+    services: Arc<dyn ScopeFactory>,
+}
+
+async fn start(&self) -> Result<()> {
+    let scope = self.services.create_scope();
+    let mut ctx: DbContext = scope
+        .get_owned()
+        .map_err(|e| Error::Internal(format!("DbContext resolution failed: {}", e)))?;
+    // ...
+    Ok(())
+}
 ```
 
 实体与领域逻辑在 `domain/`；建表由 `ctx.ensure_created()` 在启动时完成，框架不提供版本化迁移。

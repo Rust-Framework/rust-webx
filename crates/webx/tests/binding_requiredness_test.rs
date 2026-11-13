@@ -34,7 +34,7 @@ struct QueryModelHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<QueryModel, serde_json::Value> for QueryModelHandler {
-    async fn handle(&mut self, req: QueryModel) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: QueryModel) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({
             "a": req.a,
             "b": req.b,
@@ -69,7 +69,7 @@ struct HeaderModelHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<HeaderModel, serde_json::Value> for HeaderModelHandler {
-    async fn handle(&mut self, req: HeaderModel) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: HeaderModel) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({
             "id": req.id,
             "required": req.required,
@@ -102,7 +102,7 @@ struct ClaimModelHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<ClaimModel, serde_json::Value> for ClaimModelHandler {
-    async fn handle(&mut self, req: ClaimModel) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: ClaimModel) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({
             "sub": req.sub,
             "roles": req.roles,
@@ -132,7 +132,7 @@ struct FormModelHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<FormModel, serde_json::Value> for FormModelHandler {
-    async fn handle(&mut self, req: FormModel) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: FormModel) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({
             "title": req.title,
             "confirm": req.confirm,
@@ -167,7 +167,7 @@ struct BodyModelHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<BodyModel, serde_json::Value> for BodyModelHandler {
-    async fn handle(&mut self, req: BodyModel) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: BodyModel) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({
             "id": req.id,
             "name": req.name,
@@ -204,7 +204,29 @@ struct CompositeGetHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<CompositeGetModel, serde_json::Value> for CompositeGetHandler {
-    async fn handle(&mut self, _req: CompositeGetModel) -> Result<serde_json::Value> {
+    async fn handle(&mut self, _req: CompositeGetModel) -> ActionResult<serde_json::Value> {
+        Ok(serde_json::json!({}))
+    }
+}
+
+/// An *optional* composite field is just as unbindable on a bodyless method:
+/// it must be a clear 400, never a silent `None`.
+#[derive(Default, Deserialize, WebxRequestMeta)]
+#[allow(dead_code)]
+struct OptionalCompositeGetModel {
+    payload: Option<Payload>,
+}
+
+#[get("/req/composite-optional")]
+impl IRequest<serde_json::Value> for OptionalCompositeGetModel {}
+
+#[derive(Default)]
+struct OptionalCompositeGetHandler;
+
+#[handler]
+#[async_trait::async_trait]
+impl IRequestHandler<OptionalCompositeGetModel, serde_json::Value> for OptionalCompositeGetHandler {
+    async fn handle(&mut self, _req: OptionalCompositeGetModel) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({}))
     }
 }
@@ -237,7 +259,7 @@ struct RenamedHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<RenamedModel, serde_json::Value> for RenamedHandler {
-    async fn handle(&mut self, req: RenamedModel) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: RenamedModel) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({
             "id": req.id,
             "display_name": req.display_name,
@@ -270,7 +292,7 @@ struct FlattenHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<FlattenModel, serde_json::Value> for FlattenHandler {
-    async fn handle(&mut self, req: FlattenModel) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: FlattenModel) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({
             "id": req.id,
             "name": req.name,
@@ -301,7 +323,7 @@ struct NamedModelHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<NamedModel, serde_json::Value> for NamedModelHandler {
-    async fn handle(&mut self, req: NamedModel) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: NamedModel) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({ "user_id": req.user_id, "keyword": req.keyword }))
     }
 }
@@ -323,7 +345,7 @@ struct NamedUploadHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<NamedUpload, serde_json::Value> for NamedUploadHandler {
-    async fn handle(&mut self, req: NamedUpload) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: NamedUpload) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({
             "size": req.picture.size(),
             "caption": req.caption,
@@ -348,7 +370,7 @@ struct StrictHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<StrictModel, serde_json::Value> for StrictHandler {
-    async fn handle(&mut self, req: StrictModel) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: StrictModel) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({ "id": req.id, "name": req.name }))
     }
 }
@@ -370,7 +392,7 @@ struct NullHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<NullModel, serde_json::Value> for NullHandler {
-    async fn handle(&mut self, req: NullModel) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: NullModel) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({ "id": req.id, "name": req.name, "nickname": req.nickname }))
     }
 }
@@ -400,8 +422,65 @@ struct CustomSerdeHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<CustomSerdeModel, serde_json::Value> for CustomSerdeHandler {
-    async fn handle(&mut self, req: CustomSerdeModel) -> Result<serde_json::Value> {
+    async fn handle(&mut self, req: CustomSerdeModel) -> ActionResult<serde_json::Value> {
         Ok(serde_json::json!({ "id": req.id, "name": req.name }))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// OpenAPI metadata for a qualified `self_ty` and same-named request types
+// ---------------------------------------------------------------------------
+
+/// Two request types with the *same bare name* in different modules. The OpenAPI
+/// metadata must be keyed by `TypeId`, not by the type name string.
+mod alpha {
+    use super::*;
+
+    #[derive(Default, Deserialize, WebxRequestMeta)]
+    pub struct DetailRequest {
+        #[fromquery]
+        pub alpha_marker: String,
+    }
+}
+
+mod beta {
+    use super::*;
+
+    #[derive(Default, Deserialize, WebxRequestMeta)]
+    pub struct DetailRequest {
+        #[fromquery]
+        pub beta_marker: String,
+    }
+}
+
+// Both endpoints write a *qualified* `self_ty`, so the route records
+// `alpha::DetailRequest` / `beta::DetailRequest` while the derive records the
+// bare `DetailRequest` — a name lookup would miss both.
+#[get("/req/alpha-detail")]
+impl IRequest<serde_json::Value> for alpha::DetailRequest {}
+
+#[derive(Default)]
+struct AlphaDetailHandler;
+
+#[handler]
+#[async_trait::async_trait]
+impl IRequestHandler<alpha::DetailRequest, serde_json::Value> for AlphaDetailHandler {
+    async fn handle(&mut self, req: alpha::DetailRequest) -> ActionResult<serde_json::Value> {
+        Ok(serde_json::json!({ "alpha_marker": req.alpha_marker }))
+    }
+}
+
+#[get("/req/beta-detail")]
+impl IRequest<serde_json::Value> for beta::DetailRequest {}
+
+#[derive(Default)]
+struct BetaDetailHandler;
+
+#[handler]
+#[async_trait::async_trait]
+impl IRequestHandler<beta::DetailRequest, serde_json::Value> for BetaDetailHandler {
+    async fn handle(&mut self, req: beta::DetailRequest) -> ActionResult<serde_json::Value> {
+        Ok(serde_json::json!({ "beta_marker": req.beta_marker }))
     }
 }
 
@@ -522,6 +601,31 @@ async fn query_invalid_list_element_is_reported() {
     assert_eq!(response.status().as_u16(), 400);
     let errors = problem_errors(response).await;
     assert!(errors["c"].is_array(), "expected `c`, got {errors}");
+}
+
+#[tokio::test]
+async fn query_present_but_empty_list_is_not_a_parse_error() {
+    let base = spawn_host().await;
+
+    // `?c=` / `?d=` mean "present, no values": an empty list, and
+    // `Option<Vec<T>>` distinguishes that (`Some([])`) from absent (`None`).
+    let empty: serde_json::Value = reqwest::get(format!("{base}/req/query?a=x&c=&d="))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(empty["c"], serde_json::json!([]));
+    assert_eq!(empty["d"], serde_json::json!([]));
+
+    // Repeated keys still bind every occurrence.
+    let repeated: serde_json::Value = reqwest::get(format!("{base}/req/query?a=x&d=1&d=2"))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(repeated["d"], serde_json::json!([1, 2]));
 }
 
 // ---------------------------------------------------------------------------
@@ -796,6 +900,22 @@ async fn composite_field_without_a_body_is_a_clear_400() {
 }
 
 #[tokio::test]
+async fn optional_composite_field_without_a_body_is_a_clear_400() {
+    let base = spawn_host().await;
+    let response = reqwest::get(format!("{base}/req/composite-optional"))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status().as_u16(), 400);
+    let problem: serde_json::Value = response.json().await.unwrap();
+    let detail = problem["detail"].as_str().unwrap_or_default();
+    assert!(
+        detail.contains("payload") && detail.contains("composite"),
+        "expected a composite-field explanation, got {problem}"
+    );
+}
+
+#[tokio::test]
 async fn body_honours_rename_all_and_serde_defaults() {
     let base = spawn_host().await;
 
@@ -979,4 +1099,71 @@ async fn openapi_required_flags_match_runtime() {
     assert!(header_flag("X-Required"));
     assert!(!header_flag("X-Optional"));
     assert!(!header_flag("X-List"));
+}
+
+#[tokio::test]
+async fn openapi_documents_json_body_fields() {
+    let base = spawn_host().await;
+    let spec: serde_json::Value = reqwest::get(format!("{base}/api/openapi.json"))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    // A write endpoint documents each body field as a property of the body.
+    let request_body = &spec["paths"]["/req/body/{id}"]["put"]["requestBody"];
+    assert_eq!(request_body["required"], true, "got {request_body}");
+    let schema = &request_body["content"]["application/json"]["schema"];
+    assert_eq!(schema["type"], "object", "got {request_body}");
+    assert_eq!(schema["properties"]["name"]["type"], "string");
+    assert_eq!(schema["properties"]["nickname"]["type"], "string");
+    assert_eq!(schema["properties"]["tags"]["type"], "array");
+    assert_eq!(schema["properties"]["note"]["type"], "string");
+    assert_eq!(schema["properties"]["extra"]["type"], "array");
+    // Only the non-`Option`, no-`#[serde(default)]` field is required.
+    assert_eq!(schema["required"], serde_json::json!(["name"]));
+    assert!(request_body["content"]["multipart/form-data"].is_null());
+
+    // A read method has no body: body-only fields must not fake one.
+    assert!(spec["paths"]["/req/composite"]["get"]["requestBody"].is_null());
+    assert!(spec["paths"]["/req/composite-optional"]["get"]["requestBody"].is_null());
+
+    // Multipart endpoints keep their form schema and gain no JSON body.
+    let form_body = &spec["paths"]["/req/form"]["post"]["requestBody"];
+    assert_eq!(
+        form_body["content"]["multipart/form-data"]["schema"]["type"],
+        "object"
+    );
+    assert!(form_body["content"]["application/json"].is_null());
+}
+
+#[tokio::test]
+async fn openapi_keeps_parameters_for_qualified_and_same_named_requests() {
+    let base = spawn_host().await;
+    let spec: serde_json::Value = reqwest::get(format!("{base}/api/openapi.json"))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let parameter_names = |path: &str| -> Vec<String> {
+        spec["paths"][path]["get"]["parameters"]
+            .as_array()
+            .map(|parameters| {
+                parameters
+                    .iter()
+                    .map(|param| param["name"].as_str().unwrap_or_default().to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+
+    // Qualified `self_ty`: the route name is `alpha::DetailRequest` while the
+    // derive registered the bare `DetailRequest`; TypeId linking keeps it.
+    assert_eq!(parameter_names("/req/alpha-detail"), vec!["alpha_marker"]);
+
+    // Same-named request types in two modules never share their parameters.
+    assert_eq!(parameter_names("/req/beta-detail"), vec!["beta_marker"]);
 }

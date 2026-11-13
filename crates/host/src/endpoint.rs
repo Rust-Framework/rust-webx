@@ -2,6 +2,7 @@
 
 use serde_json;
 use std::sync::Arc;
+use webx_core::auth::DeclaredRules;
 use webx_core::error::Result;
 use webx_core::http::IHttpContext;
 use webx_core::routing::IEndpoint;
@@ -75,8 +76,14 @@ impl IEndpoint for StubEndpoint {
             if !self.authorization.is_empty() {
                 let denied = match ctx.claims() {
                     None => {
-                        write_problem(ctx, 401, "Authentication required").await;
-                        return Ok(());
+                        // Single 401 write path: bubble the error up to the host
+                        // so every unauthenticated response (declarative
+                        // `#[authorize]`, binding layer, middleware) is written
+                        // by one place — including the `WWW-Authenticate`
+                        // challenge header.
+                        return Err(webx_core::error::Error::Unauthorized(
+                            "authentication required".to_string(),
+                        ));
                     }
                     Some(claims) => self
                         .authorization
@@ -102,23 +109,21 @@ impl IEndpoint for StubEndpoint {
                         if let Some(claims) = ctx.claims() {
                             let resource_key = ctx.request().route_pattern().unwrap_or(self.path);
                             let method = ctx.request().method();
-                            authorizers.authorize(claims, resource_key, method).await?;
+                            // Hand the endpoint's `#[authorize]` rules to the
+                            // backend. The route metadata is borrowed directly
+                            // (no per-request flattening), so multiple rules keep
+                            // their AND structure.
+                            let declared = DeclaredRules::new(self.authorization);
+                            authorizers
+                                .authorize_with_rules(claims, resource_key, method, &declared)
+                                .await?;
                         }
                     }
                 }
             }
 
             let response = dispatch(&mut *ctx).await?;
-
-            ctx.response_mut().set_status(response.status);
-            if !response.content_type.is_empty() {
-                ctx.response_mut()
-                    .set_header("content-type", &response.content_type);
-            }
-            for (key, value) in &response.headers {
-                ctx.response_mut().set_header(key, value);
-            }
-            ctx.response_mut().write_body(response.body).await?;
+            response.execute(&mut *ctx).await?;
             return Ok(());
         }
 

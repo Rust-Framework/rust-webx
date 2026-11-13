@@ -214,7 +214,7 @@ pub struct UploadWorkDocsHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<UploadWorkDocsRequest, UploadWorkDocsResponse> for UploadWorkDocsHandler {
-    async fn handle(&mut self, req: UploadWorkDocsRequest) -> Result<UploadWorkDocsResponse> {
+    async fn handle(&mut self, req: UploadWorkDocsRequest) -> ActionResult<UploadWorkDocsResponse> {
         let slug = sanitize_slug(&req.slug)?;
 
         if req.archive.is_empty() {

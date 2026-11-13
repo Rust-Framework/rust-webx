@@ -117,7 +117,7 @@ pub struct ResetPasswordHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<RegisterRequest, AuthResponse> for RegisterHandler {
-    async fn handle(&mut self, req: RegisterRequest) -> Result<AuthResponse> {
+    async fn handle(&mut self, req: RegisterRequest) -> ActionResult<AuthResponse> {
         if load_user_by_email(&mut self.ctx, &req.email)
             .await?
             .is_some()
@@ -172,7 +172,7 @@ impl IRequestHandler<RegisterRequest, AuthResponse> for RegisterHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
-    async fn handle(&mut self, req: LoginRequest) -> Result<AuthResponse> {
+    async fn handle(&mut self, req: LoginRequest) -> ActionResult<AuthResponse> {
         let user = load_user_by_email(&mut self.ctx, &req.email)
             .await?
             .ok_or_else(|| Error::Http("Invalid email or password".into()))?;
@@ -195,7 +195,7 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<AuthMeRequest, UserView> for AuthMeHandler {
-    async fn handle(&mut self, _req: AuthMeRequest) -> Result<UserView> {
+    async fn handle(&mut self, _req: AuthMeRequest) -> ActionResult<UserView> {
         let uid = operator_id().ok_or_else(|| Error::Http("Not authenticated".into()))?;
 
         let user = load_user_by_id(&mut self.ctx, &uid)
@@ -209,7 +209,7 @@ impl IRequestHandler<AuthMeRequest, UserView> for AuthMeHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ForgotPasswordRequest, ForgotPasswordResponse> for ForgotPasswordHandler {
-    async fn handle(&mut self, req: ForgotPasswordRequest) -> Result<ForgotPasswordResponse> {
+    async fn handle(&mut self, req: ForgotPasswordRequest) -> ActionResult<ForgotPasswordResponse> {
         let base_msg = "If the email exists, a reset link has been sent.".to_string();
         let Some(user) = load_user_by_email(&mut self.ctx, &req.email).await? else {
             return Ok(ForgotPasswordResponse {
@@ -252,7 +252,7 @@ impl IRequestHandler<ForgotPasswordRequest, ForgotPasswordResponse> for ForgotPa
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ResetPasswordRequest, ResetPasswordResponse> for ResetPasswordHandler {
-    async fn handle(&mut self, req: ResetPasswordRequest) -> Result<ResetPasswordResponse> {
+    async fn handle(&mut self, req: ResetPasswordRequest) -> ActionResult<ResetPasswordResponse> {
         if req.password.len() < 6 {
             return Err(Error::Http("Password must be at least 6 characters".into()));
         }

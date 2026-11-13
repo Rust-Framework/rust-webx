@@ -49,13 +49,33 @@ impl IEndpoint for WebhookEndpoint {
 
 应用层需要「完全掌控响应」时，用下面两种方式之一，二者都是框架的一等能力：
 
-1. **返回 `ResponseData`**（推荐）：路由仍然是普通的 `#[get]` / `#[post]` 端点，
-   Handler 通过 `ResponseData` 决定状态码、响应头与响应体。
+1. **返回 `IActionResult`**（推荐）：路由仍然是普通的 `#[get]` / `#[post]` 端点，
+   Handler 把响应类型写成 `Response`，返回 `FileResult` / `ContentResult` /
+   `StatusCodeResult` 等结果，由结果自己决定状态码、响应头与响应体。
    见[文件上传与下载](../05-request-pattern/file-upload-download.md)。
 
    ```rust
    #[get("/api/files/{id}/download")]
-   impl IRequest<ResponseData> for DownloadFileRequest {}
+   impl IRequest<Response> for DownloadFileRequest {}
+   ```
+
+   需要「空 body + 自定义响应头」（例如 `301 Location`、`401 WWW-Authenticate`）时，实现一个
+   极小的 `IActionResult` 即可——`StatusCodeResult` 只带状态码，不带响应头：
+
+   ```rust
+   struct Redirect(pub String);
+
+   #[async_trait]
+   impl IActionResult for Redirect {
+       async fn execute(self: Box<Self>, ctx: &mut dyn IHttpContext) -> Result<()> {
+           let resp = ctx.response_mut();
+           resp.set_status(301);
+           resp.set_header("location", &self.0);
+           Ok(())
+       }
+   }
+
+   // Handler：Ok(Box::new(Redirect("/api/new-path".into())))
    ```
 
 2. **写中间件**：`IMiddleware` 拿得到 `&mut dyn IHttpContext`，可以在路由之前
@@ -66,14 +86,14 @@ impl IEndpoint for WebhookEndpoint {
 | 场景 | 推荐 |
 |------|------|
 | 标准 REST API | `RequestEndpoint`（默认，无需自定义） |
-| 文件下载 / 自定义状态码与响应头 | `ResponseData` |
+| 文件下载 / 自定义状态码与响应头 | `Response` + `FileResult` / `ContentResult` |
 | Webhook 验签 | 自定义 `IEndpoint`（框架内扩展）或中间件 |
 | 固定响应（健康检查） | `StaticJsonEndpoint` |
 | 服务端渲染 HTML | `StaticHtmlEndpoint` 或中间件 |
 
 ## 小结
 
-大多数场景使用默认 `RequestEndpoint` 即可；需要掌控响应时优先返回 `ResponseData`，
+大多数场景使用默认 `RequestEndpoint` 即可；需要掌控响应时返回 `IActionResult`，
 需要在路由之前拦截时写中间件。
 
 下一节：[样式与约定封装](style-patterns.md)

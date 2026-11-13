@@ -59,7 +59,7 @@ fn push_part_total(
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<GetDashboardRequest, DashboardModel> for GetDashboardHandler {
-    async fn handle(&mut self, _: GetDashboardRequest) -> Result<DashboardModel> {
+    async fn handle(&mut self, _: GetDashboardRequest) -> ActionResult<DashboardModel> {
         let products = linq!(self.ctx.set::<Product>();).to_list().await.map_ef()?;
         let specs = linq!(self.ctx.set::<Spec>();).to_list().await.map_ef()?;
         let devices = linq!(self.ctx.set::<Device>();).to_list().await.map_ef()?;

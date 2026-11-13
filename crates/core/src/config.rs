@@ -67,11 +67,39 @@ fn default_max_connections() -> usize {
 }
 
 /// JWT authentication section.
-#[derive(Debug, Clone, Deserialize, Default)]
+///
+/// appsettings keys are PascalCase: `Jwt.Secret` and `Jwt.ExpirationMinutes`
+/// (or `APP__Jwt__ExpirationMinutes`). `ExpirationMinutes` drives the lifetime
+/// of tokens minted by the default `ITokenIssuer` that
+/// `HostBuilder::add_authentication()` registers.
+#[derive(Debug, Clone, Deserialize)]
 pub struct JwtSection {
     /// HMAC secret for signing/verifying JWT tokens.
     #[serde(default, rename = "Secret")]
     pub secret: String,
+
+    /// Lifetime of freshly issued tokens, in minutes. Default: 60.
+    ///
+    /// `0` falls back to the default: a zero lifetime would only mint tokens
+    /// that are already expired.
+    #[serde(
+        default = "default_jwt_expiration_minutes",
+        rename = "ExpirationMinutes"
+    )]
+    pub expiration_minutes: u64,
+}
+
+fn default_jwt_expiration_minutes() -> u64 {
+    60
+}
+
+impl Default for JwtSection {
+    fn default() -> Self {
+        Self {
+            secret: String::new(),
+            expiration_minutes: default_jwt_expiration_minutes(),
+        }
+    }
 }
 
 /// CORS (Cross-Origin Resource Sharing) section.
@@ -181,6 +209,16 @@ pub struct RateLimitSection {
     /// Only enable when behind a trusted reverse proxy. Default: false.
     #[serde(default, rename = "TrustProxy")]
     pub trust_proxy: bool,
+    /// CIDR ranges of the trusted proxies. When `TrustProxy` is enabled, the
+    /// forwarded headers are only consulted if the direct peer address belongs
+    /// to one of these ranges; the client IP is then the right-most address in
+    /// `X-Forwarded-For` that is not itself a trusted proxy.
+    ///
+    /// An empty list with `TrustProxy = true` is treated as "trust nothing":
+    /// the headers are ignored (a client can otherwise rotate
+    /// `X-Forwarded-For` to bypass the limiter).
+    #[serde(default, rename = "TrustedProxies")]
+    pub trusted_proxies: Vec<String>,
 }
 
 impl Default for RateLimitSection {
@@ -191,6 +229,7 @@ impl Default for RateLimitSection {
             burst_size: default_rate_limit_burst(),
             max_tracked_ips: default_rate_limit_max_ips(),
             trust_proxy: false,
+            trusted_proxies: Vec::new(),
         }
     }
 }
@@ -548,6 +587,18 @@ mod tests {
 
         let opts: AppOptions = bind_root(&serde_json::json!({}));
         assert_eq!(opts.culture.default, "en");
+    }
+
+    #[test]
+    fn jwt_section_binds_expiration_minutes_with_60_minute_default() {
+        let opts: AppOptions = bind_root(&serde_json::json!({}));
+        assert_eq!(opts.jwt.expiration_minutes, 60);
+        assert!(opts.jwt.secret.is_empty());
+
+        let opts: AppOptions = bind_root(&serde_json::json!({
+            "Jwt": { "Secret": "s", "ExpirationMinutes": 15 }
+        }));
+        assert_eq!(opts.jwt.expiration_minutes, 15);
     }
 
     #[test]

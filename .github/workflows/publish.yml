@@ -33,49 +33,34 @@ jobs:
             exit 1
           fi
 
-          # crates.io serves a sparse index; a dependent can only be packaged
-          # once its dependency is visible there. Publication is asynchronous,
-          # so poll instead of sleeping a fixed amount and hoping.
-          index_path() {
-            local name="$1" len=${#1}
-            case "$len" in
-              1) echo "1/$name" ;;
-              2) echo "2/$name" ;;
-              3) echo "3/${name:0:1}/$name" ;;
-              *) echo "${name:0:2}/${name:2:2}/$name" ;;
-            esac
-          }
-
-          wait_for_index() {
-            local name="$1" version="$2" url
-            url="https://index.crates.io/$(index_path "$name")"
-            for attempt in $(seq 1 60); do
-              if curl -fsS "$url" 2>/dev/null | grep -q "\"vers\":\"${version}\""; then
-                echo "  ✓ ${name} ${version} is visible in the index"
-                return 0
-              fi
-              echo "  … waiting for ${name} ${version} in the index (attempt ${attempt}/60)"
-              sleep 5
-            done
-            echo "::error::${name} ${version} never appeared in the index"
-            return 1
-          }
+          # crates.io serves a sparse index; publication is asynchronous, so a
+          # dependent is packaged only after its dependencies appear there. The
+          # polling helpers are shared with `publish.sh`
+          # (`scripts/crates-index.sh`) so the two release paths cannot drift.
+          . scripts/crates-index.sh
 
           # Publish order: dependencies must appear before their dependents.
           CRATES="rust-webx-macros rust-webx-core rust-webx-build rust-webx-spa rust-webx-openapi rust-webx-host rust-webx"
           metadata="$(cargo metadata --no-deps --format-version 1)"
+
+          # The tag must match every crate version. Skipping mismatches would
+          # leave the workflow green with nothing published (e.g. a mistyped
+          # tag), hiding a failed release behind a green run.
           for name in $CRATES; do
             version="$(printf '%s' "$metadata" \
               | jq -r --arg n "$name" '.packages[] | select(.name==$n) | .version')"
             if [ "$version" != "${TAG_VERSION}" ]; then
-              echo "::warning::skip $name (version $version != tag $TAG_VERSION)"
-              continue
+              echo "::error::$name has version ${version}, but the tag is v${TAG_VERSION}"
+              exit 1
             fi
+          done
+
+          for name in $CRATES; do
+            version="${TAG_VERSION}"
 
             # Re-running the workflow for an existing version is a no-op, not a
             # failure: a partial publish can be resumed by re-running the job.
-            if curl -fsS "https://index.crates.io/$(index_path "$name")" 2>/dev/null \
-                 | grep -q "\"vers\":\"${version}\""; then
+            if index_has "$name" "$version"; then
               echo "::notice::$name $version is already published — skipping"
               continue
             fi

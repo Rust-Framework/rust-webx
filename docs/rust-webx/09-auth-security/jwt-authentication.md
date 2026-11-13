@@ -10,7 +10,7 @@ Host::builder().add_authentication().build().run().await?;
 1. 从 `appsettings.json` 读取 `Jwt.Secret`
 2. 注册 `jwt_middleware`
 
-`add_authentication()` 只负责 JWT 认证；`#[authorize]` 规则由端点自己执行，未满足时返回 401/403（见 [authorize 宏](authorize-macro.md)）。旧的 `.use_resource_authorization()` 已过时，无需调用。
+`add_authentication()` 只负责 JWT 认证；`#[authorize]` 规则由端点自己执行，未满足时返回 401/403（见 [authorize 宏](authorize-macro.md)）。
 
 ## 配置
 
@@ -35,10 +35,17 @@ sequenceDiagram
     alt 有效
         JWT->>JWT: ctx.set_claims(JwtClaims)
         JWT->>Handler: 继续处理
-    else 无效/缺失
-        JWT->>Client: 401 Unauthorized
+    else 缺失或无效/过期
+        JWT->>Handler: 匿名继续（坏 token 只代表"未认证"，不拒绝请求）
     end
 ```
+
+是否返回 `401` 由**端点保护**决定：`#[authorize]` 或必填 `#[fromclaim] user: IdentityUser`
+在认证失败时统一 401；公开端点（登录、健康检查、配置）即使客户端带着过期 token 也能正常处理——
+否则登录接口会被旧 token 锁死。
+
+所有 `401` 由 host 统一写出：`application/problem+json` + `WWW-Authenticate: Bearer realm="rust-webx"`（RFC 7235 要求 401 必须带挑战）。
+`detail` 面向客户端：未认证统一为 `authentication required`；token 解码器的具体原因（`InvalidToken`、过期、签名）只进 `tracing::debug!` 日志。
 
 ## 在 Handler 中读取身份
 

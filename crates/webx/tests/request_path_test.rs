@@ -9,8 +9,19 @@ use serde::{Deserialize, Serialize};
 use webx::*;
 
 fn find_free_port() -> u16 {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    listener.local_addr().unwrap().port()
+    // Tests in this binary run in parallel: asking the OS for an ephemeral
+    // port twice can return the same number after release (the host binds it
+    // milliseconds later), so use a process-unique rolling range and verify
+    // each candidate is still free.
+    use std::sync::atomic::{AtomicU16, Ordering};
+    static NEXT: AtomicU16 = AtomicU16::new(0);
+    loop {
+        let offset = NEXT.fetch_add(1, Ordering::Relaxed);
+        let port = 20_000 + (offset % 30_000);
+        if TcpListener::bind(("127.0.0.1", port)).is_ok() {
+            return port;
+        }
+    }
 }
 
 async fn spawn_host(port: u16) {
@@ -52,7 +63,7 @@ struct GetUserHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<GetUserRequest, UserResponse> for GetUserHandler {
-    async fn handle(&mut self, req: GetUserRequest) -> Result<UserResponse> {
+    async fn handle(&mut self, req: GetUserRequest) -> ActionResult<UserResponse> {
         Ok(UserResponse {
             id: req.id.clone(),
             name: format!("User-{}", req.id),
@@ -101,7 +112,7 @@ struct CreateUserHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<CreateUserRequest, CreateUserResponse> for CreateUserHandler {
-    async fn handle(&mut self, req: CreateUserRequest) -> Result<CreateUserResponse> {
+    async fn handle(&mut self, req: CreateUserRequest) -> ActionResult<CreateUserResponse> {
         Ok(CreateUserResponse {
             id: 1,
             name: req.name,
@@ -180,7 +191,7 @@ struct UpdateUserHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<UpdateUserRequest, UpdateUserResponse> for UpdateUserHandler {
-    async fn handle(&mut self, req: UpdateUserRequest) -> Result<UpdateUserResponse> {
+    async fn handle(&mut self, req: UpdateUserRequest) -> ActionResult<UpdateUserResponse> {
         Ok(UpdateUserResponse {
             id: req.id,
             name: req.name,
@@ -226,7 +237,7 @@ struct DeleteUserHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<DeleteUserRequest, ()> for DeleteUserHandler {
-    async fn handle(&mut self, _req: DeleteUserRequest) -> Result<()> {
+    async fn handle(&mut self, _req: DeleteUserRequest) -> ActionResult<()> {
         Ok(())
     }
 }
@@ -244,6 +255,39 @@ async fn delete_returns_204_no_content() {
 
     assert_eq!(resp.status().as_u16(), 204);
     assert!(resp.content_length().unwrap_or(0) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// An action result controls the status code
+// ---------------------------------------------------------------------------
+
+#[derive(Default, WebxRequestMeta)]
+struct StatusOnlyRequest;
+
+#[get("/status-only")]
+impl IRequest<Response> for StatusOnlyRequest {}
+
+#[derive(Default)]
+struct StatusOnlyHandler;
+
+#[handler]
+#[async_trait::async_trait]
+impl IRequestHandler<StatusOnlyRequest, Response> for StatusOnlyHandler {
+    async fn handle(&mut self, _req: StatusOnlyRequest) -> ActionResult<Response> {
+        Ok(Box::new(StatusCodeResult(202)))
+    }
+}
+
+#[tokio::test]
+async fn action_result_sets_the_status_code() {
+    let port = find_free_port();
+    spawn_host(port).await;
+
+    let resp = reqwest::get(format!("http://127.0.0.1:{}/status-only", port))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status().as_u16(), 202);
 }
 
 // ---------------------------------------------------------------------------
@@ -315,7 +359,7 @@ struct GetPostHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<GetPostRequest, PostResponse> for GetPostHandler {
-    async fn handle(&mut self, req: GetPostRequest) -> Result<PostResponse> {
+    async fn handle(&mut self, req: GetPostRequest) -> ActionResult<PostResponse> {
         Ok(PostResponse {
             user_id: req.user_id.clone(),
             post_id: req.post_id.clone(),
@@ -407,7 +451,7 @@ struct SearchHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<SearchRequest, SearchResponse> for SearchHandler {
-    async fn handle(&mut self, req: SearchRequest) -> Result<SearchResponse> {
+    async fn handle(&mut self, req: SearchRequest) -> ActionResult<SearchResponse> {
         Ok(SearchResponse {
             q: req.q,
             page: req.page,
@@ -453,7 +497,7 @@ struct FailHandler;
 #[handler]
 #[async_trait::async_trait]
 impl IRequestHandler<FailRequest, FailResponse> for FailHandler {
-    async fn handle(&mut self, req: FailRequest) -> Result<FailResponse> {
+    async fn handle(&mut self, req: FailRequest) -> ActionResult<FailResponse> {
         match req.code.as_str() {
             "401" => Err(Error::Unauthorized("custom unauthorized".into())),
             "403" => Err(Error::Forbidden("custom forbidden".into())),
@@ -571,4 +615,82 @@ async fn json_response_has_correct_content_type() {
         .to_str()
         .unwrap();
     assert!(ct.contains("application/json"));
+}
+
+// ---------------------------------------------------------------------------
+// JSON action result with an explicit status code (e.g. 201 Created)
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize, Deserialize)]
+struct CreatedDto {
+    id: u32,
+}
+
+#[derive(Default, WebxRequestMeta)]
+struct CreatedJsonRequest;
+
+#[get("/created-json")]
+impl IRequest<Response> for CreatedJsonRequest {}
+
+#[derive(Default)]
+struct CreatedJsonHandler;
+
+#[handler]
+#[async_trait::async_trait]
+impl IRequestHandler<CreatedJsonRequest, Response> for CreatedJsonHandler {
+    async fn handle(&mut self, _req: CreatedJsonRequest) -> ActionResult<Response> {
+        Ok(Box::new(JsonResult::new(CreatedDto { id: 7 }).status(201)))
+    }
+}
+
+#[tokio::test]
+async fn json_result_can_override_the_status_code() {
+    let port = find_free_port();
+    spawn_host(port).await;
+
+    let resp = reqwest::get(format!("http://127.0.0.1:{port}/created-json"))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status().as_u16(), 201);
+    assert_eq!(
+        resp.headers()["content-type"],
+        "application/json",
+        "ordinary JSON responses keep the JSON media type"
+    );
+    let body: CreatedDto = resp.json().await.unwrap();
+    assert_eq!(body.id, 7);
+}
+
+// ---------------------------------------------------------------------------
+// A qualified `webx::Response` is still detected as a response-control action
+// ---------------------------------------------------------------------------
+
+#[derive(Default, WebxRequestMeta)]
+struct QualifiedResponseRequest;
+
+#[get("/qualified-response")]
+impl IRequest<webx::Response> for QualifiedResponseRequest {}
+
+#[derive(Default)]
+struct QualifiedResponseHandler;
+
+#[handler]
+#[async_trait::async_trait]
+impl IRequestHandler<QualifiedResponseRequest, webx::Response> for QualifiedResponseHandler {
+    async fn handle(&mut self, _req: QualifiedResponseRequest) -> ActionResult<webx::Response> {
+        Ok(Box::new(StatusCodeResult(202)))
+    }
+}
+
+#[tokio::test]
+async fn qualified_response_type_uses_the_raw_path() {
+    let port = find_free_port();
+    spawn_host(port).await;
+
+    let resp = reqwest::get(format!("http://127.0.0.1:{port}/qualified-response"))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status().as_u16(), 202);
 }

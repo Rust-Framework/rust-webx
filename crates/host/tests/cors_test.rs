@@ -70,8 +70,12 @@ async fn cors_disallowed_origin_no_header() {
 async fn cors_preflight_options_request() {
     let config = CorsConfig::default();
     let middleware = CorsMiddleware::new(config);
+    // A real CORS preflight is `OPTIONS` + `Origin` +
+    // `Access-Control-Request-Method` (Fetch spec); the middleware only
+    // short-circuits that combination.
     let mut ctx = test_utils::TestHttpContext::new("OPTIONS", "/api/data")
-        .with_header("origin", "https://example.com");
+        .with_header("origin", "https://example.com")
+        .with_header("access-control-request-method", "GET");
 
     let _ = middleware.invoke(&mut ctx).await.unwrap();
 
@@ -80,6 +84,27 @@ async fn cors_preflight_options_request() {
     assert!(find_header(&headers, "access-control-allow-methods").is_some());
     assert!(find_header(&headers, "access-control-allow-headers").is_some());
     assert!(find_header(&headers, "access-control-max-age").is_some());
+}
+
+/// A plain `OPTIONS` (no `Access-Control-Request-Method`) is method discovery,
+/// not a preflight: it must not be answered with 204 here, so it reaches the
+/// router (which answers `Allow`/405/404) and a nonexistent path does not look
+/// like an existing one.
+#[tokio::test]
+async fn cors_plain_options_is_not_a_preflight() {
+    let config = CorsConfig::default();
+    let middleware = CorsMiddleware::new(config);
+    let mut ctx = test_utils::TestHttpContext::new("OPTIONS", "/api/data")
+        .with_header("origin", "https://example.com");
+
+    let _ = middleware.invoke(&mut ctx).await.unwrap();
+
+    let (status, headers, _body) = ctx.into_response_parts();
+    assert_eq!(status, 200, "plain OPTIONS is not short-circuited");
+    assert!(
+        find_header(&headers, "access-control-allow-methods").is_none(),
+        "only a real preflight gets the preflight headers"
+    );
 }
 
 #[tokio::test]

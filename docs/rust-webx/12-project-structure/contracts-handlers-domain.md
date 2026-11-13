@@ -74,7 +74,7 @@ pub struct GetDocIndexHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<GetDocIndexRequest, DocIndex> for GetDocIndexHandler {
-    async fn handle(&mut self, req: GetDocIndexRequest) -> Result<DocIndex> {
+    async fn handle(&mut self, req: GetDocIndexRequest) -> ActionResult<DocIndex> {
         self.docs.index(&req.work).map_err(Error::NotFound)
     }
 }
@@ -86,7 +86,7 @@ impl IRequestHandler<GetDocIndexRequest, DocIndex> for GetDocIndexHandler {
 - Handler **只注入** `Arc<dyn I…Service>`
 - `#[derive(Inject)]` + `#[handler(inject)]` 自动注册，无需改 `main.rs`
 - 需要数据库时声明 owned 字段 `#[inject(owned)] ctx: DbContext`（EFCore 风格 per-request unit-of-work，无需 `Arc<Mutex>`）
-- 返回 `Result<T>`，不直接操作 HTTP
+- 返回 `ActionResult<T>`，不直接操作 HTTP
 
 ## domain — 持久化实体与配置
 

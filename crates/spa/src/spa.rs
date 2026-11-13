@@ -3,7 +3,13 @@
 //! Serves files from a configured disk directory, from a table of files
 //! compiled into the executable, or both — in which case the disk copy of a
 //! given file wins and the embedded copy is the fallback.
-//! For SPA routing, non-file requests fall back to index.html.
+//!
+//! For SPA routing, a request the router did not match falls back to
+//! `index.html` via [`SpaMiddleware::try_index_fallback`], which the host calls
+//! *after* routing. The middleware itself never answers a request before the
+//! router has seen it: doing so turned unmatched requests (including API paths
+//! outside `/api/`) into `200 text/html` and leaked the file cache policy into
+//! handler responses.
 //!
 //! Files are handed to the host as [`FileBody`] values, so they are streamed
 //! rather than read into memory, and every response carries an `ETag` and
@@ -263,16 +269,10 @@ impl IMiddleware for SpaMiddleware {
             }
         }
 
-        // File not found — fall back to index.html for SPA routing.
-        let index_path = self.root.join(&self.index);
-        if index_path.is_file() {
-            return serve_file(ctx, &index_path, REVALIDATE_CACHE).await;
-        }
-        if let Some(asset) = self.embedded_asset(&self.index) {
-            return serve_embedded(ctx, asset, REVALIDATE_CACHE).await;
-        }
-
-        // Neither the file nor index.html exists — let the router decide.
+        // Static lookups missed. The index fallback for client-side routes is
+        // applied by the host after the router also misses (see
+        // `try_index_fallback`): serving it here would answer unmatched and
+        // API requests with 200 HTML before routing ever ran.
         Ok(ControlFlow::Continue(()))
     }
 }
@@ -437,6 +437,54 @@ impl SpaMiddleware {
             Err(_) => Some(candidate),
         }
     }
+
+    /// Serve `index.html` for a client-side route that did not match the router.
+    ///
+    /// Called by the host *after* routing misses, so:
+    /// * an API path (`/api/*`) is never answered with the app shell;
+    /// * a request that asks for data (`Accept: application/json`, `*/*`, or no
+    ///   `Accept`) gets a proper 404 instead of `200 text/html`;
+    /// * the fallback cannot leak its cache policy into a handler response,
+    ///   because no handler ran.
+    ///
+    /// Returns `true` when the fallback was written into `ctx`.
+    pub async fn try_index_fallback(&self, ctx: &mut dyn IHttpContext) -> Result<bool> {
+        if ctx.response().has_body() {
+            return Ok(false);
+        }
+        let method = ctx.request().method().to_uppercase();
+        if method != "GET" && method != "HEAD" {
+            return Ok(false);
+        }
+        if ctx.request().path().starts_with("/api/") {
+            return Ok(false);
+        }
+        if !accepts_html(ctx.request().header("accept")) {
+            return Ok(false);
+        }
+
+        let index_path = self.root.join(&self.index);
+        if index_path.is_file() {
+            let _ = serve_file(ctx, &index_path, REVALIDATE_CACHE).await?;
+            return Ok(true);
+        }
+        if let Some(asset) = self.embedded_asset(&self.index) {
+            let _ = serve_embedded(ctx, asset, REVALIDATE_CACHE).await?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+}
+
+/// Whether the client explicitly asked for an HTML document.
+///
+/// The SPA index is only served when `Accept` names `text/html`: a caller that
+/// sends `application/json`, `*/*`, or no `Accept` at all expected data, and
+/// answering with the app shell would turn its 404 into a parse error.
+fn accepts_html(accept: Option<&str>) -> bool {
+    accept
+        .map(|value| value.to_ascii_lowercase().contains("text/html"))
+        .unwrap_or(false)
 }
 
 /// Map vendor paths that include a redundant `dist/` segment to on-disk layout.

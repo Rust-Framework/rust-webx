@@ -27,6 +27,7 @@ use http_body_util::{combinators::UnsyncBoxBody, BodyExt, Full};
 use hyper::body::{Bytes, Frame, Incoming};
 use hyper::Request;
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -123,14 +124,30 @@ pub struct HttpContext {
     resp: HttpResponse,
     /// Authentication claims set by authentication middleware.
     claims: Option<Box<dyn IClaims>>,
+    /// A request rejection recorded at construction (e.g. an oversized declared
+    /// `Content-Length`). The pipeline turns it into a normal error response
+    /// from the innermost handler so CORS/security headers/logging still run.
+    early_error: Option<Error>,
+    /// Host DI handles (provider + handler registry) for endpoint dispatch.
+    dispatch_runtime: Option<Arc<webx_core::DispatchRuntime>>,
+    /// Trace id assigned by the tracing middleware; the same value the
+    /// `x-trace-id` response header carries and handlers read via
+    /// `RequestContext::trace_id()`.
+    trace_id: Option<String>,
 }
 
 impl HttpContext {
     /// Create a context around `req`.
     ///
     /// No I/O happens here: the body stays a live stream until the endpoint
-    /// asks for it.
-    pub fn new(req: Request<Incoming>, limits: BodyLimits) -> Self {
+    /// asks for it. `remote_addr` is the peer address captured by the accept
+    /// loop; `None` when the host cannot report it.
+    pub fn new(
+        req: Request<Incoming>,
+        limits: BodyLimits,
+        remote_addr: Option<SocketAddr>,
+        dispatch_runtime: Arc<webx_core::DispatchRuntime>,
+    ) -> Self {
         let (parts, body) = req.into_parts();
 
         let mut headers = HashMap::new();
@@ -146,30 +163,30 @@ impl HttpContext {
             .map(parse_query_string)
             .unwrap_or_default();
 
-        let mut resp = HttpResponse::new(200);
+        let resp = HttpResponse::new(200);
 
         // Refuse an oversized upload from its declared length, without reading
         // it. Chunked bodies have no `Content-Length` and are bounded while
         // streaming instead.
+        //
+        // The rejection is recorded, not written eagerly: writing a response
+        // here used to bypass the whole middleware pipeline (no CORS, no
+        // security headers, no access log, no metrics). The router handler
+        // turns it into a normal `PayloadTooLarge` error on the way in.
         let declared_limit = if is_multipart_content_type(headers.get("content-type")) {
             limits.multipart_body
         } else {
             limits.body as u64
         };
-        if let Some(declared) = headers
+        let early_error = headers
             .get("content-length")
             .and_then(|value| value.parse::<u64>().ok())
-        {
-            if declared > declared_limit {
-                let problem = build_problem(
-                    413,
-                    format!("request body exceeds the {declared_limit}-byte limit"),
-                );
-                resp.set_status(413);
-                resp.set_header("content-type", "application/problem+json");
-                resp.body = Some(ResponseBody::Bytes(problem_to_bytes(&problem)));
-            }
-        }
+            .filter(|declared| *declared > declared_limit)
+            .map(|_| {
+                Error::PayloadTooLarge(format!(
+                    "request body exceeds the {declared_limit}-byte limit"
+                ))
+            });
 
         let req = HttpRequest {
             method: parts.method.to_string(),
@@ -179,6 +196,7 @@ impl HttpContext {
             query_multi,
             route_params: HashMap::new(),
             route_pattern: None,
+            remote_addr,
             body: Mutex::new(RequestBody::Pending(Some(body))),
             limits,
         };
@@ -187,6 +205,9 @@ impl HttpContext {
             req,
             resp,
             claims: None,
+            early_error,
+            dispatch_runtime: Some(dispatch_runtime),
+            trace_id: None,
         }
     }
 
@@ -223,6 +244,22 @@ impl IHttpContext for HttpContext {
     fn response_mut(&mut self) -> &mut dyn IHttpResponse {
         &mut self.resp
     }
+
+    fn take_early_error(&mut self) -> Option<Error> {
+        self.early_error.take()
+    }
+
+    fn dispatch_runtime(&self) -> Option<&Arc<webx_core::DispatchRuntime>> {
+        self.dispatch_runtime.as_ref()
+    }
+
+    fn trace_id(&self) -> Option<&str> {
+        self.trace_id.as_deref()
+    }
+
+    fn set_trace_id(&mut self, trace_id: &str) {
+        self.trace_id = Some(trace_id.to_string());
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -248,6 +285,7 @@ pub struct HttpRequest {
     query_multi: HashMap<String, Vec<String>>,
     route_params: HashMap<String, String>,
     route_pattern: Option<String>,
+    remote_addr: Option<SocketAddr>,
     body: Mutex<RequestBody>,
     limits: BodyLimits,
 }
@@ -279,6 +317,10 @@ impl IHttpRequest for HttpRequest {
         Some(&self.query_multi)
     }
 
+    fn remote_addr(&self) -> Option<SocketAddr> {
+        self.remote_addr
+    }
+
     fn route_params(&self) -> &HashMap<String, String> {
         &self.route_params
     }
@@ -300,7 +342,7 @@ impl IHttpRequest for HttpRequest {
         let incoming = match &mut *guard {
             RequestBody::Buffered(bytes) => return Ok(bytes.clone()),
             RequestBody::Form(_) => {
-                return Err(Error::Http(
+                return Err(Error::State(
                     "request body was already read as multipart/form-data".to_string(),
                 ))
             }
@@ -308,7 +350,7 @@ impl IHttpRequest for HttpRequest {
         };
 
         let Some(incoming) = incoming else {
-            return Err(Error::Http(
+            return Err(Error::State(
                 "request body has already been consumed".to_string(),
             ));
         };
@@ -320,7 +362,8 @@ impl IHttpRequest for HttpRequest {
 
     async fn body_text(&mut self) -> Result<String> {
         let bytes = self.body_bytes().await?;
-        String::from_utf8(bytes).map_err(|e| Error::Http(e.to_string()))
+        String::from_utf8(bytes)
+            .map_err(|_| Error::Validation("request body is not valid UTF-8".to_string()))
     }
 
     async fn multipart(&mut self) -> Result<Arc<MultipartForm>> {
@@ -355,7 +398,7 @@ impl IHttpRequest for HttpRequest {
         };
 
         let Some(body) = incoming else {
-            return Err(Error::Http(
+            return Err(Error::State(
                 "request body has already been consumed".to_string(),
             ));
         };
@@ -373,8 +416,12 @@ async fn read_body(incoming: Incoming, limit: usize) -> Result<Vec<u8>> {
     let mut stream = incoming.into_data_stream();
 
     while let Some(chunk) = stream.next().await {
-        let chunk =
-            chunk.map_err(|err| Error::Http(format!("failed to read request body: {err}")))?;
+        let chunk = chunk.map_err(|err| {
+            // Transport failure while reading the body: the client went away or
+            // the framing is broken. Log the details, never serve them.
+            tracing::debug!(error = %err, "failed to read request body");
+            Error::State("failed to read request body".to_string())
+        })?;
         total = total.saturating_add(chunk.len());
         if total > limit {
             return Err(Error::PayloadTooLarge(format!(
@@ -542,11 +589,15 @@ impl IHttpResponse for HttpResponse {
     }
 
     fn set_header(&mut self, key: &str, value: &str) {
-        self.headers.insert(key.to_string(), value.to_string());
+        // HTTP header names are case-insensitive but this map is not. Normalize
+        // on the way in so `Content-Type` and `content-type` cannot coexist
+        // (which would emit duplicate headers when the map is written to hyper).
+        self.headers
+            .insert(key.to_ascii_lowercase(), value.to_string());
     }
 
     fn remove_header(&mut self, key: &str) {
-        self.headers.remove(key);
+        self.headers.remove(&key.to_ascii_lowercase());
     }
 
     async fn write_bytes(&mut self, data: Vec<u8>) -> Result<()> {
@@ -573,7 +624,9 @@ impl IHttpResponse for HttpResponse {
     }
 
     fn header(&self, key: &str) -> Option<&str> {
-        self.headers.get(key).map(|s| s.as_str())
+        self.headers
+            .get(&key.to_ascii_lowercase())
+            .map(|s| s.as_str())
     }
 }
 
@@ -671,21 +724,23 @@ async fn file_response(
                     return problem_bytes(404, headers, "Not Found")
                 }
                 Err(err) => {
-                    return problem_bytes(
-                        500,
-                        headers,
-                        &format!("cannot open `{}`: {err}", path.display()),
-                    )
+                    tracing::error!(
+                        path = %path.display(),
+                        error = %err,
+                        "cannot open file for download"
+                    );
+                    return problem_bytes(500, headers, "an unexpected error occurred");
                 }
             };
             let metadata = match handle.metadata().await {
                 Ok(metadata) => metadata,
                 Err(err) => {
-                    return problem_bytes(
-                        500,
-                        headers,
-                        &format!("cannot stat `{}`: {err}", path.display()),
-                    )
+                    tracing::error!(
+                        path = %path.display(),
+                        error = %err,
+                        "cannot stat file for download"
+                    );
+                    return problem_bytes(500, headers, "an unexpected error occurred");
                 }
             };
             if !metadata.is_file() {
@@ -814,7 +869,8 @@ async fn file_response(
             }
             if start > 0 {
                 if let Err(err) = handle.seek(SeekFrom::Start(start)).await {
-                    return problem_bytes(500, headers, &format!("cannot seek: {err}"));
+                    tracing::error!(error = %err, "cannot seek file for ranged response");
+                    return problem_bytes(500, headers, "an unexpected error occurred");
                 }
             }
             build_response(status, headers, reader_body(handle.take(count)))
@@ -826,7 +882,8 @@ async fn file_response(
             }
             if start > 0 {
                 if let Err(err) = reader.seek(SeekFrom::Start(start)).await {
-                    return problem_bytes(500, headers, &format!("cannot seek: {err}"));
+                    tracing::error!(error = %err, "cannot seek stream for ranged response");
+                    return problem_bytes(500, headers, "an unexpected error occurred");
                 }
             }
             build_response(status, headers, reader_body(reader.take(count)))

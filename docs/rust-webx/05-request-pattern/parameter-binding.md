@@ -2,7 +2,7 @@
 
 请求类型**必须**派生 `#[derive(WebxRequestMeta)]`，字段用 `#[from*]` 标记来源。派生宏在编译期生成
 `RequestModel::bind`（运行时绑定）与 `param_meta()`（OpenAPI 元数据），**同一份声明**同时驱动两者，
-不会再出现"文档写 query、运行时当 body"的分歧。
+包括请求体字段级的 OpenAPI schema；不会再出现"文档写 query、运行时当 body"的分歧。
 
 ```rust
 #[derive(WebxRequestMeta)]
@@ -82,10 +82,11 @@ pub struct SearchRequest {
 | `Option<FormFile>` | 可选 |
 | `Vec<FormFile>` | 可选，缺失 → 空列表 |
 | body 字段 | 非 `Option` 且没有 `#[serde(default)]` 即必填；列表缺失视为空列表 |
-| `#[serde(skip)]`、`claims` | 不参与绑定，用 `Default::default()` 填充 |
+| `#[serde(skip)]` | 不参与绑定，用 `Default::default()` 填充 |
 
 必填 `#[fromclaim]` 字段在请求**未认证**时返回 401；已认证但声明缺失时按普通必填字段返回 400。
-必填的复合类型字段（如 `Address`）在无 body 的方法上返回 400，并提示改用 POST/PUT/PATCH 或显式标注来源。
+复合类型字段（如 `Address`、含 `Option<Address>`）只能从 JSON body 绑定：在无 body 的方法（GET/HEAD/DELETE/OPTIONS）上返回 400，并提示改用 POST/PUT/PATCH，或显式标注 `#[fromquery]`/`#[frompath]` 并为类型实现 `FromStr`。
+`Option<Vec<T>>` 的“存在但为空”可表达：`?ids=`（键存在、值为空）绑定为 `Some(vec![])`，键缺失才是 `None`。
 
 `#[serde(default)]` 在该字段的**所有来源都没有值**时生效（body、query、路由、表单都取不到才用默认值）；
 `#[serde(rename)]` / `rename_all` / `alias` 决定 body 的 JSON 键；`#[serde(flatten)]` 字段没有独立键，
@@ -106,7 +107,7 @@ pub struct CreateOrderRequest {
 ```
 
 Handler 里直接用 `req.user.id`、`req.user.tenant_id`、`req.user.is_in_role("admin")`，
-或 `req.require_user()?`。匿名可访问的端点用 `Option<IdentityUser>`。
+或 `req.require_user()?`。匿名可访问的端点用 `#[fromclaim(optional)] viewer: Option<IdentityUser>`（只写 `#[fromclaim]` 会编译失败）。
 完整场景与收益对照见[用户身份与多租户](user-identity.md)。
 
 ## 优先级
@@ -138,13 +139,52 @@ Handler 里直接用 `req.user.id`、`req.user.tenant_id`、`req.user.is_in_role
 - body 字段类型错误会立即以该字段的 400 返回（无法为该类型构造占位值）；query/header 等字符串来源的错误会一次性汇总。
 - 有**必填** `#[fromclaim]` 字段而请求未认证 → `401`。
 - 表单端点收到非 `multipart/form-data` → `415`；JSON 端点收到 multipart 同理。
-- 绑定阶段不再有"静默 `Default`"：字段缺失或非法一定会出现在 `errors` 里。
+- 绑定阶段没有「静默 `Default`」：字段缺失或非法一定会出现在 `errors` 里。
 
 ## OpenAPI
 
-`param_meta()` 给出每个字段的来源与类型，路由宏再补上模板里的路径参数（合并时以结构体的类型为准）。
-`#[fromclaim]` 属于认证信息，不写进文档；未标记字段按路由方法解析成 body 或 query；
-`FormFile` 生成 `multipart/form-data` 的 `string/binary`。
+`param_meta()` 给出每个字段的来源、类型与 JSON 键，路由宏再补上模板里的路径参数（合并时以结构体的类型为准）。
+`#[fromclaim]` 属于认证信息，不写进文档；未标记字段按路由方法解析成 body 或 query。body 字段
+**逐个**进入请求体 schema，不再只输出一个 `{"type": "object"}` 占位：
+
+- **写方法（POST/PUT/PATCH）**：`requestBody.content["application/json"].schema` 的
+  `properties` 键是字段的 **JSON 键**（`#[serde(rename)]` / `rename_all` 与 `r#type` 的 wire 名），
+  类型按字段形状映射为 `string` / `integer` / `number` / `boolean` / `array` / `object`；
+  `required` 列出必填字段（`Option<T>`、`Vec<T>`、`#[serde(default)]` 不算必填）。
+  `requestBody.required` 由「是否存在必填 body 字段」推导，而不是恒为 `true`。
+- `#[serde(flatten)]` 字段没有独立 JSON 键，无法枚举内部属性：schema 保留
+  `type: "object"` 并加 `additionalProperties: true` 表示未知键；该字段的必填性仍计入
+  `requestBody.required`。
+- **无 body 的方法（GET/HEAD/DELETE/OPTIONS）**：不输出 `requestBody`。这些方法上的 body
+  字段在运行时同样无法绑定（复合类型/必填值会 400），应改用显式 `#[fromquery]` /
+  `#[frompath]`，或把端点改成写方法。
+- **表单端点**：`FormFile` 生成 `multipart/form-data` 的 `string/binary`（见
+  [文件上传与下载](file-upload-download.md#16-openapi-里的上传端点)），同一端点不会同时
+  输出 JSON body。
+
+示例（`PUT /api/blog/{id}` 的请求结构体带 `title: String`、`published: Option<bool>`、
+`tags: Vec<String>`）会生成：
+
+```json
+{
+  "requestBody": {
+    "required": true,
+    "content": {
+      "application/json": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "title": { "type": "string" },
+            "published": { "type": "boolean" },
+            "tags": { "type": "array" }
+          },
+          "required": ["title"]
+        }
+      }
+    }
+  }
+}
+```
 
 ## 响应序列化
 
@@ -156,8 +196,8 @@ pub struct UserDto {
     pub id: String,
 }
 
-// 需要完全控制状态码/响应头/流式响应时返回 ResponseData
-async fn handle(&mut self, req: MyRequest) -> Result<ResponseData> { ... }
+// 需要完全控制状态码/响应头/流式响应时，响应类型写 Response，返回 IActionResult
+async fn handle(&mut self, req: MyRequest) -> ActionResult<Response> { ... }
 ```
 
 下一节：[错误处理与 ProblemDetails](error-handling.md)

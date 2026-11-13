@@ -33,10 +33,26 @@ impl IMiddleware for RequestLoggingMiddleware {
 
 ```rust
 Host::builder()
-    .register(|svc| {
-        svc.add_middleware::<RequestLoggingMiddleware>()
-    })
+    .use_middleware::<RequestLoggingMiddleware>()   // 默认 AfterAuth 槽
+    .build();
 ```
+
+`use_middleware` 的默认槽位是 **`MiddlewareSlot::AfterAuth`**：中间件在 JWT 认证之后运行，
+因此 `ctx.claims()` 能拿到已登录主体（框架自带的 `RequestTracing` 就是靠这一点记录真实用户）。
+需要更早/更晚的位置时用 `use_middleware_at` / `use_middleware_with_at`：
+
+```rust
+use webx::MiddlewareSlot;
+
+Host::builder()
+    .use_middleware_at::<PreflightAudit>(MiddlewareSlot::BeforeCors)
+    .use_middleware::<TenantGuard>()                            // AfterAuth：能读身份
+    .use_middleware_with_at(MiddlewareSlot::AfterSpa, || Arc::new(Fallback::new()))
+    .build();
+```
+
+也可以注册到 DI 容器（`svc.add_middleware::<T>()`）——这类中间件同样进入默认的
+`AfterAuth` 槽，排在 builder 注册的中间件之后。完整顺序见[中间件编排策略](ordering-strategy.md)。
 
 ## 封装为可复用组件
 

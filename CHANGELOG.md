@@ -3,6 +3,428 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [1.2.0] —2026-11-13
+
+Additive release: every existing 1.1 API keeps working (`IDynamicAuthorizer::authorize`,
+`add_hosted_service<T: Default>`, `RequestContext::run`, the `x-trace-id` response header).
+New extension points are default methods or new types.
+
+### Added
+
+- **Declared authorization rules reach dynamic authorizers (WEBX-1).**
+  `webx::DeclaredRules { roles, permissions }` plus
+  `IDynamicAuthorizer::authorize_with_rules(claims, route_pattern, method, &DeclaredRules)`
+  (default forwards to `authorize`, so 1.1 implementations are source-compatible). The
+  endpoint call site now passes the role/permission literals declared by `#[authorize]`, so a
+  DB-backed authorizer no longer has to re-derive the requirement from route + method.
+- **Token issuance and session revocation ports (WEBX-2).** `webx::security` exposes
+  `ITokenIssuer`, `TokenClaims`, `IssuedToken`, `ISessionStore` and `InMemorySessionStore`;
+  `IClaims::jti()` reads the token id. `rust-webx-host` adds a default `JwtTokenIssuer`
+  (registered by `add_authentication()` when `Jwt.Secret` is configured, overridable via DI),
+  `jwt_middleware_with_revocation` and `HostBuilder::use_session_store()`. A revoked `jti`
+  is rejected at the middleware layer with 401 `problem+json` + `WWW-Authenticate`.
+- **Password hashing port with an Argon2id default (WEBX-3).** `IPasswordHasher`
+  (`hash`/`verify`/`needs_rehash`, PHC strings, `spawn_blocking` inside) lives in
+  `webx_core::security`; `rust-webx-host` ships `Argon2PasswordHasher` + `Argon2Params`
+  behind the default `password-argon2` feature. Unknown algorithm/PHC input returns a typed
+  error instead of panicking.
+- **Trace id is visible to handlers (WEBX-4).** `IHttpContext::trace_id()/set_trace_id()`
+  (default no-op), `RequestContext::run_with_trace()`/`RequestContext::trace_id()`, and the
+  endpoint macro seeds the request scope, so a handler reads the same id that is written to
+  the `x-trace-id` response header. The header behaviour is unchanged; an inbound
+  `x-request-id` still wins.
+- **Background services (WEBX-5).** `BackgroundService::execute(ct)`,
+  `PeriodicBackgroundService` (interval + interruptible tick + stop/join),
+  `BackgroundServiceHost`, `CancellationToken` and `delay(&ct, dur)`. Registration:
+  `add_hosted_service_with` (factory, no `Default` bound), `_ordered`, `_if`,
+  `add_background_service(_with/_with_if)`; `IHostedService::order()` provides stable ordering.
+  A startup failure is returned as a typed error (with rollback of already-started services)
+  instead of panicking.
+
+### Changed
+
+- **Host shutdown order (WEBX-5).** Signal →hosted services stop in reverse registration
+  order (workers observe cancellation first) →connection drain →`provider.dispose()`.
+  Previously hosted services stopped after the drain; code that relied on workers running
+  during draining should read the shutdown token instead.
+- `rust-dix` requirement raised to `1.0` (trait-object `instance<T: ?Sized>`, fallible typed
+  factory resolution, macro crate-name resolution).
+
+### Docs
+
+- Handler-visible trace ids and the `#[fromheader("x-trace-id")]` caveat
+  (`user-identity.md`), background/hosted-service registration and shutdown semantics
+  (`hosted-services.md`, `graceful-shutdown.md`).
+
+## [1.1.1] — 2026-11-12
+
+### Fixed
+
+- **Response header names are case-insensitive again.** `IHttpResponse::set_header` /
+  `remove_header` / `header` normalize the name, so `.header("Content-Type", ...)` overrides the
+  framework's `content-type` instead of emitting a duplicate header (the backing map used to be
+  case-sensitive).
+- **OpenAPI response detection matches the runtime.** Qualified spellings such as
+  `IRequest<webx::Response>` and `std::string::String` now produce the same opaque/string schemas as
+  their bare spellings, instead of a placeholder `$ref` to the wrapper type.
+- **`publish.sh` no longer hides gate failures.** It runs under bash with `set -euo pipefail`, so a
+  failing `cargo clippy` / `check` / `test` in the release preflight aborts instead of being masked
+  by the `tail` at the end of the pipeline.
+- **`publish.yml` fails on a version/tag mismatch** instead of skipping crates with a warning; a
+  mistyped tag used to leave the workflow green with nothing published.
+
+### Added
+
+- **`rust-version = "1.95"`** in `[workspace.package]`, inherited by every published crate (the
+  MSRV claim in the docs and README is now machine-readable); CI gained an MSRV job that builds the
+  workspace with Rust 1.95.
+- **`scripts/check-docs.sh`** and a CI gate: relative Markdown links, `INDEX.json` ↔ handbook files,
+  removed API names in the live handbook and Cargo/CHANGELOG/INDEX version agreement are checked on
+  every push.
+
+### Docs
+
+- README (EN/zh): the file-response feature list uses the 1.1 `FileResult` / `ContentResult` API;
+  the error-mapping table covers all 17 `Error` variants and no longer claims 401/403 come from
+  `Error::Http`; the rust-ef handbook link points at crates.io / docs.rs; a 1.0.x → 1.1 upgrade
+  pointer was added.
+- New [upgrade to 1.0.2](docs/rust-webx/16-migration/upgrade-to-1.0.2.md) page (`ActionResult`
+  rename, `PagedResult`), so every breaking release has a migration page again.
+- Handbook: raw-response type spelling, framework-managed file headers, header-name
+  case-insensitivity, OpenAPI placeholder/opaque behaviour and a custom-`IActionResult` redirect
+  example are documented.
+- `docs/design/api.md`: the unit `()` → 204 rule is part of the frozen contract, the "CI 门禁"
+  heading is corrected to "compiler + review", and the stale "3.x" reference is gone.
+
+## [1.1.0] — 2026-11-12
+
+> This release contains breaking changes (`ResponseData` removal). The project ships the
+> work on the 1.x line as **1.1.0** instead of opening a 2.0 major; the former 2.0
+> development branch is now `main`. Migration steps:
+> `docs/rust-webx/16-migration/upgrade-to-1.1.md`.
+
+### Breaking
+
+- **`ResponseData` is replaced by the ASP.NET Core `IActionResult` family.** Endpoints that
+  control the HTTP response now declare `IRequest<Response>` (where `Response` is
+  `Box<dyn IActionResult>`) and return a result:
+  - `ResponseData::file(p)` → `FileResult::path(p)`
+  - `ResponseData::file_stream(r, ct)` → `FileResult::stream(r).content_type(ct)`
+  - `ResponseData::file_seekable_stream(r, len, ct)` →
+    `FileResult::seekable_stream(r, len).content_type(ct)`
+  - `ResponseData::with_file(body)` → `FileResult::with_body(body)`
+  - `ResponseData::bytes(v)` / `::text(s)` / `::html(s)` → `ContentResult::bytes(v, ct)` /
+    `::text(s)` / `::html(s)`
+  - `ResponseData::no_content()` → `NoContentResult`
+  - `ResponseData::json(v)` → `JsonResult::new(v)` (ordinary DTO responses do this
+    automatically)
+  - `status` / `header` / `download_name` / `inline_name` / `enable_range_processing` /
+    `entity_tag` / `last_modified` keep their names on the result types
+  e.g. `Ok(Box::new(FileResult::path(path).download_name("report.csv")))`.
+
+### Added
+
+- `IActionResult` trait, `Response` (`Box<dyn IActionResult>`), and the result types
+  `JsonResult<T>`, `ContentResult`, `FileResult`, `NoContentResult`, `StatusCodeResult` —
+  the ASP.NET Core result vocabulary, so an action reports the same shapes as
+  `File(...)`, `Content(...)`, `StatusCode(...)`, `NoContent()`.
+
+### Removed
+
+- The unused `webx::Json<T>` alias (use `JsonResult<T>`); no deprecated shims remain.
+
+### Changed
+
+- OpenAPI now emits placeholder `components.schemas` entries for every referenced response type
+  (`$ref` no longer dangles) and marks `IRequest<Response>` endpoints opaque.
+- Internal plans/reviews moved out of the shipped docs tree; `publish.sh` and the publish workflow
+  share the crates.io index helpers (`scripts/crates-index.sh`); the phantom 1.0.1 changelog entry
+  is merged into 1.0.2.
+
+## [1.0.2] — 2026-11-12
+
+### Breaking
+
+- **`IRequestHandler::handle` returns `ActionResult<R>`** — the framework-level name for
+  ASP.NET Core's `ActionResult<T>`: `Ok(value)` is the response payload, `Err(Error)` is
+  mapped to the HTTP status and `problem+json` by the framework. It is the same type as
+  `Result<R, Error>` (`T` defaults to `()`), so `?` and `Err(...)` keep working; `Result<T>`
+  remains the general fallible alias for infrastructure code. `IPipelineBehavior::handle`
+  and `Next::run` follow the same name.
+- **`PagedResponse<T>` is removed in favour of `PagedResult<T>`** — the list envelope now
+  pairs with `OperationResult`.
+
+### Added
+
+- **`OperationResult` / `OperationResult<T>`** — a framework-provided business result DTO:
+  `success`, business `status`, `message` and an optional `result` (`OperationResult` has no
+  `result` member). It saves every module from defining its own `{ success, status, message }`
+  envelope. It is an ordinary DTO, not a transport shape: the HTTP status stays the framework's
+  (200 with the serialized body, `problem+json` for `Err(webx::Error)`), and `status` is
+  whatever the business assigns. Constructors: `ok`, `ok_with_status`, `failed`, `success`,
+  `success_with_status`.
+- **`OperationResult` can be adjusted while the operation runs**: `with_status`,
+  `with_message` and `with_result` (unit envelope → payload) sit next to the public fields,
+  so an outcome that different branches decide is set in place instead of rebuilt.
+
+## [1.0.0] — 2026-11-11
+
+### Breaking
+
+- **rust-dix 0.10 alignment.** The DI container is now rust-dix 0.10 (rust-dix-macros 0.10,
+  rust-ef 2.1 for the examples); MSRV is 1.95. User-visible semantics:
+  - strict scope validation is the **default** — resolving a Scoped service from the root
+    provider returns `Err(ScopedFromRootProvider)`; `provider.scope()` is the supported path,
+    and `get_owned` / `try_get_owned` remain callable from the root (caller-owned, not cached);
+  - single-service resolution is MEDI **last-registration-wins**; framework defaults are
+    registered with `try_add*` so an earlier user registration still wins;
+  - `get_all` returns **non-keyed** registrations only; use `get_all_keyed::<T>()` for keyed;
+  - `get_owned` on a Singleton returns `Err(OwnedNotSupported)` instead of panicking;
+  - `RdiError` is `#[non_exhaustive]` with new `ScopedFromRootProvider` / `ProviderDisposed` /
+    `ScopeDisposed` variants.
+- **Ambient DI removed.** `dispatch_provider()`, `dispatch_handler_cache()`,
+  `DispatchRuntime::run()` and `DispatchRuntime::run_in_scope()` are gone; there is no
+  task-local provider. `DispatchRuntime` is a plain per-host handle (`provider()`,
+  `handler_cache()`, `scope()`). Handlers use `#[handler(inject)]` constructor injection;
+  background work injects rust-dix's built-in `Arc<dyn ScopeFactory>` and opens scopes
+  explicitly; `IHttpContext::dispatch_runtime()` gives endpoint adapters the host handles.
+- **`Mediator::new` takes explicit handles**: `Mediator::new(provider, Arc<HandlerCache>)`.
+  `add_mediator()` still registers a DI-injectable mediator (the host registers the handler
+  registry in DI).
+- **Typed pipeline only.** `IErasedPipelineBehavior`, `BoxedNextFn`, `BoxedPipelineFuture`,
+  `add_pipeline` / `add_pipeline_with` and `build_pipeline_chain` are removed; dispatch runs a
+  single `IPipelineBehavior<Req, Rsp>` chain (short-circuit values are compiler-checked).
+- **Deprecated APIs removed**: `register_handlers!` (since 0.2) and
+  `build_resource_policy_from_routes()` (since 0.6).
+- **Host shutdown disposes the provider**: after hosted services stop and connections drain,
+  `provider.dispose()` releases singletons in reverse creation order and marks the provider
+  disposed (later resolution returns `ProviderDisposed`; the call is idempotent).
+
+### Added
+
+- **`HostBuilder::try_build_async()`** for async singletons (rust-ef `add_dbcontext_async`):
+  it awaits rust-dix `build_async_with`, and `try_build()` reports an actionable error when
+  async registrations are present. Host assembly is shared between the sync and async paths.
+- **`HostBuilder::lenient_scope_validation()`**: migration-only opt-out that restores the
+  pre-1.0 root-scope behavior (`ServiceProviderOptions::lenient()`).
+- `DispatchRuntime::scope()` and `IHttpContext::dispatch_runtime()` as explicit DI handles.
+- Migration guide `16-migration/upgrade-to-1.0.md` (Chinese + English summary).
+
+### Changed
+
+- Framework-provided defaults (`HealthCheckRegistry`, `IEndpointCatalog`, `IStringLocalizer`)
+  use `try_add*`; rust-dix 0.10 resolves the last registration, so user overrides keep winning.
+- docbit/dmbit examples migrated: `DbInitService` injects `Arc<dyn ScopeFactory>`, the SEO
+  middleware opens its own scope, and the old ambient calls are gone.
+- README / handbook version references moved to 1.0.
+
+### Fixed
+
+- Hosted services no longer depend on an implicit task-local scope: scoped dependencies are
+  bound to the scope the service opens and are released with it.
+- Endpoint dispatch no longer relies on a global provider lookup; a missing runtime is reported
+  as a clear `Error::Internal` instead of a panic in a macro-generated dispatch.
+## [0.10.0] — 2026-11-11
+
+### Breaking
+
+- **`IPipelineBehavior` is typed.** The pipeline trait is now
+  `IPipelineBehavior<Req, Rsp>` with
+  `async fn handle(&self, req: Req, next: Next<Req, Rsp>) -> Result<Rsp>`: the request and
+  response are real types, and a behavior that short-circuits returns the handler's response
+  type at compile time instead of being downcast from `Box<dyn Any + Send>` at runtime. The old
+  type-erased trait is renamed `IErasedPipelineBehavior` and deprecated; it keeps running for
+  one release, with its chain wrapped outermost around the typed chain (1.0 removes it).
+- **Typed pipeline registration.** `IServiceCollectionExt::add_typed_pipeline::<B, Req, Rsp>()`
+  (Default-constructed) and `add_typed_pipeline_with::<F, Req, Rsp>(factory)` (constructor
+  injection) register typed behaviors. `add_pipeline` / `add_pipeline_with` still compile but
+  now register `IErasedPipelineBehavior` and are deprecated.
+- **`HostBuilder::use_resource_authorization()` is removed.** It had been a deprecated no-op
+  since 0.6; authorization is enforced from endpoint metadata and `#[authorize]`.
+- **The process-global provider shim is removed.** `set_global_provider`,
+  `try_global_provider` and the `global_provider` fallback are gone. `dispatch_provider()`
+  resolves only from the active `DispatchRuntime` and panics with the fix in the message when
+  none is active; `Host::provider()` is the single source of truth for the host instance.
+
+### Added
+
+- **`Arc<dyn IMediator>` dispatch via `send_boxed`.** The mediator trait is now
+  dyn-compatible for type-erased callers: `send_boxed(Box<dyn Any + Send>) -> Result<Box<dyn Any + Send>>`
+  looks the request up by `TypeId` (one boxed dispatch per `#[handler]`), runs the same typed
+  pipeline + handler path, and returns a boxed response to downcast. The generic `send`/`publish`
+  gain `where Self: Sized`; `publish` stays generic (event handlers are resolved by concrete
+  `IEventHandler<T>`), so boxed publish is not part of 0.10.
+- **`HostBuilder::try_build() -> Result<Host, Error>`.** Production guards (weak or placeholder
+  JWT secret, CORS `*`) now return an error instead of panicking, so a deployment can exit with
+  a readable message. `build()` stays fail-fast: it delegates to `try_build()` and panics on
+  the same conditions as before.
+
+
+
+
+## [0.9.0] — 2026-11-10
+
+### Breaking
+
+- **`APP_ENV` unset now means Production.** The safe default protects deployments
+  that forget the variable: weak/placeholder JWT secrets and CORS `*` are rejected
+  at build time instead of warned about. Local development must set
+  `APP_ENV=Development` explicitly (the warning says so).
+- **Anonymous identity must be declared explicitly.** `Option<IdentityUser>` now
+  requires `#[fromclaim(optional)]`; a plain `#[fromclaim]` on an optional identity
+  is a compile error that names the fix. A request may carry only one identity
+  field (`user: IdentityUser` plus `viewer: Option<IdentityUser>` is rejected).
+  Rationale: an "optional login" endpoint used to be completely public by
+  accident, so forgetting `require_user()` silently exposed it.
+- **`RequestContext::run` takes an identity.** The signature is now
+  `run(Option<Arc<IdentityUser>>, future)`; `operator_id()` keeps working and is
+  derived from the identity. The HTTP adapter builds the identity before binding,
+  so the binder, handler and audit helpers all observe the same `Arc`.
+
+### Added
+
+- **Identity accessors**: `IdentityUser::{tenant, require_tenant}` (empty
+  `tenant_id` means “no tenant claim”, not a tenant called `""`) and
+  `RequestUser::{permissions, has_permission, require_role, require_tenant}`, so
+  generic helpers can distinguish 401 (anonymous) from 403 (authenticated but
+  missing the role/tenant).
+- **`RequestContext::identity()`** — the request-scoped `Arc<IdentityUser>`, for
+  audit columns and persistence callbacks outside the handler.
+
+- **`IHttpRequest::remote_addr()`** — a defaulted accessor for the client peer
+  address (`None` by default so test contexts and alternative hosts keep
+  compiling). The host records it at accept time; rate limiting and audit code
+  use it instead of guessing a constant.
+- **`Error::public_detail()`** — the client-facing message of a 4xx variant,
+  without the operator-facing `Display` prefix (`"Unauthorized: …"`); 5xx
+  variants return `None`, which is what makes detail redaction enforceable.
+- **`Retry-After` on 429** — derived from the bucket refill rate.
+- **`IHttpContext::take_early_error()`** — a defaulted hook for rejections the
+  host detects from the request line (currently an oversized declared
+  `Content-Length`). The context records them instead of writing a response, so
+  the pipeline can still see the request.
+- **`SpaMiddleware::try_index_fallback()`** — the SPA shell fallback, called by
+  the host after a router miss.
+- **Hosted-service start/stop timeouts** — `start()` and `stop()` are bounded
+  (30s each) so one stuck service cannot block startup or shutdown forever.
+
+### Changed
+
+- **Invalid or expired tokens no longer fail the request.** A bad `Authorization`
+  header is treated as "unauthenticated": the request continues anonymously and
+  protected endpoints answer 401 through `#[authorize]` or a required
+  `#[fromclaim] user: IdentityUser`. Public endpoints (login, health, config) keep
+  working when a client sends a stale token — previously such a request was
+  rejected everywhere, which could lock users out of the login endpoint. The 401
+  detail is the stable `authentication required`; decoder reasons go to
+  `tracing::debug!`.
+- **`405` carries `Allow`, and plain `OPTIONS` reports methods.** Only a real CORS
+  preflight (`Origin` + `Access-Control-Request-Method`) is short-circuited by the
+  CORS middleware; a plain `OPTIONS` answers 204 + `Allow` for a known path and 404
+  for an unknown one, instead of 204 for every path.
+- **OpenAPI parameter metadata is keyed by `TypeId`.** Qualified request paths
+  (`impl IRequest<T> for contracts::ListOrdersRequest`) and same-named request types
+  in different modules no longer lose or mix up their parameter documentation;
+  string keys remain only as a fallback for hand-written `RouteEntry::new` entries.
+- **User middleware defaults to the after-authentication slot.** `use_middleware`
+  / `use_middleware_with` (and DI-registered `IMiddleware`) now run after JWT, so a
+  middleware that reads `ctx.claims()` sees the principal — the framework's own
+  `RequestTracing` previously logged `anon` for every production request. Explicit
+  positions use `use_middleware_at` / `use_middleware_with_at` with the new
+  `MiddlewareSlot::{BeforeCors, AfterAuth, AfterSpa}`. Pipeline order is now
+  SecurityHeaders → RequestId → user(BeforeCors) → CORS → Metrics → RateLimit →
+  auth → user(AfterAuth) → SPA → user(AfterSpa) → Router, so 429/413 responses
+  carry CORS headers and rate-limited requests are counted.
+- **Hosted services run inside a DI scope.** Each `IHostedService::start`/`stop`
+  gets a fresh scope: `dispatch_provider().get_owned::<DbContext>()` resolves
+  scoped dependencies against that scope and they are disposed when the call
+  returns, instead of being cached on the root provider for the process lifetime.
+- **`add_pipeline_with` gives pipeline behaviors real constructor injection.**
+  `add_pipeline` always required `Default` and discarded the DI resolver, so the
+  documented "behaviors resolve dependencies via constructor injection" was a
+  no-op. The new
+  `add_pipeline_with(|resolver| Arc::new(MyBehavior::new(...)) as Arc<dyn IPipelineBehavior>)`
+  receives the resolver at construction time (capture an `Arc` in the closure for
+  the simple case; during DI build-time validation the portable resolver call is
+  `resolver.get_any(type_name::<T>())` + downcast). A behavior that short-circuits
+  with a different response type now produces an error naming the expected type
+  and the fix instead of a generic "response type mismatch".
+- **`after` hooks run on error paths.** The middleware pipeline now unwinds the
+  middlewares that entered when a later `invoke` or the final handler returns an
+  error, then returns the first error. Metrics, tracing, compression and cleanup
+  finally observe failed requests (previously a `?` skipped the reverse pass).
+- **One 401 write path.** Declarative authorization no longer writes its own
+  401; it returns `Error::Unauthorized` and the host writes every 401 through
+  `problem_response::write_unauthorized`, which sets `application/problem+json`
+  and `WWW-Authenticate: Bearer realm="rust-webx"` (RFC 7235). Missing
+  credentials and a rejected token keep distinct `detail` text.
+- **Rate limiting keys on the real peer address.** Previously every request was
+  bucketed under a constant `127.0.0.1`, silently turning per-client limits into
+  one global bucket. When the host cannot report a peer address the limiter now
+  passes the request through instead of bucketing everyone together.
+- **`run()`/`run_at()` bind listeners before anything starts.** A port conflict
+  now returns an error (non-zero exit) instead of being logged and followed by a
+  successful shutdown; a failed startup also stops the hosted services that
+  already started, in reverse order.
+- **Shutdown signals are stored, not broadcast.** `ServerHandle::shutdown()` and
+  `IHost::stop()` use a `watch` channel, so a signal sent before the accept loops
+  start is not lost (the documented `spawn(run); handle.shutdown()` pattern used
+  to hang). Connections are asked to close gracefully (`Connection: close`)
+  during the drain window instead of being aborted after it.
+- **Hosted services stop in reverse start order**, with rollback on a failed
+  start. Docs previously disagreed with the implementation on this.
+- **SPA index fallback runs after routing.** It is applied only when the router
+  has no match and the client explicitly asked for HTML (`Accept: text/html`);
+  unmatched API paths and data clients get a real 404. A handler response can no
+  longer inherit the SPA file cache policy (`Cache-Control: public`), which used
+  to make private JSON publicly cacheable.
+- **Oversized declared bodies go through the middleware pipeline.** The eager
+  413 response previously bypassed CORS, security headers, access logs, metrics
+  and rate limiting; it is now a normal error raised inside the pipeline.
+- **`Error::Serialization` only describes request parsing.** Response
+  serialization failures are `Error::ResponseSerialization` (500) and body
+  state-machine errors are `Error::State` (500), so a server-side bug can no
+  longer be reported to the client as a 400/415.
+- **`AppMode::from_env()` warns when `APP_ENV` is unset.** The default stays
+  `Development` in this release, but a once-per-process warning now tells the
+  operator to set `APP_ENV=Production` explicitly.
+- **Embedded-asset compression defaults to brotli quality 9.** Quality 11 made a
+  clean build of a ~27 MB `wwwroot` take over an hour (the build script is
+  single-threaded), which blocked development and CI. Quality 9 is a few percent
+  larger and an order of magnitude faster; `WEBX_BROTLI_QUALITY=11` restores the
+  old behaviour for size-critical release builds, and changing it now retriggers
+  the build script.
+
+### Fixed
+
+- **`rust-ef` upgraded to 2.0.1 (`libsqlite3-sys` 0.39).** The example apps pinned
+  rust-ef 1.8.3, which resolved `libsqlite3-sys` 0.28 — affected by
+  RUSTSEC-2026-0459 (CVE-2026-119375). Moving to the documented 2.0.1 baseline
+  updates rusqlite 0.41 / libsqlite3-sys 0.39 and makes `cargo audit` pass.
+- **5xx detail no longer leaks internals.** `Error::Internal` / `Di` / response
+  serialization text and file-system paths were served verbatim; they are logged
+  (`tracing::error!`) and replaced with a stable detail. File-download and
+  ranged-response failures are redacted the same way.
+- **`claims` is an ordinary field name again.** The derive special-cased a field
+  named `claims` and silently skipped it — even when the user wrote
+  `#[frombody] claims: Vec<Claim>` — which also meant a request whose only field
+  was `claims` never read the body. That leftover from the removed `#[claims]`
+  injection is gone.
+- **`r#` identifiers use their unraw wire name.** `#[frombody] r#type: String`
+  now binds the JSON key `type` (previously `r#type`), and query/header names
+  match serde's behaviour.
+- **`#[fromclaim]` reads the raw claim map first.** A token that literally
+  carries `user_id` or `tenant` is no longer silently replaced by `sub` /
+  `tenant_id`; the dedicated accessors are only a fallback.
+- **`Option<composite>` fields on body-less methods are a 400, not a silent
+  `None`.** The complex-type guard only covered required fields, so
+  `Option<Filter>` on a GET never bound and never failed.
+- **`?ids=` (present but empty) binds as `Some(vec![])`.** `Option<Vec<T>>` could
+  not express an explicitly empty list: the empty string became one empty element
+  and failed to parse.
+- **JWT failures no longer echo the decoder's error text** (`InvalidToken`,
+  signature/base64 details) into the 401 body.
+
 ## [0.8.0] — 2026-11-10
 
 ### Breaking

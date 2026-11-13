@@ -46,7 +46,7 @@ impl IRequest<UserDto> for GetUserRequest {}
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<GetUserRequest, UserDto> for GetUserHandler {
-    async fn handle(&mut self, req: GetUserRequest) -> Result<UserDto> {
+    async fn handle(&mut self, req: GetUserRequest) -> ActionResult<UserDto> {
         self.repo.find(&req.id)
             .ok_or_else(|| Error::NotFound(format!("User {}", req.id)))
     }

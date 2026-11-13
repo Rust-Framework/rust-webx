@@ -32,7 +32,7 @@ APP_ENV=Production cargo run
 RUST_LOG=debug cargo run
 ```
 
-`APP_ENV` 选择运行模式（`Production` / `Prod` 或 `Development` / `Dev`，未设置时默认 `Development`）；`RUST_LOG` 控制 `tracing` 日志过滤级别（默认 `info`）。
+`APP_ENV` 选择运行模式（`Production` / `Prod` 或 `Development` / `Dev`）。**未设置时默认 `Production`**（安全默认：开发环境显式设 `APP_ENV=Development`，否则弱 JWT secret / CORS `*` 等生产守卫会生效）；`RUST_LOG` 控制 `tracing` 日志过滤级别（默认 `info`）。
 
 ## 小结
 

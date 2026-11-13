@@ -100,8 +100,14 @@ async fn auth_empty_token_returns_none() {
     assert!(result.is_none(), "Empty Bearer token should return None");
 }
 
+// #18: a bad token is "not authenticated", never "reject the request".
+// The handler returns `Ok(None)` so the request continues as anonymous and a
+// public endpoint (login, health, docs) stays reachable while the client still
+// holds a stale token. Protected endpoints turn the missing claims into a 401
+// later in the pipeline.
+
 #[tokio::test]
-async fn auth_invalid_token_returns_err() {
+async fn auth_invalid_token_degrades_to_anonymous() {
     let secret = b"test-secret-key";
     let auth = JwtAuth::new(DecodingKey::from_secret(secret), Validation::default());
 
@@ -109,11 +115,15 @@ async fn auth_invalid_token_returns_err() {
         .with_header("authorization", "Bearer invalid-token-data");
 
     let result = auth.authenticate(&mut ctx).await;
-    assert!(result.is_err(), "Invalid token should return Err");
+    assert!(result.is_ok(), "a bad token must not fail authentication");
+    assert!(
+        result.unwrap().is_none(),
+        "a bad token means anonymous, not an error"
+    );
 }
 
 #[tokio::test]
-async fn auth_wrong_secret_key_returns_err() {
+async fn auth_wrong_secret_key_degrades_to_anonymous() {
     let secret = b"real-secret";
     let wrong_secret = b"wrong-secret";
     let token = create_test_token(secret, "user-1", &[], &[]);
@@ -126,14 +136,12 @@ async fn auth_wrong_secret_key_returns_err() {
         .with_header("authorization", &format!("Bearer {}", token));
 
     let result = auth.authenticate(&mut ctx).await;
-    assert!(
-        result.is_err(),
-        "Token signed with different key should return Err"
-    );
+    assert!(result.is_ok(), "a token from another key is just anonymous");
+    assert!(result.unwrap().is_none());
 }
 
 #[tokio::test]
-async fn auth_expired_token_returns_err() {
+async fn auth_expired_token_degrades_to_anonymous() {
     let secret = b"test-secret-key-expiry";
     let token = create_expired_token(secret);
     let auth = JwtAuth::new(DecodingKey::from_secret(secret), Validation::default());
@@ -142,7 +150,8 @@ async fn auth_expired_token_returns_err() {
         .with_header("authorization", &format!("Bearer {}", token));
 
     let result = auth.authenticate(&mut ctx).await;
-    assert!(result.is_err(), "Expired token should return Err");
+    assert!(result.is_ok(), "an expired token is just anonymous");
+    assert!(result.unwrap().is_none());
 }
 
 #[tokio::test]

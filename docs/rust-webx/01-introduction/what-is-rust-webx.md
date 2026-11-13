@@ -93,7 +93,7 @@ struct HelloHandler;
 #[handler]  // 编译时向 inventory 注册
 #[async_trait]
 impl IRequestHandler<HelloRequest, String> for HelloHandler {
-    async fn handle(&mut self, _req: HelloRequest) -> Result<String> {
+    async fn handle(&mut self, _req: HelloRequest) -> ActionResult<String> {
         Ok("Hello, World!".to_string())
     }
 }
@@ -137,7 +137,7 @@ let user = req.require_user()?;
 // user.id / user.tenant_id / user.roles
 ```
 
-标准身份包含用户标识、名称、邮箱、租户、角色与权限；匿名接口用 `Option<IdentityUser>`。
+标准身份包含用户标识、名称、邮箱、租户、角色与权限；匿名接口用 `#[fromclaim(optional)] viewer: Option<IdentityUser>`。
 详见[用户身份与多租户](../05-request-pattern/user-identity.md)。
 
 ## 框架边界：它不是什么

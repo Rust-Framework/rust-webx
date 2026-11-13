@@ -399,8 +399,8 @@ pub struct ImportInventoryHandler {
 
 #[handler(inject)]
 #[async_trait]
-impl IRequestHandler<ExportInventoryRequest, ResponseData> for ExportInventoryHandler {
-    async fn handle(&mut self, _: ExportInventoryRequest) -> Result<ResponseData> {
+impl IRequestHandler<ExportInventoryRequest, Response> for ExportInventoryHandler {
+    async fn handle(&mut self, _: ExportInventoryRequest) -> ActionResult<Response> {
         let mut products = linq!(self.ctx.set::<Product>();).to_list().await.map_ef()?;
         products.sort_by_key(|a| a.sort_order);
         let specs = linq!(self.ctx.set::<Spec>();).to_list().await.map_ef()?;
@@ -452,9 +452,10 @@ impl IRequestHandler<ExportInventoryRequest, ResponseData> for ExportInventoryHa
 
         // A real file response: the browser gets `text/csv` plus a
         // `Content-Disposition` filename, and the body is streamed.
-        Ok(ResponseData::bytes(csv.into_bytes())
-            .content_type("text/csv; charset=utf-8")
-            .download_name(INVENTORY_EXPORT_FILE_NAME))
+        Ok(Box::new(
+            ContentResult::bytes(csv.into_bytes(), "text/csv; charset=utf-8")
+                .download_name(INVENTORY_EXPORT_FILE_NAME),
+        ))
     }
 }
 
@@ -480,7 +481,7 @@ struct AccSpec {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportInventoryHandler {
-    async fn handle(&mut self, req: ImportInventoryRequest) -> Result<ImportInventoryResult> {
+    async fn handle(&mut self, req: ImportInventoryRequest) -> ActionResult<ImportInventoryResult> {
         let bytes = req.file.read_bytes().await?;
         let raw = String::from_utf8(bytes).map_err(|_| {
             Error::Validation(

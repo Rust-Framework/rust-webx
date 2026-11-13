@@ -11,9 +11,26 @@ use std::path::{Path, PathBuf};
 
 use crate::error::Error;
 
-/// Brotli quality. 11 is the maximum: it costs build time, not runtime size or
-/// startup, so it is the right trade for a value fixed at compile time.
-const BROTLI_QUALITY: u32 = 11;
+/// Brotli quality used to embed assets.
+///
+/// Quality 11 produces the smallest payloads but its cost is super-linear: a
+/// ~27 MB vendored-asset tree took over an hour to compress on a clean build,
+/// which makes `cargo build` unusable in development and CI. Quality 9 is a few
+/// percent larger and an order of magnitude faster, so it is the default; the
+/// maximum is still available for size-critical release builds via
+/// `WEBX_BROTLI_QUALITY` (0-11).
+fn brotli_quality() -> u32 {
+    const DEFAULT: u32 = 9;
+    match std::env::var("WEBX_BROTLI_QUALITY") {
+        Ok(value) => value
+            .trim()
+            .parse::<u32>()
+            .ok()
+            .filter(|quality| *quality <= 11)
+            .unwrap_or(DEFAULT),
+        Err(_) => DEFAULT,
+    }
+}
 
 /// Brotli window (`lgwin`). 24 keeps multi-megabyte bundles inside one window,
 /// which is where most of the ratio on vendored JS comes from.
@@ -107,6 +124,7 @@ impl Scan {
     /// subdirectory, so the full set is emitted: added, edited and deleted
     /// files all retrigger the build, and the table cannot go stale.
     pub(crate) fn announce_rerun(&self, base: &Path) {
+        println!("cargo:rerun-if-env-changed=WEBX_BROTLI_QUALITY");
         println!("cargo:rerun-if-changed={}", base.display());
         for path in self.dirs.iter().chain(self.files.iter()) {
             println!("cargo:rerun-if-changed={}", path.display());
@@ -219,7 +237,7 @@ fn is_already_compressed(path: &Path) -> bool {
         })
 }
 
-/// One-shot brotli encode at [`BROTLI_QUALITY`].
+/// One-shot brotli encode at [`brotli_quality()`].
 ///
 /// `None` when the encoder fails, which is not fatal: the caller falls back to
 /// storing the file verbatim.
@@ -227,7 +245,8 @@ fn brotli(bytes: &[u8]) -> Option<Vec<u8>> {
     use std::io::Write as _;
 
     let mut out = Vec::with_capacity(bytes.len() / 3);
-    let mut encoder = brotli::CompressorWriter::new(&mut out, 4096, BROTLI_QUALITY, BROTLI_WINDOW);
+    let mut encoder =
+        brotli::CompressorWriter::new(&mut out, 4096, brotli_quality(), BROTLI_WINDOW);
     encoder.write_all(bytes).ok()?;
     encoder.flush().ok()?;
     drop(encoder);

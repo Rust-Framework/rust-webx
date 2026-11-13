@@ -5,7 +5,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! rust-webx = "0.8"
+//! rust-webx = "1.1"
 //! ```
 //!
 //! ```ignore
@@ -18,10 +18,14 @@
 //! `rust-webx-spa` → `webx_spa`, `rust-webx-openapi` → `webx_openapi`).
 
 // --- Core traits ---
+pub use webx_core::action::{
+    ContentResult, FileResult, IActionResult, JsonResult, NoContentResult, Response,
+    StatusCodeResult,
+};
 pub use webx_core::app::IHost;
 pub use webx_core::auth::{
-    IAuthenticationHandler, IAuthorizationPolicy, IClaims, IDynamicAuthorizer, IdentityUser,
-    RequestUser,
+    DeclaredRules, IAuthenticationHandler, IAuthorizationPolicy, IClaims, IDynamicAuthorizer,
+    IdentityUser, RequestUser,
 };
 pub use webx_core::cache::{
     cache_ext::DistributedCacheExtensions,
@@ -32,30 +36,36 @@ pub use webx_core::config::{
     bind_config, bind_root, load_appsettings, AppOptions, AppSection, CorsSection, CultureSection,
     IAppOptions, JwtSection, MetricsSection, RateLimitSection, TlsSection,
 };
-pub use webx_core::dispatch_runtime::{dispatch_provider, DispatchRuntime};
-pub use webx_core::error::{Error, Result};
+pub use webx_core::dispatch_runtime::DispatchRuntime;
+pub use webx_core::error::{ActionResult, Error, Result};
 pub use webx_core::form::{
     sanitize_file_name, set_spool_root, spool_root, FormField, FormFile, FormFileBuilder,
     MultipartForm, SPOOL_FILE_PREFIX,
 };
 pub use webx_core::handler::{IEventHandler, IHostedService, IRequestHandler};
+/// Background worker helpers: `BackgroundService`, `delay`, `CancellationToken`.
+pub use webx_core::hosted as background;
+pub use webx_core::hosted::{
+    BackgroundService, BackgroundServiceHost, CancellationToken, PeriodicBackgroundService,
+};
 pub use webx_core::http::{
     content_disposition_value, read_json_body, write_json_response, ByteRange, Disposition,
-    FileBody, FileSource, HttpStatus, IClaimsExt, IHttpContext, IHttpRequest, IHttpResponse, Json,
+    FileBody, FileSource, HttpStatus, IClaimsExt, IHttpContext, IHttpRequest, IHttpResponse,
     ResponseBody, SeekableReader, STREAM_BUF_SIZE,
 };
 pub use webx_core::localization::{
     IStringLocalizer, LocalizationOptions, LocalizedString, StringLocalizer, TextRef,
 };
-pub use webx_core::mediator::build_pipeline_chain;
+pub use webx_core::mediator::dispatch;
 pub use webx_core::mediator::{IEventRequest, IMediator, IRequest};
-pub use webx_core::middleware::IMiddleware;
+pub use webx_core::middleware::{IMiddleware, MiddlewareSlot};
 pub use webx_core::mode::AppMode;
-pub use webx_core::pagination::{PagedRequest, PagedResponse};
+pub use webx_core::operation::OperationResult;
+pub use webx_core::pagination::{PagedRequest, PagedResult};
 pub use webx_core::paths::{
     app_base, framework_root, looks_like_app_base, looks_like_framework_root,
 };
-pub use webx_core::pipeline::{BoxedNextFn, BoxedPipelineFuture, IPipelineBehavior};
+pub use webx_core::pipeline::{IPipelineBehavior, Next};
 pub use webx_core::problem::{FieldError, ProblemDetails};
 pub use webx_core::request_context::RequestContext;
 pub use webx_core::route::catalog::{
@@ -66,25 +76,28 @@ pub use webx_core::route::diagnostics::{
     orphan_routes, route_snapshots,
 };
 pub use webx_core::routing::{HttpMethod, IEndpoint, IRouter, RouteMeta};
+pub use webx_core::security::{
+    IPasswordHasher, ISessionStore, ITokenIssuer, InMemorySessionStore, IssuedToken, TokenClaims,
+};
 
 // --- DI extensions ---
 pub use webx_core::route::binding;
 pub use webx_core::route::binding::RequestModel;
 pub use webx_core::route::ext::{is_mediator_active, should_scan_endpoints, IServiceCollectionExt};
-#[allow(deprecated)]
 pub use webx_core::route::scan::{
-    global_provider, set_global_provider, AuthorizeRule, HandlerCache, HandlerEntry,
-    HandlerRegistration, HandlerRegistry, ParamMeta, RequestParamEntry, ResponseData,
-    RouteDispatch, RouteDispatchFn, RouteEntry,
+    AuthorizeRule, BoxedDispatch, BoxedDispatchFn, BoxedDispatchFuture, HandlerCache, HandlerEntry,
+    HandlerRegistration, HandlerRegistry, ParamMeta, RequestParamEntry, RouteDispatch,
+    RouteDispatchFn, RouteEntry,
 };
 
 // --- HTTP layer ---
-pub use webx_host::auth_jwt::{init_jwt_secret, jwt_middleware, jwt_secret, JwtAuth, JwtClaims};
-#[allow(deprecated)]
-pub use webx_host::authz::{
-    build_resource_policy_from_routes, collect_authorizers, resource_auth_middleware,
-    AuthorizerSet, ResourceAuthorization,
+pub use webx_host::auth_jwt::{
+    init_jwt_secret, jwt_middleware, jwt_middleware_with_revocation, jwt_secret, JwtAuth,
+    JwtClaims, JwtTokenIssuer, DEFAULT_TOKEN_LIFETIME,
 };
+pub use webx_host::authz::collect_authorizers;
+pub use webx_host::authz::resource_auth_middleware;
+pub use webx_host::authz::{AuthorizerSet, ResourceAuthorization};
 pub use webx_host::compression::{compress_gzip, CompressionConfig, CompressionMiddleware};
 pub use webx_host::context::{HttpContext, HttpRequest, HttpResponse};
 pub use webx_host::cors::{CorsConfig, CorsMiddleware};
@@ -94,6 +107,8 @@ pub use webx_host::endpoint::{
 };
 pub use webx_host::health::{HealthCheckEntry, HealthCheckFn, HealthCheckRegistry, HealthStatus};
 pub use webx_host::memory_cache::MemoryCache;
+#[cfg(feature = "password-argon2")]
+pub use webx_host::password_argon2::{Argon2Params, Argon2PasswordHasher};
 pub use webx_host::pipeline::{HandlerFn, MiddlewarePipeline};
 pub use webx_host::rate_limit::{RateLimitMiddleware, RateLimiter};
 pub use webx_host::request_id::RequestIdMiddleware;
@@ -162,37 +177,3 @@ pub use inventory;
 pub use serde;
 pub use serde_json;
 pub use tokio;
-
-// =========================================================================
-// Convenience macro: register_handlers!
-//
-// **Deprecated for HTTP handlers.** HTTP dispatch uses inventory +
-// `HandlerCache` exclusively (`#[handler]` / `#[handler(inject)]`).
-// Keep this macro only for non-HTTP Mediator use or manual DI registration.
-//
-// Generates chained .singleton() calls for handlers that implement Default.
-//
-// Usage inside register():
-//   .register(|svc| {
-//       register_handlers!(svc,
-//           HelloRequest => String => HelloHandler,
-//           DeleteUserRequest => () => DeleteUserHandler,
-//       )
-//   })
-// =========================================================================
-#[deprecated(
-    since = "0.2.0",
-    note = "HTTP handlers should use `#[handler]` / `#[handler(inject)]` (inventory). \
-            register_handlers! remains for non-HTTP Mediator scenarios only."
-)]
-#[macro_export]
-macro_rules! register_handlers {
-    ($svc:ident, $($req:ty => $rsp:ty => $handler:ty),+ $(,)?) => {
-        $svc
-        $(
-            .singleton::<dyn $crate::IRequestHandler<$req, $rsp>>(
-                |_| ::std::sync::Arc::new(<$handler>::default())
-            )
-        )+
-    };
-}

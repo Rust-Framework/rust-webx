@@ -92,7 +92,7 @@ async fn spec_name_map(
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ListDevicesRequest, Vec<DeviceModel>> for ListDevicesHandler {
-    async fn handle(&mut self, _: ListDevicesRequest) -> Result<Vec<DeviceModel>> {
+    async fn handle(&mut self, _: ListDevicesRequest) -> ActionResult<Vec<DeviceModel>> {
         let names = spec_name_map(&mut self.ctx).await?;
         let mut devices = linq!(self.ctx.set::<Device>();).to_list().await.map_ef()?;
         devices.sort_by(|a, b| {
@@ -114,7 +114,7 @@ impl IRequestHandler<ListDevicesRequest, Vec<DeviceModel>> for ListDevicesHandle
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ListSpecDevicesRequest, Vec<DeviceModel>> for ListSpecDevicesHandler {
-    async fn handle(&mut self, req: ListSpecDevicesRequest) -> Result<Vec<DeviceModel>> {
+    async fn handle(&mut self, req: ListSpecDevicesRequest) -> ActionResult<Vec<DeviceModel>> {
         let spec_id = parse_id(&req.id)?;
         let (spec, product_name) = spec_and_product(&mut self.ctx, &spec_id).await?;
 
@@ -138,7 +138,7 @@ impl IRequestHandler<ListSpecDevicesRequest, Vec<DeviceModel>> for ListSpecDevic
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<GetDeviceRequest, DeviceModel> for GetDeviceHandler {
-    async fn handle(&mut self, req: GetDeviceRequest) -> Result<DeviceModel> {
+    async fn handle(&mut self, req: GetDeviceRequest) -> ActionResult<DeviceModel> {
         let id = parse_id(&req.id)?;
         let d =
             crate::ef_require_by_id!(self.ctx, Device, id, Error::NotFound("设备不存在".into()));
@@ -150,7 +150,7 @@ impl IRequestHandler<GetDeviceRequest, DeviceModel> for GetDeviceHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<CreateDeviceRequest, DeviceModel> for CreateDeviceHandler {
-    async fn handle(&mut self, req: CreateDeviceRequest) -> Result<DeviceModel> {
+    async fn handle(&mut self, req: CreateDeviceRequest) -> ActionResult<DeviceModel> {
         let spec_id = parse_id(&req.spec_id)?;
         let asset_code = require_text("资产编码", &req.asset_code, MAX_ASSET_CODE)?;
         let status = normalize_status(&req.status)?;
@@ -188,7 +188,7 @@ impl IRequestHandler<CreateDeviceRequest, DeviceModel> for CreateDeviceHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<GenerateDevicesRequest, GenerateDevicesResult> for GenerateDevicesHandler {
-    async fn handle(&mut self, req: GenerateDevicesRequest) -> Result<GenerateDevicesResult> {
+    async fn handle(&mut self, req: GenerateDevicesRequest) -> ActionResult<GenerateDevicesResult> {
         let spec_id = parse_id(&req.id)?;
         let (_spec, _product_name) = spec_and_product(&mut self.ctx, &spec_id).await?;
 
@@ -251,7 +251,7 @@ impl IRequestHandler<GenerateDevicesRequest, GenerateDevicesResult> for Generate
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<UpdateDeviceRequest, DeviceModel> for UpdateDeviceHandler {
-    async fn handle(&mut self, req: UpdateDeviceRequest) -> Result<DeviceModel> {
+    async fn handle(&mut self, req: UpdateDeviceRequest) -> ActionResult<DeviceModel> {
         let id = parse_id(&req.id)?;
         let mut d =
             crate::ef_require_by_id!(self.ctx, Device, id, Error::NotFound("设备不存在".into()));
@@ -293,7 +293,7 @@ impl IRequestHandler<UpdateDeviceRequest, DeviceModel> for UpdateDeviceHandler {
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<DeleteDeviceRequest, String> for DeleteDeviceHandler {
-    async fn handle(&mut self, req: DeleteDeviceRequest) -> Result<String> {
+    async fn handle(&mut self, req: DeleteDeviceRequest) -> ActionResult<String> {
         let id = parse_id(&req.id)?;
         let mut d =
             crate::ef_require_by_id!(self.ctx, Device, id, Error::NotFound("设备不存在".into()));

@@ -42,7 +42,7 @@ pub struct Argon2Params {
 
 impl Argon2Params {
     /// Build a parameter set. Values are validated when hashing; invalid
-    /// combinations surface as [`Error::PasswordHash`] instead of panicking.
+    /// combinations surface as a 500 [`Error::Internal`] instead of panicking.
     pub const fn new(memory_kib: u32, iterations: u32, parallelism: u32) -> Self {
         Self {
             memory_kib,
@@ -58,14 +58,8 @@ impl Argon2Params {
 
     /// Convert to the `argon2` crate's own parameter type.
     fn to_argon2_params(self) -> Result<Params> {
-        Params::new(
-            self.memory_kib,
-            self.iterations,
-            self.parallelism,
-            None,
-        )
-        .map_err(|error| {
-            Error::PasswordHash(format!(
+        Params::new(self.memory_kib, self.iterations, self.parallelism, None).map_err(|error| {
+            Error::Internal(format!(
                 "invalid Argon2 parameters (m={}, t={}, p={}): {error}",
                 self.memory_kib, self.iterations, self.parallelism
             ))
@@ -108,22 +102,21 @@ impl Argon2PasswordHasher {
 /// Parse and fully verify one PHC string against `password` — runs on a blocking
 /// thread.
 fn verify_blocking(password: &str, stored_hash: &str) -> Result<bool> {
-    let parsed = PasswordHash::new(stored_hash).map_err(|error| {
-        Error::PasswordHash(format!("stored password hash is malformed: {error}"))
-    })?;
+    let parsed = PasswordHash::new(stored_hash)
+        .map_err(|error| Error::Internal(format!("stored password hash is malformed: {error}")))?;
 
     // A PHC string without salt or output cannot represent a password hash; the
     // PHC parser accepts the shape, so verify the fields exists before treating a
     // parse as a usable stored hash.
     if parsed.salt.is_none() || parsed.hash.is_none() {
-        return Err(Error::PasswordHash(
+        return Err(Error::Internal(
             "stored password hash is malformed: missing salt or hash output".to_string(),
         ));
     }
     // Reject unusable parameter fields (e.g. `m=notanumber`) explicitly: a broken
     // stored record must surface as an error, not as "wrong password".
     Params::try_from(&parsed).map_err(|error| {
-        Error::PasswordHash(format!(
+        Error::Internal(format!(
             "stored password hash parameters are invalid: {error}"
         ))
     })?;
@@ -135,7 +128,7 @@ fn verify_blocking(password: &str, stored_hash: &str) -> Result<bool> {
         "argon2i" => Algorithm::Argon2i,
         "argon2d" => Algorithm::Argon2d,
         other => {
-            return Err(Error::PasswordHash(format!(
+            return Err(Error::Internal(format!(
                 "stored password hash uses an unsupported algorithm '{other}'"
             )))
         }
@@ -146,7 +139,7 @@ fn verify_blocking(password: &str, stored_hash: &str) -> Result<bool> {
         Ok(()) => Ok(true),
         // A mismatch is an ordinary authentication failure, not corruption.
         Err(argon2::password_hash::Error::Password) => Ok(false),
-        Err(error) => Err(Error::PasswordHash(format!(
+        Err(error) => Err(Error::Internal(format!(
             "password verification failed: {error}"
         ))),
     }
@@ -171,12 +164,10 @@ impl IPasswordHasher for Argon2PasswordHasher {
             argon2
                 .hash_password(password.as_bytes(), &salt)
                 .map(|hash| hash.to_string())
-                .map_err(|error| Error::PasswordHash(format!("password hashing failed: {error}")))
+                .map_err(|error| Error::Internal(format!("password hashing failed: {error}")))
         })
         .await
-        .map_err(|error| {
-            Error::PasswordHash(format!("password hashing task failed: {error}"))
-        })?
+        .map_err(|error| Error::Internal(format!("password hashing task failed: {error}")))?
     }
 
     async fn verify(&self, password: &str, stored_hash: &str) -> Result<bool> {
@@ -185,7 +176,7 @@ impl IPasswordHasher for Argon2PasswordHasher {
         tokio::task::spawn_blocking(move || verify_blocking(&password, &stored_hash))
             .await
             .map_err(|error| {
-                Error::PasswordHash(format!("password verification task failed: {error}"))
+                Error::Internal(format!("password verification task failed: {error}"))
             })?
     }
 

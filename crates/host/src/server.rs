@@ -23,7 +23,6 @@ use webx_core::security::{ISessionStore, ITokenIssuer};
 
 use crate::auth_jwt::{
     init_jwt_secret, jwt_middleware, jwt_middleware_with_revocation, JwtAuth, JwtTokenIssuer,
-    DEFAULT_TOKEN_LIFETIME,
 };
 use crate::authz::collect_authorizers;
 use crate::context::{BodyLimits, HttpContext, RespBody};
@@ -46,7 +45,7 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig;
 use rustls_pemfile::{certs, pkcs8_private_keys, rsa_private_keys};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::task::JoinSet;
 use tokio_rustls::TlsAcceptor;
 
@@ -374,6 +373,17 @@ impl HostBuilder {
     /// persistent [`ISessionStore`] implementation when revocations must survive
     /// a restart.
     ///
+    /// **This is the only recommended entry point.** Revocation is enabled when
+    /// the container has a `dyn ISessionStore` registration — this method
+    /// registers exactly that. Registering the *concrete* type instead (for
+    /// example `svc.instance(Arc::new(InMemorySessionStore::new()))`) leaves the
+    /// `dyn` key unresolved and revocation silently stays off; register with
+    /// `svc.try_add_singleton::<dyn ISessionStore>(...)` if not using this
+    /// builder. The host logs the on/off decision at startup (debug level).
+    ///
+    /// `jwt_middleware_with_revocation` is the escape hatch for a hand-assembled
+    /// middleware pipeline only; regular hosts use this method.
+    ///
     /// ```ignore
     /// Host::builder()
     ///     .add_authentication()
@@ -677,14 +687,18 @@ impl HostBuilder {
         // WEBX-2: the default JWT issuer is a host service, so a login endpoint
         // injects `Arc<dyn ITokenIssuer>` instead of hand-rolling signing. It is
         // registered through `try_add*`: an application registration of its own
-        // issuer (added above) wins over this default.
+        // issuer (added above) wins over this default. The lifetime comes from
+        // `Jwt.ExpirationMinutes` (PascalCase in appsettings, default 60); `0`
+        // falls back to the default instead of minting already-expired tokens.
         if self.auth_enabled && !options.jwt.secret.trim().is_empty() {
             let secret = options.jwt.secret.clone();
+            let lifetime_minutes = match options.jwt.expiration_minutes {
+                0 => 60,
+                minutes => minutes,
+            };
+            let lifetime = Duration::from_secs(lifetime_minutes.saturating_mul(60));
             svc = svc.try_add_singleton::<dyn ITokenIssuer>(move |_| {
-                Arc::new(JwtTokenIssuer::from_secret(
-                    secret.as_bytes(),
-                    DEFAULT_TOKEN_LIFETIME,
-                ))
+                Arc::new(JwtTokenIssuer::from_secret(secret.as_bytes(), lifetime))
             });
         }
 
@@ -821,6 +835,15 @@ impl HostBuilder {
                 // verified tokens are additionally checked for revocation.
                 // Without one this stays the 1.1 verify-only middleware.
                 let session_store = provider.get_all::<dyn ISessionStore>().into_iter().next();
+                match &session_store {
+                    Some(_) => tracing::debug!(
+                        "[Host] JWT revocation enabled (a dyn ISessionStore is registered)"
+                    ),
+                    None => tracing::debug!(
+                        "[Host] JWT revocation disabled (no dyn ISessionStore registered; \
+                         use HostBuilder::use_session_store)"
+                    ),
+                }
                 let auth_middleware: Arc<dyn IMiddleware> = match session_store {
                     Some(store) => Arc::new(jwt_middleware_with_revocation(jwt_auth, store)),
                     None => Arc::new(jwt_middleware(jwt_auth)),

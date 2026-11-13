@@ -55,13 +55,19 @@ async fn use_password_hasher_replaces_the_default_registration() {
 #[tokio::test]
 async fn hash_verify_and_needs_rehash_round_trip() {
     let hasher = Argon2PasswordHasher::default();
-    let phc = hasher.hash("s3cret-password").await.expect("hash must succeed");
+    let phc = hasher
+        .hash("s3cret-password")
+        .await
+        .expect("hash must succeed");
 
     assert!(
         phc.starts_with("$argon2id$"),
         "the default algorithm must be Argon2id, got {phc}"
     );
-    assert!(!hasher.needs_rehash(&phc), "a fresh hash must not need rehash");
+    assert!(
+        !hasher.needs_rehash(&phc),
+        "a fresh hash must not need rehash"
+    );
     assert!(hasher.verify("s3cret-password", &phc).await.unwrap());
     assert!(
         !hasher.verify("wrong-password", &phc).await.unwrap(),
@@ -125,10 +131,14 @@ async fn unknown_algorithm_is_a_typed_error() {
             .await
             .expect_err("an unsupported algorithm must be an Err");
         assert!(
-            matches!(err, Error::PasswordHash(_)),
-            "expected a typed PasswordHash error for {stored}, got {err:?}"
+            matches!(err, Error::Internal(_)),
+            "expected a typed Internal (500) error for {stored}, got {err:?}"
         );
-        assert_eq!(err.status_code(), 500, "stored-hash problems are server-side");
+        assert_eq!(
+            err.status_code(),
+            500,
+            "stored-hash problems are server-side"
+        );
     }
 }
 
@@ -149,8 +159,8 @@ async fn malformed_phc_is_a_typed_error_not_a_panic() {
             .await
             .expect_err("a malformed stored hash must be an Err");
         assert!(
-            matches!(err, Error::PasswordHash(_)),
-            "expected a typed PasswordHash error for {stored:?}, got {err:?}"
+            matches!(err, Error::Internal(_)),
+            "expected a typed Internal (500) error for {stored:?}, got {err:?}"
         );
     }
 }
@@ -178,5 +188,5 @@ async fn invalid_parameters_are_a_typed_error() {
         .hash("pw")
         .await
         .expect_err("invalid Argon2 parameters must be an Err");
-    assert!(matches!(err, Error::PasswordHash(_)), "got {err:?}");
+    assert!(matches!(err, Error::Internal(_)), "got {err:?}");
 }

@@ -31,15 +31,19 @@ pub trait ISessionStore: Send + Sync {
 
     /// Revoke every token of `subject` ("sign out everywhere").
     ///
-    /// Optional capability: the default implementation returns a typed
-    /// [`Error::State`] instead of silently succeeding, because a store that
-    /// cannot enumerate a subject's sessions would otherwise report a logout
-    /// that did not happen. Override it when the backing store keeps a
-    /// subject-to-session index.
+    /// Optional capability: the default implementation returns
+    /// `501 Not Implemented` ([`Error::Status`]) instead of silently succeeding,
+    /// because a store that cannot enumerate a subject's sessions would
+    /// otherwise report a logout that did not happen. `501` lets the caller (and
+    /// the logs) tell "not supported" from a real server failure. Override it
+    /// when the backing store keeps a subject-to-session index.
     async fn revoke_all_for_subject(&self, subject: &str) -> Result<()> {
-        Err(Error::State(format!(
-            "this ISessionStore cannot revoke every token of '{subject}'; override revoke_all_for_subject"
-        )))
+        Err(Error::Status(
+            501,
+            format!(
+                "this ISessionStore cannot revoke every token of '{subject}'; override revoke_all_for_subject"
+            ),
+        ))
     }
 }
 
@@ -134,11 +138,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn revoke_all_for_subject_is_unsupported_by_default() {
+    async fn revoke_all_for_subject_is_not_implemented_by_default() {
         let err = InMemorySessionStore::new()
             .revoke_all_for_subject("user-1")
             .await
             .expect_err("the dependency-free store has no subject index");
-        assert!(matches!(err, Error::State(_)), "got {err:?}");
+        assert!(
+            matches!(err, Error::Status(501, _)),
+            "an unsupported capability is 501, not a generic 500: {err:?}"
+        );
+        assert_eq!(err.status_code(), 501);
     }
 }

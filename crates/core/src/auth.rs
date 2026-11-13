@@ -114,45 +114,67 @@ pub trait IAuthorizationPolicy: Send + Sync {
         -> Result<()>;
 }
 
-/// Role / permission codes declared on the matched endpoint by `#[authorize]`.
+/// The `#[authorize]` rules declared on the matched endpoint.
 ///
-/// The framework hands this to [`IDynamicAuthorizer::authorize_with_rules`] so a
-/// dynamic backend sees the *same literals* the endpoint declared — e.g. an
-/// endpoint annotated `#[authorize(permission = "order.create")]` yields
-/// `permissions == ["order.create"]`. Without it a backend can only recover the
-/// requirement by re-mapping route + method, which duplicates the declaration.
+/// A zero-allocation view over the route metadata's `AuthorizeRule` list — the
+/// framework hands it to [`IDynamicAuthorizer::authorize_with_rules`] so a
+/// dynamic backend sees the *same literals* the endpoint declared (e.g.
+/// `#[authorize(permission = "order.create")]`), instead of re-deriving the
+/// requirement from route + method.
 ///
-/// Both slices are empty when the endpoint declares no role/permission
-/// constraint (a bare `#[authorize]` or `AuthorizeRule::authenticated()`).
+/// **Multi-rule semantics are AND, preserved here:** each item is one
+/// `#[authorize]` attribute and *every* item must hold. Within one item, the
+/// role list is any-of and the permission list is any-of; an empty list leaves
+/// that dimension unconstrained, so a rule with both empty means "any
+/// authenticated user". [`DeclaredRules::roles`] and
+/// [`DeclaredRules::permissions`] therefore yield one list per rule rather than
+/// a flattened union.
+///
+/// An endpoint without `#[authorize]` has no rules ([`DeclaredRules::empty`]);
+/// a bare `#[authorize]` has one rule with both lists empty.
 ///
 /// New in 1.2.0; additive — `authorize` keeps its 1.1 signature.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DeclaredRules<'a> {
-    /// Any-of role names declared on the endpoint; empty = no role constraint.
-    pub roles: &'a [&'a str],
-
-    /// Any-of permission names declared on the endpoint; empty = no permission
-    /// constraint.
-    pub permissions: &'a [&'a str],
+    rules: &'a [crate::route::scan::AuthorizeRule],
 }
 
 impl<'a> DeclaredRules<'a> {
-    /// An endpoint with no declared role/permission constraint.
+    /// An endpoint with no `#[authorize]` rule.
     pub const fn empty() -> Self {
-        Self {
-            roles: &[],
-            permissions: &[],
-        }
+        Self { rules: &[] }
     }
 
-    /// Build from the declared role and permission codes.
-    pub const fn new(roles: &'a [&'a str], permissions: &'a [&'a str]) -> Self {
-        Self { roles, permissions }
+    /// View over the endpoint's `#[authorize]` rules (usually
+    /// [`RouteEntry::authorization`](crate::route::scan::RouteEntry)).
+    pub const fn new(rules: &'a [crate::route::scan::AuthorizeRule]) -> Self {
+        Self { rules }
     }
 
-    /// Whether neither a role nor a permission was declared.
+    /// Whether the endpoint declares no `#[authorize]` rule at all.
     pub fn is_empty(&self) -> bool {
-        self.roles.is_empty() && self.permissions.is_empty()
+        self.rules.is_empty()
+    }
+
+    /// The raw rules — every item must hold (AND).
+    pub fn rules(&self) -> &'a [crate::route::scan::AuthorizeRule] {
+        self.rules
+    }
+
+    /// Declared role lists, one item per `#[authorize]` rule.
+    ///
+    /// Each item is an any-of list (`[]` = no role constraint); the items
+    /// themselves are ANDed.
+    pub fn roles(&self) -> impl Iterator<Item = &'a [&'a str]> + 'a {
+        self.rules.iter().map(|rule| rule.roles)
+    }
+
+    /// Declared permission lists, one item per `#[authorize]` rule.
+    ///
+    /// Each item is an any-of list (`[]` = no permission constraint); the items
+    /// themselves are ANDed.
+    pub fn permissions(&self) -> impl Iterator<Item = &'a [&'a str]> + 'a {
+        self.rules.iter().map(|rule| rule.permissions)
     }
 }
 
@@ -173,10 +195,11 @@ impl<'a> DeclaredRules<'a> {
 /// * `authorize` — receives the user's claims, matched route pattern, and HTTP
 ///   method. Returns `Ok(())` if allowed, or `Err` with details if denied.
 ///   Kept for source compatibility with 1.1.
-/// * `authorize_with_rules` — same, plus the endpoint's [`DeclaredRules`]
-///   (the role/permission literals written in `#[authorize]`). The framework
-///   calls this one; the default implementation forwards to `authorize`, so an
-///   implementation that only overrides `authorize` keeps working unchanged.
+/// * `authorize_with_rules` — same, plus the endpoint's [`DeclaredRules`] (the
+///   rules written in `#[authorize]`, AND-preserved per attribute). The
+///   framework calls this one; the default implementation forwards to
+///   `authorize`, so an implementation that only overrides `authorize` keeps
+///   working unchanged.
 #[async_trait::async_trait]
 pub trait IDynamicAuthorizer: Send + Sync {
     /// Validate whether the authenticated user can access the resource.
@@ -427,20 +450,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn declared_rules_empty_is_both_dimensions_empty() {
+    fn declared_rules_empty_has_no_rules() {
         let empty = DeclaredRules::empty();
         assert!(empty.is_empty());
-        assert!(empty.roles.is_empty());
-        assert!(empty.permissions.is_empty());
+        assert!(empty.rules().is_empty());
+        assert_eq!(empty.roles().count(), 0);
+        assert_eq!(empty.permissions().count(), 0);
         assert_eq!(empty, DeclaredRules::default());
     }
 
     #[test]
-    fn declared_rules_keep_the_declared_literals() {
-        let declared = DeclaredRules::new(&["admin"], &["order.create"]);
-        assert_eq!(declared.roles, &["admin"]);
-        assert_eq!(declared.permissions, &["order.create"]);
+    fn declared_rules_keep_the_and_structure_of_multiple_authorize_attributes() {
+        const RULES: &[crate::route::scan::AuthorizeRule] = &[
+            crate::route::scan::AuthorizeRule {
+                roles: &["admin"],
+                permissions: &[],
+            },
+            crate::route::scan::AuthorizeRule {
+                roles: &[],
+                permissions: &["order.create"],
+            },
+        ];
+
+        let declared = DeclaredRules::new(RULES);
         assert!(!declared.is_empty());
+        assert_eq!(declared.rules(), RULES);
+
+        let roles: Vec<&[&str]> = declared.roles().collect();
+        assert_eq!(roles, vec![&["admin"][..], &[][..]]);
+        let permissions: Vec<&[&str]> = declared.permissions().collect();
+        assert_eq!(permissions, vec![&[][..], &["order.create"][..]]);
     }
 
     /// Minimal `RequestUser` carrier: a request struct with

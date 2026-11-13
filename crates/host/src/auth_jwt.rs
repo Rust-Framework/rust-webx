@@ -217,7 +217,11 @@ impl IAuthenticationHandler for JwtAuth {
 // JwtTokenIssuer —ITokenIssuer implementation (default token minting)
 // ---------------------------------------------------------------------------
 
-/// Default token lifetime used when [`TokenClaims::expires_in`] is `None`.
+/// Default token lifetime used by [`JwtTokenIssuer::from_secret`] when the
+/// caller does not pass one explicitly.
+///
+/// The host does **not** use this constant: `add_authentication()` builds the
+/// issuer from the `Jwt.ExpirationMinutes` appsettings key (default 60 minutes).
 pub const DEFAULT_TOKEN_LIFETIME: Duration = Duration::from_secs(3600);
 
 fn unix_now() -> u64 {
@@ -227,7 +231,14 @@ fn unix_now() -> u64 {
         .unwrap_or_default()
 }
 
-/// JWT token issuer — the default [`ITokenIssuer`] (HS256).
+/// JWT token issuer — the default [`ITokenIssuer`].
+///
+/// **HS256 only.** The token is signed with `HS256` and verified by this
+/// crate's `JwtAuth`, whose `Validation::default()` also expects `HS256`, so
+/// issuer and verifier agree out of the box. Asymmetric algorithms (RSA/EC)
+/// are not supported by this type: using one requires *both* a custom
+/// [`ITokenIssuer`] and a custom [`IAuthenticationHandler`] (the host's
+/// `jwt_middleware` always verifies with `Validation::default()`).
 ///
 /// Mints a token carrying `sub`, `roles`, `permissions`, the caller's extra
 /// claims, and the framework-managed `jti` / `iat` / `exp`. The `jti` is what
@@ -239,8 +250,8 @@ fn unix_now() -> u64 {
 /// ```
 ///
 /// `HostBuilder::add_authentication()` registers one from the configured
-/// `Jwt.Secret`; register a custom [`ITokenIssuer`] in DI to replace it (for
-/// example to use an asymmetric algorithm).
+/// `Jwt.Secret` / `Jwt.ExpirationMinutes`; register a custom [`ITokenIssuer`] in
+/// DI to replace it.
 pub struct JwtTokenIssuer {
     encoding_key: EncodingKey,
     default_lifetime: Duration,
@@ -249,21 +260,18 @@ pub struct JwtTokenIssuer {
 }
 
 impl JwtTokenIssuer {
-    /// Build from a prepared [`EncodingKey`] (any algorithm `jsonwebtoken`
-    /// supports; the decoder must be configured to match).
-    pub fn new(encoding_key: EncodingKey, default_lifetime: Duration) -> Self {
+    /// Build an HS256 issuer from a shared secret — the same secret
+    /// `JwtAuth` verifies with.
+    ///
+    /// `default_lifetime` applies when [`TokenClaims::expires_in`] is `None`;
+    /// `DEFAULT_TOKEN_LIFETIME` (1 hour) is the framework default.
+    pub fn from_secret(secret: impl AsRef<[u8]>, default_lifetime: Duration) -> Self {
         Self {
-            encoding_key,
+            encoding_key: EncodingKey::from_secret(secret.as_ref()),
             default_lifetime,
             issuer: None,
             audience: None,
         }
-    }
-
-    /// Build an HS256 issuer from a shared secret — the same secret
-    /// `JwtAuth` verifies with.
-    pub fn from_secret(secret: impl AsRef<[u8]>, default_lifetime: Duration) -> Self {
-        Self::new(EncodingKey::from_secret(secret.as_ref()), default_lifetime)
     }
 
     /// Set the `iss` claim.
@@ -291,7 +299,7 @@ impl ITokenIssuer for JwtTokenIssuer {
 
         let lifetime = claims.expires_in.unwrap_or(self.default_lifetime);
         let issued_at = unix_now();
-        let expires_at = issued_at.saturating_add(lifetime.as_secs());
+        let expires_at_unix_secs = issued_at.saturating_add(lifetime.as_secs());
         let jti = uuid::Uuid::new_v4().to_string();
 
         // Extra claims first: reserved claims must win, otherwise a caller could
@@ -302,13 +310,10 @@ impl ITokenIssuer for JwtTokenIssuer {
         }
         payload.insert("sub".into(), serde_json::json!(subject));
         payload.insert("roles".into(), serde_json::json!(claims.roles));
-        payload.insert(
-            "permissions".into(),
-            serde_json::json!(claims.permissions),
-        );
+        payload.insert("permissions".into(), serde_json::json!(claims.permissions));
         payload.insert("jti".into(), serde_json::json!(jti));
         payload.insert("iat".into(), serde_json::json!(issued_at));
-        payload.insert("exp".into(), serde_json::json!(expires_at));
+        payload.insert("exp".into(), serde_json::json!(expires_at_unix_secs));
         if let Some(issuer) = &self.issuer {
             payload.insert("iss".into(), serde_json::json!(issuer));
         }
@@ -316,6 +321,8 @@ impl ITokenIssuer for JwtTokenIssuer {
             payload.insert("aud".into(), serde_json::json!(audience));
         }
 
+        // `Header::default()` is `HS256` — the only algorithm this issuer
+        // promises, and the one `JwtAuth` verifies.
         let token = encode(
             &Header::default(),
             &serde_json::Value::Object(payload),
@@ -326,7 +333,7 @@ impl ITokenIssuer for JwtTokenIssuer {
         Ok(IssuedToken {
             token,
             jti,
-            expires_at,
+            expires_at_unix_secs,
         })
     }
 }
@@ -382,6 +389,11 @@ pub fn jwt_middleware(handler: Arc<dyn IAuthenticationHandler>) -> impl IMiddlew
 /// a revoked token is answered with the framework's 401 (problem+json +
 /// `WWW-Authenticate`) before the endpoint runs. Tokens without a `jti` pass
 /// through unchanged.
+///
+/// **Advanced entry point** — only for a hand-assembled middleware pipeline.
+/// A regular host enables revocation with
+/// [`HostBuilder::use_session_store`](crate::server::HostBuilder::use_session_store),
+/// which registers the store and wires this middleware itself.
 pub fn jwt_middleware_with_revocation(
     handler: Arc<dyn IAuthenticationHandler>,
     session_store: Arc<dyn ISessionStore>,

@@ -88,6 +88,7 @@
 - [JWT Bearer 认证](09-auth-security/jwt-authentication.md)
 - [基于资源的授权](09-auth-security/resource-authorization.md)
 - [authorize 宏与声明式授权](09-auth-security/authorize-macro.md)
+- [令牌签发、会话吊销与口令哈希](09-auth-security/token-session-password.md)
 - [安全最佳实践](09-auth-security/security-best-practices.md)
 
 ### [第十章 配置与环境](10-configuration/INDEX.md)

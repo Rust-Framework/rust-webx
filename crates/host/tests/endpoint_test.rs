@@ -307,7 +307,8 @@ async fn endpoint_dynamic_authorizer_allows_access() {
 }
 
 #[tokio::test]
-async fn endpoint_no_authorizer_skips_dynamic_check() {    // When authorizers is None, the dynamic check is skipped entirely
+async fn endpoint_no_authorizer_skips_dynamic_check() {
+    // When authorizers is None, the dynamic check is skipped entirely
     let endpoint = StubEndpoint {
         method: "GET",
         path: "/public-admin",
@@ -457,17 +458,35 @@ async fn roles_list_is_any_of() {
 
 // ── WEBX-1: dynamic authorizers receive the endpoint's declared rules ───────
 
+/// One `#[authorize]` rule as seen by the authorizer: (any-of roles, any-of
+/// permissions). The list keeps the AND structure between rules.
+type DeclaredRuleSummary = (Vec<String>, Vec<String>);
+
 /// Records the `DeclaredRules` it receives, so a test can assert the endpoint's
 /// `#[authorize]` declaration (permission/role literals) reached the backend.
 #[derive(Default)]
 struct RecordingAuthorizer {
-    seen: std::sync::Mutex<Vec<(Vec<String>, Vec<String>)>>,
+    seen: std::sync::Mutex<Vec<DeclaredRuleSummary>>,
 }
 
 impl RecordingAuthorizer {
-    fn declarations(&self) -> Vec<(Vec<String>, Vec<String>)> {
+    fn declarations(&self) -> Vec<DeclaredRuleSummary> {
         self.seen.lock().unwrap().clone()
     }
+}
+
+/// Flatten `DeclaredRules` into one `(roles, permissions)` summary per rule.
+fn summarize(declared: &DeclaredRules<'_>) -> Vec<DeclaredRuleSummary> {
+    let roles: Vec<Vec<String>> = declared
+        .roles()
+        .map(|codes| codes.iter().map(|code| code.to_string()).collect())
+        .collect();
+    let permissions: Vec<Vec<String>> = declared
+        .permissions()
+        .map(|codes| codes.iter().map(|code| code.to_string()).collect())
+        .collect();
+
+    roles.into_iter().zip(permissions).collect()
 }
 
 #[async_trait::async_trait]
@@ -489,14 +508,7 @@ impl IDynamicAuthorizer for RecordingAuthorizer {
         _method: &str,
         declared: &DeclaredRules<'_>,
     ) -> LrwfResult<()> {
-        self.seen.lock().unwrap().push((
-            declared.roles.iter().map(|r| r.to_string()).collect(),
-            declared
-                .permissions
-                .iter()
-                .map(|p| p.to_string())
-                .collect(),
-        ));
+        self.seen.lock().unwrap().extend(summarize(declared));
         Ok(())
     }
 }
@@ -560,7 +572,7 @@ async fn endpoint_dynamic_authorizer_receives_empty_slices_when_nothing_declared
 }
 
 #[tokio::test]
-async fn endpoint_dynamic_authorizer_receives_union_of_multiple_rules() {
+async fn endpoint_dynamic_authorizer_receives_and_structure_of_multiple_rules() {
     let authorizer = Arc::new(RecordingAuthorizer::default());
     let endpoint = recording_endpoint(Arc::clone(&authorizer), ADMIN_AND_EXPORT);
 
@@ -576,10 +588,10 @@ async fn endpoint_dynamic_authorizer_receives_union_of_multiple_rules() {
 
     assert_eq!(
         authorizer.declarations(),
-        vec![(
-            vec!["admin".to_string()],
-            vec!["reports:export".to_string()]
-        )],
-        "every `#[authorize]` attribute (ANDed rules) must be visible to the authorizer"
+        vec![
+            (vec!["admin".to_string()], vec![]),
+            (vec![], vec!["reports:export".to_string()]),
+        ],
+        "every `#[authorize]` attribute must stay a separate (ANDed) rule, not be flattened"
     );
 }

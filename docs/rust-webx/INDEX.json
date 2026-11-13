@@ -362,6 +362,13 @@
               "difficulty": "intermediate"
             },
             {
+              "id": "token-session-password",
+              "title": "令牌签发、会话吊销与口令哈希",
+              "summary": "ITokenIssuer / ISessionStore / IPasswordHasher 端口与 DeclaredRules 动态授权",
+              "readingTime": 14,
+              "difficulty": "intermediate"
+            },
+            {
               "id": "security-best-practices",
               "title": "安全最佳实践",
               "summary": "密钥管理、HTTPS 与输入校验",

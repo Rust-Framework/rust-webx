@@ -185,27 +185,28 @@ mod tests {
 
     #[tokio::test]
     async fn nested_run_keeps_the_enclosing_trace_id() {
-        RequestContext::run_with_trace(Some(identity("user-1", "acme")), Some(Arc::from("t-1")), async {
-            // A narrower identity scope (an audit helper, a background step)
-            // must not lose the request's trace id.
-            RequestContext::run(None, async {
-                assert_eq!(RequestContext::trace_id().as_deref(), Some("t-1"));
-            })
-            .await;
+        RequestContext::run_with_trace(
+            Some(identity("user-1", "acme")),
+            Some(Arc::from("t-1")),
+            async {
+                // A narrower identity scope (an audit helper, a background step)
+                // must not lose the request's trace id.
+                RequestContext::run(None, async {
+                    assert_eq!(RequestContext::trace_id().as_deref(), Some("t-1"));
+                })
+                .await;
 
-            assert_eq!(RequestContext::trace_id().as_deref(), Some("t-1"));
-        })
+                assert_eq!(RequestContext::trace_id().as_deref(), Some("t-1"));
+            },
+        )
         .await;
     }
 
     #[tokio::test]
     async fn anonymous_request_without_tracing_has_no_trace_id() {
-        RequestContext::run(
-            None,
-            async {
-                assert!(RequestContext::trace_id().is_none());
-            },
-        )
+        RequestContext::run(None, async {
+            assert!(RequestContext::trace_id().is_none());
+        })
         .await;
     }
 }

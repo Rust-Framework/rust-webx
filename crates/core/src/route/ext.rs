@@ -257,9 +257,7 @@ impl IServiceCollectionExt for ServiceCollection {
     {
         self.add(
             ServiceLifetime::Singleton,
-            move |resolver: &dyn IServiceResolver| -> Arc<dyn IHostedService> {
-                factory(resolver)
-            },
+            move |resolver: &dyn IServiceResolver| -> Arc<dyn IHostedService> { factory(resolver) },
         )
     }
 
@@ -324,9 +322,7 @@ impl IServiceCollectionExt for ServiceCollection {
         self.add(
             ServiceLifetime::Singleton,
             move |resolver: &dyn IServiceResolver| -> Arc<dyn IHostedService> {
-                Arc::new(crate::hosted::BackgroundServiceHost::new(factory(
-                    resolver,
-                )))
+                Arc::new(crate::hosted::BackgroundServiceHost::new(factory(resolver)))
             },
         )
     }

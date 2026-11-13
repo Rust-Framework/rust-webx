@@ -239,7 +239,10 @@ async fn ordered_registration_controls_start_and_stop_order() {
 
     handle.shutdown();
     // Awaiting the runner means teardown (all `stop()` calls) has finished.
-    runner.await.expect("host task must not panic").expect("clean shutdown");
+    runner
+        .await
+        .expect("host task must not panic")
+        .expect("clean shutdown");
 
     let events = events.lock().unwrap().clone();
     assert_eq!(
@@ -366,7 +369,11 @@ async fn background_worker_is_cancelled_promptly_on_shutdown() {
         !exited.load(Ordering::SeqCst),
         "the worker must still be running while the host serves"
     );
-    assert_eq!(ticked.load(Ordering::SeqCst), 0, "30s sleep is still pending");
+    assert_eq!(
+        ticked.load(Ordering::SeqCst),
+        0,
+        "30s sleep is still pending"
+    );
 
     let started = Instant::now();
     handle.shutdown();
@@ -399,10 +406,7 @@ struct SlowOnDemand;
 
 #[async_trait::async_trait]
 impl IMiddleware for SlowOnDemand {
-    async fn invoke(
-        &self,
-        ctx: &mut dyn IHttpContext,
-    ) -> Result<std::ops::ControlFlow<()>> {
+    async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<std::ops::ControlFlow<()>> {
         if ctx.request().query().get("slow").is_some() {
             tokio::time::sleep(Duration::from_millis(300)).await;
         }

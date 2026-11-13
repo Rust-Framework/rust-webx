@@ -387,7 +387,10 @@ mod tests {
         // Let `execute` fail before stop observes it.
         tokio::time::sleep(Duration::from_millis(20)).await;
 
-        let err = host.stop().await.expect_err("failure must not be swallowed");
+        let err = host
+            .stop()
+            .await
+            .expect_err("failure must not be swallowed");
         assert!(err.to_string().contains("worker exploded"), "{err}");
     }
 
@@ -407,7 +410,10 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(20)).await;
 
         let err = host.stop().await.expect_err("panic must be a typed error");
-        assert!(err.to_string().contains("background service panicked"), "{err}");
+        assert!(
+            err.to_string().contains("background service panicked"),
+            "{err}"
+        );
     }
 
     struct Stubborn;
@@ -511,7 +517,11 @@ mod tests {
         let host = BackgroundServiceHost::new(Arc::new(LongInterval(Arc::clone(&ticks))));
         host.start().await.expect("start must succeed");
         tokio::time::sleep(Duration::from_millis(30)).await;
-        assert_eq!(ticks.load(Ordering::SeqCst), 0, "first tick is one interval away");
+        assert_eq!(
+            ticks.load(Ordering::SeqCst),
+            0,
+            "first tick is one interval away"
+        );
 
         let started = Instant::now();
         host.stop().await.expect("stop must succeed");
@@ -568,10 +578,7 @@ mod tests {
     #[tokio::test]
     async fn stop_on_error_surfaces_the_typed_tick_error() {
         let ticks = Arc::new(AtomicU32::new(0));
-        let host = BackgroundServiceHost::new(Arc::new(FailingTicker {
-            ticks,
-            fatal: true,
-        }));
+        let host = BackgroundServiceHost::new(Arc::new(FailingTicker { ticks, fatal: true }));
         host.start().await.expect("start must succeed");
 
         // Let `execute` fail before stop observes it.

@@ -47,8 +47,8 @@ New extension points are default methods or new types.
   order (workers observe cancellation first) →connection drain →`provider.dispose()`.
   Previously hosted services stopped after the drain; code that relied on workers running
   during draining should read the shutdown token instead.
-- `rust-dix` dependency raised to `0.11` (public `instance_dyn`/typed resolver; fixes the
-  hard-coded crate name in derive macros).
+- `rust-dix` requirement raised to `1.0` (trait-object `instance<T: ?Sized>`, fallible typed
+  factory resolution, macro crate-name resolution).
 
 ### Docs
 

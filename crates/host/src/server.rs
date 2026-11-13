@@ -384,6 +384,34 @@ impl HostBuilder {
         self
     }
 
+    /// Replace the default password hasher registered in DI.
+    ///
+    /// Host startup registers `Argon2PasswordHasher` (feature
+    /// `password-argon2`, on by default) so handlers can inject
+    /// `Arc<dyn IPasswordHasher>` without any hashing code of their own. Use this
+    /// to change the Argon2 cost parameters, or to plug a different algorithm;
+    /// register through DI (`svc.singleton::<dyn IPasswordHasher>`) for the same
+    /// effect when building services by hand.
+    ///
+    /// ```ignore
+    /// // raise the Argon2 cost for this deployment
+    /// Host::builder().use_password_hasher(Arc::new(
+    ///     Argon2PasswordHasher::with_params(Argon2Params::new(65536, 3, 1)),
+    /// ))
+    /// ```
+    pub fn use_password_hasher(
+        mut self,
+        hasher: Arc<dyn webx_core::security::IPasswordHasher>,
+    ) -> Self {
+        self.service_configs.push(Box::new(move |svc| {
+            let hasher = Arc::clone(&hasher);
+            svc.try_add_singleton::<dyn webx_core::security::IPasswordHasher>(move |_| {
+                Arc::clone(&hasher)
+            })
+        }));
+        self
+    }
+
     /// Enable localization with the conventional resource layout.
     ///
     /// Reads `<culture>.json` files from `locales/` under the application base
@@ -653,6 +681,17 @@ impl HostBuilder {
                     secret.as_bytes(),
                     DEFAULT_TOKEN_LIFETIME,
                 ))
+            });
+        }
+
+        // WEBX-3: the default password hasher is a host service as well, so a
+        // login handler injects `Arc<dyn IPasswordHasher>` and keeps no crypto
+        // code. `try_add*`: an application registration (e.g. custom cost
+        // parameters via `HostBuilder::use_password_hasher`) wins.
+        #[cfg(feature = "password-argon2")]
+        {
+            svc = svc.try_add_singleton::<dyn webx_core::security::IPasswordHasher>(|_| {
+                Arc::new(crate::password_argon2::Argon2PasswordHasher::default())
             });
         }
 

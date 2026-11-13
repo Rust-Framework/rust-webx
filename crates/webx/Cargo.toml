@@ -33,7 +33,9 @@ inventory.workspace = true
 jsonwebtoken.workspace = true
 
 [features]
+default = ["password-argon2"]
 testing = ["rust-webx-host/testing"]
+password-argon2 = ["rust-webx-host/password-argon2"]
 
 [dev-dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart"] }

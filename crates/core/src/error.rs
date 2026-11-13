@@ -68,6 +68,16 @@ pub enum Error {
     #[error("{0}")]
     UnsupportedMediaType(String),
 
+    /// A stored password hash is malformed, uses an unsupported algorithm, or
+    /// the configured hashing parameters are invalid.
+    ///
+    /// Server-side data/configuration corruption: a client must not be told to
+    /// retry with different credentials, and serving `Ok(false)` for it would
+    /// turn a broken account into "wrong password". Maps to 500; the detail is
+    /// operator-facing only. New in 1.2.0 (webx-auth stream).
+    #[error("password hash error: {0}")]
+    PasswordHash(String),
+
     /// A fully-formed problem response (validation, binding failure).
     ///
     /// Carried as-is instead of being flattened into a message so the host can
@@ -99,6 +109,7 @@ impl Error {
             Error::Conflict(_) => 409,
             Error::PayloadTooLarge(_) => 413,
             Error::UnsupportedMediaType(_) => 415,
+            Error::PasswordHash(_) => 500,
             Error::Problem(problem) => problem.status,
         }
     }
@@ -130,6 +141,7 @@ impl Error {
             | Error::State(_)
             | Error::Internal(_)
             | Error::Message(_)
+            | Error::PasswordHash(_)
             | Error::Problem(_) => None,
         }
     }
@@ -173,6 +185,18 @@ mod tests {
         assert_eq!(err.status_code(), 500);
         assert_eq!(err.public_detail(), None);
         assert_eq!(err.to_string(), "response body already written");
+    }
+
+    #[test]
+    fn password_hash_error_maps_to_500_and_hides_detail() {
+        let err = Error::PasswordHash("unsupported algorithm 'bcrypt'".into());
+        assert_eq!(err.status_code(), 500);
+        assert_eq!(
+            err.public_detail(),
+            None,
+            "stored-hash corruption is never a client-facing detail"
+        );
+        assert!(err.to_string().contains("unsupported algorithm 'bcrypt'"));
     }
 
     #[test]

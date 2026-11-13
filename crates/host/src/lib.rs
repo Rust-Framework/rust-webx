@@ -15,6 +15,8 @@ pub mod endpoint;
 pub mod health;
 pub mod memory_cache;
 pub mod metrics;
+#[cfg(feature = "password-argon2")]
+pub mod password_argon2;
 pub mod pipeline;
 pub mod problem_response;
 pub mod rate_limit;
@@ -38,6 +40,8 @@ pub use endpoint::*;
 pub use health::*;
 pub use memory_cache::*;
 pub use metrics::*;
+#[cfg(feature = "password-argon2")]
+pub use password_argon2::*;
 pub use pipeline::*;
 pub use problem_response::*;
 pub use rate_limit::*;

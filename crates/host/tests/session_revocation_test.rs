@@ -11,7 +11,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation};
 use serde_json::json;
-use webx_core::auth::IClaims;
 use webx_core::error::Error;
 use webx_core::http::IClaimsExt;
 use webx_core::middleware::IMiddleware;

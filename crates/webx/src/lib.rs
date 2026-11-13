@@ -71,7 +71,9 @@ pub use webx_core::route::diagnostics::{
     orphan_routes, route_snapshots,
 };
 pub use webx_core::routing::{HttpMethod, IEndpoint, IRouter, RouteMeta};
-pub use webx_core::security::{ISessionStore, ITokenIssuer, InMemorySessionStore, IssuedToken, TokenClaims};
+pub use webx_core::security::{
+    IPasswordHasher, ISessionStore, ITokenIssuer, InMemorySessionStore, IssuedToken, TokenClaims,
+};
 
 // --- DI extensions ---
 pub use webx_core::route::binding;
@@ -100,6 +102,8 @@ pub use webx_host::endpoint::{
 };
 pub use webx_host::health::{HealthCheckEntry, HealthCheckFn, HealthCheckRegistry, HealthStatus};
 pub use webx_host::memory_cache::MemoryCache;
+#[cfg(feature = "password-argon2")]
+pub use webx_host::password_argon2::{Argon2Params, Argon2PasswordHasher};
 pub use webx_host::pipeline::{HandlerFn, MiddlewarePipeline};
 pub use webx_host::rate_limit::{RateLimitMiddleware, RateLimiter};
 pub use webx_host::request_id::RequestIdMiddleware;

@@ -49,9 +49,14 @@ compact_str = "0.9.1"
 flate2 = "1.1.9"
 ctrlc.workspace = true
 reqwest = { version = "0.12", optional = true, default-features = false, features = ["json", "rustls-tls"] }
+# Default password-hashing implementation (`password-argon2` feature, on by default).
+argon2 = { version = "0.5", optional = true }
+rand_core = { version = "0.6", features = ["getrandom"], optional = true }
 
 [features]
+default = ["password-argon2"]
 testing = ["dep:reqwest"]
+password-argon2 = ["dep:argon2", "dep:rand_core"]
 
 [dev-dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["json", "gzip", "rustls-tls"] }

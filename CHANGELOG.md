@@ -3,6 +3,59 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [1.2.0] —2026-11-13
+
+Additive release: every existing 1.1 API keeps working (`IDynamicAuthorizer::authorize`,
+`add_hosted_service<T: Default>`, `RequestContext::run`, the `x-trace-id` response header).
+New extension points are default methods or new types.
+
+### Added
+
+- **Declared authorization rules reach dynamic authorizers (WEBX-1).**
+  `webx::DeclaredRules { roles, permissions }` plus
+  `IDynamicAuthorizer::authorize_with_rules(claims, route_pattern, method, &DeclaredRules)`
+  (default forwards to `authorize`, so 1.1 implementations are source-compatible). The
+  endpoint call site now passes the role/permission literals declared by `#[authorize]`, so a
+  DB-backed authorizer no longer has to re-derive the requirement from route + method.
+- **Token issuance and session revocation ports (WEBX-2).** `webx::security` exposes
+  `ITokenIssuer`, `TokenClaims`, `IssuedToken`, `ISessionStore` and `InMemorySessionStore`;
+  `IClaims::jti()` reads the token id. `rust-webx-host` adds a default `JwtTokenIssuer`
+  (registered by `add_authentication()` when `Jwt.Secret` is configured, overridable via DI),
+  `jwt_middleware_with_revocation` and `HostBuilder::use_session_store()`. A revoked `jti`
+  is rejected at the middleware layer with 401 `problem+json` + `WWW-Authenticate`.
+- **Password hashing port with an Argon2id default (WEBX-3).** `IPasswordHasher`
+  (`hash`/`verify`/`needs_rehash`, PHC strings, `spawn_blocking` inside) lives in
+  `webx_core::security`; `rust-webx-host` ships `Argon2PasswordHasher` + `Argon2Params`
+  behind the default `password-argon2` feature. Unknown algorithm/PHC input returns a typed
+  error instead of panicking.
+- **Trace id is visible to handlers (WEBX-4).** `IHttpContext::trace_id()/set_trace_id()`
+  (default no-op), `RequestContext::run_with_trace()`/`RequestContext::trace_id()`, and the
+  endpoint macro seeds the request scope, so a handler reads the same id that is written to
+  the `x-trace-id` response header. The header behaviour is unchanged; an inbound
+  `x-request-id` still wins.
+- **Background services (WEBX-5).** `BackgroundService::execute(ct)`,
+  `PeriodicBackgroundService` (interval + interruptible tick + stop/join),
+  `BackgroundServiceHost`, `CancellationToken` and `delay(&ct, dur)`. Registration:
+  `add_hosted_service_with` (factory, no `Default` bound), `_ordered`, `_if`,
+  `add_background_service(_with/_with_if)`; `IHostedService::order()` provides stable ordering.
+  A startup failure is returned as a typed error (with rollback of already-started services)
+  instead of panicking.
+
+### Changed
+
+- **Host shutdown order (WEBX-5).** Signal →hosted services stop in reverse registration
+  order (workers observe cancellation first) →connection drain →`provider.dispose()`.
+  Previously hosted services stopped after the drain; code that relied on workers running
+  during draining should read the shutdown token instead.
+- `rust-dix` dependency raised to `0.11` (public `instance_dyn`/typed resolver; fixes the
+  hard-coded crate name in derive macros).
+
+### Docs
+
+- Handler-visible trace ids and the `#[fromheader("x-trace-id")]` caveat
+  (`user-identity.md`), background/hosted-service registration and shutdown semantics
+  (`hosted-services.md`, `graceful-shutdown.md`).
+
 ## [1.1.1] — 2026-11-12
 
 ### Fixed

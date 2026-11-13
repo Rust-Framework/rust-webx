@@ -20,7 +20,7 @@ members = [
 ]
 
 [workspace.package]
-version = "1.1.1"
+version = "1.2.0"
 edition = "2021"
 rust-version = "1.95"
 license = "MIT"
@@ -28,17 +28,17 @@ authors = ["Start"]
 homepage = "https://github.com/Rust-Framework/rust-webx"
 repository = "https://github.com/Rust-Framework/rust-webx"
 documentation = "https://docs.rs/rust-webx"
-description = "rust-webx — A Rust WebApi framework inspired by ASP.NET Core, built on DI + Mediator pattern"
+description = "rust-webx 鈥?A Rust WebApi framework inspired by ASP.NET Core, built on DI + Mediator pattern"
 
 [workspace.dependencies]
 # Internal crates
-rust-webx-core = { version = "1.1.1", path = "crates/core" }
-rust-webx-host = { version = "1.1.1", path = "crates/host" }
-rust-webx-macros = { version = "1.1.1", path = "crates/macros" }
-rust-webx = { version = "1.1.1", path = "crates/webx" }
-rust-webx-spa = { version = "1.1.1", path = "crates/spa" }
-rust-webx-build = { version = "1.1.1", path = "crates/build" }
-rust-webx-openapi = { version = "1.1.1", path = "crates/openapi" }
+rust-webx-core = { version = "1.2.0", path = "crates/core" }
+rust-webx-host = { version = "1.2.0", path = "crates/host" }
+rust-webx-macros = { version = "1.2.0", path = "crates/macros" }
+rust-webx = { version = "1.2.0", path = "crates/webx" }
+rust-webx-spa = { version = "1.2.0", path = "crates/spa" }
+rust-webx-build = { version = "1.2.0", path = "crates/build" }
+rust-webx-openapi = { version = "1.2.0", path = "crates/openapi" }
 
 # Docbit sub-crates
 docbit-contracts = { version = "0.1.0", path = "docbit/contracts" }
@@ -50,7 +50,7 @@ dmbit-contracts = { version = "0.1.0", path = "dmbit/contracts" }
 dmbit-domain = { version = "0.1.0", path = "dmbit/domain" }
 dmbit-handlers = { version = "0.1.0", path = "dmbit/handlers" }
 
-# DI framework (crates.io — no local path required)
+# DI framework (crates.io 鈥?no local path required)
 rust-dix = "0.10"
 rust-dix-macros = "0.10"
 
@@ -101,7 +101,7 @@ codegen-units = 1
 strip = true
 panic = "abort"
 
-# ── Dev/test build hygiene ───────────────────────────────────────────────
+# 鈹€鈹€ Dev/test build hygiene 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 # Windows MSVC emits one .pdb per linked binary, and with the default
 # `debug = 2` on *every* dependency a single integration-test binary needs
 # ~200 MB (rust-webx full `cargo test --workspace` produced >100 GB of

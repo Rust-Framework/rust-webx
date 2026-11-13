@@ -2,7 +2,7 @@
 //!
 //! The framework only *declares* the port: signing needs a concrete algorithm
 //! and key management, so the default JWT implementation lives in
-//! `rust-webx-host` ([`rust_webx_host::auth_jwt::JwtTokenIssuer`]). Applications
+//! `rust-webx-host` (`JwtTokenIssuer`). Applications
 //! register their issuer in DI and call it from the login endpoint.
 
 use crate::error::Result;

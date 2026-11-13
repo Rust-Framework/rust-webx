@@ -162,9 +162,9 @@ impl IEndpoint for StubEndpoint {
 /// "everything the endpoint declared", so the codes are concatenated; duplicate
 /// literals are harmless (the declaration is a list of alternatives, not a
 /// multiset).
-fn flatten_authorize_rules<'a>(
-    rules: &'a [webx_core::route::scan::AuthorizeRule],
-) -> (Vec<&'a str>, Vec<&'a str>) {
+fn flatten_authorize_rules(
+    rules: &[webx_core::route::scan::AuthorizeRule],
+) -> (Vec<&str>, Vec<&str>) {
     let mut roles = Vec::new();
     let mut permissions = Vec::new();
     for rule in rules {

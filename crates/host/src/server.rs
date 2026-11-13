@@ -23,7 +23,6 @@ use webx_core::security::{ISessionStore, ITokenIssuer};
 
 use crate::auth_jwt::{
     init_jwt_secret, jwt_middleware, jwt_middleware_with_revocation, JwtAuth, JwtTokenIssuer,
-    DEFAULT_TOKEN_LIFETIME,
 };
 use crate::authz::collect_authorizers;
 use crate::context::{BodyLimits, HttpContext, RespBody};
@@ -46,7 +45,7 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig;
 use rustls_pemfile::{certs, pkcs8_private_keys, rsa_private_keys};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::task::JoinSet;
 use tokio_rustls::TlsAcceptor;
 
@@ -673,14 +672,18 @@ impl HostBuilder {
         // WEBX-2: the default JWT issuer is a host service, so a login endpoint
         // injects `Arc<dyn ITokenIssuer>` instead of hand-rolling signing. It is
         // registered through `try_add*`: an application registration of its own
-        // issuer (added above) wins over this default.
+        // issuer (added above) wins over this default. The lifetime comes from
+        // `Jwt.ExpirationMinutes` (PascalCase in appsettings, default 60); `0`
+        // falls back to the default instead of minting already-expired tokens.
         if self.auth_enabled && !options.jwt.secret.trim().is_empty() {
             let secret = options.jwt.secret.clone();
+            let lifetime_minutes = match options.jwt.expiration_minutes {
+                0 => 60,
+                minutes => minutes,
+            };
+            let lifetime = Duration::from_secs(lifetime_minutes.saturating_mul(60));
             svc = svc.try_add_singleton::<dyn ITokenIssuer>(move |_| {
-                Arc::new(JwtTokenIssuer::from_secret(
-                    secret.as_bytes(),
-                    DEFAULT_TOKEN_LIFETIME,
-                ))
+                Arc::new(JwtTokenIssuer::from_secret(secret.as_bytes(), lifetime))
             });
         }
 

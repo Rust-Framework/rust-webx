@@ -83,7 +83,7 @@ impl TokenClaims {
 /// `jti` is what [`ISessionStore::revoke`](crate::security::ISessionStore::revoke)
 /// stores: the login endpoint persists it (or hands it to the client for
 /// revocation), and the authentication middleware rejects the token once the
-/// `jti` is revoked — no need to wait for `expires_at`.
+/// `jti` is revoked — no need to wait for `expires_at_unix_secs`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IssuedToken {
     /// The serialized token (JWT compact form for the default issuer).
@@ -92,15 +92,19 @@ pub struct IssuedToken {
     /// Revocation identifier (`jti` claim) embedded in the token.
     pub jti: String,
 
-    /// Expiry as a Unix timestamp in seconds.
-    pub expires_at: u64,
+    /// Expiry as a **Unix timestamp in seconds** (`exp` claim).
+    ///
+    /// Deliberately not milliseconds (Travel-style `expires_at` fields are
+    /// milliseconds): convert with `* 1000` when writing a millisecond column or
+    /// returning a millisecond field.
+    pub expires_at_unix_secs: u64,
 }
 
 /// Mint a token from [`TokenClaims`].
 ///
-/// Implementations embed a unique [`IssuedToken::jti`] and an absolute
-/// [`IssuedToken::expires_at`], so callers can revoke the token later without
-/// decoding it again.
+/// Implementations embed a unique [`IssuedToken::jti`] and an absolute expiry in
+/// Unix seconds (`expires_at_unix_secs`), so callers can revoke the token later
+/// without decoding it again.
 ///
 /// ```ignore
 /// let issued = token_issuer.issue(

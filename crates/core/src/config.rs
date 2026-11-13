@@ -67,11 +67,39 @@ fn default_max_connections() -> usize {
 }
 
 /// JWT authentication section.
-#[derive(Debug, Clone, Deserialize, Default)]
+///
+/// appsettings keys are PascalCase: `Jwt.Secret` and `Jwt.ExpirationMinutes`
+/// (or `APP__Jwt__ExpirationMinutes`). `ExpirationMinutes` drives the lifetime
+/// of tokens minted by the default `ITokenIssuer` that
+/// `HostBuilder::add_authentication()` registers.
+#[derive(Debug, Clone, Deserialize)]
 pub struct JwtSection {
     /// HMAC secret for signing/verifying JWT tokens.
     #[serde(default, rename = "Secret")]
     pub secret: String,
+
+    /// Lifetime of freshly issued tokens, in minutes. Default: 60.
+    ///
+    /// `0` falls back to the default: a zero lifetime would only mint tokens
+    /// that are already expired.
+    #[serde(
+        default = "default_jwt_expiration_minutes",
+        rename = "ExpirationMinutes"
+    )]
+    pub expiration_minutes: u64,
+}
+
+fn default_jwt_expiration_minutes() -> u64 {
+    60
+}
+
+impl Default for JwtSection {
+    fn default() -> Self {
+        Self {
+            secret: String::new(),
+            expiration_minutes: default_jwt_expiration_minutes(),
+        }
+    }
 }
 
 /// CORS (Cross-Origin Resource Sharing) section.
@@ -559,6 +587,18 @@ mod tests {
 
         let opts: AppOptions = bind_root(&serde_json::json!({}));
         assert_eq!(opts.culture.default, "en");
+    }
+
+    #[test]
+    fn jwt_section_binds_expiration_minutes_with_60_minute_default() {
+        let opts: AppOptions = bind_root(&serde_json::json!({}));
+        assert_eq!(opts.jwt.expiration_minutes, 60);
+        assert!(opts.jwt.secret.is_empty());
+
+        let opts: AppOptions = bind_root(&serde_json::json!({
+            "Jwt": { "Secret": "s", "ExpirationMinutes": 15 }
+        }));
+        assert_eq!(opts.jwt.expiration_minutes, 15);
     }
 
     #[test]

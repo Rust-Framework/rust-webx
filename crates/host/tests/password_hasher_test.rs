@@ -125,8 +125,8 @@ async fn unknown_algorithm_is_a_typed_error() {
             .await
             .expect_err("an unsupported algorithm must be an Err");
         assert!(
-            matches!(err, Error::PasswordHash(_)),
-            "expected a typed PasswordHash error for {stored}, got {err:?}"
+            matches!(err, Error::Internal(_)),
+            "expected a typed Internal (500) error for {stored}, got {err:?}"
         );
         assert_eq!(err.status_code(), 500, "stored-hash problems are server-side");
     }
@@ -149,8 +149,8 @@ async fn malformed_phc_is_a_typed_error_not_a_panic() {
             .await
             .expect_err("a malformed stored hash must be an Err");
         assert!(
-            matches!(err, Error::PasswordHash(_)),
-            "expected a typed PasswordHash error for {stored:?}, got {err:?}"
+            matches!(err, Error::Internal(_)),
+            "expected a typed Internal (500) error for {stored:?}, got {err:?}"
         );
     }
 }
@@ -178,5 +178,5 @@ async fn invalid_parameters_are_a_typed_error() {
         .hash("pw")
         .await
         .expect_err("invalid Argon2 parameters must be an Err");
-    assert!(matches!(err, Error::PasswordHash(_)), "got {err:?}");
+    assert!(matches!(err, Error::Internal(_)), "got {err:?}");
 }

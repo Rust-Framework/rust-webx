@@ -63,9 +63,9 @@ async fn issued_token_carries_subject_roles_permissions_jti_and_expiry() {
 
     assert!(!issued.jti.is_empty(), "a token must carry a jti");
     assert!(
-        issued.expires_at > before,
-        "expires_at must be in the future, got {} (now {before})",
-        issued.expires_at
+        issued.expires_at_unix_secs > before,
+        "expires_at_unix_secs must be in the future, got {} (now {before})",
+        issued.expires_at_unix_secs
     );
 
     let decoded = jsonwebtoken::decode::<serde_json::Value>(
@@ -81,7 +81,7 @@ async fn issued_token_carries_subject_roles_permissions_jti_and_expiry() {
     assert_eq!(claims["roles"], json!(["admin"]));
     assert_eq!(claims["permissions"], json!(["order.create"]));
     assert_eq!(claims["tenant_id"], "acme");
-    assert_eq!(claims["exp"].as_u64(), Some(issued.expires_at));
+    assert_eq!(claims["exp"].as_u64(), Some(issued.expires_at_unix_secs));
 }
 
 #[tokio::test]
@@ -201,4 +201,67 @@ async fn revoke_all_for_subject_is_unsupported_by_default_instead_of_silently_ok
         .await
         .expect_err("the in-memory store cannot enumerate a subject's tokens");
     assert!(matches!(err, Error::State(_)), "got {err:?}");
+}
+
+/// Build a host that has authentication enabled and `Jwt.Secret` set, so the
+/// default `ITokenIssuer` is registered.
+fn host_with_jwt(expiration_minutes: Option<u64>) -> webx_host::Host {
+    webx_host::Host::builder()
+        .mode(webx_core::mode::AppMode::Development)
+        .no_spa()
+        .add_authentication()
+        .configure(move |b| {
+            b.useOptions(move |o| {
+                o.jwt.secret = SECRET.to_string();
+                if let Some(minutes) = expiration_minutes {
+                    o.jwt.expiration_minutes = minutes;
+                }
+            });
+        })
+        .try_build()
+        .expect("host must build")
+}
+
+/// `Jwt.ExpirationMinutes` (appsettings / `APP__Jwt__ExpirationMinutes`) drives
+/// the lifetime of tokens minted by the framework's default issuer.
+#[tokio::test]
+async fn jwt_expiration_minutes_config_drives_the_default_issuer() {
+    let host = host_with_jwt(Some(5));
+    let issuer = host
+        .provider()
+        .get::<dyn ITokenIssuer>()
+        .expect("add_authentication must register the default issuer");
+    let issued = issuer
+        .issue(TokenClaims::new("user-1"))
+        .await
+        .expect("issuing must succeed");
+
+    let now = now_secs();
+    let lower = now + 5 * 60 - 5;
+    let upper = now + 5 * 60 + 5;
+    assert!(
+        (lower..=upper).contains(&issued.expires_at_unix_secs),
+        "expires_at_unix_secs {} must be ~5 minutes from {now}",
+        issued.expires_at_unix_secs
+    );
+}
+
+#[tokio::test]
+async fn jwt_expiration_defaults_to_60_minutes() {
+    let host = host_with_jwt(None);
+    let issuer = host
+        .provider()
+        .get::<dyn ITokenIssuer>()
+        .expect("add_authentication must register the default issuer");
+    let issued = issuer
+        .issue(TokenClaims::new("user-1"))
+        .await
+        .expect("issuing must succeed");
+
+    let now = now_secs();
+    let expires_in = issued.expires_at_unix_secs.saturating_sub(now);
+    assert!(
+        (59 * 60..=61 * 60).contains(&expires_in),
+        "default lifetime must be ~60 minutes, got {expires_in}s"
+    );
 }

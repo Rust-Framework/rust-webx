@@ -2061,9 +2061,9 @@ dependencies = [
 
 [[package]]
 name = "rust-dix"
-version = "0.10.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8454b7a8edacafce54c66a3caa8b6f089f56903abaf417e06fe61381dfa29b89"
+checksum = "2b4860f8536b1a2663a63dee1de2a648f6ba83fcb177580684bf451f69dde618"
 dependencies = [
  "futures",
  "inventory",
@@ -2073,10 +2073,11 @@ dependencies = [
 
 [[package]]
 name = "rust-dix-macros"
-version = "0.10.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9e9898e2f2791e6349c7045756df0f1643bc7e8b0d49a7e33fd396b76755abd"
+checksum = "6e5cef1fcc7e37a53f717927f4f611f37c9c54690b6bdadf71fcb450dfa265a6"
 dependencies = [
+ "proc-macro-crate",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -2084,9 +2085,9 @@ dependencies = [
 
 [[package]]
 name = "rust-ef"
-version = "2.1.0"
+version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "63f7da328dade5f9fdcd00b421291f01680a5e50aa22990b1bf4674fa319b896"
+checksum = "fa2516134732e53086b559844bb20cb8df8d97ae579debf622ba236dd358f1fb"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2094,6 +2095,7 @@ dependencies = [
  "rust-dix",
  "rust-ef-macros",
  "rust_decimal",
+ "serde_json",
  "thiserror 2.0.21",
  "tokio",
  "uuid",
@@ -2101,10 +2103,11 @@ dependencies = [
 
 [[package]]
 name = "rust-ef-macros"
-version = "2.1.0"
+version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "728688f4f7152d372249dc8dece31969a176fb0846e981f3baa97af0dc890cea"
+checksum = "5bfe6c4e7ca65ea406ef55a7ef45439ca52a8efd3b54013de7b20018323de1b6"
 dependencies = [
+ "proc-macro-crate",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -2112,9 +2115,9 @@ dependencies = [
 
 [[package]]
 name = "rust-ef-sqlite"
-version = "2.1.0"
+version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6aefe6447cab5a0531bcd01be670b7a315840c62bee6b3fcdd23bc0abdf0af35"
+checksum = "9c4e5f078d0724efb90abc38484c7754664d8d520c2057c6b627b5a289aaef68"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2128,7 +2131,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "async-trait",
  "hyper",
@@ -2149,7 +2152,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-build"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "brotli",
  "mime_guess",
@@ -2159,7 +2162,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-core"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2177,7 +2180,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-host"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "argon2",
  "async-trait",
@@ -2220,7 +2223,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-macros"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2229,7 +2232,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-openapi"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "inventory",
  "rust-webx-core",
@@ -2238,7 +2241,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-spa"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "async-trait",
  "brotli",

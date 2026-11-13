@@ -138,7 +138,10 @@ mod tests {
         assert_eq!(claims.subject, "user-1");
         assert_eq!(claims.roles, vec!["admin", "user"]);
         assert_eq!(claims.permissions, vec!["order.create"]);
-        assert_eq!(claims.extra.get("tenant_id").map(String::as_str), Some("acme"));
+        assert_eq!(
+            claims.extra.get("tenant_id").map(String::as_str),
+            Some("acme")
+        );
         assert_eq!(claims.expires_in, Some(Duration::from_secs(60)));
     }
 

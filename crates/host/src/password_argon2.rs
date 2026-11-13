@@ -58,13 +58,7 @@ impl Argon2Params {
 
     /// Convert to the `argon2` crate's own parameter type.
     fn to_argon2_params(self) -> Result<Params> {
-        Params::new(
-            self.memory_kib,
-            self.iterations,
-            self.parallelism,
-            None,
-        )
-        .map_err(|error| {
+        Params::new(self.memory_kib, self.iterations, self.parallelism, None).map_err(|error| {
             Error::Internal(format!(
                 "invalid Argon2 parameters (m={}, t={}, p={}): {error}",
                 self.memory_kib, self.iterations, self.parallelism
@@ -108,9 +102,8 @@ impl Argon2PasswordHasher {
 /// Parse and fully verify one PHC string against `password` — runs on a blocking
 /// thread.
 fn verify_blocking(password: &str, stored_hash: &str) -> Result<bool> {
-    let parsed = PasswordHash::new(stored_hash).map_err(|error| {
-        Error::Internal(format!("stored password hash is malformed: {error}"))
-    })?;
+    let parsed = PasswordHash::new(stored_hash)
+        .map_err(|error| Error::Internal(format!("stored password hash is malformed: {error}")))?;
 
     // A PHC string without salt or output cannot represent a password hash; the
     // PHC parser accepts the shape, so verify the fields exists before treating a
@@ -174,9 +167,7 @@ impl IPasswordHasher for Argon2PasswordHasher {
                 .map_err(|error| Error::Internal(format!("password hashing failed: {error}")))
         })
         .await
-        .map_err(|error| {
-            Error::Internal(format!("password hashing task failed: {error}"))
-        })?
+        .map_err(|error| Error::Internal(format!("password hashing task failed: {error}")))?
     }
 
     async fn verify(&self, password: &str, stored_hash: &str) -> Result<bool> {

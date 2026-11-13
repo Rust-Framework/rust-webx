@@ -389,6 +389,11 @@ pub fn jwt_middleware(handler: Arc<dyn IAuthenticationHandler>) -> impl IMiddlew
 /// a revoked token is answered with the framework's 401 (problem+json +
 /// `WWW-Authenticate`) before the endpoint runs. Tokens without a `jti` pass
 /// through unchanged.
+///
+/// **Advanced entry point** — only for a hand-assembled middleware pipeline.
+/// A regular host enables revocation with
+/// [`HostBuilder::use_session_store`](crate::server::HostBuilder::use_session_store),
+/// which registers the store and wires this middleware itself.
 pub fn jwt_middleware_with_revocation(
     handler: Arc<dyn IAuthenticationHandler>,
     session_store: Arc<dyn ISessionStore>,

@@ -55,13 +55,19 @@ async fn use_password_hasher_replaces_the_default_registration() {
 #[tokio::test]
 async fn hash_verify_and_needs_rehash_round_trip() {
     let hasher = Argon2PasswordHasher::default();
-    let phc = hasher.hash("s3cret-password").await.expect("hash must succeed");
+    let phc = hasher
+        .hash("s3cret-password")
+        .await
+        .expect("hash must succeed");
 
     assert!(
         phc.starts_with("$argon2id$"),
         "the default algorithm must be Argon2id, got {phc}"
     );
-    assert!(!hasher.needs_rehash(&phc), "a fresh hash must not need rehash");
+    assert!(
+        !hasher.needs_rehash(&phc),
+        "a fresh hash must not need rehash"
+    );
     assert!(hasher.verify("s3cret-password", &phc).await.unwrap());
     assert!(
         !hasher.verify("wrong-password", &phc).await.unwrap(),
@@ -128,7 +134,11 @@ async fn unknown_algorithm_is_a_typed_error() {
             matches!(err, Error::Internal(_)),
             "expected a typed Internal (500) error for {stored}, got {err:?}"
         );
-        assert_eq!(err.status_code(), 500, "stored-hash problems are server-side");
+        assert_eq!(
+            err.status_code(),
+            500,
+            "stored-hash problems are server-side"
+        );
     }
 }
 

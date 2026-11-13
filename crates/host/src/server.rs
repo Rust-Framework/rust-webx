@@ -369,6 +369,17 @@ impl HostBuilder {
     /// persistent [`ISessionStore`] implementation when revocations must survive
     /// a restart.
     ///
+    /// **This is the only recommended entry point.** Revocation is enabled when
+    /// the container has a `dyn ISessionStore` registration — this method
+    /// registers exactly that. Registering the *concrete* type instead (for
+    /// example `svc.instance(Arc::new(InMemorySessionStore::new()))`) leaves the
+    /// `dyn` key unresolved and revocation silently stays off; register with
+    /// `svc.try_add_singleton::<dyn ISessionStore>(...)` if not using this
+    /// builder. The host logs the on/off decision at startup (debug level).
+    ///
+    /// `jwt_middleware_with_revocation` is the escape hatch for a hand-assembled
+    /// middleware pipeline only; regular hosts use this method.
+    ///
     /// ```ignore
     /// Host::builder()
     ///     .add_authentication()
@@ -820,6 +831,15 @@ impl HostBuilder {
                 // verified tokens are additionally checked for revocation.
                 // Without one this stays the 1.1 verify-only middleware.
                 let session_store = provider.get_all::<dyn ISessionStore>().into_iter().next();
+                match &session_store {
+                    Some(_) => tracing::debug!(
+                        "[Host] JWT revocation enabled (a dyn ISessionStore is registered)"
+                    ),
+                    None => tracing::debug!(
+                        "[Host] JWT revocation disabled (no dyn ISessionStore registered; \
+                         use HostBuilder::use_session_store)"
+                    ),
+                }
                 let auth_middleware: Arc<dyn IMiddleware> = match session_store {
                     Some(store) => Arc::new(jwt_middleware_with_revocation(jwt_auth, store)),
                     None => Arc::new(jwt_middleware(jwt_auth)),

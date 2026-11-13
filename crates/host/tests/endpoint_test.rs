@@ -307,7 +307,8 @@ async fn endpoint_dynamic_authorizer_allows_access() {
 }
 
 #[tokio::test]
-async fn endpoint_no_authorizer_skips_dynamic_check() {    // When authorizers is None, the dynamic check is skipped entirely
+async fn endpoint_no_authorizer_skips_dynamic_check() {
+    // When authorizers is None, the dynamic check is skipped entirely
     let endpoint = StubEndpoint {
         method: "GET",
         path: "/public-admin",

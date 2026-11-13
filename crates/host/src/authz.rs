@@ -218,8 +218,10 @@ impl AuthorizerSet {
     ///
     /// Returns `Ok(())` if ALL authorizers pass. Returns the first `Err` if any denies.
     ///
-    /// Equivalent to [`AuthorizerSet::authorize_with_rules`] with an empty
-    /// declaration — kept for compatibility with 1.1 call sites.
+    /// **1.1 compatibility** — new code should call
+    /// [`AuthorizerSet::authorize_with_rules`] instead, which passes the
+    /// endpoint's declared rules. This method is equivalent to that call with an
+    /// empty declaration.
     pub async fn authorize(
         &self,
         claims: &dyn IClaims,

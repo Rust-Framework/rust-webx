@@ -15,7 +15,7 @@ use webx_core::error::Error;
 use webx_core::http::IClaimsExt;
 use webx_core::middleware::IMiddleware;
 use webx_core::security::{
-    InMemorySessionStore, ISessionStore, ITokenIssuer, IssuedToken, TokenClaims,
+    ISessionStore, ITokenIssuer, InMemorySessionStore, IssuedToken, TokenClaims,
 };
 use webx_host::auth_jwt::{
     jwt_middleware, jwt_middleware_with_revocation, JwtAuth, JwtTokenIssuer,
@@ -117,7 +117,10 @@ async fn revoked_token_is_unauthorized_at_the_middleware() {
     let issued = issue(TokenClaims::new("user-1")).await;
 
     // Logout: revoke the very token that was just issued.
-    store.revoke(&issued.jti).await.expect("revoke must succeed");
+    store
+        .revoke(&issued.jti)
+        .await
+        .expect("revoke must succeed");
     assert!(store.is_revoked(&issued.jti).await.unwrap());
 
     let mut ctx = bearer(&issued.token);
@@ -146,13 +149,11 @@ async fn unrevoked_token_passes_the_revocation_check() {
     let issued = issue(TokenClaims::new("user-1")).await;
 
     let mut ctx = bearer(&issued.token);
-    let flow = jwt_middleware_with_revocation(
-        verifier(),
-        Arc::clone(&store) as Arc<dyn ISessionStore>,
-    )
-    .invoke(&mut ctx)
-    .await
-    .expect("an unrevoked token must authenticate");
+    let flow =
+        jwt_middleware_with_revocation(verifier(), Arc::clone(&store) as Arc<dyn ISessionStore>)
+            .invoke(&mut ctx)
+            .await
+            .expect("an unrevoked token must authenticate");
     assert!(matches!(flow, std::ops::ControlFlow::Continue(())));
     assert_eq!(ctx.claims().map(|c| c.subject()), Some("user-1"));
 }
@@ -194,13 +195,17 @@ async fn no_session_store_means_no_revocation_lookup() {
 }
 
 #[tokio::test]
-async fn revoke_all_for_subject_is_unsupported_by_default_instead_of_silently_ok() {
+async fn revoke_all_for_subject_is_not_implemented_by_default() {
     let store = InMemorySessionStore::new();
     let err = store
         .revoke_all_for_subject("user-1")
         .await
         .expect_err("the in-memory store cannot enumerate a subject's tokens");
-    assert!(matches!(err, Error::State(_)), "got {err:?}");
+    assert!(
+        matches!(err, Error::Status(501, _)),
+        "an unsupported optional capability maps to 501, got {err:?}"
+    );
+    assert_eq!(err.status_code(), 501);
 }
 
 /// Build a host that has authentication enabled and `Jwt.Secret` set, so the

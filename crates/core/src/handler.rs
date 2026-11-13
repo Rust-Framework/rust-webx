@@ -100,7 +100,8 @@ pub trait IEventHandler<T: IEventRequest>: Send + Sync {
 pub trait IHostedService: Send + Sync {
     /// Called when the host starts.
     ///
-    /// Services start in registration order and the host waits for all of them
+    /// Services start in registration order (after sorting by [`order`](IHostedService::order))
+    /// and the host waits for all of them
     /// before accepting requests. There is **no ambient DI context**: a hosted
     /// service that needs scoped dependencies (DbContext, transactions, ...)
     /// takes rust-dix's built-in `#[inject] services: Arc<dyn ScopeFactory>`
@@ -116,7 +117,25 @@ pub trait IHostedService: Send + Sync {
     /// (the last dependency to start is the first to stop), with a timeout per
     /// service so one stuck service cannot block the process forever. Like
     /// `start()`, each `stop()` runs inside a fresh DI scope.
+    ///
+    /// Shutdown stops hosted services **before** in-flight connections are
+    /// drained, so a worker never keeps running against services that are about
+    /// to be torn down.
     async fn stop(&self) -> Result<()> {
         Ok(())
+    }
+
+    /// Start/stop priority. Lower starts first and stops last.
+    ///
+    /// Defaults to `0`; services with equal order keep their **registration
+    /// order** (the sort is stable). Use it when a dependency must be ready
+    /// before another: a migration/seed service at `-100`, cache warmup at `0`,
+    /// queue consumers at `100`.
+    ///
+    /// Register with order through `add_hosted_service_ordered` /
+    /// `add_hosted_service_with_ordered`; the default keeps the historical
+    /// registration-order behavior.
+    fn order(&self) -> i32 {
+        0
     }
 }

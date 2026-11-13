@@ -138,7 +138,11 @@ pub struct Host {
     shutdown: ShutdownSignal,
     /// Hosted services that are started on host start
     /// and stopped on graceful shutdown.
-    hosted_services: Vec<Arc<dyn IHostedService>>,
+    hosted_services: Arc<Vec<Arc<dyn IHostedService>>>,
+    /// Set once the hosted services were stopped: shutdown stops them as soon as
+    /// the signal arrives (before connections drain), and the teardown path calls
+    /// in again; both go through this cell so `stop()` runs exactly once.
+    hosted_stopped: Arc<tokio::sync::OnceCell<()>>,
 }
 
 /// Factory for a user-registered middleware.
@@ -945,8 +949,13 @@ impl HostBuilder {
 
         // Resolve all registered hosted services from the DI container.
         // These will be started when `run()` is called and stopped on shutdown.
-        let hosted_services: Vec<Arc<dyn IHostedService>> =
+        //
+        // Sort by `order()` (stable): equal orders keep the DI registration
+        // order, so the historical registration-order behavior is unchanged and
+        // `add_hosted_service_ordered` can move a service earlier/later.
+        let mut hosted_services: Vec<Arc<dyn IHostedService>> =
             provider.get_all::<dyn IHostedService>();
+        hosted_services.sort_by_key(|service| service.order());
 
         Ok(Host {
             provider,
@@ -961,7 +970,8 @@ impl HostBuilder {
             mode: self.mode,
             spa_source,
             shutdown: Arc::new(tokio::sync::watch::channel(false).0),
-            hosted_services,
+            hosted_services: Arc::new(hosted_services),
+            hosted_stopped: Arc::new(tokio::sync::OnceCell::new()),
         })
     }
 
@@ -1077,6 +1087,40 @@ impl Host {
         tracing::debug!("[Host] DI provider disposed");
     }
 
+    /// Stop every hosted service exactly once (reverse start order).
+    ///
+    /// Two callers race here on purpose: the shutdown watcher stops workers as
+    /// soon as the signal arrives, and the teardown path calls in after the
+    /// listeners finish. The cell makes the second call a no-op instead of
+    /// running `stop()` twice on services whose cleanup is not idempotent.
+    async fn stop_hosted_services_once(&self) {
+        let services = Arc::clone(&self.hosted_services);
+        self.hosted_stopped
+            .get_or_init(|| async move { stop_hosted_services(&services).await })
+            .await;
+    }
+
+    /// Spawn the task that stops hosted services the moment shutdown starts.
+    ///
+    /// Waiting for the listeners to drain first would let workers keep running
+    /// (and keep touching databases/caches) while the process is already
+    /// closing; cancelling them first is what `BackgroundService` promises.
+    /// The returned handle is aborted once teardown is done so a host that ends
+    /// without a shutdown signal does not leak the watcher.
+    fn spawn_hosted_shutdown_watcher(&self) -> tokio::task::JoinHandle<()> {
+        let mut shutdown = self.shutdown.subscribe();
+        let stopped = Arc::clone(&self.hosted_stopped);
+        let services = Arc::clone(&self.hosted_services);
+        tokio::spawn(async move {
+            // `wait_for` returns immediately when the signal was already sent.
+            if shutdown.wait_for(|signalled| *signalled).await.is_ok() {
+                stopped
+                    .get_or_init(|| async move { stop_hosted_services(&services).await })
+                    .await;
+            }
+        })
+    }
+
     /// Instance-scoped dispatch runtime (provider + handler cache).
     pub fn dispatch_runtime(&self) -> &Arc<DispatchRuntime> {
         &self.dispatch_runtime
@@ -1175,6 +1219,8 @@ impl Host {
 
         install_shutdown_handler(Arc::clone(&self.shutdown));
         spawn_async_shutdown_listener(Arc::clone(&self.shutdown));
+        // Stop background work at signal time, before connections drain.
+        let hosted_watcher = self.spawn_hosted_shutdown_watcher();
 
         let mut handles = Vec::new();
         let pipeline = Arc::clone(&self.pipeline);
@@ -1228,7 +1274,10 @@ impl Host {
             }
         }
 
-        stop_hosted_services(&self.hosted_services).await;
+        // Hosted services were cancelled when the shutdown signal arrived; this
+        // second call is a no-op unless the listeners ended without a signal.
+        self.stop_hosted_services_once().await;
+        hosted_watcher.abort();
         self.dispose_di();
 
         match run_error {
@@ -1247,6 +1296,8 @@ impl Host {
 
         install_shutdown_handler(Arc::clone(&self.shutdown));
         spawn_async_shutdown_listener(Arc::clone(&self.shutdown));
+        // Stop background work at signal time, before connections drain.
+        let hosted_watcher = self.spawn_hosted_shutdown_watcher();
         serve_http(
             addr.to_string(),
             listener,
@@ -1260,7 +1311,10 @@ impl Host {
         )
         .await;
 
-        stop_hosted_services(&self.hosted_services).await;
+        // Hosted services were cancelled when the shutdown signal arrived; this
+        // second call is a no-op unless the listener ended without a signal.
+        self.stop_hosted_services_once().await;
+        hosted_watcher.abort();
         self.dispose_di();
         Ok(())
     }

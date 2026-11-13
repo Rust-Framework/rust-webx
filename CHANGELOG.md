@@ -3,6 +3,61 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [1.3.0] — 2026-11-13
+
+Additive release for the 1.2 line: every existing 1.2 API keeps working
+(`IDynamicAuthorizer::authorize`/`authorize_with_rules`, `DeclaredRules`, static
+`#[authorize]` enforcement, `PagedRequest::new/clamped`, the `Jwt.Secret` flow).
+Two public structs gained a field (`RouteEntry::authorization_dynamic`,
+`StubEndpoint::authorization_dynamic`), so hand-written struct literals must add the
+field; the official constructors (`RouteEntry::new`/`with_type_id`) are unchanged.
+
+### Added
+
+- **WEBX-18 — `#[authorize(dynamic)]`: declarative rules can be delegated to
+  `IDynamicAuthorizer`.** Combines with `role`/`permission` in one attribute
+  (`#[authorize(dynamic, permission = "order.delete")]`); when an endpoint has several
+  `#[authorize]` attributes, one `dynamic` makes the whole endpoint dynamic. In dynamic
+  mode the static gate only requires an authenticated principal (no claims → 401) and the
+  declared rules are passed to the registered authorizer, which decides (denial → 403).
+  With **no** authorizer registered the endpoint is authenticated-only pass-through —
+  documented behaviour, not a safe default. Static endpoints behave exactly as in 1.2.
+  New `RouteEntry.authorization_dynamic: bool` and the `const`
+  `RouteEntry::with_dynamic_authorization()` builder (usable from `inventory::submit!`).
+- **WEBX-19 — `IDynamicAuthorizer::authorize_with_declared_rules(&self, claims,
+  route_pattern, method, declared: &'static [AuthorizeRule])`.** Provided default method;
+  the host now calls it with the endpoint's own `&'static [AuthorizeRule]` slice
+  (zero allocation, no `DeclaredRules` wrapper on the hot path). The default chain is new
+  method → `authorize_with_rules` → `authorize`, so 1.1/1.2 implementations compile and
+  work unchanged. `AuthorizerSet::authorize_with_declared_rules` mirrors it host-side.
+- **XR-4 — `PagedRequest::from_parts(page: Option<u32>, page_size: Option<u32>)`.**
+  `None` → 1/20, then clamped to 1..=100; equivalent to `new(..).clamped()`.
+- **XR-2 — `Jwt.SecretFile` configuration source.** `JwtSection.secret_file:
+  Option<String>` (JSON `SecretFile`, env `APP__Jwt__SecretFile`), resolved at host build
+  time by `webx::apply_jwt_secret_file`; precedence `APP__Jwt__Secret`/`JWT_SECRET` >
+  `Jwt.Secret` (JSON or `useOptions`) > secret file contents. Missing/unreadable/empty/
+  shorter-than-`MIN_JWT_SECRET_LEN` (32 bytes) or (Unix) non-`0600` files fail startup with
+  a typed error instead of panicking; the resolved value feeds the default issuer, the
+  `JwtAuth` middleware and the Production weak-secret guard. Windows ACLs are not checked;
+  DPAPI remains a future item.
+- **XR-3 — timing-safe comparison and single-use secrets.** `webx::security::
+  constant_time_eq` (no early return; length leakage documented),
+  `OneTimeSecret`/`OneTimeSecretState` (TTL + atomic compare-and-consume, `issue`/
+  `consume`/`matches`/`state`/`revoke`, redacted `Debug`), exported from `webx::security`
+  and the `webx` facade.
+- Docs: authorize macro chapter (dynamic delegation, "database is the source of truth"
+  pattern, static-vs-dynamic table), resource authorization, route macros, new pagination
+  page, security best practices, appsettings/JWT page.
+
+### Changed
+
+- The host now calls `IDynamicAuthorizer::authorize_with_declared_rules` instead of
+  building a `DeclaredRules` wrapper per request; the `DeclaredRules` type and
+  `authorize_with_rules` stay as legacy aliases (removal scheduled for 2.0, no
+  `#[deprecated]` attribute so 1.2 code keeps compiling without warnings).
+- `StubEndpoint`/`RouteEntry` gained `authorization_dynamic`; the framework's own fixtures
+  and the host constructor were updated. No other signature changed.
+
 ## [1.2.0] —2026-11-13
 
 Additive release: every existing 1.1 API keeps working (`IDynamicAuthorizer::authorize`,

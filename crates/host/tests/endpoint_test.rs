@@ -7,7 +7,7 @@ mod test_utils;
 use std::collections::HashMap;
 use std::sync::Arc;
 use webx_core::action::{JsonResult, Response};
-use webx_core::auth::{IClaims, IDynamicAuthorizer};
+use webx_core::auth::{DeclaredRules, IClaims, IDynamicAuthorizer};
 use webx_core::error::{Error, Result as LrwfResult};
 use webx_core::http::{IClaimsExt, IHttpContext};
 use webx_core::route::scan::AuthorizeRule;
@@ -307,8 +307,7 @@ async fn endpoint_dynamic_authorizer_allows_access() {
 }
 
 #[tokio::test]
-async fn endpoint_no_authorizer_skips_dynamic_check() {
-    // When authorizers is None, the dynamic check is skipped entirely
+async fn endpoint_no_authorizer_skips_dynamic_check() {    // When authorizers is None, the dynamic check is skipped entirely
     let endpoint = StubEndpoint {
         method: "GET",
         path: "/public-admin",
@@ -454,4 +453,133 @@ async fn roles_list_is_any_of() {
     assert!(result.is_ok());
     let (status, _, _) = ctx.into_response_parts();
     assert_eq!(status, 200);
+}
+
+// ── WEBX-1: dynamic authorizers receive the endpoint's declared rules ───────
+
+/// Records the `DeclaredRules` it receives, so a test can assert the endpoint's
+/// `#[authorize]` declaration (permission/role literals) reached the backend.
+#[derive(Default)]
+struct RecordingAuthorizer {
+    seen: std::sync::Mutex<Vec<(Vec<String>, Vec<String>)>>,
+}
+
+impl RecordingAuthorizer {
+    fn declarations(&self) -> Vec<(Vec<String>, Vec<String>)> {
+        self.seen.lock().unwrap().clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl IDynamicAuthorizer for RecordingAuthorizer {
+    async fn authorize(
+        &self,
+        _claims: &dyn IClaims,
+        _route_pattern: &str,
+        _method: &str,
+    ) -> LrwfResult<()> {
+        // Must not run: this authorizer overrides the rules-aware method.
+        panic!("authorize() must not be used when authorize_with_rules is overridden");
+    }
+
+    async fn authorize_with_rules(
+        &self,
+        _claims: &dyn IClaims,
+        _route_pattern: &str,
+        _method: &str,
+        declared: &DeclaredRules<'_>,
+    ) -> LrwfResult<()> {
+        self.seen.lock().unwrap().push((
+            declared.roles.iter().map(|r| r.to_string()).collect(),
+            declared
+                .permissions
+                .iter()
+                .map(|p| p.to_string())
+                .collect(),
+        ));
+        Ok(())
+    }
+}
+
+fn recording_endpoint(
+    authorizer: Arc<RecordingAuthorizer>,
+    authorization: &'static [AuthorizeRule],
+) -> StubEndpoint {
+    StubEndpoint {
+        method: "POST",
+        path: "/orders",
+        handler_type: "CreateOrderRequest",
+        dispatch_fn: Some(mock_dispatch_ok),
+        authorization,
+        authorizers: Some(Arc::new(AuthorizerSet::new(vec![authorizer]))),
+    }
+}
+
+#[tokio::test]
+async fn endpoint_dynamic_authorizer_receives_declared_permission_literal() {
+    let authorizer = Arc::new(RecordingAuthorizer::default());
+    let endpoint = recording_endpoint(Arc::clone(&authorizer), SETTINGS_WRITE_RULE);
+
+    let mut ctx = test_utils::TestHttpContext::new("POST", "/orders");
+    *ctx.request_mut().route_pattern_mut() = Some("/orders".into());
+    ctx.set_claims(Box::new(MockClaims {
+        sub: "user-1".into(),
+        roles: vec![],
+        permissions: vec!["settings:write".into()],
+    }));
+
+    endpoint.handle(&mut ctx).await.expect("must be allowed");
+
+    assert_eq!(
+        authorizer.declarations(),
+        vec![(vec![], vec!["settings:write".to_string()])],
+        "the `permission = \"settings:write\"` literal must reach the dynamic authorizer"
+    );
+}
+
+#[tokio::test]
+async fn endpoint_dynamic_authorizer_receives_empty_slices_when_nothing_declared() {
+    let authorizer = Arc::new(RecordingAuthorizer::default());
+    let endpoint = recording_endpoint(Arc::clone(&authorizer), AUTHENTICATED_RULE);
+
+    let mut ctx = test_utils::TestHttpContext::new("POST", "/orders");
+    *ctx.request_mut().route_pattern_mut() = Some("/orders".into());
+    ctx.set_claims(Box::new(MockClaims {
+        sub: "user-1".into(),
+        roles: vec![],
+        permissions: vec![],
+    }));
+
+    endpoint.handle(&mut ctx).await.expect("must be allowed");
+
+    assert_eq!(
+        authorizer.declarations(),
+        vec![(Vec::<String>::new(), Vec::<String>::new())],
+        "an endpoint without role/permission declarations must yield empty slices"
+    );
+}
+
+#[tokio::test]
+async fn endpoint_dynamic_authorizer_receives_union_of_multiple_rules() {
+    let authorizer = Arc::new(RecordingAuthorizer::default());
+    let endpoint = recording_endpoint(Arc::clone(&authorizer), ADMIN_AND_EXPORT);
+
+    let mut ctx = test_utils::TestHttpContext::new("POST", "/orders");
+    *ctx.request_mut().route_pattern_mut() = Some("/orders".into());
+    ctx.set_claims(Box::new(MockClaims {
+        sub: "user-1".into(),
+        roles: vec!["admin".into()],
+        permissions: vec!["reports:export".into()],
+    }));
+
+    endpoint.handle(&mut ctx).await.expect("must be allowed");
+
+    assert_eq!(
+        authorizer.declarations(),
+        vec![(
+            vec!["admin".to_string()],
+            vec!["reports:export".to_string()]
+        )],
+        "every `#[authorize]` attribute (ANDed rules) must be visible to the authorizer"
+    );
 }

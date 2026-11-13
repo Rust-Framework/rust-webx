@@ -2,6 +2,7 @@
 
 use serde_json;
 use std::sync::Arc;
+use webx_core::auth::DeclaredRules;
 use webx_core::error::Result;
 use webx_core::http::IHttpContext;
 use webx_core::routing::IEndpoint;
@@ -108,7 +109,29 @@ impl IEndpoint for StubEndpoint {
                         if let Some(claims) = ctx.claims() {
                             let resource_key = ctx.request().route_pattern().unwrap_or(self.path);
                             let method = ctx.request().method();
-                            authorizers.authorize(claims, resource_key, method).await?;
+                            // Hand the endpoint's `#[authorize]` declaration to
+                            // the backend. The metadata is already on the route
+                            // entry; without this the backend has to re-derive
+                            // the required permission from route + method.
+                            // Multiple `#[authorize]` attributes are ANDed, so
+                            // their codes are unioned into one flat view.
+                            let union = (self.authorization.len() > 1)
+                                .then(|| flatten_authorize_rules(self.authorization));
+                            let declared = match &union {
+                                Some((roles, permissions)) => DeclaredRules {
+                                    roles,
+                                    permissions,
+                                },
+                                None => self.authorization.first().map_or(
+                                    DeclaredRules::empty(),
+                                    |rule| {
+                                        DeclaredRules::new(rule.roles, rule.permissions)
+                                    },
+                                ),
+                            };
+                            authorizers
+                                .authorize_with_rules(claims, resource_key, method, &declared)
+                                .await?;
                         }
                     }
                 }
@@ -131,6 +154,24 @@ impl IEndpoint for StubEndpoint {
         .await;
         Ok(())
     }
+}
+
+/// Union the role/permission codes of every `#[authorize]` rule on an endpoint.
+///
+/// Multiple rules are ANDed. A dynamic authorizer wants one flat view of
+/// "everything the endpoint declared", so the codes are concatenated; duplicate
+/// literals are harmless (the declaration is a list of alternatives, not a
+/// multiset).
+fn flatten_authorize_rules<'a>(
+    rules: &'a [webx_core::route::scan::AuthorizeRule],
+) -> (Vec<&'a str>, Vec<&'a str>) {
+    let mut roles = Vec::new();
+    let mut permissions = Vec::new();
+    for rule in rules {
+        roles.extend_from_slice(rule.roles);
+        permissions.extend_from_slice(rule.permissions);
+    }
+    (roles, permissions)
 }
 
 /// Endpoint for controller-based methods.

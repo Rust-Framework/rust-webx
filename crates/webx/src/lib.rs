@@ -24,8 +24,8 @@ pub use webx_core::action::{
 };
 pub use webx_core::app::IHost;
 pub use webx_core::auth::{
-    IAuthenticationHandler, IAuthorizationPolicy, IClaims, IDynamicAuthorizer, IdentityUser,
-    RequestUser,
+    DeclaredRules, IAuthenticationHandler, IAuthorizationPolicy, IClaims, IDynamicAuthorizer,
+    IdentityUser, RequestUser,
 };
 pub use webx_core::cache::{
     cache_ext::DistributedCacheExtensions,

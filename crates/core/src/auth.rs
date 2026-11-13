@@ -104,6 +104,48 @@ pub trait IAuthorizationPolicy: Send + Sync {
         -> Result<()>;
 }
 
+/// Role / permission codes declared on the matched endpoint by `#[authorize]`.
+///
+/// The framework hands this to [`IDynamicAuthorizer::authorize_with_rules`] so a
+/// dynamic backend sees the *same literals* the endpoint declared — e.g. an
+/// endpoint annotated `#[authorize(permission = "order.create")]` yields
+/// `permissions == ["order.create"]`. Without it a backend can only recover the
+/// requirement by re-mapping route + method, which duplicates the declaration.
+///
+/// Both slices are empty when the endpoint declares no role/permission
+/// constraint (a bare `#[authorize]` or `AuthorizeRule::authenticated()`).
+///
+/// New in 1.2.0; additive — `authorize` keeps its 1.1 signature.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DeclaredRules<'a> {
+    /// Any-of role names declared on the endpoint; empty = no role constraint.
+    pub roles: &'a [&'a str],
+
+    /// Any-of permission names declared on the endpoint; empty = no permission
+    /// constraint.
+    pub permissions: &'a [&'a str],
+}
+
+impl<'a> DeclaredRules<'a> {
+    /// An endpoint with no declared role/permission constraint.
+    pub const fn empty() -> Self {
+        Self {
+            roles: &[],
+            permissions: &[],
+        }
+    }
+
+    /// Build from the declared role and permission codes.
+    pub const fn new(roles: &'a [&'a str], permissions: &'a [&'a str]) -> Self {
+        Self { roles, permissions }
+    }
+
+    /// Whether neither a role nor a permission was declared.
+    pub fn is_empty(&self) -> bool {
+        self.roles.is_empty() && self.permissions.is_empty()
+    }
+}
+
 /// Dynamic authorizer interface — pluggable authorization for protected routes.
 ///
 /// Implement this trait and register it in the DI container:
@@ -116,10 +158,15 @@ pub trait IAuthorizationPolicy: Send + Sync {
 /// and invokes them on every route that has `#[authorize]`.
 /// If no implementations are registered, authorization is pass-through (no dynamic checks).
 ///
-/// # Method
+/// # Methods
 ///
-/// * `authorize` — receives the user's claims, matched route pattern, and HTTP method.
-///   Returns `Ok(())` if allowed, or `Err` with details if denied.
+/// * `authorize` — receives the user's claims, matched route pattern, and HTTP
+///   method. Returns `Ok(())` if allowed, or `Err` with details if denied.
+///   Kept for source compatibility with 1.1.
+/// * `authorize_with_rules` — same, plus the endpoint's [`DeclaredRules`]
+///   (the role/permission literals written in `#[authorize]`). The framework
+///   calls this one; the default implementation forwards to `authorize`, so an
+///   implementation that only overrides `authorize` keeps working unchanged.
 #[async_trait::async_trait]
 pub trait IDynamicAuthorizer: Send + Sync {
     /// Validate whether the authenticated user can access the resource.
@@ -129,6 +176,25 @@ pub trait IDynamicAuthorizer: Send + Sync {
         route_pattern: &str,
         method: &str,
     ) -> Result<()>;
+
+    /// Validate access with the endpoint's declared role / permission codes.
+    ///
+    /// Override this instead of `authorize` when the authorization backend must
+    /// know *which* permission the endpoint declared (resource-instance checks,
+    /// permission-to-policy mapping, audit). Calls made through this method never
+    /// reach the overridden `authorize` when this one is overridden.
+    ///
+    /// The default forwards to [`IDynamicAuthorizer::authorize`], which keeps
+    /// 1.1 implementations wire-compatible.
+    async fn authorize_with_rules(
+        &self,
+        claims: &dyn IClaims,
+        route_pattern: &str,
+        method: &str,
+        _declared: &DeclaredRules<'_>,
+    ) -> Result<()> {
+        self.authorize(claims, route_pattern, method).await
+    }
 }
 
 /// The standard identity a request can carry.
@@ -349,6 +415,23 @@ pub trait RequestUser {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn declared_rules_empty_is_both_dimensions_empty() {
+        let empty = DeclaredRules::empty();
+        assert!(empty.is_empty());
+        assert!(empty.roles.is_empty());
+        assert!(empty.permissions.is_empty());
+        assert_eq!(empty, DeclaredRules::default());
+    }
+
+    #[test]
+    fn declared_rules_keep_the_declared_literals() {
+        let declared = DeclaredRules::new(&["admin"], &["order.create"]);
+        assert_eq!(declared.roles, &["admin"]);
+        assert_eq!(declared.permissions, &["order.create"]);
+        assert!(!declared.is_empty());
+    }
 
     /// Minimal `RequestUser` carrier: a request struct with
     /// `#[fromclaim(optional)] viewer: Option<IdentityUser>` reduces to this.

@@ -45,7 +45,7 @@
 use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::sync::Arc;
-use webx_core::auth::{IAuthorizationPolicy, IClaims, IDynamicAuthorizer};
+use webx_core::auth::{DeclaredRules, IAuthorizationPolicy, IClaims, IDynamicAuthorizer};
 use webx_core::error::Result;
 use webx_core::http::IHttpContext;
 use webx_core::middleware::IMiddleware;
@@ -217,14 +217,34 @@ impl AuthorizerSet {
     /// Run all registered authorizers in sequence.
     ///
     /// Returns `Ok(())` if ALL authorizers pass. Returns the first `Err` if any denies.
+    ///
+    /// Equivalent to [`AuthorizerSet::authorize_with_rules`] with an empty
+    /// declaration — kept for compatibility with 1.1 call sites.
     pub async fn authorize(
         &self,
         claims: &dyn IClaims,
         route_pattern: &str,
         method: &str,
     ) -> Result<()> {
+        self.authorize_with_rules(claims, route_pattern, method, &DeclaredRules::empty())
+            .await
+    }
+
+    /// Run all registered authorizers in sequence, handing them the matched
+    /// endpoint's `#[authorize]` declaration.
+    ///
+    /// Returns `Ok(())` if ALL authorizers pass. Returns the first `Err` if any denies.
+    pub async fn authorize_with_rules(
+        &self,
+        claims: &dyn IClaims,
+        route_pattern: &str,
+        method: &str,
+        declared: &DeclaredRules<'_>,
+    ) -> Result<()> {
         for authorizer in &self.authorizers {
-            authorizer.authorize(claims, route_pattern, method).await?;
+            authorizer
+                .authorize_with_rules(claims, route_pattern, method, declared)
+                .await?;
         }
         Ok(())
     }

@@ -707,7 +707,10 @@ async fn dynamic_endpoint_skips_the_static_gate_and_passes_the_raw_declaration()
         .await
         .expect("the dynamic authorizer decides, and it allows");
     let (status, _, _) = ctx.into_response_parts();
-    assert_eq!(status, 200, "dynamic delegation must let the request through");
+    assert_eq!(
+        status, 200,
+        "dynamic delegation must let the request through"
+    );
 
     let seen = authorizer.seen();
     assert_eq!(
@@ -817,7 +820,10 @@ async fn static_endpoint_never_reaches_the_dynamic_authorizer_on_403() {
     let result = endpoint.handle(&mut ctx).await;
     assert!(result.is_ok());
     let (status, _, body) = ctx.into_response_parts();
-    assert_eq!(status, 403, "static regression: claims still gate the route");
+    assert_eq!(
+        status, 403,
+        "static regression: claims still gate the route"
+    );
     let body_json: serde_json::Value = serde_json::from_slice(body.as_ref().unwrap()).unwrap();
     assert_eq!(
         body_json["required_permissions"],
@@ -883,4 +889,3 @@ async fn dynamic_endpoint_reaches_legacy_authorize_only_implementation() {
     let (status, _, _) = ctx.into_response_parts();
     assert_eq!(status, 200);
 }
-

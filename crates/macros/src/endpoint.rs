@@ -654,9 +654,7 @@ fn parse_string_list(input: ParseStream, out: &mut Vec<String>) -> syn::Result<(
 /// dynamic mode's static gate enforces anyway. `dynamic` only changes *who*
 /// evaluates the rules (the registered `IDynamicAuthorizer` instead of the
 /// claim snapshot), never the declaration itself.
-fn extract_authorization(
-    attrs: &[Attribute],
-) -> syn::Result<(proc_macro2::TokenStream, bool)> {
+fn extract_authorization(attrs: &[Attribute]) -> syn::Result<(proc_macro2::TokenStream, bool)> {
     let mut rules = Vec::new();
     let mut dynamic = false;
     for attr in attrs {

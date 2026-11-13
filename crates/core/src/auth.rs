@@ -736,7 +736,10 @@ mod tests {
             _method: &str,
             declared: &DeclaredRules<'_>,
         ) -> Result<()> {
-            self.seen.lock().unwrap().extend_from_slice(declared.rules());
+            self.seen
+                .lock()
+                .unwrap()
+                .extend_from_slice(declared.rules());
             Ok(())
         }
     }

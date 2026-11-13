@@ -131,7 +131,10 @@ fn one_dynamic_attribute_makes_the_whole_endpoint_dynamic() {
         .collect();
     assert_eq!(
         rules,
-        vec![(&["admin"][..], &[][..]), (&[][..], &["reports:export"][..])],
+        vec![
+            (&["admin"][..], &[][..]),
+            (&[][..], &["reports:export"][..])
+        ],
         "the declared rules stay intact (AND structure, declaration order)"
     );
 }

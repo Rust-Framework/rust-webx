@@ -100,9 +100,7 @@ impl IEndpoint for StubEndpoint {
                 // the dynamic authorizer's input, not a claim check.
                 if !self.authorization_dynamic {
                     let denied = {
-                        let claims = ctx
-                            .claims()
-                            .expect("claims presence is checked above");
+                        let claims = ctx.claims().expect("claims presence is checked above");
                         self.authorization
                             .iter()
                             .find(|rule| !rule.matches(claims.roles(), claims.permissions()))

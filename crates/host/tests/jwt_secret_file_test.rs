@@ -289,9 +289,12 @@ fn host_build_fails_fast_when_the_secret_file_is_missing() {
         .expect("a missing secret file must abort start-up");
 
     assert!(matches!(error, Error::Di(_)), "got {error:?}");
+    // Unix inspects the mode first ("could not be inspected"); Windows opens the
+    // file directly ("could not be read"). Both are the actionable message.
+    let message = error.to_string();
     assert!(
-        error.to_string().contains("could not be read"),
-        "the operator gets an actionable message: {error}"
+        message.contains("could not be read") || message.contains("could not be inspected"),
+        "the operator gets an actionable message: {message}"
     );
 }
 

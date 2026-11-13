@@ -71,6 +71,7 @@ pub use webx_core::route::diagnostics::{
     orphan_routes, route_snapshots,
 };
 pub use webx_core::routing::{HttpMethod, IEndpoint, IRouter, RouteMeta};
+pub use webx_core::security::{ISessionStore, ITokenIssuer, InMemorySessionStore, IssuedToken, TokenClaims};
 
 // --- DI extensions ---
 pub use webx_core::route::binding;
@@ -83,7 +84,10 @@ pub use webx_core::route::scan::{
 };
 
 // --- HTTP layer ---
-pub use webx_host::auth_jwt::{init_jwt_secret, jwt_middleware, jwt_secret, JwtAuth, JwtClaims};
+pub use webx_host::auth_jwt::{
+    init_jwt_secret, jwt_middleware, jwt_middleware_with_revocation, jwt_secret, JwtAuth,
+    JwtClaims, JwtTokenIssuer, DEFAULT_TOKEN_LIFETIME,
+};
 pub use webx_host::authz::collect_authorizers;
 pub use webx_host::authz::resource_auth_middleware;
 pub use webx_host::authz::{AuthorizerSet, ResourceAuthorization};

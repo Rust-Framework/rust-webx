@@ -28,6 +28,7 @@ pub mod problem;
 pub mod request_context;
 pub mod route;
 pub mod routing;
+pub mod security;
 
 pub use action::*;
 pub use app::*;
@@ -53,3 +54,4 @@ pub use problem::*;
 pub use request_context::*;
 pub use route::*;
 pub use routing::*;
+pub use security::*;

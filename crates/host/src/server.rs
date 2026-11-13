@@ -19,8 +19,12 @@ use webx_core::middleware::IMiddleware;
 use webx_core::mode::AppMode;
 use webx_core::route::catalog::{EndpointCatalog, IEndpointCatalog};
 use webx_core::routing::{HttpMethod, IEndpoint, IRouter};
+use webx_core::security::{ISessionStore, ITokenIssuer};
 
-use crate::auth_jwt::{init_jwt_secret, jwt_middleware, JwtAuth};
+use crate::auth_jwt::{
+    init_jwt_secret, jwt_middleware, jwt_middleware_with_revocation, JwtAuth, JwtTokenIssuer,
+    DEFAULT_TOKEN_LIFETIME,
+};
 use crate::authz::collect_authorizers;
 use crate::context::{BodyLimits, HttpContext, RespBody};
 use crate::cors::{CorsConfig, CorsMiddleware};
@@ -353,6 +357,33 @@ impl HostBuilder {
         self
     }
 
+    /// Register a session store so authentication rejects revoked tokens.
+    ///
+    /// After verifying a token, the authentication middleware asks the store
+    /// whether the token's `jti` has been revoked; a revoked token is answered
+    /// with the framework's 401 (problem+json + `WWW-Authenticate`) before the
+    /// endpoint runs. Without a store, authentication only verifies signatures
+    /// — the 1.1 behaviour.
+    ///
+    /// [`InMemorySessionStore`](webx_core::security::InMemorySessionStore) is
+    /// the dependency-free store for a single-process deployment; pass a
+    /// persistent [`ISessionStore`] implementation when revocations must survive
+    /// a restart.
+    ///
+    /// ```ignore
+    /// Host::builder()
+    ///     .add_authentication()
+    ///     .use_session_store(Arc::new(InMemorySessionStore::new()))
+    ///     .build()
+    /// ```
+    pub fn use_session_store(mut self, store: Arc<dyn ISessionStore>) -> Self {
+        self.service_configs.push(Box::new(move |svc| {
+            let store = Arc::clone(&store);
+            svc.try_add_singleton::<dyn ISessionStore>(move |_| Arc::clone(&store))
+        }));
+        self
+    }
+
     /// Enable localization with the conventional resource layout.
     ///
     /// Reads `<culture>.json` files from `locales/` under the application base
@@ -611,6 +642,20 @@ impl HostBuilder {
             svc = cfg(svc);
         }
 
+        // WEBX-2: the default JWT issuer is a host service, so a login endpoint
+        // injects `Arc<dyn ITokenIssuer>` instead of hand-rolling signing. It is
+        // registered through `try_add*`: an application registration of its own
+        // issuer (added above) wins over this default.
+        if self.auth_enabled && !options.jwt.secret.trim().is_empty() {
+            let secret = options.jwt.secret.clone();
+            svc = svc.try_add_singleton::<dyn ITokenIssuer>(move |_| {
+                Arc::new(JwtTokenIssuer::from_secret(
+                    secret.as_bytes(),
+                    DEFAULT_TOKEN_LIFETIME,
+                ))
+            });
+        }
+
         // The compiled handler registry is a host service: `add_mediator`
         // resolves it from DI, and the HTTP path reads it from DispatchRuntime.
         let handler_cache = Arc::new(webx_core::route::scan::HandlerCache::build());
@@ -729,7 +774,15 @@ impl HostBuilder {
                     DecodingKey::from_secret(secret.as_bytes()),
                     Validation::default(),
                 ));
-                pipeline.add_middleware(Arc::new(jwt_middleware(jwt_auth)));
+                // WEBX-2: when the application registered an `ISessionStore`,
+                // verified tokens are additionally checked for revocation.
+                // Without one this stays the 1.1 verify-only middleware.
+                let session_store = provider.get_all::<dyn ISessionStore>().into_iter().next();
+                let auth_middleware: Arc<dyn IMiddleware> = match session_store {
+                    Some(store) => Arc::new(jwt_middleware_with_revocation(jwt_auth, store)),
+                    None => Arc::new(jwt_middleware(jwt_auth)),
+                };
+                pipeline.add_middleware(auth_middleware);
                 init_jwt_secret(&secret);
             } else {
                 tracing::warn!(

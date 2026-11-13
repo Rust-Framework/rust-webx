@@ -64,6 +64,16 @@ pub trait IClaims: Send + Sync {
     fn get_email(&self) -> Option<&str> {
         self.claims().get("email").map(|s| s.as_str())
     }
+
+    /// The token identifier (`jti` claim), when the token carries one.
+    ///
+    /// The authentication middleware looks this up in
+    /// [`ISessionStore`](crate::security::ISessionStore) to reject revoked
+    /// tokens. A token without a `jti` cannot be revoked individually; the
+    /// revocation check then leaves it alone (it still expires at `exp`).
+    fn jti(&self) -> Option<&str> {
+        self.claims().get("jti").map(String::as_str)
+    }
 }
 
 impl Clone for Box<dyn IClaims> {

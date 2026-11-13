@@ -4,6 +4,26 @@
 //! a Bearer token from the `Authorization` header and validates it using
 //! the `jsonwebtoken` crate.
 //!
+//! # Issuance and revocation (WEBX-2)
+//!
+//! Minting and invalidation are ports, so application code does not need its
+//! own signing or session code:
+//!
+//! * [`JwtTokenIssuer`] implements `ITokenIssuer` and is registered
+//!   automatically by `HostBuilder::add_authentication()` from `Jwt.Secret`.
+//!   A login handler injects `Arc<dyn ITokenIssuer>` and calls
+//!   [`ITokenIssuer::issue`].
+//! * `.use_session_store(store)` registers an `ISessionStore`; the auth
+//!   middleware then rejects a token whose `jti` was revoked. Revocation is
+//!   opt-in: without a store the middleware only verifies signatures.
+//!
+//! ```ignore
+//! // login: issue and remember the jti (or give it to the client)
+//! let issued = token_issuer.issue(TokenClaims::new(&user.id)).await?;
+//! // logout: revoke it; the next request with that token is 401
+//! session_store.revoke(&issued.jti).await?;
+//! ```
+//!
 //! # Example
 //!
 //! ```ignore
@@ -17,15 +37,17 @@
 //! let middleware = jwt_middleware(Arc::new(auth));
 //! ```
 
-use jsonwebtoken::{decode, DecodingKey, Validation};
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::sync::{Arc, OnceLock};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use webx_core::auth::{IAuthenticationHandler, IClaims};
-use webx_core::error::Result;
+use webx_core::error::{Error, Result};
 use webx_core::http::IHttpContext;
 use webx_core::middleware::IMiddleware;
+use webx_core::security::{ISessionStore, ITokenIssuer, IssuedToken, TokenClaims};
 
 // ---------------------------------------------------------------------------
 // JwtClaims —IClaims implementation backed by JWT payload
@@ -192,19 +214,150 @@ impl IAuthenticationHandler for JwtAuth {
 }
 
 // ---------------------------------------------------------------------------
+// JwtTokenIssuer —ITokenIssuer implementation (default token minting)
+// ---------------------------------------------------------------------------
+
+/// Default token lifetime used when [`TokenClaims::expires_in`] is `None`.
+pub const DEFAULT_TOKEN_LIFETIME: Duration = Duration::from_secs(3600);
+
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or_default()
+}
+
+/// JWT token issuer — the default [`ITokenIssuer`] (HS256).
+///
+/// Mints a token carrying `sub`, `roles`, `permissions`, the caller's extra
+/// claims, and the framework-managed `jti` / `iat` / `exp`. The `jti` is what
+/// [`ISessionStore::revoke`] later invalidates, so a login endpoint only needs:
+///
+/// ```ignore
+/// let issued = issuer.issue(TokenClaims::new(&user.id)).await?;
+/// sessions.revoke(&issued.jti).await?; // logout
+/// ```
+///
+/// `HostBuilder::add_authentication()` registers one from the configured
+/// `Jwt.Secret`; register a custom [`ITokenIssuer`] in DI to replace it (for
+/// example to use an asymmetric algorithm).
+pub struct JwtTokenIssuer {
+    encoding_key: EncodingKey,
+    default_lifetime: Duration,
+    issuer: Option<String>,
+    audience: Option<String>,
+}
+
+impl JwtTokenIssuer {
+    /// Build from a prepared [`EncodingKey`] (any algorithm `jsonwebtoken`
+    /// supports; the decoder must be configured to match).
+    pub fn new(encoding_key: EncodingKey, default_lifetime: Duration) -> Self {
+        Self {
+            encoding_key,
+            default_lifetime,
+            issuer: None,
+            audience: None,
+        }
+    }
+
+    /// Build an HS256 issuer from a shared secret — the same secret
+    /// `JwtAuth` verifies with.
+    pub fn from_secret(secret: impl AsRef<[u8]>, default_lifetime: Duration) -> Self {
+        Self::new(EncodingKey::from_secret(secret.as_ref()), default_lifetime)
+    }
+
+    /// Set the `iss` claim.
+    pub fn with_issuer(mut self, issuer: impl Into<String>) -> Self {
+        self.issuer = Some(issuer.into());
+        self
+    }
+
+    /// Set the `aud` claim.
+    pub fn with_audience(mut self, audience: impl Into<String>) -> Self {
+        self.audience = Some(audience.into());
+        self
+    }
+}
+
+#[async_trait::async_trait]
+impl ITokenIssuer for JwtTokenIssuer {
+    async fn issue(&self, claims: TokenClaims) -> Result<IssuedToken> {
+        let subject = claims.subject.trim();
+        if subject.is_empty() {
+            return Err(Error::Validation(
+                "token subject must not be empty".to_string(),
+            ));
+        }
+
+        let lifetime = claims.expires_in.unwrap_or(self.default_lifetime);
+        let issued_at = unix_now();
+        let expires_at = issued_at.saturating_add(lifetime.as_secs());
+        let jti = uuid::Uuid::new_v4().to_string();
+
+        // Extra claims first: reserved claims must win, otherwise a caller could
+        // override `sub`/`exp`/`jti` through `TokenClaims::extra`.
+        let mut payload = serde_json::Map::new();
+        for (key, value) in &claims.extra {
+            payload.insert(key.clone(), serde_json::Value::String(value.clone()));
+        }
+        payload.insert("sub".into(), serde_json::json!(subject));
+        payload.insert("roles".into(), serde_json::json!(claims.roles));
+        payload.insert(
+            "permissions".into(),
+            serde_json::json!(claims.permissions),
+        );
+        payload.insert("jti".into(), serde_json::json!(jti));
+        payload.insert("iat".into(), serde_json::json!(issued_at));
+        payload.insert("exp".into(), serde_json::json!(expires_at));
+        if let Some(issuer) = &self.issuer {
+            payload.insert("iss".into(), serde_json::json!(issuer));
+        }
+        if let Some(audience) = &self.audience {
+            payload.insert("aud".into(), serde_json::json!(audience));
+        }
+
+        let token = encode(
+            &Header::default(),
+            &serde_json::Value::Object(payload),
+            &self.encoding_key,
+        )
+        .map_err(|error| Error::Internal(format!("JWT signing failed: {error}")))?;
+
+        Ok(IssuedToken {
+            token,
+            jti,
+            expires_at,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Middleware
 // ---------------------------------------------------------------------------
 
-/// Authentication middleware that uses the given `IAuthenticationHandler`
-/// to extract claims from the request and store them in the context.
+/// Authentication middleware: verify the token, then reject revoked tokens.
 struct AuthMiddleware {
     handler: Arc<dyn IAuthenticationHandler>,
+    /// `None` = signature verification only (1.1 behaviour).
+    session_store: Option<Arc<dyn ISessionStore>>,
 }
 
 #[async_trait::async_trait]
 impl IMiddleware for AuthMiddleware {
     async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
         if let Some(claims) = self.handler.authenticate(ctx).await? {
+            if let Some(store) = &self.session_store {
+                // A token without `jti` cannot be matched against a revocation
+                // record; it keeps its `exp`-based lifetime (no re-reject).
+                if let Some(jti) = claims.jti() {
+                    if store.is_revoked(jti).await? {
+                        // Revoked credentials are a credentials problem, not an
+                        // anonymous request: fail here so the host writes its
+                        // single 401 (problem+json + `WWW-Authenticate`).
+                        return Err(Error::Unauthorized("token has been revoked".to_string()));
+                    }
+                }
+            }
             // IHttpContext extends IClaimsExt, so set_claims is available directly.
             ctx.set_claims(claims);
         }
@@ -217,7 +370,26 @@ impl IMiddleware for AuthMiddleware {
 /// Reads the Bearer token from `Authorization` header, validates it, and
 /// stores the resulting claims in the HTTP context for downstream use.
 pub fn jwt_middleware(handler: Arc<dyn IAuthenticationHandler>) -> impl IMiddleware {
-    AuthMiddleware { handler }
+    AuthMiddleware {
+        handler,
+        session_store: None,
+    }
+}
+
+/// Create a JWT authentication middleware that also rejects revoked tokens.
+///
+/// After the signature check, the token's `jti` is looked up in `session_store`;
+/// a revoked token is answered with the framework's 401 (problem+json +
+/// `WWW-Authenticate`) before the endpoint runs. Tokens without a `jti` pass
+/// through unchanged.
+pub fn jwt_middleware_with_revocation(
+    handler: Arc<dyn IAuthenticationHandler>,
+    session_store: Arc<dyn ISessionStore>,
+) -> impl IMiddleware {
+    AuthMiddleware {
+        handler,
+        session_store: Some(session_store),
+    }
 }
 
 // ---------------------------------------------------------------------------

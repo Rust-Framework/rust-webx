@@ -9,6 +9,7 @@
 一个类型安全、约定优于配置的平台——在这里 *请求即端点*：一行属性声明路由，实现一个 Handler，路由、依赖注入、中间件与错误映射全部交给框架。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Documentation](https://img.shields.io/badge/docs-mdBook-blue.svg)](https://rust-framework.github.io/rust-webx/)
 [![CI](https://github.com/Rust-Framework/rust-webx/actions/workflows/ci.yml/badge.svg)](https://github.com/Rust-Framework/rust-webx/actions/workflows/ci.yml)
 ![Rust](https://img.shields.io/badge/rust-%3E%3D%201.95-orange.svg)
 
@@ -311,6 +312,7 @@ docker compose -f docbit/docker-compose.yml --env-file docbit/.env up --build
 
 ## 文档
 
+- **在线手册** — 全书发布在 <https://rust-framework.github.io/rust-webx/>（mdBook，中文；由 `.github/workflows/docs.yml` 从 `docs/rust-webx/` 构建）。
 - **rust-webx 开发者手册** — 位于 [`docs/rust-webx/`](docs/rust-webx/INDEX.md) 的渐进式披露书籍（16 章，中文）：入门、快速上手、架构、DI 与生命周期、中间件、中介者与事件、认证与安全、配置、生产、项目结构、扩展、最佳实践、案例研究与迁移指南。
 - **从 1.0.x 升级** — 1.1.0 用 `IActionResult` 族替换了 `ResponseData`，请按 [1.0.2 → 1.1.0 迁移指南](docs/rust-webx/16-migration/upgrade-to-1.1.md) 改写。
 - **rust-ef 参考** — ORM 手册随 [`rust-ef`](https://crates.io/crates/rust-ef) crate 维护（见其 [docs.rs](https://docs.rs/rust-ef) 文档），`docbit` 示例使用。

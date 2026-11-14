@@ -10,6 +10,7 @@ A type-safe, convention-over-configuration platform where *requests are endpoint
 
 [![Crates.io Version](https://img.shields.io/crates/v/rust-webx)](https://crates.io/crates/rust-webx)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Documentation](https://img.shields.io/badge/docs-mdBook-blue.svg)](https://rust-framework.github.io/rust-webx/)
 [![CI](https://github.com/Rust-Framework/rust-webx/actions/workflows/ci.yml/badge.svg)](https://github.com/Rust-Framework/rust-webx/actions/workflows/ci.yml)
 ![Rust](https://img.shields.io/badge/rust-%3E%3D%201.95-orange.svg)
 
@@ -345,6 +346,7 @@ See the configuration chapter under `docs/rust-webx/` for the full variable refe
 
 ## Documentation
 
+- **Online handbook** — the full book is published at <https://rust-framework.github.io/rust-webx/> (mdBook, Chinese; built from `docs/rust-webx/` by `.github/workflows/docs.yml`).
 - **rust-webx developer's manual** — a progressive-disclosure book under [`docs/rust-webx/`](docs/rust-webx/INDEX.md) (16 chapters, Chinese): introduction, quick start, architecture, DI & lifecycle, middleware, mediator & events, auth & security, configuration, production, project structure, extensibility, best practices, case study and migration guides.
 - **Upgrading from 1.0.x** — 1.1.0 replaced `ResponseData` with the `IActionResult` family; follow the [1.0.2 → 1.1.0 migration guide](docs/rust-webx/16-migration/upgrade-to-1.1.md).
 - **rust-ef reference** — the ORM handbook lives with the [`rust-ef`](https://crates.io/crates/rust-ef) crate (see its [docs.rs](https://docs.rs/rust-ef) documentation), used by the `docbit` example.

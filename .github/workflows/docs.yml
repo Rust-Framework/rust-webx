@@ -1,0 +1,55 @@
+name: Docs (mdBook)
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "docs/rust-webx/**"
+      - "scripts/gen-mdbook-summary.py"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build mdBook
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Refresh SUMMARY.md from INDEX.json
+        run: python3 scripts/gen-mdbook-summary.py
+      - name: Verify committed SUMMARY.md is current
+        run: git diff --exit-code -- docs/rust-webx/SUMMARY.md
+      - name: Install mdBook
+        run: |
+          mkdir mdbook
+          curl -sSL https://github.com/rust-lang/mdBook/releases/download/v0.4.40/mdbook-v0.4.40-x86_64-unknown-linux-gnu.tar.gz -o mdbook.tar.gz
+          tar -xzf mdbook.tar.gz -C mdbook
+          chmod +x mdbook/mdbook
+          echo "$PWD/mdbook" >> $GITHUB_PATH
+      - name: Build book
+        run: mdbook build docs/rust-webx
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/rust-webx/book
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

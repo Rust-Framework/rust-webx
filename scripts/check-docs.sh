@@ -80,7 +80,7 @@ for part in index.get("parts", []):
 actual = {
     str(path.relative_to(docs_root)).replace("\\", "/")
     for path in docs_root.rglob("*.md")
-    if path.name not in {"INDEX.md", "FOREWORD.md"}
+    if path.name not in {"INDEX.md", "FOREWORD.md", "SUMMARY.md"}
 }
 for rel in sorted(actual - indexed):
     errors.append(f"docs/rust-webx/{rel} is not listed in INDEX.json")

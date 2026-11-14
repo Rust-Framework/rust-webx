@@ -94,7 +94,8 @@ pub use webx_core::route::scan::{
 // --- HTTP layer ---
 pub use webx_host::auth_jwt::{
     apply_jwt_secret_file, init_jwt_secret, jwt_middleware, jwt_middleware_with_revocation,
-    jwt_secret, JwtAuth, JwtClaims, JwtTokenIssuer, DEFAULT_TOKEN_LIFETIME, MIN_JWT_SECRET_LEN,
+    jwt_secret, JwtAuth, JwtClaims, JwtSecret, JwtTokenIssuer, DEFAULT_TOKEN_LIFETIME,
+    MIN_JWT_SECRET_LEN,
 };
 pub use webx_host::authz::collect_authorizers;
 pub use webx_host::authz::resource_auth_middleware;
@@ -106,7 +107,10 @@ pub use webx_host::diagnostics::log_startup_diagnostics;
 pub use webx_host::endpoint::{
     ControllerEndpoint, RequestEndpoint, StaticHtmlEndpoint, StaticJsonEndpoint,
 };
-pub use webx_host::health::{HealthCheckEntry, HealthCheckFn, HealthCheckRegistry, HealthStatus};
+pub use webx_host::health::{
+    HealthCheckEntry, HealthCheckFn, HealthCheckRegistry, HealthStatus, IHealthCheck,
+    DEFAULT_HEALTH_CHECK_TIMEOUT,
+};
 pub use webx_host::memory_cache::MemoryCache;
 #[cfg(feature = "password-argon2")]
 pub use webx_host::password_argon2::{Argon2Params, Argon2PasswordHasher};

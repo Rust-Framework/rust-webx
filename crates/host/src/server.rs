@@ -22,13 +22,17 @@ use webx_core::routing::{HttpMethod, IEndpoint, IRouter};
 use webx_core::security::{ISessionStore, ITokenIssuer};
 
 use crate::auth_jwt::{
-    init_jwt_secret, jwt_middleware, jwt_middleware_with_revocation, JwtAuth, JwtTokenIssuer,
+    init_jwt_secret, jwt_middleware, jwt_middleware_with_revocation, JwtAuth, JwtSecret,
+    JwtTokenIssuer,
 };
 use crate::authz::collect_authorizers;
 use crate::context::{BodyLimits, HttpContext, RespBody};
 use crate::cors::{CorsConfig, CorsMiddleware};
 use crate::endpoint::{StaticHtmlEndpoint, StaticJsonEndpoint, StubEndpoint};
-use crate::health::{HealthCheckEndpoint, HealthCheckRegistry, HealthStatus};
+use crate::health::{
+    HealthCheckEndpoint, HealthCheckRegistry, HealthStatus, IHealthCheck,
+    DEFAULT_HEALTH_CHECK_TIMEOUT,
+};
 use crate::memory_cache::MemoryCache;
 use crate::metrics::{HttpMetrics, MetricsEndpoint, MetricsMiddleware};
 use crate::pipeline::{HandlerFn, MiddlewarePipeline};
@@ -151,6 +155,13 @@ pub struct Host {
 /// Factory for a user-registered middleware.
 type MiddlewareFactory = Box<dyn Fn() -> Arc<dyn IMiddleware> + Send + Sync>;
 
+/// A deferred service registration.
+///
+/// Receives the fully merged [`AppOptions`] — including a resolved
+/// `Jwt.SecretFile` — so a registration that constructs a security primitive
+/// reads the same configuration the host itself uses.
+type ServiceConfig = Box<dyn FnOnce(ServiceCollection, &AppOptions) -> ServiceCollection + Send>;
+
 /// A user middleware waiting to be placed in the pipeline at its slot.
 struct MiddlewareSpec {
     slot: webx_core::middleware::MiddlewareSlot,
@@ -159,7 +170,7 @@ struct MiddlewareSpec {
 
 #[allow(clippy::type_complexity)]
 pub struct HostBuilder {
-    service_configs: Vec<Box<dyn FnOnce(ServiceCollection) -> ServiceCollection + Send>>,
+    service_configs: Vec<ServiceConfig>,
     mode: AppMode,
     spa_source: Option<SpaSource>,
     spa_disabled: bool,
@@ -231,9 +242,52 @@ impl HostBuilder {
         }
     }
 
-    pub fn register<F>(mut self, f: F) -> Self
+    /// Defer service registration until host build.
+    ///
+    /// The closure runs during [`Self::try_build`] / [`Self::try_build_async`],
+    /// after configuration has been merged and `Jwt.SecretFile` resolved, and
+    /// before the host's own defaults are registered. Use
+    /// [`Self::register_with_options`] when the registration itself needs the
+    /// final [`AppOptions`].
+    pub fn register<F>(self, f: F) -> Self
     where
         F: FnOnce(ServiceCollection) -> ServiceCollection + Send + 'static,
+    {
+        self.register_with_options(move |svc, _options| f(svc))
+    }
+
+    /// Like [`Self::register`], but the closure also receives the final
+    /// [`AppOptions`].
+    ///
+    /// `options` is the appsettings / environment / `useOptions` merge **after**
+    /// `Jwt.SecretFile` was resolved into `Jwt.Secret`. A custom
+    /// [`ITokenIssuer`] can therefore be
+    /// built from exactly the key the host's JWT middleware verifies with — no
+    /// second read of the secret file, no empty-key signature in a
+    /// `SecretFile`-only deployment:
+    ///
+    /// ```ignore
+    /// use std::time::Duration;
+    ///
+    /// Host::builder()
+    ///     .add_authentication()
+    ///     .register_with_options(|svc, options| {
+    ///         let issuer = JwtTokenIssuer::from_secret(
+    ///             options.jwt.secret.as_bytes(),
+    ///             Duration::from_secs(3600),
+    ///         );
+    ///         svc.try_add_singleton::<dyn ITokenIssuer>(move |_| Arc::new(issuer))
+    ///     })
+    ///     .build()
+    /// ```
+    ///
+    /// If the issuer is created lazily by a DI factory instead, resolve
+    /// [`JwtSecret`]: the host registers it before
+    /// these closures, and a missing value means no secret was configured
+    /// (resolving it fails the provider build rather than signing with `""`).
+    pub fn register_with_options<F>(mut self, f: F) -> Self
+    where
+        F: FnOnce(ServiceCollection, &AppOptions) -> ServiceCollection + Send + 'static,
     {
         self.service_configs.push(Box::new(f));
         self
@@ -355,6 +409,17 @@ impl HostBuilder {
     ///     .add_authentication()
     ///     .build()
     /// ```
+    ///
+    /// # Custom token issuers
+    ///
+    /// The host resolves `Jwt.SecretFile` before application service
+    /// registrations and registers the result as
+    /// [`JwtSecret`]. A custom
+    /// [`ITokenIssuer`] therefore reaches the
+    /// final key either through [`Self::register_with_options`] (read
+    /// `options.jwt.secret` in the closure) or by resolving `JwtSecret` in a
+    /// factory. The host's default issuer is added with `try_add`, so an issuer
+    /// registered by the application wins.
     pub fn add_authentication(mut self) -> Self {
         self.auth_enabled = true;
         self
@@ -391,7 +456,7 @@ impl HostBuilder {
     ///     .build()
     /// ```
     pub fn use_session_store(mut self, store: Arc<dyn ISessionStore>) -> Self {
-        self.service_configs.push(Box::new(move |svc| {
+        self.service_configs.push(Box::new(move |svc, _options| {
             let store = Arc::clone(&store);
             svc.try_add_singleton::<dyn ISessionStore>(move |_| Arc::clone(&store))
         }));
@@ -417,7 +482,7 @@ impl HostBuilder {
         mut self,
         hasher: Arc<dyn webx_core::security::IPasswordHasher>,
     ) -> Self {
-        self.service_configs.push(Box::new(move |svc| {
+        self.service_configs.push(Box::new(move |svc, _options| {
             let hasher = Arc::clone(&hasher);
             svc.try_add_singleton::<dyn webx_core::security::IPasswordHasher>(move |_| {
                 Arc::clone(&hasher)
@@ -480,15 +545,16 @@ impl HostBuilder {
     pub fn add_memory_cache(mut self) -> Self {
         let cache = Arc::new(MemoryCache::new());
         self.service_configs
-            .push(Box::new(move |svc| svc.instance(cache)));
+            .push(Box::new(move |svc, _options| svc.instance(cache)));
         self
     }
 
     /// Register a memory cache with custom configuration.
     pub fn add_memory_cache_with(mut self, max_entries: usize) -> Self {
         let cache = Arc::new(MemoryCache::new().with_max_entries(max_entries));
-        self.service_configs
-            .push(Box::new(move |svc| svc.instance(Arc::clone(&cache))));
+        self.service_configs.push(Box::new(move |svc, _options| {
+            svc.instance(Arc::clone(&cache))
+        }));
         self
     }
 
@@ -555,10 +621,16 @@ impl HostBuilder {
         self
     }
 
-    /// Register a health check probe.
+    /// Register a **synchronous** health check probe.
     ///
     /// Health checks are exposed via `/health` and `/health/ready` endpoints
     /// following RFC 8407 (`application/health+json` content type).
+    ///
+    /// The closure runs on the request task and cannot be timed out: use it only
+    /// for cheap, non-blocking checks. A check that must `.await` I/O (database
+    /// ping, HTTP dependency, queue depth) belongs in
+    /// [`Self::add_health_check_async`]; the sync view then reports it as `warn`
+    /// instead of evaluating it.
     ///
     /// ```ignore
     /// Host::builder()
@@ -572,6 +644,50 @@ impl HostBuilder {
         F: Fn() -> HealthStatus + Send + Sync + 'static,
     {
         self.health_registry.register(name, Arc::new(check));
+        self
+    }
+
+    /// Register an **async** health check with the default timeout
+    /// ([`DEFAULT_HEALTH_CHECK_TIMEOUT`], 3 s).
+    ///
+    /// Async checks are evaluated concurrently on every `/health` /
+    /// `/health/ready` request, each under its own timeout. A check that exceeds
+    /// the timeout is reported as `fail` (`timed out after ...`) and readiness
+    /// answers 503; `warn` keeps the endpoint at 200.
+    ///
+    /// ```ignore
+    /// struct DatabaseProbe { db: Arc<Pool> }
+    ///
+    /// #[async_trait::async_trait]
+    /// impl IHealthCheck for DatabaseProbe {
+    ///     fn name(&self) -> &str { "database" }
+    ///     async fn check(&self) -> HealthStatus {
+    ///         match self.db.ping().await {
+    ///             Ok(()) => HealthStatus::pass(),
+    ///             Err(error) => HealthStatus::fail(format!("db unreachable: {error}")),
+    ///         }
+    ///     }
+    /// }
+    ///
+    /// Host::builder()
+    ///     .add_health_check_async(DatabaseProbe { db })
+    ///     .build()
+    /// ```
+    pub fn add_health_check_async<C: IHealthCheck + 'static>(self, check: C) -> Self {
+        self.add_health_check_async_with_timeout(check, DEFAULT_HEALTH_CHECK_TIMEOUT)
+    }
+
+    /// Register an async health check with an explicit per-check timeout.
+    ///
+    /// Timeouts are independent: a slow check fails only itself while the other
+    /// probes still report their real status in the same response.
+    pub fn add_health_check_async_with_timeout<C: IHealthCheck + 'static>(
+        self,
+        check: C,
+        timeout: Duration,
+    ) -> Self {
+        self.health_registry
+            .register_async(Arc::new(check), timeout);
         self
     }
 
@@ -683,8 +799,15 @@ impl HostBuilder {
         let endpoints: Arc<dyn IEndpointCatalog> = Arc::new(EndpointCatalog::from_inventory());
 
         let mut svc = ServiceCollection::from_injected();
+        // WEBX-01: expose the resolved signing secret to application service
+        // factories before their closures run. Only a non-empty secret is
+        // registered: an empty `JwtSecret` would let a custom issuer sign with
+        // `""`, which is the failure mode this registration exists to prevent.
+        if !options.jwt.secret.trim().is_empty() {
+            svc = svc.instance(Arc::new(JwtSecret::new(options.jwt.secret.clone())));
+        }
         for cfg in std::mem::take(&mut self.service_configs) {
-            svc = cfg(svc);
+            svc = cfg(svc, &options);
         }
 
         // WEBX-2: the default JWT issuer is a host service, so a login endpoint

@@ -3,6 +3,75 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [1.4.0] — 2026-11-14
+
+Additive release on the 1.3 line: every existing API keeps working (`register`, `add_health_check`,
+the synchronous health registry view, the default `ITokenIssuer`). It fixes the two upstream defects
+found by the Travel production verification.
+
+> **English** · **简体中文**
+
+### English
+
+#### Fixed
+
+- **WEBX-01 — a custom `ITokenIssuer` reaches the final JWT signing secret.** `Jwt.SecretFile`
+  used to be resolved after the host's own authentication setup, so an issuer built during
+  application DI registration could see an empty `Jwt.Secret` in a `SecretFile`-only deployment and
+  mint tokens the same host's `JwtAuth` could not verify. The host now resolves the secret and
+  registers `webx::JwtSecret` as a DI singleton **before** application service configurations run,
+  and adds `HostBuilder::register_with_options(|svc, options| ...)`, which passes the final
+  `AppOptions` (`options.jwt.secret` already resolved) to the registration closure. `register` keeps
+  its signature and behaviour. The default issuer, `JwtAuth` and the Production weak-secret guard
+  still read the same resolved value. `JwtSecret` is registered only when a non-empty secret was
+  resolved: resolving it in an unconfigured deployment fails start-up instead of signing with `""`.
+- **WEBX-02 — asynchronous health checks with per-check timeouts.** New `webx::IHealthCheck` port
+  (`name()` + `async check()`) and `HostBuilder::add_health_check_async` /
+  `add_health_check_async_with_timeout` (default `DEFAULT_HEALTH_CHECK_TIMEOUT` = 3 s).
+  `HealthCheckRegistry::snapshot_async` / `overall_status_async` / `all_healthy_async` /
+  `build_health_response_async` evaluate all checks concurrently (`futures_util::future::join_all`),
+  preserve registration order, and apply an independent timeout to every async check. A timeout
+  becomes `HealthStatus::fail("timed out after ...")`, so `/health` and `/health/ready` answer 503;
+  `fail` dominates `warn`, and `warn` keeps 200.
+
+#### Compatibility
+
+- Existing synchronous API (`register`, `snapshot`, `overall_status`, `all_healthy`,
+  `build_health_response`, `add_health_check`) is source- and behaviour-compatible. The sync view
+  evaluates sync checks and reports each async check as
+  `warn("async health check '<name>' requires async evaluation")` — never `fail` — so existing call
+  sites compile unchanged and registering an async probe does not break readiness.
+- `register`'s signature is unchanged; `register_with_options` is additive. No item was removed or
+  renamed; the workspace version is 1.4.0.
+
+### 简体中文
+
+#### 修复
+
+- **WEBX-01 — 自定义 `ITokenIssuer` 能拿到最终的 JWT 签名密钥。** 此前 `Jwt.SecretFile` 在 host
+  自身认证装配之后才解析，应用在 DI 注册期构造 issuer 时可能看到空的 `Jwt.Secret`，在只配置
+  `SecretFile` 的部署里签出的 token 无法被同一 host 的 `JwtAuth` 验证。现在 host 在**应用 service
+  配置之前**完成密钥解析并把 `webx::JwtSecret` 以 DI 单例注册；新增
+  `HostBuilder::register_with_options(|svc, options| ...)`，闭包直接拿到已解析的最终 `AppOptions`
+  （`options.jwt.secret`）。`register` 的签名与行为保持不变；默认 issuer、`JwtAuth` 与 Production
+  弱密钥守卫读取的仍是同一个最终值。仅在解析出非空密钥时注册 `JwtSecret`：未配置密钥时工厂解析它会
+  启动失败，而不是用空密钥签名。
+- **WEBX-02 — 异步健康检查 + 每项独立超时。** 新增 `webx::IHealthCheck` 端口（`name()` +
+  `async check()`）与 `HostBuilder::add_health_check_async` /
+  `add_health_check_async_with_timeout`（默认 `DEFAULT_HEALTH_CHECK_TIMEOUT` = 3 秒）。
+  `HealthCheckRegistry::snapshot_async` / `overall_status_async` / `all_healthy_async` /
+  `build_health_response_async` 用 `futures_util::future::join_all` 并发执行所有检查、保持注册顺序，
+  并对每项异步检查独立计时。超时记为 `HealthStatus::fail("timed out after ...")`，`/health` 与
+  `/health/ready` 返回 503；`fail` 优先于 `warn`，`warn` 仍为 200。
+
+#### 兼容性
+
+- 既有同步 API（`register`、`snapshot`、`overall_status`、`all_healthy`、`build_health_response`、
+  `add_health_check`）源码与语义兼容。同步视图只执行同步检查，遇到异步检查以
+  `warn("async health check '<name>' requires async evaluation")` 计入——不会 `fail`——既有调用点无需
+  改动，注册异步探针也不会破坏 readiness。
+- `register` 签名不变，`register_with_options` 为新增；没有删除或改名，工作区版本升级到 1.4.0。
+
 ## [1.3.0] — 2026-11-13
 
 Additive release for the 1.2 line: every existing 1.2 API keeps working

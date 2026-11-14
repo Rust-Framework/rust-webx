@@ -25,6 +25,21 @@
 //! short or (on Unix) group/other-accessible file aborts start-up with a
 //! readable error instead of signing tokens with a broken key.
 //!
+//! # Custom issuers and the resolved secret
+//!
+//! `Jwt.SecretFile` is resolved **before** application service registrations
+//! run, so a custom [`ITokenIssuer`] can use the same key the host's `JwtAuth`
+//! verifies with in either of two ways:
+//!
+//! * `HostBuilder::register_with_options(|svc, options| ...)` — `options` is the
+//!   final [`AppOptions`]; build the issuer from `options.jwt.secret`.
+//! * `HostBuilder::register(|svc| ...)` plus the [`JwtSecret`] singleton — the
+//!   host registers the resolved secret in DI before user registrations, so a
+//!   lazily-invoked factory can call `resolve_arc::<JwtSecret>()`.
+//!
+//! Both keep the `SecretFile`-only deployment working: the file is read before
+//! the issuer is built, so an issuer never sees an empty key.
+//!
 //! ```ignore
 //! // login: issue and remember the jti (or give it to the client)
 //! let issued = token_issuer.issue(TokenClaims::new(&user.id)).await?;
@@ -261,7 +276,9 @@ fn unix_now() -> u64 {
 ///
 /// `HostBuilder::add_authentication()` registers one from the configured
 /// `Jwt.Secret` / `Jwt.ExpirationMinutes`; register a custom [`ITokenIssuer`] in
-/// DI to replace it.
+/// DI to replace it. `HostBuilder::register_with_options` hands the closure the
+/// final `AppOptions` (with `Jwt.SecretFile` already resolved), so a custom
+/// issuer can sign with the same key the host verifies.
 pub struct JwtTokenIssuer {
     encoding_key: EncodingKey,
     default_lifetime: Duration,
@@ -449,6 +466,37 @@ pub fn jwt_secret() -> &'static str {
 /// a startup error rather than a warning.
 pub const MIN_JWT_SECRET_LEN: usize = 32;
 
+/// The final JWT signing secret, registered in DI by the host.
+///
+/// `Jwt.SecretFile` is resolved before the application's service registrations
+/// run, and the resolved value is registered as this singleton. A custom
+/// [`ITokenIssuer`] factory can therefore lazily obtain exactly the key
+/// `JwtAuth` verifies with:
+///
+/// ```ignore
+/// svc.try_add_singleton::<dyn ITokenIssuer>(|resolver| {
+///     let secret = resolver.resolve_arc::<JwtSecret>()?;
+///     Arc::new(JwtTokenIssuer::from_secret(secret.as_str(), lifetime))
+/// });
+/// ```
+///
+/// The type is only registered when a non-empty secret was resolved: resolving
+/// it is a start-up error rather than a silent empty-key signature.
+#[derive(Clone)]
+pub struct JwtSecret(Arc<str>);
+
+impl JwtSecret {
+    /// Wrap an already-resolved secret.
+    pub fn new(secret: impl Into<Arc<str>>) -> Self {
+        Self(secret.into())
+    }
+
+    /// Borrow the secret bytes as a string.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// Resolve `Jwt.SecretFile` into `Jwt.Secret`, failing fast on a bad file.
 ///
 /// This is the third source in the documented priority chain — the first
@@ -460,10 +508,12 @@ pub const MIN_JWT_SECRET_LEN: usize = 32;
 ///    `HostBuilder` `useOptions` override;
 /// 3. `Jwt.SecretFile` — the path configured here, read from disk.
 ///
-/// The host calls this once while preparing itself (before the default
-/// `ITokenIssuer` and the authentication middleware are built), so every later
-/// reader of `options.jwt.secret` — issuer, verifier, `init_jwt_secret`, the
-/// Production weak-secret guard — sees the resolved value.
+/// The host calls this once while preparing itself (before any application
+/// service registration, the default `ITokenIssuer` and the authentication
+/// middleware are built), registers the resolved value as [`JwtSecret`] in DI,
+/// and every later reader of `options.jwt.secret` — issuer, verifier,
+/// `init_jwt_secret`, the Production weak-secret guard — sees the resolved
+/// value.
 ///
 /// # Behaviour
 ///

@@ -129,6 +129,18 @@ Host::builder().add_localization().build();
 相对路径按**进程工作目录**解析（与 `Tls.CertPath`/`Tls.KeyPath` 一致）。优先级只影响密钥来源；
 token 生命周期仍由 `Jwt.ExpirationMinutes` 决定。
 
+### 自定义 issuer 与最终密钥
+
+`Jwt.SecretFile` 在**应用 service 注册之前**解析为 `Jwt.Secret`，并作为 `JwtSecret` 单例注册进 DI。
+自定义 `ITokenIssuer` 因此有两种拿最终密钥的方式：
+
+- `HostBuilder::register_with_options(|svc, options| ...)`：闭包里的 `options.jwt.secret` 已是最终值；
+- `HostBuilder::register(|svc| ...)` + DI 工厂内 `resolve_arc::<JwtSecret>()`。
+
+不要自行读取 `SecretFile`：那会在 `APP__Jwt__Secret`/`JWT_SECRET` 或 `Jwt.Secret` 已设置时读到错误
+（或空的）密钥。只配置 `SecretFile` 时上述顺序保证 issuer 与 `JwtAuth` 使用同一把密钥；未配置任何
+密钥时 `JwtSecret` 不存在，解析即启动失败，不会空密钥签名。`register` 的签名与行为不变。
+
 ## 访问配置
 
 ```rust

@@ -1,0 +1,36 @@
+[package]
+name = "rust-webx-ai"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+documentation.workspace = true
+description = "AI gateway domain kit for rust-webx: usage metering, token accounting and provider ports"
+readme = "README.md"
+keywords = ["web", "ai", "gateway", "llm", "tokens"]
+categories = ["web-programming", "api-bindings"]
+
+# Library name used by dependents (`use webx_ai::...`); package stays `rust-webx-ai`.
+[lib]
+name = "webx_ai"
+
+[dependencies]
+rust-webx-core.workspace = true
+rust-webx-client.workspace = true
+async-trait.workspace = true
+arc-swap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+futures-util.workspace = true
+hmac.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio = { version = "1", features = ["rt", "sync", "time"] }
+
+[dev-dependencies]
+serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

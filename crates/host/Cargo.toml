@@ -18,6 +18,7 @@ name = "webx_host"
 
 [dependencies]
 rust-webx-core.workspace = true
+rust-webx-client.workspace = true
 rust-webx-spa.workspace = true
 rust-webx-openapi.workspace = true
 rust-dix.workspace = true

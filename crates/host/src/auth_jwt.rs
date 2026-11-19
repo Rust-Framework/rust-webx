@@ -352,6 +352,35 @@ impl ITokenIssuer for JwtTokenIssuer {
 // Middleware
 // ---------------------------------------------------------------------------
 
+/// Authenticate with a handler and apply the optional revocation check.
+///
+/// Shared by the standalone JWT middleware and the scheme chain
+/// ([`crate::auth::JwtScheme`]) so both paths reject the same revoked tokens.
+pub(crate) async fn authenticate_with_revocation(
+    handler: &dyn IAuthenticationHandler,
+    session_store: Option<&Arc<dyn ISessionStore>>,
+    ctx: &mut dyn IHttpContext,
+) -> Result<Option<Box<dyn IClaims>>> {
+    let Some(claims) = handler.authenticate(ctx).await? else {
+        return Ok(None);
+    };
+
+    if let Some(store) = session_store {
+        // A token without `jti` cannot be matched against a revocation record;
+        // it keeps its `exp`-based lifetime (no re-reject).
+        if let Some(jti) = claims.jti() {
+            if store.is_revoked(jti).await? {
+                // Revoked credentials are a credentials problem, not an
+                // anonymous request: fail here so the host writes its single
+                // 401 (problem+json + `WWW-Authenticate`).
+                return Err(Error::Unauthorized("token has been revoked".to_string()));
+            }
+        }
+    }
+
+    Ok(Some(claims))
+}
+
 /// Authentication middleware: verify the token, then reject revoked tokens.
 struct AuthMiddleware {
     handler: Arc<dyn IAuthenticationHandler>,
@@ -362,19 +391,9 @@ struct AuthMiddleware {
 #[async_trait::async_trait]
 impl IMiddleware for AuthMiddleware {
     async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
-        if let Some(claims) = self.handler.authenticate(ctx).await? {
-            if let Some(store) = &self.session_store {
-                // A token without `jti` cannot be matched against a revocation
-                // record; it keeps its `exp`-based lifetime (no re-reject).
-                if let Some(jti) = claims.jti() {
-                    if store.is_revoked(jti).await? {
-                        // Revoked credentials are a credentials problem, not an
-                        // anonymous request: fail here so the host writes its
-                        // single 401 (problem+json + `WWW-Authenticate`).
-                        return Err(Error::Unauthorized("token has been revoked".to_string()));
-                    }
-                }
-            }
+        if let Some(claims) =
+            authenticate_with_revocation(&*self.handler, self.session_store.as_ref(), ctx).await?
+        {
             // IHttpContext extends IClaimsExt, so set_claims is available directly.
             ctx.set_claims(claims);
         }

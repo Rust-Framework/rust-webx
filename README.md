@@ -103,7 +103,7 @@ The framework is split into a small set of focused crates, re-exported through t
 
 ```
 rust-webx/
-├── Cargo.toml                 # workspace root (v1.1.1)
+├── Cargo.toml                 # workspace root (v1.3.0)
 ├── crates/
 │   ├── core/                  # rust-webx-core  — traits, configuration
 │   ├── host/                  # rust-webx-host  — Host builder, middleware
@@ -111,6 +111,11 @@ rust-webx/
 │   ├── macros/                # rust-webx-macros — procedural macros
 │   ├── spa/                   # rust-webx-spa   — static-file / SPA middleware
 │   ├── openapi/               # rust-webx-openapi — OpenAPI spec generation + UI
+│   ├── ai/                    # rust-webx-ai    — AI gateway domain kit
+│   │                          #   (IR, providers, routing, quota, usage)
+│   ├── ai-ef/                 # rust-webx-ai-ef — durable EF usage ledger
+│   ├── client/                # rust-webx-client — outbound HTTP: pool, streaming, SSE
+│   ├── gateway/               # rust-webx-ai-gateway — OpenAI-compatible /v1 surface
 │   └── webx/                  # rust-webx       — umbrella crate (re-exports)
 ├── docbit/                    # reference app: portfolio + blog + RBAC + docs
 └── dmbit/                     # reference app: device & inventory management
@@ -119,7 +124,9 @@ rust-webx/
 > **Package vs import name**: the dependency is `rust-webx`, the code is
 > `use webx::*;`. Same for the sub-crates — `rust-webx-core` → `webx_core`,
 > `rust-webx-host` → `webx_host`, `rust-webx-macros` → `webx_macros`,
-> `rust-webx-spa` → `webx_spa`, `rust-webx-openapi` → `webx_openapi`.
+> `rust-webx-spa` → `webx_spa`, `rust-webx-openapi` → `webx_openapi`,
+> `rust-webx-ai` → `webx_ai`, `rust-webx-client` → `webx_client`,
+> `rust-webx-ai-ef` → `webx_ai_ef`, `rust-webx-ai-gateway` → `webx_ai_gateway`.
 > Upgrading from 0.4 or earlier: see the
 > [0.5 upgrade guide](docs/rust-webx/16-migration/upgrade-to-0.5.md).
 

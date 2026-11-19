@@ -74,11 +74,17 @@ pub struct StubEndpoint {
     /// endpoint) and before handler dispatch.
     /// When `None`, no dynamic authorization checks run (pass-through).
     pub authorizers: Option<Arc<AuthorizerSet>>,
+    /// Per-route request body cap from `#[max_body_size(..)]`; `None` keeps the
+    /// global `App.MaxBodySize`.
+    pub max_body_size: Option<usize>,
 }
 
 #[async_trait::async_trait]
 impl IEndpoint for StubEndpoint {
     async fn handle(&self, ctx: &mut dyn IHttpContext) -> Result<()> {
+        if let Some(limit) = self.max_body_size {
+            ctx.request_mut().set_max_body_size(limit);
+        }
         if let Some(dispatch) = self.dispatch_fn {
             // ── Declarative authorization from `#[authorize]` ──
             // `authorization_dynamic` alone (hand-written metadata) also makes

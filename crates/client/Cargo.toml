@@ -1,0 +1,43 @@
+[package]
+name = "rust-webx-client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+documentation.workspace = true
+description = "Outbound HTTP client for rust-webx: pooled connections, streaming responses and SSE decoding"
+readme = "README.md"
+keywords = ["web", "http", "client", "hyper", "sse"]
+categories = ["web-programming", "network-programming"]
+
+# Library name used by dependents (`use webx_client::...`); package stays `rust-webx-client`.
+[lib]
+name = "webx_client"
+
+[dependencies]
+rust-webx-core.workspace = true
+async-trait.workspace = true
+bytes.workspace = true
+futures-util.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+hyper-rustls.workspace = true
+rustls.workspace = true
+rustls-pemfile.workspace = true
+webpki-roots.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+rust-webx-core.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+rcgen = "0.13"
+tempfile.workspace = true

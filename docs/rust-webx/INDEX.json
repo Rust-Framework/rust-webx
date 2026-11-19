@@ -235,6 +235,20 @@
               "summary": "列表端点分页契约与 from_parts 便利构造",
               "readingTime": 8,
               "difficulty": "beginner"
+            },
+            {
+              "id": "streaming-sse",
+              "title": "流式响应（SSE）",
+              "summary": "SseResult、逐帧推送、断连回调与长流停机",
+              "readingTime": 12,
+              "difficulty": "intermediate"
+            },
+            {
+              "id": "request-body-streaming",
+              "title": "请求体流式读取",
+              "summary": "body_stream、413 上限与裸流场景",
+              "readingTime": 8,
+              "difficulty": "advanced"
             }
           ]
         },
@@ -355,6 +369,13 @@
               "difficulty": "intermediate"
             },
             {
+              "id": "api-key-auth",
+              "title": "API Key 认证",
+              "summary": "认证 scheme 链、sk- 校验与 JWT 共存",
+              "readingTime": 12,
+              "difficulty": "intermediate"
+            },
+            {
               "id": "resource-authorization",
               "title": "基于资源的授权",
               "summary": "路由模式匹配与角色权限",
@@ -373,6 +394,13 @@
               "title": "令牌签发、会话吊销与口令哈希",
               "summary": "ITokenIssuer / ISessionStore / IPasswordHasher 端口与 DeclaredRules 动态授权",
               "readingTime": 14,
+              "difficulty": "intermediate"
+            },
+            {
+              "id": "secret-store",
+              "title": "密钥存储",
+              "summary": "ISecretStore / SecretValue：env、文件与链式解析",
+              "readingTime": 10,
               "difficulty": "intermediate"
             },
             {
@@ -428,6 +456,69 @@
               "id": "caching-rate-limit",
               "title": "缓存与速率限制",
               "summary": "IDistributedCache 与令牌桶限流",
+              "readingTime": 12,
+              "difficulty": "intermediate"
+            },
+            {
+              "id": "quota",
+              "title": "配额与预扣-结算",
+              "summary": "按 key/模型的请求、token、并发与预算配额",
+              "readingTime": 12,
+              "difficulty": "intermediate"
+            },
+            {
+              "id": "usage-metering",
+              "title": "用量计量与账本",
+              "summary": "幂等 UsageEvent、tokenizer 兜底与窗口聚合",
+              "readingTime": 12,
+              "difficulty": "intermediate"
+            },
+            {
+              "id": "model-routing",
+              "title": "模型目录与路由",
+              "summary": "provider 端口、别名策略、健康与容量规划",
+              "readingTime": 14,
+              "difficulty": "intermediate"
+            },
+            {
+              "id": "resilience",
+              "title": "韧性：重试、熔断与舱壁",
+              "summary": "退避/jitter、熔断状态机、provider 并发上限",
+              "readingTime": 12,
+              "difficulty": "advanced"
+            },
+            {
+              "id": "metrics",
+              "title": "指标（IMeter）",
+              "summary": "请求/TTFT/token/上游错误/配额/active streams",
+              "readingTime": 10,
+              "difficulty": "advanced"
+            },
+            {
+              "id": "hot-config",
+              "title": "目录热替换",
+              "summary": "CatalogHandle + ArcSwap 无锁快照替换",
+              "readingTime": 8,
+              "difficulty": "advanced"
+            },
+            {
+              "id": "live-options",
+              "title": "配置热更新",
+              "summary": "IOptionsMonitor、文件轮询与变更通知",
+              "readingTime": 9,
+              "difficulty": "advanced"
+            },
+            {
+              "id": "response-cache",
+              "title": "精确响应缓存",
+              "summary": "确定性非流请求的租户隔离缓存",
+              "readingTime": 8,
+              "difficulty": "advanced"
+            },
+            {
+              "id": "openai-compatible-endpoint",
+              "title": "OpenAI 兼容端点",
+              "summary": "/v1/chat/completions 的 JSON/SSE 与错误信封",
               "readingTime": 12,
               "difficulty": "intermediate"
             },
@@ -527,6 +618,27 @@
               "summary": "ORM、消息队列与外部服务",
               "readingTime": 14,
               "difficulty": "advanced"
+            },
+            {
+              "id": "outbound-http",
+              "title": "出站 HTTP（rust-webx-client）",
+              "summary": "命名客户端、连接池、流式响应与 SSE 解码",
+              "readingTime": 12,
+              "difficulty": "intermediate"
+            },
+            {
+              "id": "error-writers",
+              "title": "错误响应写入器",
+              "summary": "按路由接管错误信封（problem+json / OpenAI）",
+              "readingTime": 10,
+              "difficulty": "advanced"
+            },
+            {
+              "id": "mock-upstream",
+              "title": "Mock 上游",
+              "summary": "脚本化 HTTP/SSE 上游与请求录制",
+              "readingTime": 8,
+              "difficulty": "intermediate"
             }
           ]
         },

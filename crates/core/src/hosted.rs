@@ -51,6 +51,45 @@ use crate::handler::IHostedService;
 
 pub use tokio_util::sync::CancellationToken;
 
+/// The host's shutdown token, registered in DI for request handlers.
+///
+/// Unlike the per-worker [`CancellationToken`] a background service receives,
+/// this one is cancelled when the **host** starts graceful shutdown. A long
+/// `SseResult` injects it and calls
+/// [`SseResult::on_server_shutdown`](crate::stream::SseResult::on_server_shutdown)
+/// so the stream ends with a `server_shutdown` event instead of being cut off at
+/// the drain deadline.
+///
+/// The token is registered by `Host::build`; handlers inject the value itself
+/// (it is a cheap clone of the underlying cancellation token):
+///
+/// ```ignore
+/// #[derive(Inject)]
+/// struct EventsHandler {
+///     #[inject]
+///     shutdown: Arc<ShutdownToken>,
+/// }
+/// ```
+#[derive(Debug, Clone)]
+pub struct ShutdownToken(CancellationToken);
+
+impl ShutdownToken {
+    /// Wrap a host cancellation token (used by the host builder).
+    pub fn new(token: CancellationToken) -> Self {
+        Self(token)
+    }
+
+    /// The underlying token, for APIs that take [`CancellationToken`].
+    pub fn token(&self) -> &CancellationToken {
+        &self.0
+    }
+
+    /// Whether shutdown has started.
+    pub fn is_cancelled(&self) -> bool {
+        self.0.is_cancelled()
+    }
+}
+
 /// How long a background worker may take to observe cancellation.
 ///
 /// The host itself allows 30s per `stop()`; a worker that is still running after

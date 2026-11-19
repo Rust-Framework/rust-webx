@@ -19,9 +19,11 @@ pub mod hosted;
 pub mod http;
 pub mod localization;
 pub mod mediator;
+pub mod metrics;
 pub mod middleware;
 pub mod mode;
 pub mod operation;
+pub mod options_monitor;
 pub mod pagination;
 pub mod paths;
 pub mod pipeline;
@@ -29,7 +31,9 @@ pub mod problem;
 pub mod request_context;
 pub mod route;
 pub mod routing;
+pub mod secrets;
 pub mod security;
+pub mod stream;
 
 pub use action::*;
 pub use app::*;
@@ -44,13 +48,16 @@ pub use form::*;
 pub use handler::*;
 pub use hosted::{
     BackgroundService, BackgroundServiceHost, CancellationToken, PeriodicBackgroundService,
+    ShutdownToken,
 };
 pub use http::*;
 pub use localization::*;
 pub use mediator::*;
+pub use metrics::*;
 pub use middleware::*;
 pub use mode::*;
 pub use operation::*;
+pub use options_monitor::{IOptionsMonitor, OptionsMonitor};
 pub use pagination::*;
 pub use paths::*;
 pub use pipeline::*;
@@ -58,4 +65,6 @@ pub use problem::*;
 pub use request_context::*;
 pub use route::*;
 pub use routing::*;
+pub use secrets::*;
 pub use security::*;
+pub use stream::*;

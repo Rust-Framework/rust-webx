@@ -110,6 +110,7 @@ async fn endpoint_normal_dispatch_returns_200() {
         dispatch_fn: Some(mock_dispatch_ok),
         authorization: &[],
         authorization_dynamic: false,
+        max_body_size: None,
         authorizers: None,
     };
 
@@ -133,6 +134,7 @@ async fn endpoint_no_dispatch_fn_returns_not_implemented() {
         dispatch_fn: None,
         authorization: &[],
         authorization_dynamic: false,
+        max_body_size: None,
         authorizers: None,
     };
 
@@ -156,6 +158,7 @@ async fn endpoint_auth_required_with_valid_claims_succeeds() {
         dispatch_fn: Some(mock_dispatch_ok),
         authorization: ADMIN_RULE,
         authorization_dynamic: false,
+        max_body_size: None,
         authorizers: None,
     };
 
@@ -181,6 +184,7 @@ async fn endpoint_auth_required_without_claims_bubbles_unauthorized_error() {
         dispatch_fn: Some(mock_dispatch_ok),
         authorization: ADMIN_RULE,
         authorization_dynamic: false,
+        max_body_size: None,
         authorizers: None,
     };
 
@@ -216,6 +220,7 @@ async fn endpoint_auth_required_wrong_role_returns_403() {
         dispatch_fn: Some(mock_dispatch_ok),
         authorization: ADMIN_RULE,
         authorization_dynamic: false,
+        max_body_size: None,
         authorizers: None,
     };
 
@@ -244,6 +249,7 @@ async fn endpoint_auth_with_authenticated_role_allows_any_valid_jwt() {
         dispatch_fn: Some(mock_dispatch_ok),
         authorization: AUTHENTICATED_RULE,
         authorization_dynamic: false,
+        max_body_size: None,
         authorizers: None,
     };
 
@@ -270,6 +276,7 @@ async fn endpoint_dynamic_authorizer_denies_access() {
         dispatch_fn: Some(mock_dispatch_ok),
         authorization: ADMIN_RULE,
         authorization_dynamic: false,
+        max_body_size: None,
         authorizers: Some(authorizers),
     };
 
@@ -297,6 +304,7 @@ async fn endpoint_dynamic_authorizer_allows_access() {
         dispatch_fn: Some(mock_dispatch_ok),
         authorization: ADMIN_RULE,
         authorization_dynamic: false,
+        max_body_size: None,
         authorizers: Some(authorizers),
     };
 
@@ -324,6 +332,7 @@ async fn endpoint_no_authorizer_skips_dynamic_check() {
         dispatch_fn: Some(mock_dispatch_ok),
         authorization: ADMIN_RULE,
         authorization_dynamic: false,
+        max_body_size: None,
         authorizers: None,
     };
 
@@ -350,6 +359,7 @@ async fn endpoint_permission_required_with_valid_permission_succeeds() {
         dispatch_fn: Some(mock_dispatch_ok),
         authorization: SETTINGS_WRITE_RULE,
         authorization_dynamic: false,
+        max_body_size: None,
         authorizers: None,
     };
 
@@ -375,6 +385,7 @@ async fn endpoint_permission_required_missing_permission_returns_403() {
         dispatch_fn: Some(mock_dispatch_ok),
         authorization: SETTINGS_WRITE_RULE,
         authorization_dynamic: false,
+        max_body_size: None,
         authorizers: None,
     };
 
@@ -421,6 +432,7 @@ async fn multiple_authorize_rules_must_all_pass() {
         dispatch_fn: Some(mock_dispatch_ok),
         authorization: ADMIN_AND_EXPORT,
         authorization_dynamic: false,
+        max_body_size: None,
         authorizers: None,
     };
 
@@ -453,6 +465,7 @@ async fn roles_list_is_any_of() {
         dispatch_fn: Some(mock_dispatch_ok),
         authorization: ADMIN_OR_AUDITOR,
         authorization_dynamic: false,
+        max_body_size: None,
         authorizers: None,
     };
 
@@ -537,6 +550,7 @@ fn recording_endpoint(
         dispatch_fn: Some(mock_dispatch_ok),
         authorization,
         authorization_dynamic: false,
+        max_body_size: None,
         authorizers: Some(Arc::new(AuthorizerSet::new(vec![authorizer]))),
     }
 }
@@ -675,6 +689,7 @@ fn dynamic_endpoint(
         dispatch_fn: Some(mock_dispatch_ok),
         authorization,
         authorization_dynamic: true,
+        max_body_size: None,
         authorizers: Some(authorizers),
     }
 }
@@ -785,6 +800,7 @@ async fn dynamic_endpoint_without_registered_authorizer_is_pass_through() {
         dispatch_fn: Some(mock_dispatch_ok),
         authorization: SETTINGS_WRITE_RULE,
         authorization_dynamic: true,
+        max_body_size: None,
         authorizers: None,
     };
 
@@ -809,6 +825,7 @@ async fn static_endpoint_never_reaches_the_dynamic_authorizer_on_403() {
         dispatch_fn: Some(mock_dispatch_ok),
         authorization: SETTINGS_WRITE_RULE,
         authorization_dynamic: false,
+        max_body_size: None,
         authorizers: Some(Arc::new(AuthorizerSet::new(vec![
             authorizer.clone() as Arc<dyn IDynamicAuthorizer>
         ]))),
@@ -846,6 +863,7 @@ async fn dynamic_flag_without_rules_still_requires_authentication() {
         dispatch_fn: Some(mock_dispatch_ok),
         authorization: &[],
         authorization_dynamic: true,
+        max_body_size: None,
         authorizers: Some(Arc::new(AuthorizerSet::new(vec![Arc::new(
             AllowAllAuthorizer,
         )]))),

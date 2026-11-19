@@ -352,6 +352,45 @@ fn default_memory_threshold() -> usize {
     1024 * 1024
 }
 
+fn default_drain_timeout_seconds() -> u64 {
+    30
+}
+
+fn default_stream_drain_timeout_seconds() -> u64 {
+    300
+}
+
+/// Server lifecycle settings.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct ServerSection {
+    /// How long normal (non-streaming) connections may drain during shutdown.
+    #[serde(default = "default_drain_timeout_seconds")]
+    pub drain_timeout_seconds: u64,
+    /// How long connections with an SSE response may drain during shutdown.
+    #[serde(default = "default_stream_drain_timeout_seconds")]
+    pub stream_drain_timeout_seconds: u64,
+    /// Deadline for one inbound request, in seconds. Default: 0 (disabled).
+    ///
+    /// The budget starts after routing and covers binding plus handler
+    /// execution. A handler that exceeds it is cancelled and the client gets a
+    /// `504`. It deliberately does **not** bound the response body of a streamed
+    /// response: an `SseResult` handler returns quickly and the stream then runs
+    /// under its own `max_lifetime` / drain budget.
+    #[serde(default)]
+    pub request_timeout_seconds: u64,
+}
+
+impl Default for ServerSection {
+    fn default() -> Self {
+        Self {
+            drain_timeout_seconds: default_drain_timeout_seconds(),
+            stream_drain_timeout_seconds: default_stream_drain_timeout_seconds(),
+            request_timeout_seconds: 0,
+        }
+    }
+}
+
 /// Standard application options loaded from appsettings.json.
 ///
 /// Bound automatically by the framework.  Access via `host.options()`
@@ -370,6 +409,9 @@ pub struct AppOptions {
     /// TLS settings.
     #[serde(default, rename = "Tls")]
     pub tls: TlsSection,
+    /// Server lifecycle settings.
+    #[serde(default, rename = "Server")]
+    pub server: ServerSection,
     /// Rate limiting settings.
     #[serde(default, rename = "RateLimit")]
     pub rate_limit: RateLimitSection,
@@ -551,6 +593,34 @@ fn merge_json(base: &mut serde_json::Value, overlay: serde_json::Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn server_drain_defaults_and_overrides() {
+        let default = ServerSection::default();
+        assert_eq!(default.drain_timeout_seconds, 30);
+        assert_eq!(default.stream_drain_timeout_seconds, 300);
+
+        let options: AppOptions = serde_json::from_value(serde_json::json!({
+            "Server": {
+                "DrainTimeoutSeconds": 7,
+                "StreamDrainTimeoutSeconds": 99
+            }
+        }))
+        .expect("options parse");
+        assert_eq!(options.server.drain_timeout_seconds, 7);
+        assert_eq!(options.server.stream_drain_timeout_seconds, 99);
+    }
+
+    #[test]
+    fn server_request_timeout_defaults_to_disabled_and_parses_seconds() {
+        assert_eq!(ServerSection::default().request_timeout_seconds, 0);
+
+        let options: AppOptions = serde_json::from_value(serde_json::json!({
+            "Server": { "RequestTimeoutSeconds": 5 }
+        }))
+        .expect("options parse");
+        assert_eq!(options.server.request_timeout_seconds, 5);
+    }
 
     #[test]
     fn config_env_jwt_and_app_override_precedence() {

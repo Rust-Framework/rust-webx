@@ -5,6 +5,7 @@
 //! the middleware pipeline, the Trie router, JWT auth/authorization, and the
 //! production middleware (compression, timing, tracing, rate limiting).
 
+pub mod auth;
 pub mod auth_jwt;
 pub mod authz;
 pub mod compression;
@@ -15,6 +16,7 @@ pub mod endpoint;
 pub mod health;
 pub mod memory_cache;
 pub mod metrics;
+pub mod options_watch;
 #[cfg(feature = "password-argon2")]
 pub mod password_argon2;
 pub mod pipeline;
@@ -30,6 +32,7 @@ pub mod timing;
 #[cfg(feature = "testing")]
 pub mod testing;
 
+pub use auth::*;
 pub use auth_jwt::*;
 pub use authz::*;
 pub use compression::*;
@@ -40,6 +43,7 @@ pub use endpoint::*;
 pub use health::*;
 pub use memory_cache::*;
 pub use metrics::*;
+pub use options_watch::*;
 #[cfg(feature = "password-argon2")]
 pub use password_argon2::*;
 pub use pipeline::*;

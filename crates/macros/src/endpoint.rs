@@ -119,6 +119,11 @@ fn expand_endpoint(
     // only, rules delegated to IDynamicAuthorizer". Emitted only for dynamic
     // endpoints, so the metadata of every other route is byte-for-byte
     // unchanged.
+    let max_body_size = max_body_size_attr(&item_impl.attrs)?;
+    let max_body_size_tokens = match max_body_size {
+        Some(limit) => quote! { ::core::option::Option::Some(#limit) },
+        None => quote! { ::core::option::Option::None },
+    };
     let route_entry = quote! {
         ::webx::RouteEntry::with_type_id(
             ::webx::HttpMethod::#method_ident,
@@ -132,6 +137,7 @@ fn expand_endpoint(
             &[#(#params_tokens),*],
             #authorization,
         )
+        .with_max_body_size(#max_body_size_tokens)
     };
     let route_entry = if authorization_dynamic {
         quote! { #route_entry.with_dynamic_authorization() }
@@ -332,6 +338,32 @@ fn map_method_name(attr_name: &str) -> &str {
         "HttpPatch" | "http_patch" => "Patch",
         other => other,
     }
+}
+
+/// Read `#[max_body_size(N)]` (or its hidden rewrite) from the impl attributes.
+fn max_body_size_attr(attrs: &[Attribute]) -> syn::Result<Option<usize>> {
+    let mut found: Option<usize> = None;
+    for attr in attrs {
+        if !attr.path().is_ident("__webx_max_body_size") && !attr.path().is_ident("max_body_size") {
+            continue;
+        }
+        if found.is_some() {
+            return Err(syn::Error::new_spanned(
+                attr,
+                "duplicate `#[max_body_size(..)]`",
+            ));
+        }
+        let value: syn::LitInt = attr.parse_args()?;
+        let limit: usize = value.base10_parse()?;
+        if limit == 0 {
+            return Err(syn::Error::new_spanned(
+                attr,
+                "`#[max_body_size(..)]` must be greater than zero",
+            ));
+        }
+        found = Some(limit);
+    }
+    Ok(found)
 }
 
 fn parse_endpoint_attr(attr: &str) -> (String, String) {

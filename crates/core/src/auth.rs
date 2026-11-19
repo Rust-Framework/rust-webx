@@ -96,6 +96,36 @@ pub trait IAuthenticationHandler: Send + Sync {
     async fn authenticate(&self, ctx: &mut dyn IHttpContext) -> Result<Option<Box<dyn IClaims>>>;
 }
 
+/// A pluggable authentication scheme that participates in the host's scheme
+/// chain.
+///
+/// The host tries schemes in registration order: the first scheme whose
+/// [`matches`](Self::matches) returns `true` handles the request. A scheme that
+/// matches but produces no claims leaves the request anonymous (JWT semantics);
+/// a scheme can also return [`Error::Unauthorized`] to reject malformed
+/// credentials outright (API key semantics).
+///
+/// `IAuthenticationHandler` remains the lower-level "verify a credential"
+/// port; `IAuthenticationScheme` adds the cheap shape check that lets several
+/// credential types (JWT, `sk-` API keys, …) coexist on one host.
+#[async_trait::async_trait]
+pub trait IAuthenticationScheme: Send + Sync {
+    /// Stable scheme name for diagnostics, e.g. `"jwt"` or `"api-key"`.
+    fn name(&self) -> &'static str;
+
+    /// Whether this scheme recognizes the request's credential shape.
+    ///
+    /// Must be cheap and side-effect free — no I/O and no response mutation.
+    fn matches(&self, ctx: &dyn IHttpContext) -> bool;
+
+    /// Verify the credential and return claims.
+    ///
+    /// Return `Ok(None)` to continue anonymously; return
+    /// `Err(Error::Unauthorized(..))` to reject an explicitly presented but
+    /// invalid credential.
+    async fn authenticate(&self, ctx: &mut dyn IHttpContext) -> Result<Option<Box<dyn IClaims>>>;
+}
+
 /// Authorization policy that checks whether an authenticated user
 /// can access a given resource.
 ///

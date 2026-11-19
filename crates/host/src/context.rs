@@ -7,6 +7,8 @@
 //!
 //! * [`IHttpRequest::body_bytes`] buffers the whole body, enforcing
 //!   `App.MaxBodySize`.
+//! * [`IHttpRequest::body_stream`] exposes the live body as chunks (also
+//!   enforcing `App.MaxBodySize`) for proxy/large-upload endpoints.
 //! * [`IHttpRequest::multipart`] streams the body through a multipart parser,
 //!   enforcing `Form.MaxRequestSize`, `Form.MaxFileSize` and
 //!   `Form.MaxFieldSize`, and spooling large file parts to disk.
@@ -23,7 +25,7 @@
 //! can be cached and resumed.
 
 use futures_util::{StreamExt, TryStreamExt};
-use http_body_util::{combinators::UnsyncBoxBody, BodyExt, Full};
+use http_body_util::{combinators::UnsyncBoxBody, BodyExt, BodyStream, Full};
 use hyper::body::{Bytes, Frame, Incoming};
 use hyper::Request;
 use std::collections::HashMap;
@@ -39,7 +41,7 @@ use webx_core::error::{Error, Result};
 use webx_core::form::{FormFileBuilder, MultipartForm};
 use webx_core::http::{
     content_disposition_value, ByteRange, FileBody, FileSource, IClaimsExt, IHttpContext,
-    IHttpRequest, IHttpResponse, ResponseBody, SeekableReader,
+    IHttpRequest, IHttpResponse, RequestBodyStream, ResponseBody, SeekableReader,
 };
 
 use crate::problem_response::{build_problem, problem_to_bytes};
@@ -321,6 +323,10 @@ impl IHttpRequest for HttpRequest {
         self.remote_addr
     }
 
+    fn set_max_body_size(&mut self, limit: usize) {
+        self.limits.body = limit;
+    }
+
     fn route_params(&self) -> &HashMap<String, String> {
         &self.route_params
     }
@@ -358,6 +364,45 @@ impl IHttpRequest for HttpRequest {
         let bytes = read_body(incoming, self.limits.body).await?;
         *guard = RequestBody::Buffered(bytes.clone());
         Ok(bytes)
+    }
+
+    async fn body_stream(&mut self) -> Result<RequestBodyStream> {
+        let mut guard = self.body.lock().await;
+        match &mut *guard {
+            RequestBody::Buffered(bytes) => {
+                let bytes = Bytes::from(bytes.clone());
+                return Ok(Box::pin(futures_util::stream::once(async move {
+                    Ok::<Bytes, Error>(bytes)
+                })));
+            }
+            RequestBody::Form(_) => {
+                return Err(Error::State(
+                    "request body was already read as multipart/form-data".to_string(),
+                ))
+            }
+            RequestBody::Pending(slot) => {
+                let Some(incoming) = slot.take() else {
+                    return Err(Error::State(
+                        "request body has already been consumed".to_string(),
+                    ));
+                };
+                let limit = self.limits.body as u64;
+                let mut seen = 0u64;
+                let stream = BodyStream::new(incoming).map(move |frame| {
+                    let frame = frame
+                        .map_err(|error| Error::Http(format!("request body stream: {error}")))?;
+                    let bytes = frame.into_data().map_err(|_| {
+                        Error::Http("unexpected trailer frame in request body".to_string())
+                    })?;
+                    seen = seen.saturating_add(bytes.len() as u64);
+                    if seen > limit {
+                        return Err(Error::Status(413, "request body too large".to_string()));
+                    }
+                    Ok(bytes)
+                });
+                Ok(Box::pin(stream))
+            }
+        }
     }
 
     async fn body_text(&mut self) -> Result<String> {

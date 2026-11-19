@@ -101,7 +101,7 @@ rust-webx **不是** 全栈 UI 框架（可搭配任意前端）、**不是** OR
 
 ```
 rust-webx/
-├── Cargo.toml                 # workspace 根 (v1.1.1)
+├── Cargo.toml                 # workspace 根 (v1.3.0)
 ├── crates/
 │   ├── core/                  # rust-webx-core  — trait 与配置
 │   ├── host/                  # rust-webx-host  — Host 构建器、中间件管道
@@ -109,6 +109,11 @@ rust-webx/
 │   ├── macros/                # rust-webx-macros — 过程宏
 │   ├── spa/                   # rust-webx-spa   — 静态文件 / SPA 中间件
 │   ├── openapi/               # rust-webx-openapi — OpenAPI 规范生成 + UI
+│   ├── ai/                    # rust-webx-ai    — AI 网关领域包
+│   │                          #   （IR、provider、路由、配额、用量）
+│   ├── ai-ef/                 # rust-webx-ai-ef — rust-ef 持久化用量账本
+│   ├── client/                # rust-webx-client — 出站 HTTP：连接池、流式、SSE
+│   ├── gateway/               # rust-webx-ai-gateway — OpenAI 兼容 /v1 表面
 │   └── webx/                  # rust-webx       — 伞 crate（重新导出）
 ├── docbit/                    # 参考应用：作品集 + 博客 + RBAC + 文档
 └── dmbit/                     # 参考应用：设备与库存管理
@@ -117,7 +122,9 @@ rust-webx/
 > **包名 vs 导入名**：依赖写 `rust-webx`，代码写 `use webx::*;`。子 crate 同理：
 > `rust-webx-core` → `webx_core`、`rust-webx-host` → `webx_host`、
 > `rust-webx-macros` → `webx_macros`、`rust-webx-spa` → `webx_spa`、
-> `rust-webx-openapi` → `webx_openapi`。从 0.4 及更早版本升级见
+> `rust-webx-openapi` → `webx_openapi`、`rust-webx-ai` → `webx_ai`、
+> `rust-webx-client` → `webx_client`、`rust-webx-ai-ef` → `webx_ai_ef`、
+> `rust-webx-ai-gateway` → `webx_ai_gateway`。从 0.4 及更早版本升级见
 > [0.5 升级指南](docs/rust-webx/16-migration/upgrade-to-0.5.md)。
 
 ## 请求即端点：Hello World

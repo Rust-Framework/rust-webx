@@ -123,3 +123,20 @@ async fn upstream_request_id_propagates_to_the_handler() {
     assert_eq!(header, "upstream-123");
     assert_eq!(body.trace.as_deref(), Some("upstream-123"));
 }
+
+#[tokio::test]
+async fn w3c_traceparent_is_adopted_as_the_trace_id() {
+    let base = spawn_host_with_tracing().await;
+    let trace_id = "4bf92f3577b34da6a3ce929d0e0e4736";
+
+    let resp = reqwest::Client::new()
+        .get(format!("{base}/trace/whoami"))
+        .header("traceparent", format!("00-{trace_id}-00f067aa0ba902b7-01"))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.headers()["x-trace-id"].to_str().unwrap(), trace_id);
+    let body: TraceView = resp.json().await.unwrap();
+    assert_eq!(body.trace.as_deref(), Some(trace_id));
+}

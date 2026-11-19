@@ -24,8 +24,8 @@ pub use webx_core::action::{
 };
 pub use webx_core::app::IHost;
 pub use webx_core::auth::{
-    DeclaredRules, IAuthenticationHandler, IAuthorizationPolicy, IClaims, IDynamicAuthorizer,
-    IdentityUser, RequestUser,
+    DeclaredRules, IAuthenticationHandler, IAuthenticationScheme, IAuthorizationPolicy, IClaims,
+    IDynamicAuthorizer, IdentityUser, RequestUser,
 };
 pub use webx_core::cache::{
     cache_ext::DistributedCacheExtensions,
@@ -37,7 +37,7 @@ pub use webx_core::config::{
     IAppOptions, JwtSection, MetricsSection, RateLimitSection, TlsSection,
 };
 pub use webx_core::dispatch_runtime::DispatchRuntime;
-pub use webx_core::error::{ActionResult, Error, Result};
+pub use webx_core::error::{ActionResult, Error, IErrorResponseWriter, Result};
 pub use webx_core::form::{
     sanitize_file_name, set_spool_root, spool_root, FormField, FormFile, FormFileBuilder,
     MultipartForm, SPOOL_FILE_PREFIX,
@@ -47,20 +47,23 @@ pub use webx_core::handler::{IEventHandler, IHostedService, IRequestHandler};
 pub use webx_core::hosted as background;
 pub use webx_core::hosted::{
     BackgroundService, BackgroundServiceHost, CancellationToken, PeriodicBackgroundService,
+    ShutdownToken,
 };
 pub use webx_core::http::{
     content_disposition_value, read_json_body, write_json_response, ByteRange, Disposition,
     FileBody, FileSource, HttpStatus, IClaimsExt, IHttpContext, IHttpRequest, IHttpResponse,
-    ResponseBody, SeekableReader, STREAM_BUF_SIZE,
+    RequestBodyStream, ResponseBody, SeekableReader, STREAM_BUF_SIZE,
 };
 pub use webx_core::localization::{
     IStringLocalizer, LocalizationOptions, LocalizedString, StringLocalizer, TextRef,
 };
 pub use webx_core::mediator::dispatch;
 pub use webx_core::mediator::{IEventRequest, IMediator, IRequest};
+pub use webx_core::metrics::{Counter, Gauge, Histogram, IMeter, MemoryMeter, NoopMeter};
 pub use webx_core::middleware::{IMiddleware, MiddlewareSlot};
 pub use webx_core::mode::AppMode;
 pub use webx_core::operation::OperationResult;
+pub use webx_core::options_monitor::{IOptionsMonitor, OptionsMonitor};
 pub use webx_core::pagination::{PagedRequest, PagedResult};
 pub use webx_core::paths::{
     app_base, framework_root, looks_like_app_base, looks_like_framework_root,
@@ -76,10 +79,15 @@ pub use webx_core::route::diagnostics::{
     orphan_routes, route_snapshots,
 };
 pub use webx_core::routing::{HttpMethod, IEndpoint, IRouter, RouteMeta};
+pub use webx_core::secrets::{
+    ChainSecretStore, EnvSecretStore, FileSecretStore, ISecretStore, SecretError, SecretRef,
+    SecretValue,
+};
 pub use webx_core::security::{
     constant_time_eq, IPasswordHasher, ISessionStore, ITokenIssuer, InMemorySessionStore,
     IssuedToken, OneTimeSecret, OneTimeSecretState, TokenClaims,
 };
+pub use webx_core::stream::{SseEvent, SseResult, StreamEnd};
 
 // --- DI extensions ---
 pub use webx_core::route::binding;
@@ -92,6 +100,13 @@ pub use webx_core::route::scan::{
 };
 
 // --- HTTP layer ---
+pub use webx_client::{
+    BodySource, HttpClient, HttpClientError, HttpClientOptions, HttpClientRegistry, IHttpClient,
+    IHttpClientFactory, OutboundRequest, OutboundResponse, ResponseStream, SseStream,
+};
+pub use webx_host::auth::{
+    ApiKeyClaims, ApiKeyHeader, ApiKeyScheme, AuthenticationMiddleware, IApiKeyValidator, JwtScheme,
+};
 pub use webx_host::auth_jwt::{
     apply_jwt_secret_file, init_jwt_secret, jwt_middleware, jwt_middleware_with_revocation,
     jwt_secret, JwtAuth, JwtClaims, JwtTokenIssuer, DEFAULT_TOKEN_LIFETIME, MIN_JWT_SECRET_LEN,
@@ -156,11 +171,12 @@ pub mod assets {
 pub use webx_openapi::{generate_openapi_spec, APIUI_HTML};
 
 // --- Macros ---
+pub use webx_macros::__webx_max_body_size;
 #[doc(hidden)]
 pub use webx_macros::{__webx_category, __webx_description, __webx_display};
 pub use webx_macros::{
     authorize, category, delete, description, display, embed_assets, endpoint, get, handler, main,
-    post, put, WebxRequestMeta,
+    max_body_size, post, put, WebxRequestMeta,
 };
 
 // --- Re-export rust_dix (for manual registration, #[inject] auto-registration, and module blocks) ---

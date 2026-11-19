@@ -148,6 +148,24 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// corresponds to. `T` defaults to `()` for an action without a body.
 pub type ActionResult<T = ()> = std::result::Result<T, Error>;
 
+/// Rewrites framework-generated error responses for a surface.
+///
+/// The default host writes RFC 7807 `problem+json`. An API that must speak a
+/// different envelope (for example the OpenAI `{"error":{...}}` shape under
+/// `/v1/`) registers a writer; the first matching writer handles the error.
+///
+/// `matches` receives both the matched route pattern (if any) and the raw path,
+/// so a writer can target a surface even for 404s where no route matched. It
+/// must be cheap and side-effect free.
+#[async_trait::async_trait]
+pub trait IErrorResponseWriter: Send + Sync {
+    /// Whether this writer handles the error for this request.
+    fn matches(&self, route_pattern: Option<&str>, path: &str, accept: Option<&str>) -> bool;
+
+    /// Write the error response. The writer owns status, headers and body.
+    async fn write(&self, ctx: &mut dyn crate::http::IHttpContext, error: &Error);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

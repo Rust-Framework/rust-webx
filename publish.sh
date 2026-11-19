@@ -13,11 +13,15 @@
 # Order (must respect dependency graph):
 #   1. rust-webx-macros   (no internal deps)
 #   2. rust-webx-core     (no internal deps)
-#   3. rust-webx-build    (no internal deps; build-dependency of apps)
-#   4. rust-webx-spa      (depends on rust-webx-core)
-#   5. rust-webx-openapi  (depends on rust-webx-core)
-#   6. rust-webx-host     (depends on rust-webx-core, rust-webx-spa, rust-webx-openapi)
-#   7. rust-webx          (depends on all above, umbrella crate)
+#   3. rust-webx-client   (depends on rust-webx-core; outbound HTTP)
+#   4. rust-webx-ai       (AI domain kit; follows the workspace version)
+#   5. rust-webx-ai-ef    (rust-ef usage ledger)
+#   6. rust-webx-build    (no internal deps; build-dependency of apps)
+#   7. rust-webx-spa      (depends on rust-webx-core)
+#   8. rust-webx-openapi  (depends on rust-webx-core)
+#   9. rust-webx-host     (depends on rust-webx-core, rust-webx-spa, rust-webx-openapi)
+#  10. rust-webx          (depends on all above, umbrella crate)
+#  11. rust-webx-ai-gateway (OpenAI-compatible surface; depends on webx + webx-ai)
 # ─────────────────────────────────────────────────────────────────
 
 # `pipefail` is required: the gate commands below pipe into `tail`, and without
@@ -71,6 +75,10 @@ bump_version() {
 internal_deps() {
     case "$1" in
         rust-webx-core|rust-webx-macros|rust-webx-build) ;;
+        rust-webx-client) echo "rust-webx-core" ;;
+        rust-webx-ai) echo "rust-webx-core rust-webx-client" ;;
+        rust-webx-ai-ef) echo "rust-webx-ai" ;;
+        rust-webx-ai-gateway) echo "rust-webx rust-webx-ai" ;;
         rust-webx-spa|rust-webx-openapi) echo "rust-webx-core" ;;
         rust-webx-host) echo "rust-webx-core rust-webx-spa rust-webx-openapi" ;;
         rust-webx) echo "rust-webx-core rust-webx-host rust-webx-macros rust-webx-spa rust-webx-openapi" ;;
@@ -164,11 +172,15 @@ bump_version
 # Publish in dependency order (dependencies before dependents)
 publish_crate "rust-webx-macros"
 publish_crate "rust-webx-core"
+publish_crate "rust-webx-client"
+publish_crate "rust-webx-ai"
+publish_crate "rust-webx-ai-ef"
 publish_crate "rust-webx-build"
 publish_crate "rust-webx-spa"
 publish_crate "rust-webx-openapi"
 publish_crate "rust-webx-host"
 publish_crate "rust-webx"
+publish_crate "rust-webx-ai-gateway"
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

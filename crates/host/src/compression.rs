@@ -99,6 +99,11 @@ impl IMiddleware for CompressionMiddleware {
         if ct.starts_with("image/") || ct.starts_with("video/") || ct.starts_with("audio/") {
             return Ok(());
         }
+        // SSE is a long-lived stream: buffering it for gzip would delay every
+        // event until the response ends. Never compress event streams.
+        if ct.starts_with("text/event-stream") {
+            return Ok(());
+        }
 
         if let Some(compressed) = compress_gzip(&body, self.config.level) {
             ctx.response_mut().set_header("content-encoding", "gzip");

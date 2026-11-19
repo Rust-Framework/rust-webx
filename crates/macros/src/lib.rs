@@ -80,6 +80,28 @@ pub fn endpoint(attr: TokenStream, item: TokenStream) -> TokenStream {
     endpoint::endpoint_impl(attr, item)
 }
 
+/// Set a per-route request body cap in bytes.
+///
+/// ```ignore
+/// #[post("/v1/files")]
+/// #[max_body_size(64 * 1024 * 1024)]
+/// impl IRequest<FileInfo> for UploadRequest {}
+/// ```
+///
+/// The limit is applied before request binding and returns `413` when the body
+/// exceeds it; routes without the attribute keep the global `App.MaxBodySize`.
+/// Only non-multipart bodies are affected (multipart uses `Form.MaxRequestSize`).
+#[proc_macro_attribute]
+pub fn max_body_size(attr: TokenStream, item: TokenStream) -> TokenStream {
+    rewrite_as_hidden(attr, item, "__webx_max_body_size", "max_body_size")
+}
+
+/// Internal carrier for [`max_body_size`] — do not use directly.
+#[proc_macro_attribute]
+pub fn __webx_max_body_size(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    item
+}
+
 /// Shortcut: registers an IRequest impl at GET /path.
 ///
 /// ```ignore

@@ -8,9 +8,9 @@ Host::builder().add_authentication().build().run().await?;
 
 自动：
 1. 从 `appsettings.json` 读取 `Jwt.Secret`
-2. 注册 `jwt_middleware`
+2. 注册 JWT scheme（由 `AuthenticationMiddleware` 统一调度）
 
-`add_authentication()` 只负责 JWT 认证；`#[authorize]` 规则由端点自己执行，未满足时返回 401/403（见 [authorize 宏](authorize-macro.md)）。
+`add_authentication()` 只负责 JWT 认证；`#[authorize]` 规则由端点自己执行，未满足时返回 401/403（见 [authorize 宏](authorize-macro.md)）。需要与 `sk-` API Key 共存时见 [API Key 认证](api-key-auth.md)。
 
 ## 配置
 

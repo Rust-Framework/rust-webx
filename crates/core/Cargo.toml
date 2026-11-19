@@ -18,14 +18,17 @@ name = "webx_core"
 
 [dependencies]
 async-trait.workspace = true
+arc-swap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["sync", "macros"] }
+tokio = { workspace = true, features = ["sync", "macros", "time"] }
 tokio-util.workspace = true
+futures-util.workspace = true
 rust-dix.workspace = true
 inventory.workspace = true
 tracing.workspace = true
 tempfile.workspace = true
+zeroize.workspace = true
 bytes.workspace = true
 httpdate.workspace = true

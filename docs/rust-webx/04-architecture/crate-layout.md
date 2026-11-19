@@ -24,6 +24,10 @@ Cargo **包名**带连字符，Rust **导入名**用下划线库名。两者不�
 | `rust-webx-macros` | `webx_macros` | 过程宏（`#[get]`、`#[handler]`…） |
 | `rust-webx-spa` | `webx_spa` | 静态文件 / SPA |
 | `rust-webx-openapi` | `webx_openapi` | OpenAPI 生成 + UI |
+| `rust-webx-ai` | `webx_ai` | AI 网关领域包（用量/记账/端口；不进入伞 crate） |
+| `rust-webx-ai-ef` | `webx_ai_ef` | rust-ef 持久化用量账本（`EfUsageSink`） |
+| `rust-webx-ai-gateway` | `webx_ai_gateway` | OpenAI 兼容 `/v1` HTTP 表面（依赖 webx + webx-ai） |
+| `rust-webx-client` | `webx_client` | 出站 HTTP（连接池/流式/SSE；伞 crate 只重导出传输类型） |
 | `rust-webx-build` | `webx` | 构建期（`build-dependencies`） |
 
 对照 `rust-dix` / `rust-ef`：包名与导入名同样分别是 `rust-dix`→`rust_dix`、`rust-ef`→`rust_ef`。
@@ -47,9 +51,12 @@ Cargo **包名**带连字符，Rust **导入名**用下划线库名。两者不�
 | `http` | `IHttpContext`, `IHttpRequest`, `IHttpResponse` |
 | `middleware` | `IMiddleware` |
 | `routing` | `IRouter`, `IEndpoint`, `RouteMeta` |
-| `auth` | `IClaims`, `IAuthenticationHandler`, `IAuthorizationPolicy`, `IDynamicAuthorizer` |
+| `auth` | `IClaims`, `IAuthenticationHandler`, `IAuthenticationScheme`, `IAuthorizationPolicy`, `IDynamicAuthorizer` |
 | `route` | 扫描类型、`HandlerCache`、`RouteEntry`、`IEndpointCatalog` / `EndpointCatalog` |
 | `localization` | `TextRef`, `IStringLocalizer`, `StringLocalizer`, `LocalizationOptions` |
+| `stream` | `SseEvent`, `SseResult`, `StreamEnd`（`text/event-stream` 响应） |
+| `options_monitor` | `IOptionsMonitor`, `OptionsMonitor`（热更新快照 + 变更通知） |
+| `metrics` | `IMeter`, `Counter`, `Histogram`, `Gauge`（`NoopMeter`/`MemoryMeter`） |
 
 ## host — 运行时层
 
@@ -61,7 +68,7 @@ Cargo **包名**带连字符，Rust **导入名**用下划线库名。两者不�
 | 路由 | matchit radix 树 `Router` |
 | 上下文 | `HttpContext`, `HttpRequest`, `HttpResponse` |
 | 管道 | `MiddlewarePipeline` |
-| 认证 | `JwtAuth`, `jwt_middleware` |
+| 认证 | `JwtAuth`, `jwt_middleware`, `AuthenticationMiddleware` + `JwtScheme` / `ApiKeyScheme` 链 |
 | 授权 | 端点执行 `#[authorize]` 规则；`ResourceAuthorization` / `resource_auth_middleware` 仅用于自定义策略 |
 | 端点 | `StubEndpoint`（路由宏端点）, `RequestEndpoint`, `ControllerEndpoint`, `StaticJsonEndpoint`, `StaticHtmlEndpoint` |
 | 宿主 | `Host`, `HostBuilder`, `Server` |
@@ -84,6 +91,44 @@ Cargo **包名**带连字符，Rust **导入名**用下划线库名。两者不�
 | `rust-webx-openapi` | OpenAPI 3.0 规范生成 + 内置 API 文档 UI（`/api/openapi.html`） |
 
 二者均依赖 `core`，被 `host` 在 `HostBuilder` 中集成。
+
+## ai — 可选领域包
+
+`rust-webx-ai`（导入名 `webx_ai`）承载 AI 聚合网关的领域能力：统一 IR（`CanonicalRequest`/
+`StreamEvent`）、`ChatProvider` 端口、OpenAI 兼容适配器、`ModelCatalog`/`CatalogRouter` 与健康表、
+`CatalogHandle` 热替换、`GatewayExecutor` 执行器、精确响应缓存与单飞、成本计算、
+`RetryPolicy`/`CircuitBreaker`/`Bulkhead` 韧性原语、
+`Usage`/`UsageEvent` 与 `IUsageSink` 账本、`rollup_events`、`ITokenizer`、
+API key 解析/HMAC、`IApiKeyStore`/`MemoryApiKeyStore`、配额预扣-结算、`OpenAiErrorWriter`。
+HTTP 数据面端点、非 OpenAI 适配器与租户级路由后续加入。
+
+- **不进入伞 crate**：应用显式依赖 `rust-webx-ai`，不需要 AI 能力的项目不引入。
+- **不依赖 host/hyper**：领域类型与传输解耦；出站 HTTP 由 `rust-webx-client` 提供。
+- **版本跟随 workspace**：`version.workspace = true`，与 `rust-webx` 同一个版本号，没有独立 0.x 线。
+
+## gateway — OpenAI 兼容表面
+
+`rust-webx-ai-gateway`（导入名 `webx_ai_gateway`）是 `rust-webx-ai` 的 HTTP 适配层：
+`POST /v1/chat/completions` 的请求 DTO、IR 转换、JSON/SSE 输出与 OpenAI 错误信封。
+它依赖伞 crate 与 `rust-webx-ai`，但不反向进入 `rust-webx-ai` 的领域依赖；应用注册
+`Arc<GatewayExecutor>`、鉴权 scheme 与 `OpenAiErrorWriter` 后即可使用。
+
+## client — 出站 HTTP 层
+
+`rust-webx-client`（导入名 `webx_client`）是服务端调用外部 HTTP 服务的唯一入口：
+
+| 类型 | 职责 |
+|------|------|
+| `HttpClient` | 池化客户端；每个 provider 一个实例（base URL、超时、池大小、代理、CA） |
+| `IHttpClient` | 端口；Handler 依赖它，测试可替换 |
+| `OutboundRequest` / `OutboundResponse` | 请求构造（字节/流式 body）与流式响应 |
+| `ResponseStream::{collect, bytes, sse}` | 有上限收集 / 原始字节流 / SSE 解码 |
+| `HttpClientRegistry` / `IHttpClientFactory` | 按名字解析客户端 |
+| `HttpClientError` | 连接/超时/协议/响应体分类；`is_connect()` 供重试判定 |
+
+它依赖 `core`（复用 `SseEvent` 类型），不依赖 `host`，因此也能用于后台任务或 CLI。版本跟随 workspace。
+伞 crate 重导出上述传输类型，并提供 `HostBuilder::add_http_client` 把命名客户端注册进 DI；
+AI 领域包（`rust-webx-ai`）仍不进入伞 crate。
 
 ## build — 编译期资源层
 

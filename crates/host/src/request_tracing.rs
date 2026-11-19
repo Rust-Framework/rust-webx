@@ -31,11 +31,17 @@ impl Default for RequestTracing {
 #[async_trait::async_trait]
 impl IMiddleware for RequestTracing {
     async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
-        // Propagate existing request ID from upstream, or generate a new one.
+        // Propagate an explicit request id, otherwise adopt a W3C traceparent,
+        // otherwise generate a new 32-hex trace id.
         let tid = ctx
             .request()
             .header("x-request-id")
             .map(|s| s.to_string())
+            .or_else(|| {
+                ctx.request()
+                    .header("traceparent")
+                    .and_then(traceparent_trace_id)
+            })
             .unwrap_or_else(next_trace_id);
         // Store on the context *and* echo in the header: handlers read the same
         // value through `RequestContext::trace_id()`, so an audit row can be
@@ -75,5 +81,57 @@ impl IMiddleware for RequestTracing {
 
 fn next_trace_id() -> String {
     let id = TRACE_SEQ.fetch_add(1, Ordering::Relaxed);
-    format!("{:016x}", id)
+    format!("{:032x}", id)
+}
+
+/// Extract the trace id from a W3C `traceparent` header.
+///
+/// Format: `version-32hex-trace-16hex-parent-2hex-flags`. Only version `00` is
+/// accepted here; malformed or all-zero ids are ignored so the host generates a
+/// fresh trace instead of trusting a broken upstream.
+fn traceparent_trace_id(value: &str) -> Option<String> {
+    let mut parts = value.trim().split('-');
+    let version = parts.next()?;
+    let trace_id = parts.next()?;
+    let parent_id = parts.next()?;
+    let flags = parts.next()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    let valid = version == "00"
+        && trace_id.len() == 32
+        && parent_id.len() == 16
+        && flags.len() == 2
+        && trace_id.bytes().all(|byte| byte.is_ascii_hexdigit())
+        && parent_id.bytes().all(|byte| byte.is_ascii_hexdigit())
+        && flags.bytes().all(|byte| byte.is_ascii_hexdigit())
+        && trace_id.bytes().any(|byte| byte != b'0');
+    valid.then(|| trace_id.to_ascii_lowercase())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::traceparent_trace_id;
+
+    #[test]
+    fn accepts_a_valid_traceparent() {
+        let value = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+        assert_eq!(
+            traceparent_trace_id(value).as_deref(),
+            Some("4bf92f3577b34da6a3ce929d0e0e4736")
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_or_zero_traceparent() {
+        assert!(traceparent_trace_id("00-short-00f067aa0ba902b7-01").is_none());
+        assert!(
+            traceparent_trace_id("00-00000000000000000000000000000000-00f067aa0ba902b7-01")
+                .is_none()
+        );
+        assert!(
+            traceparent_trace_id("01-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+                .is_none()
+        );
+    }
 }

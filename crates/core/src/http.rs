@@ -22,7 +22,14 @@
 
 use crate::auth::IClaims;
 use crate::error::Result;
+use bytes::Bytes;
+use futures_util::stream;
+use futures_util::Stream;
 use std::collections::HashMap;
+use std::pin::Pin;
+
+/// A request body stream of `Bytes` chunks.
+pub type RequestBodyStream = Pin<Box<dyn Stream<Item = Result<Bytes>> + Send>>;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -494,6 +501,13 @@ pub trait IHttpRequest: Send {
         None
     }
 
+    /// Override the non-multipart body cap for this request (per-route limit).
+    ///
+    /// The host calls this before binding when the matched route declares
+    /// `#[max_body_size(..)]`. The default is a no-op so alternative/test
+    /// contexts keep compiling; such a host simply keeps its global limit.
+    fn set_max_body_size(&mut self, _limit: usize) {}
+
     /// Every value per query key, in the order they appeared.
     ///
     /// `?id=1&id=2` yields two values for `id`, which is what `Vec<T>` query
@@ -517,6 +531,19 @@ pub trait IHttpRequest: Send {
     /// The body can only be read once; a second call reports an error rather
     /// than silently returning an empty body.
     async fn body_bytes(&mut self) -> Result<Vec<u8>>;
+
+    /// Return the request body as a stream of chunks.
+    ///
+    /// The default buffers [`body_bytes`](Self::body_bytes) and replays it as a
+    /// single chunk, so test contexts and alternative hosts keep working. A
+    /// real host should override this to expose the live connection body; the
+    /// body can then only be consumed once.
+    async fn body_stream(&mut self) -> Result<RequestBodyStream> {
+        let bytes = self.body_bytes().await?;
+        Ok(Box::pin(stream::once(async move {
+            Ok::<Bytes, crate::error::Error>(Bytes::from(bytes))
+        })))
+    }
 
     /// Return the request body as a UTF-8 string.
     async fn body_text(&mut self) -> Result<String> {

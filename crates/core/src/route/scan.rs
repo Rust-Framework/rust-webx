@@ -155,6 +155,13 @@ pub struct RouteEntry {
     /// `false` for every other endpoint, including public ones: the rules are
     /// then enforced statically, exactly as before 1.3.0.
     pub authorization_dynamic: bool,
+
+    /// Per-route request body cap in bytes, from `#[max_body_size(..)]`.
+    ///
+    /// `None` uses the global `App.MaxBodySize`. The host applies the route
+    /// limit before binding, so an oversized body is rejected with `413` even
+    /// when the global limit would allow it.
+    pub max_body_size: Option<usize>,
 }
 
 // Collect RouteEntry instances at compile time using `inventory`.
@@ -268,6 +275,7 @@ impl RouteEntry {
             params,
             authorization,
             authorization_dynamic: false,
+            max_body_size: None,
         }
     }
 
@@ -300,7 +308,14 @@ impl RouteEntry {
             params,
             authorization,
             authorization_dynamic: false,
+            max_body_size: None,
         }
+    }
+
+    /// Set a per-route request body cap (see [`Self::max_body_size`]).
+    pub const fn with_max_body_size(mut self, limit: Option<usize>) -> Self {
+        self.max_body_size = limit;
+        self
     }
 
     /// Switch this entry to the `#[authorize(dynamic)]` mode.

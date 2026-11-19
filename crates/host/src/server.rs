@@ -10,9 +10,11 @@ use hyper::Request;
 use hyper_util::rt::TokioIo;
 use rust_dix::{ServiceCollection, ServiceProvider};
 use webx_core::app::IHost;
+use webx_core::auth::IAuthenticationScheme;
 use webx_core::config::{self, AppOptions};
-use webx_core::error::{Error, Result};
+use webx_core::error::{Error, IErrorResponseWriter, Result};
 use webx_core::handler::IHostedService;
+use webx_core::hosted::{CancellationToken, ShutdownToken};
 use webx_core::http::IHttpContext;
 use webx_core::localization::{IStringLocalizer, LocalizationOptions, StringLocalizer};
 use webx_core::middleware::IMiddleware;
@@ -21,9 +23,8 @@ use webx_core::route::catalog::{EndpointCatalog, IEndpointCatalog};
 use webx_core::routing::{HttpMethod, IEndpoint, IRouter};
 use webx_core::security::{ISessionStore, ITokenIssuer};
 
-use crate::auth_jwt::{
-    init_jwt_secret, jwt_middleware, jwt_middleware_with_revocation, JwtAuth, JwtTokenIssuer,
-};
+use crate::auth::{AuthenticationMiddleware, JwtScheme};
+use crate::auth_jwt::{init_jwt_secret, JwtAuth, JwtTokenIssuer};
 use crate::authz::collect_authorizers;
 use crate::context::{BodyLimits, HttpContext, RespBody};
 use crate::cors::{CorsConfig, CorsMiddleware};
@@ -44,6 +45,7 @@ use webx_spa::{EmbeddedAssets, SpaMiddleware, SpaSource};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig;
 use rustls_pemfile::{certs, pkcs8_private_keys, rsa_private_keys};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::task::JoinSet;
@@ -134,6 +136,8 @@ pub struct Host {
     router: Arc<Router>,
     /// Pre-built router handler —eliminates per-request Arc::new.
     router_handler: HandlerFn,
+    /// Ordered error writers; the first match overrides `problem+json`.
+    error_writers: Arc<Vec<Arc<dyn IErrorResponseWriter>>>,
     mode: AppMode,
     /// Kept for introspection; the middleware already holds its own copy.
     #[allow(dead_code)]
@@ -146,6 +150,9 @@ pub struct Host {
     /// the signal arrives (before connections drain), and the teardown path calls
     /// in again; both go through this cell so `stop()` runs exactly once.
     hosted_stopped: Arc<tokio::sync::OnceCell<()>>,
+    /// Cancelled when the host starts graceful shutdown; registered in DI as
+    /// [`ShutdownToken`] so long-lived SSE responses can end cleanly.
+    shutdown_token: CancellationToken,
 }
 
 /// Factory for a user-registered middleware.
@@ -166,11 +173,17 @@ pub struct HostBuilder {
     options_modifiers: Vec<Box<dyn FnOnce(&mut AppOptions) + Send>>,
     cors_config: Option<CorsConfig>,
     auth_enabled: bool,
+    /// Additional authentication schemes, tried before the JWT scheme.
+    auth_schemes: Vec<Arc<dyn IAuthenticationScheme>>,
     localization: Option<LocalizationOptions>,
     health_registry: Arc<HealthCheckRegistry>,
     /// Middlewares registered through the builder, kept with their slot so
     /// ordering does not depend on DI enumeration order.
     middleware_specs: Vec<MiddlewareSpec>,
+    /// Error writers registered through the builder, tried in order.
+    error_writers: Vec<Arc<dyn IErrorResponseWriter>>,
+    /// Named outbound clients registered through `add_http_client`.
+    http_clients: Vec<(String, Arc<dyn webx_client::IHttpClient>)>,
     /// Opt back into the pre-1.0 lenient root-scope behavior (rust-dix 0.7).
     /// Migration-only: 1.0 defaults to strict scope validation.
     lenient_scope_validation: bool,
@@ -189,6 +202,9 @@ struct PreparedHost {
     endpoints: Arc<dyn IEndpointCatalog>,
     localizer: Arc<dyn IStringLocalizer>,
     handler_cache: Arc<webx_core::route::scan::HandlerCache>,
+    /// Host shutdown token, created before the DI provider so it can be
+    /// registered as a service instance.
+    shutdown_token: CancellationToken,
 }
 
 #[allow(clippy::type_complexity)]
@@ -224,9 +240,12 @@ impl HostBuilder {
             options_modifiers: Vec::new(),
             cors_config: None,
             auth_enabled: false,
+            auth_schemes: Vec::new(),
             localization: None,
             health_registry: HealthCheckRegistry::new(),
             middleware_specs: Vec::new(),
+            error_writers: Vec::new(),
+            http_clients: Vec::new(),
             lenient_scope_validation: false,
         }
     }
@@ -298,6 +317,124 @@ impl HostBuilder {
         })
     }
 
+    /// Bind a configuration section once and expose it through a hot-reloadable
+    /// [`OptionsMonitor`](webx_core::options_monitor::OptionsMonitor).
+    ///
+    /// The monitor is registered twice, for both injection styles:
+    ///
+    /// * `Arc<OptionsMonitor<T>>` — concrete, with [`OptionsMonitor::set`];
+    /// * `Arc<dyn IOptionsMonitor<T>>` — the port, for handlers/services.
+    ///
+    /// Pair it with [`HostBuilder::watch_options_file`] (or a custom
+    /// `PeriodicBackgroundService`) to publish new snapshots without a restart.
+    ///
+    /// ```ignore
+    /// Host::builder()
+    ///     .add_options_monitor::<GatewayConfig>("Gateway")
+    ///     .build();
+    /// ```
+    pub fn add_options_monitor<T>(self, section: &str) -> Self
+    where
+        T: for<'de> serde::Deserialize<'de> + Default + Send + Sync + 'static,
+    {
+        let mode = self.mode;
+        let section = section.to_string();
+        self.register(move |svc| {
+            let appsettings = config::load_appsettings(mode).unwrap_or_default();
+            let bound: T = config::bind_config(&appsettings, &section);
+            tracing::info!(
+                "[Host] add_options_monitor<{}>(\"{}\") registered",
+                std::any::type_name::<T>(),
+                section
+            );
+            let monitor = Arc::new(webx_core::options_monitor::OptionsMonitor::new(bound));
+            let port: Arc<dyn webx_core::options_monitor::IOptionsMonitor<T>> = monitor.clone();
+            svc.instance(monitor).instance(port)
+        })
+    }
+
+    /// Bind `section` at startup and poll `path` for replacements.
+    ///
+    /// The file is read on the worker interval; unchanged bytes are ignored and
+    /// a malformed file leaves the current snapshot active (see
+    /// [`OptionsFileWatcher`](crate::options_watch::OptionsFileWatcher)).
+    /// The monitor is registered like [`HostBuilder::add_options_monitor`].
+    ///
+    /// ```ignore
+    /// Host::builder()
+    ///     .watch_options_file::<GatewayConfig>(
+    ///         "Gateway",
+    ///         "config/gateway.json",
+    ///         Duration::from_secs(5),
+    ///     )
+    ///     .build();
+    /// ```
+    pub fn watch_options_file<T>(
+        self,
+        section: &str,
+        path: impl Into<std::path::PathBuf>,
+        interval: Duration,
+    ) -> Self
+    where
+        T: for<'de> serde::Deserialize<'de> + Default + Send + Sync + 'static,
+    {
+        use webx_core::route::ext::IServiceCollectionExt;
+
+        let mode = self.mode;
+        let section = section.to_string();
+        let path = path.into();
+        self.register(move |svc| {
+            let appsettings = config::load_appsettings(mode).unwrap_or_default();
+            let bound: T = config::bind_config(&appsettings, &section);
+            tracing::info!(
+                "[Host] watch_options_file<{}>(\"{}\", {}) registered",
+                std::any::type_name::<T>(),
+                section,
+                path.display()
+            );
+            let monitor = Arc::new(webx_core::options_monitor::OptionsMonitor::new(bound));
+            let port: Arc<dyn webx_core::options_monitor::IOptionsMonitor<T>> = monitor.clone();
+            let watcher = crate::options_watch::OptionsFileWatcher::new(
+                Arc::clone(&monitor),
+                section,
+                path,
+                interval,
+            );
+            svc.instance(monitor)
+                .instance(port)
+                .add_background_service_with(move |_| Arc::new(watcher.clone()))
+        })
+    }
+
+    /// Register a named outbound HTTP client for injection.
+    ///
+    /// The host collects all `add_http_client` calls into one
+    /// [`HttpClientRegistry`](webx_client::HttpClientRegistry) and registers it
+    /// twice: as `Arc<HttpClientRegistry>` and as
+    /// `Arc<dyn IHttpClientFactory>`. Handlers inject either form and resolve a
+    /// provider by name (`clients.create("openai")?`) — no hyper code in the
+    /// application.
+    ///
+    /// ```ignore
+    /// Host::builder()
+    ///     .add_http_client("openai", HttpClient::new("openai", options)?)
+    ///     .build();
+    /// ```
+    ///
+    /// A registry registered manually with `.register(...)` wins: the host
+    /// default only fills the port when it is still empty.
+    pub fn add_http_client(
+        mut self,
+        name: impl Into<String>,
+        client: webx_client::HttpClient,
+    ) -> Self {
+        self.http_clients.push((
+            name.into(),
+            Arc::new(client) as Arc<dyn webx_client::IHttpClient>,
+        ));
+        self
+    }
+
     /// Serve SPA static files from a directory on disk.
     ///
     /// ```ignore
@@ -357,6 +494,44 @@ impl HostBuilder {
     /// ```
     pub fn add_authentication(mut self) -> Self {
         self.auth_enabled = true;
+        self
+    }
+
+    /// Register a custom authentication scheme.
+    ///
+    /// Schemes are tried in registration order, before the JWT scheme enabled
+    /// by [`add_authentication`](Self::add_authentication); the first scheme
+    /// whose `matches` returns `true` handles the request. This is how a
+    /// management-plane JWT and a data-plane `sk-` API key coexist:
+    ///
+    /// ```ignore
+    /// Host::builder()
+    ///     .add_authentication_scheme(Arc::new(ApiKeyScheme::new(validator)))
+    ///     .add_authentication() // JWT, tried after the API-key scheme
+    ///     .build()
+    /// ```
+    ///
+    /// A scheme that never matches leaves the request anonymous; a scheme that
+    /// matches an explicitly presented but invalid credential returns 401.
+    pub fn add_authentication_scheme(mut self, scheme: Arc<dyn IAuthenticationScheme>) -> Self {
+        self.auth_schemes.push(scheme);
+        self
+    }
+
+    /// Register an error-response writer.
+    ///
+    /// Writers are tried in registration order before the default RFC 7807
+    /// `problem+json` path. This is how an OpenAI-compatible `/v1/` surface can
+    /// answer with `{"error": {...}}` while the rest of the host keeps
+    /// `problem+json`:
+    ///
+    /// ```ignore
+    /// Host::builder()
+    ///     .add_error_writer(Arc::new(OpenAiErrorWriter::new()))
+    ///     .build();
+    /// ```
+    pub fn add_error_writer(mut self, writer: Arc<dyn IErrorResponseWriter>) -> Self {
+        self.error_writers.push(writer);
         self
     }
 
@@ -600,11 +775,19 @@ impl HostBuilder {
             endpoints,
             localizer,
             handler_cache,
+            shutdown_token,
         } = prepared;
         let provider = svc
             .build_with(provider_options)
             .map_err(build_provider_error)?;
-        builder.assemble(provider, handler_cache, options, endpoints, localizer)
+        builder.assemble(
+            provider,
+            handler_cache,
+            options,
+            endpoints,
+            localizer,
+            shutdown_token,
+        )
     }
 
     /// Build the host, awaiting rust-dix's `build_async` for async singletons.
@@ -630,12 +813,20 @@ impl HostBuilder {
             endpoints,
             localizer,
             handler_cache,
+            shutdown_token,
         } = prepared;
         let provider = svc
             .build_async_with(provider_options)
             .await
             .map_err(build_provider_error)?;
-        builder.assemble(provider, handler_cache, options, endpoints, localizer)
+        builder.assemble(
+            provider,
+            handler_cache,
+            options,
+            endpoints,
+            localizer,
+            shutdown_token,
+        )
     }
 
     fn prepare(mut self) -> Result<PreparedHost> {
@@ -687,6 +878,28 @@ impl HostBuilder {
             svc = cfg(svc);
         }
 
+        // Named outbound clients collected by `HostBuilder::add_http_client`.
+        // `try_add*` keeps an application-registered registry/factory.
+        if !self.http_clients.is_empty() {
+            let mut registry = webx_client::HttpClientRegistry::new();
+            for (name, client) in std::mem::take(&mut self.http_clients) {
+                registry.insert(name, client);
+            }
+            tracing::info!(
+                "[Host] {} outbound HTTP client(s) registered",
+                registry.len()
+            );
+            let registry = Arc::new(registry);
+            let factory: Arc<dyn webx_client::IHttpClientFactory> = registry.clone();
+            let registry_for_di = Arc::clone(&registry);
+            svc = svc.try_add_singleton::<webx_client::HttpClientRegistry>(move |_| {
+                Arc::clone(&registry_for_di)
+            });
+            svc = svc.try_add_singleton::<dyn webx_client::IHttpClientFactory>(move |_| {
+                Arc::clone(&factory)
+            });
+        }
+
         // WEBX-2: the default JWT issuer is a host service, so a login endpoint
         // injects `Arc<dyn ITokenIssuer>` instead of hand-rolling signing. It is
         // registered through `try_add*`: an application registration of its own
@@ -732,6 +945,12 @@ impl HostBuilder {
         let localizer_for_di = Arc::clone(&localizer);
         svc = svc.try_add_singleton::<dyn IStringLocalizer>(move |_| Arc::clone(&localizer_for_di));
 
+        // Host shutdown token: registered before the provider is built so
+        // long-lived responses can inject it. Cancelled by every shutdown path
+        // (signal, `ServerHandle::shutdown`, `IHost::stop`).
+        let shutdown_token = CancellationToken::new();
+        svc = svc.instance(Arc::new(ShutdownToken::new(shutdown_token.clone())));
+
         let provider_options = if self.lenient_scope_validation {
             rust_dix::ServiceProviderOptions::lenient()
         } else {
@@ -745,6 +964,7 @@ impl HostBuilder {
             endpoints,
             localizer,
             handler_cache,
+            shutdown_token,
         })
     }
 
@@ -756,6 +976,7 @@ impl HostBuilder {
         options: AppOptions,
         endpoints: Arc<dyn IEndpointCatalog>,
         localizer: Arc<dyn IStringLocalizer>,
+        shutdown_token: CancellationToken,
     ) -> Result<Host> {
         // Per-host dispatch runtime (provider + handler registry).
         let dispatch_runtime = Arc::new(DispatchRuntime::new(Arc::clone(&provider), handler_cache));
@@ -827,6 +1048,7 @@ impl HostBuilder {
             )));
         }
 
+        let mut auth_schemes = self.auth_schemes;
         if self.auth_enabled {
             let secret = options.jwt.secret.clone();
             if !secret.is_empty() {
@@ -836,7 +1058,7 @@ impl HostBuilder {
                 ));
                 // WEBX-2: when the application registered an `ISessionStore`,
                 // verified tokens are additionally checked for revocation.
-                // Without one this stays the 1.1 verify-only middleware.
+                // Without one this stays the 1.1 verify-only behaviour.
                 let session_store = provider.get_all::<dyn ISessionStore>().into_iter().next();
                 match &session_store {
                     Some(_) => tracing::debug!(
@@ -847,17 +1069,22 @@ impl HostBuilder {
                          use HostBuilder::use_session_store)"
                     ),
                 }
-                let auth_middleware: Arc<dyn IMiddleware> = match session_store {
-                    Some(store) => Arc::new(jwt_middleware_with_revocation(jwt_auth, store)),
-                    None => Arc::new(jwt_middleware(jwt_auth)),
-                };
-                pipeline.add_middleware(auth_middleware);
+                auth_schemes.push(Arc::new(JwtScheme::new(jwt_auth, session_store)));
                 init_jwt_secret(&secret);
             } else {
                 tracing::warn!(
                     "add_authentication() enabled but no JWT secret configured. Set Jwt.Secret in appsettings.json, JWT_SECRET, or APP__Jwt__Secret env var."
                 );
             }
+        }
+
+        if !auth_schemes.is_empty() {
+            let middleware = AuthenticationMiddleware::new(auth_schemes);
+            tracing::debug!(
+                schemes = ?middleware.names(),
+                "[Host] authentication schemes enabled"
+            );
+            pipeline.add_middleware(Arc::new(middleware));
         }
 
         // User middlewares in the default slot: after authentication, so
@@ -961,6 +1188,7 @@ impl HostBuilder {
                 authorization: entry.authorization,
                 authorization_dynamic: entry.authorization_dynamic,
                 authorizers: collect_authorizers(provider.as_ref()),
+                max_body_size: entry.max_body_size,
             });
             router.register(entry.method, entry.path, stub);
         }
@@ -1064,7 +1292,16 @@ impl HostBuilder {
         }
 
         let router = Arc::new(router);
-        let router_handler = make_router_handler(Arc::clone(&router), spa_fallback);
+        let error_writers = Arc::new(self.error_writers);
+        let router_handler = make_router_handler(
+            Arc::clone(&router),
+            spa_fallback,
+            Arc::clone(&error_writers),
+            match options.server.request_timeout_seconds {
+                0 => None,
+                seconds => Some(Duration::from_secs(seconds)),
+            },
+        );
 
         // Resolve all registered hosted services from the DI container.
         // These will be started when `run()` is called and stopped on shutdown.
@@ -1086,11 +1323,13 @@ impl HostBuilder {
             pipeline,
             router,
             router_handler,
+            error_writers,
             mode: self.mode,
             spa_source,
             shutdown: Arc::new(tokio::sync::watch::channel(false).0),
             hosted_services: Arc::new(hosted_services),
             hosted_stopped: Arc::new(tokio::sync::OnceCell::new()),
+            shutdown_token,
         })
     }
 
@@ -1130,6 +1369,7 @@ fn build_failure_message(error: &Error) -> String {
 /// Handle for a running server, allowing programmatic graceful shutdown.
 pub struct ServerHandle {
     shutdown: ShutdownSignal,
+    shutdown_token: CancellationToken,
 }
 
 impl ServerHandle {
@@ -1137,9 +1377,11 @@ impl ServerHandle {
     /// draining existing ones.
     ///
     /// The signal is stored in a `watch` channel, so calling this before the
-    /// server's accept loops start is not lost.
+    /// server's accept loops start is not lost. The host shutdown token is
+    /// cancelled at the same time, which lets long SSE responses end with a
+    /// `server_shutdown` event instead of waiting for the drain timeout.
     pub fn shutdown(self) {
-        trigger_shutdown(&self.shutdown);
+        trigger_shutdown(&self.shutdown, &self.shutdown_token);
     }
 }
 
@@ -1336,8 +1578,8 @@ impl Host {
             tracing::info!("Listening on {} url(s)", urls.len());
         }
 
-        install_shutdown_handler(Arc::clone(&self.shutdown));
-        spawn_async_shutdown_listener(Arc::clone(&self.shutdown));
+        install_shutdown_handler(Arc::clone(&self.shutdown), self.shutdown_token.clone());
+        spawn_async_shutdown_listener(Arc::clone(&self.shutdown), self.shutdown_token.clone());
         // Stop background work at signal time, before connections drain.
         let hosted_watcher = self.spawn_hosted_shutdown_watcher();
 
@@ -1360,6 +1602,9 @@ impl Host {
                 mode,
                 body_limits.clone(),
                 max_connections,
+                Arc::clone(&self.error_writers),
+                Duration::from_secs(self.options.server.drain_timeout_seconds),
+                Duration::from_secs(self.options.server.stream_drain_timeout_seconds),
             )));
         }
 
@@ -1376,6 +1621,9 @@ impl Host {
                     mode,
                     body_limits.clone(),
                     max_connections,
+                    Arc::clone(&self.error_writers),
+                    Duration::from_secs(self.options.server.drain_timeout_seconds),
+                    Duration::from_secs(self.options.server.stream_drain_timeout_seconds),
                 )));
             }
         }
@@ -1413,8 +1661,8 @@ impl Host {
             return Err(err);
         }
 
-        install_shutdown_handler(Arc::clone(&self.shutdown));
-        spawn_async_shutdown_listener(Arc::clone(&self.shutdown));
+        install_shutdown_handler(Arc::clone(&self.shutdown), self.shutdown_token.clone());
+        spawn_async_shutdown_listener(Arc::clone(&self.shutdown), self.shutdown_token.clone());
         // Stop background work at signal time, before connections drain.
         let hosted_watcher = self.spawn_hosted_shutdown_watcher();
         serve_http(
@@ -1427,6 +1675,9 @@ impl Host {
             self.mode,
             self.body_limits.clone(),
             self.options.app.max_connections,
+            Arc::clone(&self.error_writers),
+            Duration::from_secs(self.options.server.drain_timeout_seconds),
+            Duration::from_secs(self.options.server.stream_drain_timeout_seconds),
         )
         .await;
 
@@ -1451,6 +1702,7 @@ impl Host {
     pub fn server_handle(&self) -> ServerHandle {
         ServerHandle {
             shutdown: Arc::clone(&self.shutdown),
+            shutdown_token: self.shutdown_token.clone(),
         }
     }
 
@@ -1470,15 +1722,21 @@ impl IHost for Host {
     }
     async fn stop(&self) -> Result<()> {
         tracing::info!("Stop requested.");
-        trigger_shutdown(&self.shutdown);
+        trigger_shutdown(&self.shutdown, &self.shutdown_token);
         Ok(())
     }
 }
 
-fn make_router_handler(router: Arc<Router>, spa_fallback: Option<Arc<SpaMiddleware>>) -> HandlerFn {
+fn make_router_handler(
+    router: Arc<Router>,
+    spa_fallback: Option<Arc<SpaMiddleware>>,
+    error_writers: Arc<Vec<Arc<dyn IErrorResponseWriter>>>,
+    request_timeout: Option<Duration>,
+) -> HandlerFn {
     Arc::new(move |ctx: &mut dyn IHttpContext| {
         let router = Arc::clone(&router);
         let spa_fallback = spa_fallback.clone();
+        let error_writers = Arc::clone(&error_writers);
         Box::pin(async move {
             // The context may carry a rejection detected from the request line
             // (oversized declared Content-Length). Failing here — inside the
@@ -1493,7 +1751,14 @@ fn make_router_handler(router: Arc<Router>, spa_fallback: Option<Arc<SpaMiddlewa
                         ctx.request_mut().route_params_mut().insert(key, value);
                     }
                     *ctx.request_mut().route_pattern_mut() = Some(pattern);
-                    endpoint.handle(ctx).await
+                    let handle = endpoint.handle(ctx);
+                    match request_timeout {
+                        Some(limit) => match tokio::time::timeout(limit, handle).await {
+                            Ok(result) => result,
+                            Err(_) => Err(Error::Status(504, "request timed out".to_string())),
+                        },
+                        None => handle.await,
+                    }
                 }
                 None => {
                     let path_exists = router.path_exists(ctx.request().path());
@@ -1526,7 +1791,19 @@ fn make_router_handler(router: Arc<Router>, spa_fallback: Option<Arc<SpaMiddlewa
                                 write_method_not_allowed(ctx, &allowed).await;
                             }
                         } else {
-                            write_plain_error(ctx, 404, "Not Found").await;
+                            let path = ctx.request().path().to_string();
+                            let accept = ctx.request().header("accept").map(str::to_string);
+                            let writer = error_writers
+                                .iter()
+                                .find(|writer| writer.matches(None, &path, accept.as_deref()))
+                                .cloned();
+                            if let Some(writer) = writer {
+                                writer
+                                    .write(ctx, &Error::Routing("Not Found".to_string()))
+                                    .await;
+                            } else {
+                                write_plain_error(ctx, 404, "Not Found").await;
+                            }
                         }
                     }
                     Ok(())
@@ -1543,20 +1820,33 @@ async fn handle_request(
     dispatch_runtime: Arc<DispatchRuntime>,
     body_limits: BodyLimits,
     remote_addr: Option<std::net::SocketAddr>,
+    error_writers: Arc<Vec<Arc<dyn IErrorResponseWriter>>>,
 ) -> std::result::Result<hyper::Response<RespBody>, std::convert::Infallible> {
     let mut ctx = HttpContext::new(req, body_limits, remote_addr, Arc::clone(&dispatch_runtime));
 
     let result = pipeline.execute(&mut ctx, router_handler).await;
-    if let Err(e) = result {
-        match e {
-            // A binding/validation failure already carries its full
-            // ProblemDetails (including the `errors` extension); write it
-            // verbatim instead of flattening it into a detail string.
-            webx_core::error::Error::Problem(problem) => {
-                write_problem_response(&mut ctx, *problem).await
-            }
-            other => {
-                write_framework_error(&mut ctx, &other).await;
+    if let Err(error) = result {
+        let route = ctx.request().route_pattern().map(str::to_string);
+        let accept = ctx.request().header("accept").map(str::to_string);
+        let path = ctx.request().path();
+        let writer = error_writers
+            .iter()
+            .find(|writer| writer.matches(route.as_deref(), path, accept.as_deref()))
+            .cloned();
+
+        if let Some(writer) = writer {
+            writer.write(&mut ctx, &error).await;
+        } else {
+            match error {
+                // A binding/validation failure already carries its full
+                // ProblemDetails (including the `errors` extension); write it
+                // verbatim instead of flattening it into a detail string.
+                webx_core::error::Error::Problem(problem) => {
+                    write_problem_response(&mut ctx, *problem).await
+                }
+                other => {
+                    write_framework_error(&mut ctx, &other).await;
+                }
             }
         }
     }
@@ -1617,12 +1907,15 @@ async fn write_method_not_allowed(ctx: &mut dyn IHttpContext, allowed: &[&str]) 
 /// `watch::Sender::send` stores the value, so a listener that subscribes later
 /// (or a listener between two `select!` iterations) still observes it — unlike
 /// `Notify::notify_waiters`, which drops the wakeup when nobody is parked.
-fn trigger_shutdown(shutdown: &ShutdownSignal) {
+fn trigger_shutdown(shutdown: &ShutdownSignal, token: &CancellationToken) {
     // `send_replace` stores the value unconditionally. `send` would fail while
     // no receiver exists (e.g. `handle.shutdown()` called before `run()`
     // subscribes) and silently drop the signal — the exact bug this type
     // replaces `Notify` for.
     shutdown.send_replace(true);
+    // Wake long-lived responses (SSE) so they can close cleanly before the
+    // drain deadline instead of being aborted.
+    token.cancel();
 }
 
 /// Resolve once the host has been asked to shut down.
@@ -1653,11 +1946,14 @@ async fn wait_for_shutdown(shutdown: &mut tokio::sync::watch::Receiver<bool>) {
 /// registers its signal (weakly) here and the single handler raises all of
 /// them. That keeps two hosts in one process — integration tests, embedded
 /// scenarios — individually stoppable by Ctrl+C.
-fn install_shutdown_handler(shutdown: ShutdownSignal) {
+fn install_shutdown_handler(shutdown: ShutdownSignal, token: CancellationToken) {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Mutex, OnceLock, Weak};
 
-    static HANDLERS: OnceLock<Mutex<Vec<Weak<tokio::sync::watch::Sender<bool>>>>> = OnceLock::new();
+    /// A host that is alive: its watch signal plus the token registered in DI.
+    type LiveHost = (Weak<tokio::sync::watch::Sender<bool>>, CancellationToken);
+
+    static HANDLERS: OnceLock<Mutex<Vec<LiveHost>>> = OnceLock::new();
     static CTRL_COUNT: AtomicUsize = AtomicUsize::new(0);
     static INSTALLED: AtomicBool = AtomicBool::new(false);
 
@@ -1667,8 +1963,8 @@ fn install_shutdown_handler(shutdown: ShutdownSignal) {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         // Drop hosts that have already exited before adding this one.
-        registered.retain(|weak| weak.strong_count() > 0);
-        registered.push(Arc::downgrade(&shutdown));
+        registered.retain(|(weak, _)| weak.strong_count() > 0);
+        registered.push((Arc::downgrade(&shutdown), token));
     }
 
     // `ctrlc::set_handler` is process-wide and may only be called once. The
@@ -1685,9 +1981,9 @@ fn install_shutdown_handler(shutdown: ShutdownSignal) {
             let registered = handlers
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            for weak in registered.iter() {
+            for (weak, token) in registered.iter() {
                 if let Some(shutdown) = weak.upgrade() {
-                    trigger_shutdown(&shutdown);
+                    trigger_shutdown(&shutdown, token);
                 }
             }
         } else {
@@ -1700,11 +1996,11 @@ fn install_shutdown_handler(shutdown: ShutdownSignal) {
 }
 
 /// Tokio-based listener for Ctrl+C (all platforms) and SIGTERM (Unix).
-fn spawn_async_shutdown_listener(shutdown: ShutdownSignal) {
+fn spawn_async_shutdown_listener(shutdown: ShutdownSignal, token: CancellationToken) {
     tokio::spawn(async move {
         wait_for_shutdown_signal().await;
         tracing::info!("Async shutdown signal received, draining connections...");
-        trigger_shutdown(&shutdown);
+        trigger_shutdown(&shutdown, &token);
     });
 }
 
@@ -1814,8 +2110,18 @@ async fn stop_hosted_service(index: usize, svc: &Arc<dyn IHostedService>) {
     }
 }
 
-async fn drain_connections(join_set: &mut JoinSet<()>, label: &str, mode: AppMode) {
-    let timeout_secs = if mode == AppMode::Development { 5 } else { 30 };
+async fn drain_connections(
+    join_set: &mut JoinSet<()>,
+    label: &str,
+    drain_timeout: Duration,
+    stream_drain_timeout: Duration,
+    active_streams: &AtomicUsize,
+) {
+    let timeout = drain_timeout_for(
+        drain_timeout,
+        stream_drain_timeout,
+        active_streams.load(Ordering::Relaxed),
+    );
     let drain_future = async {
         while let Some(result) = join_set.join_next().await {
             if let Err(e) = result {
@@ -1824,7 +2130,7 @@ async fn drain_connections(join_set: &mut JoinSet<()>, label: &str, mode: AppMod
         }
     };
 
-    match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), drain_future).await {
+    match tokio::time::timeout(timeout, drain_future).await {
         Ok(_) => tracing::info!("{}: drained.", label),
         Err(_) => {
             tracing::warn!("{}: drain timeout, aborting connections.", label);
@@ -1832,6 +2138,23 @@ async fn drain_connections(join_set: &mut JoinSet<()>, label: &str, mode: AppMod
             while join_set.join_next().await.is_some() {}
         }
     }
+}
+
+fn drain_timeout_for(normal: Duration, streaming: Duration, active_streams: usize) -> Duration {
+    let chosen = if active_streams > 0 {
+        streaming
+    } else {
+        normal
+    };
+    chosen.max(Duration::from_secs(1))
+}
+
+fn is_sse_response(response: &hyper::Response<RespBody>) -> bool {
+    response
+        .headers()
+        .get(hyper::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.trim_start().starts_with("text/event-stream"))
 }
 
 // ---------------------------------------------------------------------------
@@ -1876,8 +2199,12 @@ async fn serve_http(
     mode: AppMode,
     body_limits: BodyLimits,
     max_connections: usize,
+    error_writers: Arc<Vec<Arc<dyn IErrorResponseWriter>>>,
+    drain_timeout: Duration,
+    stream_drain_timeout: Duration,
 ) {
     let sem = Arc::new(tokio::sync::Semaphore::new(max_connections));
+    let active_streams = Arc::new(AtomicUsize::new(0));
     let mut join_set = JoinSet::new();
 
     loop {
@@ -1916,15 +2243,23 @@ async fn serve_http(
                 let router_handler = router_handler.clone();
                 let dispatch_runtime = Arc::clone(&dispatch_runtime);
                 let body_limits = body_limits.clone();
+                let error_writers = Arc::clone(&error_writers);
+                let connection_streaming = Arc::new(AtomicBool::new(false));
+                let active_streams = Arc::clone(&active_streams);
                 let conn_shutdown = shutdown.clone();
 
                 join_set.spawn(async move {
                     let _permit = permit;
+                    let connection_streaming_probe = Arc::clone(&connection_streaming);
+                    let active_streams_probe = Arc::clone(&active_streams);
                     let svc_fn = service_fn(move |req: Request<Incoming>| {
                         let pipeline = Arc::clone(&pipeline);
                         let router_handler = router_handler.clone();
                         let dispatch_runtime = Arc::clone(&dispatch_runtime);
                         let body_limits = body_limits.clone();
+                        let error_writers = Arc::clone(&error_writers);
+                        let connection_streaming = Arc::clone(&connection_streaming_probe);
+                        let active_streams = Arc::clone(&active_streams_probe);
                         let mode = mode;
                         // Peer address for rate limiting and audit; captured per
                         // connection and carried into the request context.
@@ -1940,8 +2275,14 @@ async fn serve_http(
                                 dispatch_runtime,
                                 body_limits,
                                 remote_addr,
+                                error_writers,
                             )
                             .await;
+                            if result.as_ref().is_ok_and(is_sse_response)
+                                && !connection_streaming.swap(true, Ordering::Relaxed)
+                            {
+                                active_streams.fetch_add(1, Ordering::Relaxed);
+                            }
                             let elapsed = start.elapsed();
                             if mode == AppMode::Development {
                                 let status =
@@ -1978,12 +2319,22 @@ async fn serve_http(
                             }
                         }
                     }
+                    if connection_streaming.load(Ordering::Relaxed) {
+                        active_streams.fetch_sub(1, Ordering::Relaxed);
+                    }
                 });
             }
         }
     }
 
-    drain_connections(&mut join_set, &format!("HTTP {}", addr), mode).await;
+    drain_connections(
+        &mut join_set,
+        &format!("HTTP {}", addr),
+        drain_timeout,
+        stream_drain_timeout,
+        &active_streams,
+    )
+    .await;
 }
 
 /// Serve HTTPS (TLS) on an already-bound listener.
@@ -1999,8 +2350,12 @@ async fn serve_https(
     mode: AppMode,
     body_limits: BodyLimits,
     max_connections: usize,
+    error_writers: Arc<Vec<Arc<dyn IErrorResponseWriter>>>,
+    drain_timeout: Duration,
+    stream_drain_timeout: Duration,
 ) {
     let sem = Arc::new(tokio::sync::Semaphore::new(max_connections));
+    let active_streams = Arc::new(AtomicUsize::new(0));
     let mut join_set = JoinSet::new();
 
     loop {
@@ -2036,10 +2391,15 @@ async fn serve_https(
                 let router_handler = router_handler.clone();
                 let dispatch_runtime = Arc::clone(&dispatch_runtime);
                 let body_limits = body_limits.clone();
+                let error_writers = Arc::clone(&error_writers);
+                let connection_streaming = Arc::new(AtomicBool::new(false));
+                let active_streams = Arc::clone(&active_streams);
                 let conn_shutdown = shutdown.clone();
 
                 join_set.spawn(async move {
                     let _permit = permit;
+                    let connection_streaming_probe = Arc::clone(&connection_streaming);
+                    let active_streams_probe = Arc::clone(&active_streams);
                     match acceptor.accept(stream).await {
                         Ok(tls_stream) => {
                             let io = TokioIo::new(tls_stream);
@@ -2048,6 +2408,9 @@ async fn serve_https(
                                 let router_handler = router_handler.clone();
                                 let dispatch_runtime = Arc::clone(&dispatch_runtime);
                                 let body_limits = body_limits.clone();
+                                let error_writers = Arc::clone(&error_writers);
+                                let connection_streaming = Arc::clone(&connection_streaming_probe);
+                                let active_streams = Arc::clone(&active_streams_probe);
                                 let mode = mode;
                                 // Peer address for rate limiting and audit.
                                 let remote_addr = remote_addr;
@@ -2062,8 +2425,14 @@ async fn serve_https(
                                         dispatch_runtime,
                                         body_limits,
                                         remote_addr,
+                                        error_writers,
                                     )
                                     .await;
+                                    if result.as_ref().is_ok_and(is_sse_response)
+                                        && !connection_streaming.swap(true, Ordering::Relaxed)
+                                    {
+                                        active_streams.fetch_add(1, Ordering::Relaxed);
+                                    }
                                     let elapsed = start.elapsed();
                                     if mode == AppMode::Development {
                                         let status =
@@ -2102,12 +2471,22 @@ async fn serve_https(
                             tracing::error!("TLS handshake error: {}", e);
                         }
                     }
+                    if connection_streaming.load(Ordering::Relaxed) {
+                        active_streams.fetch_sub(1, Ordering::Relaxed);
+                    }
                 });
             }
         }
     }
 
-    drain_connections(&mut join_set, &format!("HTTPS {}", addr), mode).await;
+    drain_connections(
+        &mut join_set,
+        &format!("HTTPS {}", addr),
+        drain_timeout,
+        stream_drain_timeout,
+        &active_streams,
+    )
+    .await;
 }
 
 // ---------------------------------------------------------------------------
@@ -2218,5 +2597,27 @@ mod embedded_attach_tests {
     #[test]
     fn host_crate_registers_no_asset_table() {
         assert!(EmbeddedAssets::registered().is_none());
+    }
+}
+
+#[cfg(test)]
+mod drain_tests {
+    use super::drain_timeout_for;
+    use std::time::Duration;
+
+    #[test]
+    fn streaming_connections_get_the_stream_budget() {
+        let normal = Duration::from_secs(30);
+        let stream = Duration::from_secs(300);
+        assert_eq!(drain_timeout_for(normal, stream, 0), normal);
+        assert_eq!(drain_timeout_for(normal, stream, 1), stream);
+    }
+
+    #[test]
+    fn zero_budget_is_clamped_to_one_second() {
+        assert_eq!(
+            drain_timeout_for(Duration::ZERO, Duration::ZERO, 0),
+            Duration::from_secs(1)
+        );
     }
 }

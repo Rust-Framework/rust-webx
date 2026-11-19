@@ -17,6 +17,7 @@
 
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
+use std::fmt;
 use webx_core::security::constant_time_eq;
 
 /// Default key prefix used by the SDK-facing API.
@@ -34,12 +35,23 @@ pub const SECRET_HASH_LEN: usize = 32;
 type HmacSha256 = Hmac<Sha256>;
 
 /// The two parts of a presented API key.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct PresentedApiKey<'a> {
     /// Indexed identifier (the only part stored in cleartext / logs).
     pub key_id: &'a str,
     /// The secret handed to the client; never log or store it.
     pub secret: &'a str,
+}
+
+impl fmt::Debug for PresentedApiKey<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Never emit the secret via Debug: `{:?}` on this value must not leak
+        // credentials into logs. Only the key id is safe to display.
+        f.debug_struct("PresentedApiKey")
+            .field("key_id", &self.key_id)
+            .field("secret", &"<redacted>")
+            .finish()
+    }
 }
 
 /// Split `{prefix}{key_id}-{secret}` into its parts.
@@ -89,6 +101,15 @@ pub fn verify_secret(pepper: &[u8], secret: &str, expected_hash: &[u8]) -> bool 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn debug_redacts_the_secret() {
+        let parsed = parse_presented("sk-key-1-0123456789abcdef", DEFAULT_PREFIX).expect("parses");
+        let rendered = format!("{parsed:?}");
+        assert!(!rendered.contains("0123456789abcdef"), "Debug leaked the secret: {rendered}");
+        assert!(rendered.contains("key-1"));
+        assert!(rendered.contains("<redacted>"));
+    }
 
     #[test]
     fn parses_prefix_id_and_secret() {

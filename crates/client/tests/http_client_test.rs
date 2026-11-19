@@ -166,6 +166,30 @@ async fn spawn_server() -> String {
     format!("http://{addr}")
 }
 
+/// Local cleartext HTTP/2 (h2c prior-knowledge) server for outbound h2 tests.
+async fn spawn_h2c_server() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind test port");
+    let addr = listener.local_addr().expect("local addr");
+
+    tokio::spawn(async move {
+        loop {
+            let Ok((stream, _)) = listener.accept().await else {
+                break;
+            };
+            tokio::spawn(async move {
+                let io = TokioIo::new(stream);
+                let _ = hyper::server::conn::http2::Builder::new(hyper_util::rt::TokioExecutor::new())
+                    .serve_connection(io, service_fn(handle))
+                    .await;
+            });
+        }
+    });
+
+    format!("http://{addr}")
+}
+
 /// Minimal HTTP `CONNECT` proxy: accepts one CONNECT request, opens the tunnel
 /// target and then splices the two sockets. Enough to prove the client actually
 /// tunnels through `HttpClientOptions::proxy`.
@@ -248,6 +272,34 @@ async fn gets_json_with_headers() {
 
     assert_eq!(response.status, 200);
     assert_eq!(response.headers["x-test"].to_str().unwrap(), "yes");
+    assert_eq!(
+        &response.body.collect(1024).await.expect("body collects")[..],
+        b"{\"ok\":true}"
+    );
+}
+
+#[tokio::test]
+async fn outbound_h2c_prior_knowledge_reports_http2() {
+    let base = spawn_h2c_server().await;
+    let client = HttpClient::new(
+        "h2c",
+        HttpClientOptions {
+            http2_only: true,
+            ..options(base)
+        },
+    )
+    .expect("client builds");
+
+    let response = client
+        .execute(OutboundRequest::get("/json"))
+        .await
+        .expect("h2c request succeeds");
+    assert_eq!(response.status, 200);
+    assert_eq!(
+        response.version,
+        http::Version::HTTP_2,
+        "outbound must use HTTP/2 with http2_only"
+    );
     assert_eq!(
         &response.body.collect(1024).await.expect("body collects")[..],
         b"{\"ok\":true}"
@@ -510,6 +562,31 @@ async fn ssrf_guard_blocks_metadata_and_private_literals() {
         .err()
         .expect("a private base URL must be rejected");
     assert!(matches!(error, HttpClientError::BlockedAddress(_)));
+
+    // IPv4-mapped IPv6 must not slip past the guard (::ffff:a.b.c.d).
+    for literal in [
+        "http://[::ffff:169.254.169.254]",
+        "http://[::ffff:10.0.0.1]",
+        "http://[::ffff:192.168.1.1]",
+        // Native IPv6 internal / metadata-equivalent ranges.
+        "http://[fd00::1]",
+        "http://[fe80::1]",
+        "http://[64:ff9b::a9fe:a9fe]", // NAT64 of 169.254.169.254
+    ] {
+        let error = HttpClient::new("blocked", HttpClientOptions::new(literal))
+            .err()
+            .unwrap_or_else(|| panic!("{literal} must be rejected by the SSRF guard"));
+        assert!(
+            matches!(error, HttpClientError::BlockedAddress(_)),
+            "{literal} -> unexpected error {error:?}"
+        );
+    }
+
+    // A public NAT64-mapped address (64:ff9b::/96 + 8.8.8.8) must NOT be
+    // blocked. The IPv4 lives in segments 6-7; reading 5-6 would turn it into
+    // 0.0.8.8 and falsely reject every public NAT64 destination.
+    HttpClient::new("nat64-public", HttpClientOptions::new("http://[64:ff9b::0808:0808]"))
+        .expect("a public NAT64 address must be allowed");
 
     // Loopback stays allowed, so a client can still talk to a local mock.
     let base = spawn_server().await;

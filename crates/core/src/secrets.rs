@@ -181,6 +181,18 @@ pub struct FileSecretStore {
     root: PathBuf,
 }
 
+/// Whether an open error means "path is a symlink". On Unix, `O_NOFOLLOW`
+/// yields `ELOOP`; elsewhere there is no nofollow flag, so no error maps here.
+#[cfg(unix)]
+fn is_symlink_error(error: &std::io::Error) -> bool {
+    error.raw_os_error() == Some(libc::ELOOP)
+}
+
+#[cfg(not(unix))]
+fn is_symlink_error(_error: &std::io::Error) -> bool {
+    false
+}
+
 impl FileSecretStore {
     /// Read secrets beneath `root`.
     pub fn new(root: impl Into<PathBuf>) -> Self {
@@ -213,47 +225,86 @@ impl FileSecretStore {
 impl ISecretStore for FileSecretStore {
     async fn get(&self, name: &str) -> Result<SecretValue, SecretError> {
         let path = self.path_for(name)?;
-        let metadata = match std::fs::symlink_metadata(&path) {
-            Ok(metadata) => metadata,
+        let unavailable = |detail: String| SecretError::Unavailable {
+            name: name.to_string(),
+            detail,
+        };
+
+        // On platforms without O_NOFOLLOW there is no race-free way to reject
+        // symlinks, but a `symlink_metadata` check is still strictly better than
+        // following arbitrary links out of the secret directory (Windows
+        // junctions/symlinks need no admin rights). Keep the original guard.
+        // On Unix the check below is done race-free on the opened fd instead.
+        #[cfg(not(unix))]
+        match std::fs::symlink_metadata(&path) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return Err(unavailable("secret file must not be a symlink".into()));
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Err(SecretError::NotFound(name.to_string()));
             }
             Err(error) => {
-                return Err(SecretError::Unavailable {
-                    name: name.to_string(),
-                    detail: format!("cannot stat {}: {error}", path.display()),
-                });
+                return Err(unavailable(format!("cannot stat {}: {error}", path.display())));
             }
-        };
-        if metadata.file_type().is_symlink() {
-            return Err(SecretError::Unavailable {
-                name: name.to_string(),
-                detail: "secret file must not be a symlink".to_string(),
-            });
+            Ok(_) => {}
         }
+
+        // Open the file once and validate the *opened handle*, never a path
+        // that could be swapped between a separate stat() and read() (TOCTOU).
+        #[cfg(unix)]
+        let open_result = {
+            use std::os::unix::fs::OpenOptionsExt;
+            std::fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NOFOLLOW)
+                .open(&path)
+        };
+        #[cfg(not(unix))]
+        let open_result = std::fs::File::open(&path);
+
+        let file = match open_result {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Err(SecretError::NotFound(name.to_string()));
+            }
+            // ELOOP on Unix means the path is a symlink rejected by O_NOFOLLOW.
+            Err(error) if is_symlink_error(&error) => {
+                return Err(unavailable("secret file must not be a symlink".into()));
+            }
+            Err(error) => return Err(unavailable(format!("cannot open {}: {error}", path.display()))),
+        };
+
+        // Permissions are checked on the already-open fd, so a race cannot swap
+        // in a world-readable file after validation.
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            if metadata.permissions().mode() & 0o077 != 0 {
-                return Err(SecretError::Unavailable {
-                    name: name.to_string(),
-                    detail: "secret file permissions must be 0600".to_string(),
-                });
+            match file.metadata() {
+                Ok(meta) if meta.permissions().mode() & 0o077 != 0 => {
+                    return Err(unavailable("secret file permissions must be 0600".into()));
+                }
+                Err(error) => {
+                    return Err(unavailable(format!("cannot stat {}: {error}", path.display())));
+                }
+                _ => {}
             }
         }
 
-        let raw = std::fs::read(&path).map_err(|error| SecretError::Unavailable {
-            name: name.to_string(),
-            detail: format!("cannot read {}: {error}", path.display()),
-        })?;
-        let text = String::from_utf8(raw).map_err(|_| SecretError::Unavailable {
-            name: name.to_string(),
-            detail: "secret file is not valid UTF-8".to_string(),
-        })?;
-        let value = text.trim_end_matches(['\r', '\n']).to_string();
-        if value.is_empty() {
+        use std::io::Read;
+        let mut file = file;
+        let mut raw = Vec::new();
+        file.read_to_end(&mut raw)
+            .map_err(|error| unavailable(format!("cannot read {}: {error}", path.display())))?;
+
+        // Trim in place so no un-zeroized copy of the secret is left behind.
+        while matches!(raw.last(), Some(b'\r') | Some(b'\n')) {
+            raw.pop();
+        }
+        if raw.is_empty() {
             return Err(SecretError::NotFound(name.to_string()));
         }
+        let value = String::from_utf8(raw)
+            .map_err(|_| unavailable("secret file is not valid UTF-8".into()))?;
         Ok(SecretValue::new(value))
     }
 }
@@ -413,6 +464,33 @@ mod tests {
             store.get("loose").await,
             Err(SecretError::Unavailable { detail, .. }) if detail.contains("0600")
         ));
+    }
+
+    #[tokio::test]
+    async fn file_store_rejects_symlinks_on_all_platforms() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let outside = dir.path().join("outside.txt");
+        std::fs::write(&outside, "external-secret").expect("write outside file");
+
+        let link = dir.path().join("linked");
+        #[cfg(unix)]
+        let created = std::os::unix::fs::symlink(&outside, &link);
+        #[cfg(windows)]
+        let created = std::os::windows::fs::symlink_file(&outside, &link);
+        // Creating symlinks needs extra privileges on some hosts; if the OS
+        // refuses, there is no link to test and we skip rather than false-fail.
+        if created.is_err() {
+            return;
+        }
+
+        let store = FileSecretStore::new(dir.path());
+        assert!(
+            matches!(
+                store.get("linked").await,
+                Err(SecretError::Unavailable { detail, .. }) if detail.contains("symlink")
+            ),
+            "a symlink must never be followed, on any platform"
+        );
     }
 
     #[tokio::test]

@@ -122,6 +122,18 @@ impl Stream for SseStream {
                         this.retry = std::str::from_utf8(value).ok().and_then(|v| v.parse().ok());
                     }
                     b"data" => {
+                        // `data` accumulates across lines until a blank line
+                        // dispatches the event. Bound it independently of the
+                        // partial-line buffer, otherwise an upstream that keeps
+                        // sending `data:` lines without a terminator grows the
+                        // vector without limit (memory DoS).
+                        let extra = value.len().saturating_add(usize::from(this.has_data));
+                        if this.data.len().saturating_add(extra) > this.max_buffer {
+                            this.done = true;
+                            return Poll::Ready(Some(Err(HttpClientError::BodyTooLarge {
+                                limit: this.max_buffer,
+                            })));
+                        }
                         if this.has_data {
                             this.data.put_u8(b'\n');
                         }

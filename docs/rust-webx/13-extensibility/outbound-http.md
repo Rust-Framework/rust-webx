@@ -135,12 +135,27 @@ let client = HttpClient::new("public", HttpClientOptions {
 - 字面私有 IPv4（10/8、172.16/12、192.168/16、100.64/10 等）、链路本地
   （169.254/16，含 `169.254.169.254`）、文档/基准地址、IPv6 ULA/链路本地/组播一律拒绝，
   返回 `HttpClientError::BlockedAddress`。
+- **IPv4-mapped IPv6**（`::ffff:a.b.c.d`）会先映射回 IPv4 再套用同一策略，堵住 `::ffff:169.254.169.254`
+  这类前缀绕过；同时覆盖 IPv6 文档段 `2001:db8::/32`、站点本地 `fec0::/10`、
+  6to4 `2002::/16` 与 NAT64 `64:ff9b::/96` 中嵌入的私有地址。
 - 内部主机后缀 `.local`、`.internal`、`.home.arpa` 同样拒绝。
 - 回环（`127.0.0.0/8`、`::1`、`localhost`）允许，便于本地开发与 mock。
 - 内网/本地模型显式设置 `allow_private_networks: true` 才放行。
-- 目前按 URI 字面 host 校验；公网域名解析到私网地址（DNS rebinding）不在连接期复查，且客户端
-  不自动跟随重定向。对不可信输入仍应在应用层做 URL 允许列表。
+- **DNS rebinding 在连接期复查**：公网域名由带守卫的解析器解析，每个 DNS 应答 IP 都用同一套
+  `is_blocked_ip` 过滤；若全部被封堵则连接失败，不再出现「URI 检查通过、连接时却指向私网」的窗口。
+  字面 IP 不走解析器（hyper 直接连接），已在 URI 校验阶段覆盖。客户端不自动跟随重定向。
 - 代理地址由运维配置，不经过该守卫；上游目标仍会校验。
+
+## HTTP/2
+
+出站与入站均支持 HTTP/2：
+
+- **出站**：默认通过 TLS ALPN 协商 h2（`http2 = true`，HTTP/1.1 作为回退）。设置
+  `http2_only = true` 可强制 HTTP/2——TLS 目标只 advertise `h2`，明文目标使用 h2c
+  prior-knowledge。响应版本可从 `OutboundResponse::version` 读取。
+- **入站**：服务端连接构建器版本自适应，同时接受 HTTP/1.1 与 HTTP/2；明文监听支持 h2c
+  prior-knowledge，TLS 监听通过 ALPN（`h2` 优先、`http/1.1` 回退）协商。
+- hop-by-hop 头过滤、超时与 SSE 解码在 h1/h2 下语义一致。
 
 ## 限制（当前版本）
 

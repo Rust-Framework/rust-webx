@@ -28,6 +28,7 @@
 pub mod api_key;
 pub mod api_key_store;
 pub mod cache;
+pub mod catalog_file;
 pub mod cost;
 pub mod error;
 pub mod executor;
@@ -47,6 +48,10 @@ pub use api_key_store::{
     MemoryApiKeyStore,
 };
 pub use cache::{request_cache_key, IGatewayCache, MemoryGatewayCache};
+pub use catalog_file::{
+    CapabilityFlags, CatalogFileError, CatalogFileWatcher, CatalogManifest, ManifestAlias,
+    ManifestModel, ManifestStrategy, ManifestTarget,
+};
 pub use cost::{ICostCalculator, ModelPrice, NoCost, StaticCostTable};
 pub use error::{OpenAiError, OpenAiErrorBody, OpenAiErrorWriter};
 pub use executor::{GatewayContext, GatewayError, GatewayEstimate, GatewayExecutor, GatewayStream};

@@ -33,7 +33,7 @@
 | G10 | 凭据/密钥 | ✅ `ISecretStore` + `SecretValue`（Debug 脱敏、Drop zeroize）+ `SecretRef` + `EnvSecretStore`/`FileSecretStore`（0600、拒绝符号链接/穿越）/`ChainSecretStore`，`OpenAiProvider::from_secret_store` 已接；KMS/信封加密、轮换与 key pool 待补 | `crates/core/src/secrets.rs`、`crates/ai/src/openai.rs`、`docs/rust-webx/09-auth-security/secret-store.md` |
 | G11 | 缓存与单飞 | ✅ 精确缓存键（tenant+model+完整请求、`temperature==0`、非流）+ `MemoryGatewayCache` + 单飞（并发同键共享一次上游）+ 命中/加入指标；Redis/SSE 重放待补 | `crates/ai/src/cache.rs`、`crates/ai/src/executor.rs` |
 | G12 | 可观测 | ✅ core `IMeter`/`NoopMeter`/`MemoryMeter` + 执行器请求/TTFT/token/成本/上游错误/配额/active streams/熔断状态指标 + 结构化日志 + W3C `traceparent` 采纳/出站注入 + `GatewayHealth` 就绪聚合；上游子 span/OTel exporter/`tracestate` 待补 | `crates/core/src/metrics.rs`、`crates/ai/src/{executor,cost}.rs`、`crates/gateway/src/health.rs`、`crates/host/src/request_tracing.rs`、`crates/client/src/client.rs` |
-| G13 | 动态配置 | ✅ `CatalogHandle`（`ArcSwap`）+ `CatalogRouter::from_handle` + `GatewayExecutor::new_with_handle`；版本回退拒绝；`IOptionsMonitor<T>` + `HostBuilder::add_options_monitor` / `watch_options_file`（文件轮询、变更通知、坏配置保留旧快照）；目录文件 watcher、配额/价格/key 轮换待补 | `crates/ai/src/{provider,routing,executor}.rs`、`crates/core/src/options_monitor.rs`、`crates/host/src/options_watch.rs` |
+| G13 | 动态配置 | ✅ `CatalogHandle`（`ArcSwap`）+ `CatalogRouter::from_handle` + `GatewayExecutor::new_with_handle`；版本回退拒绝；`IOptionsMonitor<T>` + `HostBuilder::add_options_monitor` / `watch_options_file`；`CatalogFileWatcher` + `CatalogManifest`（models/aliases 文件热加载、校验失败保留旧快照）；多实例版本轮询/canary/配额价格 key 轮换待补 | `crates/ai/src/{provider,routing,executor,catalog_file}.rs`、`crates/core/src/options_monitor.rs`、`crates/host/src/options_watch.rs` |
 | G15 | 长流停机 | ✅ `Server.DrainTimeoutSeconds` / `StreamDrainTimeoutSeconds` 分离；连接级 SSE 活动跟踪选择预算；`ShutdownToken` + `SseResult::on_server_shutdown` 发送 `event:server_shutdown` 后正常结束；后端 drain 协调待补 | `crates/core/src/config.rs`、`crates/core/src/{hosted,stream}.rs`、`crates/host/src/server.rs` |
 | G17 | 成本模拟 | ✅ `GatewayExecutor::estimate` + `/v1/chat/completions` 的 `dry_run`（不调 provider/不预扣） | `crates/ai/src/executor.rs`、`crates/gateway/src/handler.rs` |
 | G16 | 测试工具链 | ✅ `MockUpstream`（JSON/SSE/status/延迟/请求录制）+ 文件式 `ReplayFixture`（版本协商、敏感头默认脱敏、原始保存）+ OpenAI 适配器真实 HTTP/SSE e2e + SSE 任意 chunk 边界回归；官方 SDK conformance、真实 fuzz/压测待补 | `crates/client/src/{testing,sse}.rs`、`crates/ai/tests/openai_provider_test.rs` |
@@ -935,8 +935,11 @@ Host::builder()
   坏 JSON 返回 typed error 且**保留旧快照**（失败退化为上一版，不宕机）。
 - 订阅者从当前快照开始；无订阅者时替换仍生效。
 
-**待补**：目录文件/DB watcher（用 `IOptionsMonitor` 承载"构建下一版 catalog"）、配额策略/价格/key
-轮换、多实例版本轮询、canary 校验。
+**文件热加载（CatalogFileWatcher）**：manifest 只声明 models/capabilities/aliases（provider 由代码提供），
+`CatalogFileWatcher` 轮询 JSON → 校验（未知 provider/target、重复、版本回退）→ `reload`；内容 hash
+去重，坏文件保留旧快照。装配见 `11-production/hot-config.md`。
+
+**待补**：多实例版本轮询、canary 校验、配额策略/价格/key 轮换。
 
 ### G14 请求体流式
 

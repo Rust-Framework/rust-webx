@@ -29,3 +29,6 @@ tempfile.workspace = true
 brotli.workspace = true
 tokio.workspace = true
 async-trait.workspace = true
+
+[lints]
+workspace = true

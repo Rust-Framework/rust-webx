@@ -42,3 +42,6 @@ password-argon2 = ["rust-webx-host/password-argon2"]
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart"] }
 futures-util.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

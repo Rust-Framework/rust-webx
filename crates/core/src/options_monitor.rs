@@ -3,20 +3,24 @@
 //! `add_options::<T>` binds a configuration section once at startup. A gateway
 //! needs to change routing/pricing/key settings without restarting, so this
 //! module adds the missing half: [`OptionsMonitor<T>`] holds the current
-//! snapshot in an [`arc_swap::ArcSwap`] and publishes each replacement through a
-//! `tokio::sync::watch` channel.
+//! snapshot and publishes each replacement through a single `tokio::sync::watch`
+//! channel, which is the one source of truth.
 //!
-//! * [`IOptionsMonitor::current`] is the hot-path read: a lock-free `Arc` clone.
+//! * [`IOptionsMonitor::current`] is the hot-path read: a cheap `Arc` clone from
+//!   the watch channel's stored value.
 //! * [`IOptionsMonitor::subscribe`] gives consumers a receiver that observes
 //!   every replacement (a lagging consumer still reads the latest value).
 //! * Values are immutable. Replacements are whole snapshots, never in-place
 //!   mutation, so a handler either sees the old or the new configuration.
 //!
+//! A single source (rather than parallel `ArcSwap` + `watch` states updated in
+//! two steps) guarantees `current()` and `subscribe().borrow()` can never
+//! diverge, even under concurrent reloads.
+//!
 //! The host wires this to `appsettings.json` with
 //! `HostBuilder::add_options_monitor` (startup snapshot) and
 //! `HostBuilder::watch_options_file` (poll a JSON file and reload it in place).
 
-use arc_swap::ArcSwap;
 use std::fmt;
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -48,7 +52,6 @@ pub struct OptionsMonitor<T>
 where
     T: Send + Sync + 'static,
 {
-    current: ArcSwap<T>,
     updates: watch::Sender<Arc<T>>,
 }
 
@@ -58,12 +61,8 @@ where
 {
     /// A monitor whose initial snapshot is `initial`.
     pub fn new(initial: T) -> Self {
-        let initial = Arc::new(initial);
-        let (updates, _receiver) = watch::channel(Arc::clone(&initial));
-        Self {
-            current: ArcSwap::from(initial),
-            updates,
-        }
+        let (updates, _receiver) = watch::channel(Arc::new(initial));
+        Self { updates }
     }
 
     /// Replace the snapshot and notify subscribers.
@@ -76,16 +75,17 @@ where
 
     /// Replace the snapshot with an already shared value.
     pub fn replace(&self, value: Arc<T>) -> Arc<T> {
-        let previous = self.current.swap(Arc::clone(&value));
-        // `send_replace` updates even when nobody is subscribed, so a consumer
-        // that subscribes after the reload still starts from the new value.
-        self.updates.send_replace(value);
-        previous
+        // `send_replace` is a single atomic state transition: it both swaps the
+        // stored value and returns the previous one, so `current()` and every
+        // subscriber always observe the same snapshot. It also updates even
+        // when nobody is subscribed, so a late subscriber starts from the new
+        // value.
+        self.updates.send_replace(value)
     }
 
     /// The current snapshot (same value as [`IOptionsMonitor::current`]).
     pub fn current(&self) -> Arc<T> {
-        self.current.load_full()
+        Arc::clone(&self.updates.borrow())
     }
 
     /// Subscribe to subsequent replacements.
@@ -99,7 +99,7 @@ where
     T: Send + Sync + 'static,
 {
     fn current(&self) -> Arc<T> {
-        self.current.load_full()
+        Arc::clone(&self.updates.borrow())
     }
 
     fn subscribe(&self) -> watch::Receiver<Arc<T>> {

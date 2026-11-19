@@ -28,3 +28,6 @@ tracing.workspace = true
 [dev-dependencies]
 rust-ef-sqlite.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

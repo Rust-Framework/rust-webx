@@ -1988,6 +1988,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-util",
+ "h2",
  "http",
  "http-body",
  "http-body-util",
@@ -2230,6 +2231,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "tower-service",
  "webpki-roots",
 ]
 
@@ -2243,6 +2245,7 @@ dependencies = [
  "futures-util",
  "httpdate",
  "inventory",
+ "libc",
  "rust-dix",
  "serde",
  "serde_json",
@@ -2266,6 +2269,7 @@ dependencies = [
  "ctrlc",
  "flate2",
  "futures-util",
+ "http",
  "http-body-util",
  "httpdate",
  "hyper",

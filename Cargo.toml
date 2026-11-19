@@ -23,6 +23,9 @@ members = [
     "dmbit/host",
 ]
 
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
 [workspace.package]
 version = "1.4.0"
 edition = "2021"
@@ -32,7 +35,7 @@ authors = ["Start"]
 homepage = "https://rust-framework.github.io/rust-webx/"
 repository = "https://github.com/Rust-Framework/rust-webx"
 documentation = "https://docs.rs/rust-webx"
-description = "rust-webx 鈥?A Rust WebApi framework inspired by ASP.NET Core, built on DI + Mediator pattern"
+description = "rust-webx - A Rust WebApi framework inspired by ASP.NET Core, built on DI + Mediator pattern"
 
 [workspace.dependencies]
 # Internal crates

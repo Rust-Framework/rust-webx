@@ -7,7 +7,8 @@
 use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper::Request;
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::server::conn::auto;
 use rust_dix::{ServiceCollection, ServiceProvider};
 use webx_core::app::IHost;
 use webx_core::auth::IAuthenticationScheme;
@@ -2119,10 +2120,22 @@ fn install_shutdown_handler(shutdown: ShutdownSignal, token: CancellationToken) 
 
 /// Tokio-based listener for Ctrl+C (all platforms) and SIGTERM (Unix).
 fn spawn_async_shutdown_listener(shutdown: ShutdownSignal, token: CancellationToken) {
+    let cancelled = token.clone();
     tokio::spawn(async move {
-        wait_for_shutdown_signal().await;
-        tracing::info!("Async shutdown signal received, draining connections...");
-        trigger_shutdown(&shutdown, &token);
+        // Exit if shutdown was triggered by another source (another host, an
+        // explicit handle.shutdown(), or the server loop ending). Otherwise
+        // each run() leaks a listener that holds the watch channel alive for
+        // the entire process lifetime — a problem for tests and embedded
+        // multi-host deployments.
+        tokio::select! {
+            _ = wait_for_shutdown_signal() => {
+                tracing::info!("Async shutdown signal received, draining connections...");
+                trigger_shutdown(&shutdown, &token);
+            }
+            _ = cancelled.cancelled() => {
+                tracing::debug!("Shutdown listener stopped: already shutting down");
+            }
+        }
     });
 }
 
@@ -2421,8 +2434,10 @@ async fn serve_http(
                         }
                     });
 
-                    let conn = hyper::server::conn::http1::Builder::new()
-                        .serve_connection(io, svc_fn);
+                    // Version-adaptive connection: accepts HTTP/1.1 and
+                    // HTTP/2 (cleartext h2c prior-knowledge and TLS ALPN h2).
+                    let builder = auto::Builder::new(TokioExecutor::new());
+                    let conn = builder.serve_connection(io, svc_fn);
                     let mut conn = std::pin::pin!(conn);
                     let mut conn_shutdown = conn_shutdown;
                     tokio::select! {
@@ -2571,8 +2586,10 @@ async fn serve_https(
                                 }
                             });
 
-                            let conn = hyper::server::conn::http1::Builder::new()
-                                .serve_connection(io, svc_fn);
+                            // TLS connection with ALPN h2/http1.1; the version
+                            // is picked from the negotiated ALPN protocol.
+                            let builder = auto::Builder::new(TokioExecutor::new());
+                            let conn = builder.serve_connection(io, svc_fn);
                             let mut conn = std::pin::pin!(conn);
                             let mut conn_shutdown = conn_shutdown;
                             tokio::select! {
@@ -2659,10 +2676,13 @@ fn build_tls_acceptor(cert_path: &str, key_path: &str) -> Result<TlsAcceptor> {
             webx_core::error::Error::Http(format!("No valid private key in '{}'", key_path))
         })?;
 
-    let config = ServerConfig::builder()
+    let mut config = ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(certs, key)
         .map_err(|e| webx_core::error::Error::Http(format!("TLS config error: {}", e)))?;
+    // Advertise h2 first so capable clients negotiate HTTP/2, while keeping
+    // http/1.1 as a fallback for older clients.
+    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
 
     Ok(TlsAcceptor::from(std::sync::Arc::new(config)))
 }

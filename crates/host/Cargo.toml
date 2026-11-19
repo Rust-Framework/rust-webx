@@ -60,7 +60,8 @@ testing = ["dep:reqwest"]
 password-argon2 = ["dep:argon2", "dep:rand_core"]
 
 [dev-dependencies]
-reqwest = { version = "0.12", default-features = false, features = ["json", "gzip", "rustls-tls"] }
+http.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["json", "gzip", "rustls-tls", "http2"] }
 criterion = { version = "0.5", features = ["html_reports"] }
 rust-webx-macros.workspace = true
 rcgen = "0.13"
@@ -73,3 +74,6 @@ harness = false
 [[bench]]
 name = "pipeline_bench"
 harness = false
+
+[lints]
+workspace = true

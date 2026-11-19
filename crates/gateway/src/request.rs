@@ -6,6 +6,15 @@ use webx::IdentityUser;
 use webx::WebxRequestMeta;
 use webx_ai::{CanonicalRequest, ContentPart, Message, Role, SamplingParams, ToolCall, ToolDef};
 
+/// Request-shape ceilings. These are defense-in-depth before a request reaches
+/// tokenization/quota: a hostile client cannot force unbounded allocation or a
+/// multi-million-token upstream bill with one JSON body.
+const MAX_MESSAGES: usize = 512;
+const MAX_TOOLS: usize = 128;
+const MAX_STOP_SEQUENCES: usize = 16;
+const MAX_MAX_TOKENS: u32 = 200_000;
+const MAX_TEXT_LEN: usize = 2_000_000;
+
 /// Stop sequence: a single string or an array of strings.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
@@ -155,14 +164,35 @@ impl TryFrom<OpenAiChatRequest> for CanonicalRequest {
         if model.trim().is_empty() {
             return Err("model is required".into());
         }
+        if model.len() > 512 {
+            return Err("model name is too long".into());
+        }
         if messages.is_empty() {
             return Err("messages must not be empty".into());
+        }
+        if messages.len() > MAX_MESSAGES {
+            return Err(format!("too many messages (max {MAX_MESSAGES})"));
+        }
+        if let Some(limit) = max_tokens {
+            if limit == 0 || limit > MAX_MAX_TOKENS {
+                return Err(format!("max_tokens out of range (1..={MAX_MAX_TOKENS})"));
+            }
+        }
+        if tools.as_ref().is_some_and(|t| t.len() > MAX_TOOLS) {
+            return Err(format!("too many tools (max {MAX_TOOLS})"));
         }
 
         let messages = messages
             .into_iter()
             .map(convert_message)
             .collect::<Result<Vec<_>, _>>()?;
+        // Apply the text ceiling to the canonical messages, not only to the
+        // tool-message path: user/assistant/system content, image URLs, tool
+        // call arguments and names all reach tokenization/quota and must be
+        // bounded. One check here covers every conversion path uniformly.
+        for message in &messages {
+            validate_message_limits(message)?;
+        }
         let tools = tools
             .unwrap_or_default()
             .into_iter()
@@ -174,6 +204,12 @@ impl TryFrom<OpenAiChatRequest> for CanonicalRequest {
                 StopValue::Multiple(many) => many,
             })
             .unwrap_or_default();
+        if stop.len() > MAX_STOP_SEQUENCES {
+            return Err(format!("too many stop sequences (max {MAX_STOP_SEQUENCES})"));
+        }
+        if stop.iter().any(|s| s.len() > MAX_TEXT_LEN) {
+            return Err("stop sequence is too long".into());
+        }
 
         let mut canonical = CanonicalRequest {
             model,
@@ -277,6 +313,47 @@ fn convert_message(message: OpenAiMessage) -> Result<Message, String> {
     }
 }
 
+/// Enforce [`MAX_TEXT_LEN`] on every caller-supplied string in a converted
+/// message. Called on the canonical form so no conversion path (string content,
+/// multimodal parts, tool calls, names) can bypass the ceiling.
+fn validate_message_limits(message: &Message) -> Result<(), String> {
+    let too_long = |text: &str| text.len() > MAX_TEXT_LEN;
+    if message.name.as_ref().is_some_and(|name| too_long(name)) {
+        return Err("message name is too long".into());
+    }
+    for part in &message.content {
+        match part {
+            ContentPart::Text(text) => {
+                if too_long(text) {
+                    return Err("message content is too long".into());
+                }
+            }
+            ContentPart::Image { url, detail } => {
+                if too_long(url) {
+                    return Err("image url is too long".into());
+                }
+                if detail.as_ref().is_some_and(|value| too_long(value)) {
+                    return Err("image detail is too long".into());
+                }
+            }
+            ContentPart::ToolCall(call) => {
+                if too_long(&call.id) || too_long(&call.name) || too_long(&call.arguments) {
+                    return Err("tool call field is too long".into());
+                }
+            }
+            ContentPart::ToolResult {
+                tool_call_id,
+                content,
+            } => {
+                if too_long(tool_call_id) || too_long(content) {
+                    return Err("tool result field is too long".into());
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn content_parts(content: Option<Value>) -> Result<Vec<ContentPart>, String> {
     match content {
         None | Some(Value::Null) => Ok(Vec::new()),
@@ -327,9 +404,16 @@ fn convert_content_part(part: Value) -> Result<ContentPart, String> {
 }
 
 fn content_as_text(content: Option<Value>) -> Result<String, String> {
+    let check = |text: String| {
+        if text.len() > MAX_TEXT_LEN {
+            Err("message content is too long".to_string())
+        } else {
+            Ok(text)
+        }
+    };
     match content {
         None | Some(Value::Null) => Ok(String::new()),
-        Some(Value::String(text)) => Ok(text),
+        Some(Value::String(text)) => check(text),
         Some(Value::Array(parts)) => {
             let mut text = String::new();
             for part in parts {
@@ -343,7 +427,7 @@ fn content_as_text(content: Option<Value>) -> Result<String, String> {
                     _ => return Err("tool content must be text".into()),
                 }
             }
-            Ok(text)
+            check(text)
         }
         Some(other) => Err(format!("tool content must be text, got {other}")),
     }
@@ -355,16 +439,20 @@ mod tests {
     use serde_json::json;
     use webx::IdentityUser;
 
+    fn base_message() -> OpenAiMessage {
+        OpenAiMessage {
+            role: "user".into(),
+            content: Some(json!("hello")),
+            name: None,
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+        }
+    }
+
     fn base_request() -> OpenAiChatRequest {
         OpenAiChatRequest {
             model: "fast".into(),
-            messages: vec![OpenAiMessage {
-                role: "user".into(),
-                content: Some(json!("hello")),
-                name: None,
-                tool_calls: Vec::new(),
-                tool_call_id: None,
-            }],
+            messages: vec![base_message()],
             user: IdentityUser {
                 id: "key-1".into(),
                 tenant_id: "tenant-1".into(),
@@ -475,5 +563,78 @@ mod tests {
         let canonical = CanonicalRequest::try_from(request).expect("converts");
         assert_eq!(canonical.extensions["tool_choice"], json!("auto"));
         assert_eq!(canonical.extensions["custom"], json!(1));
+    }
+
+    #[test]
+    fn rejects_oversized_requests_before_conversion() {
+        let request = OpenAiChatRequest {
+            max_tokens: Some(u32::MAX),
+            ..base_request()
+        };
+        assert!(CanonicalRequest::try_from(request).is_err(), "max_tokens must be bounded");
+
+        let request = OpenAiChatRequest {
+            messages: vec![
+                OpenAiMessage {
+                    role: "user".into(),
+                    content: Some(json!("hi")),
+                    name: None,
+                    tool_calls: Vec::new(),
+                    tool_call_id: None,
+                };
+                MAX_MESSAGES + 1
+            ],
+            ..base_request()
+        };
+        assert!(CanonicalRequest::try_from(request).is_err(), "message count must be bounded");
+    }
+
+    #[test]
+    fn text_ceiling_covers_every_message_path() {
+        let oversized = "x".repeat(MAX_TEXT_LEN + 1);
+
+        // Plain user content (the path that previously bypassed the ceiling).
+        let request = OpenAiChatRequest {
+            messages: vec![OpenAiMessage {
+                role: "user".into(),
+                content: Some(json!(oversized.clone())),
+                ..base_message()
+            }],
+            ..base_request()
+        };
+        assert!(CanonicalRequest::try_from(request).is_err(), "user text must be bounded");
+
+        // Assistant tool-call arguments.
+        let request = OpenAiChatRequest {
+            messages: vec![OpenAiMessage {
+                role: "assistant".into(),
+                content: Some(json!("ok")),
+                tool_calls: vec![OpenAiToolCall {
+                    id: "call-1".into(),
+                    function: OpenAiFunction {
+                        name: "f".into(),
+                        arguments: oversized.clone(),
+                    },
+                }],
+                ..base_message()
+            }],
+            ..base_request()
+        };
+        assert!(CanonicalRequest::try_from(request).is_err(), "tool arguments must be bounded");
+
+        // Multimodal image URL.
+        let image = json!([{
+            "type": "image_url",
+            "image_url": { "url": oversized }
+        }]);
+        let request = OpenAiChatRequest {
+            messages: vec![OpenAiMessage {
+                role: "user".into(),
+                content: Some(image),
+                ..base_message()
+            }],
+            ..base_request()
+        };
+        assert!(CanonicalRequest::try_from(request).is_err(), "image url must be bounded");
     }
 }

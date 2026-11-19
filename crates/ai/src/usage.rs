@@ -27,10 +27,11 @@ use thiserror::Error;
 /// Token usage for one request.
 ///
 /// `cached_tokens` and `reasoning_tokens` are subsets the provider reports
-/// separately (prompt caching, reasoning models). They are additive to the
-/// checksum only in the sense that [`Usage::total_tokens`] sums every bucket the
-/// caller filled; do not add them to `prompt_tokens`/`completion_tokens` again
-/// when a provider already includes them.
+/// separately (prompt caching, reasoning models): they are already included in
+/// `prompt_tokens` / `completion_tokens` respectively. [`Usage::total_tokens`]
+/// therefore counts `prompt + completion` only, matching the OpenAI wire
+/// definition and the billable semantics in `cost.rs`. Adding the subsets
+/// again would double-count them and over-charge quota/billing.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Usage {
     /// Input tokens billed for the request.
@@ -66,8 +67,18 @@ impl Usage {
         }
     }
 
-    /// Sum of every bucket, saturating instead of wrapping.
+    /// Billable total: prompt + completion tokens, saturating instead of
+    /// wrapping. `cached_tokens` and `reasoning_tokens` are reported subsets
+    /// already contained in those two buckets and are intentionally not added
+    /// again (see the struct docs and `cost::cost_micros`).
     pub fn total_tokens(&self) -> u64 {
+        self.prompt_tokens
+            .saturating_add(self.completion_tokens)
+    }
+
+    /// Sum of all four reported buckets. Only for telemetry that deliberately
+    /// wants raw provider counters; never use for billing or quota.
+    pub fn sum_all_buckets(&self) -> u64 {
         self.prompt_tokens
             .saturating_add(self.completion_tokens)
             .saturating_add(self.cached_tokens)
@@ -416,14 +427,15 @@ mod tests {
     }
 
     #[test]
-    fn total_tokens_sums_every_bucket() {
+    fn total_tokens_counts_subsets_once() {
         let usage = Usage {
             prompt_tokens: 10,
             completion_tokens: 20,
             cached_tokens: 3,
             reasoning_tokens: 5,
         };
-        assert_eq!(usage.total_tokens(), 38);
+        assert_eq!(usage.total_tokens(), 30, "subsets must not be double-counted");
+        assert_eq!(usage.sum_all_buckets(), 38);
         assert!(!usage.is_empty());
     }
 

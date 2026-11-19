@@ -187,7 +187,9 @@ mod tests {
             "call-1"
         );
         assert_eq!(value["choices"][0]["finish_reason"], "tool_calls");
-        assert_eq!(value["usage"]["total_tokens"], 18);
+        // total_tokens follows OpenAI wire semantics: prompt + completion only.
+        // cached/reasoning are reported subsets and must not be added again.
+        assert_eq!(value["usage"]["total_tokens"], 15);
         assert_eq!(value["usage"]["prompt_tokens_details"]["cached_tokens"], 2);
     }
 

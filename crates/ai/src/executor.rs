@@ -22,6 +22,7 @@ use crate::resilience::{Bulkhead, BulkheadPermit, CircuitBreaker, CircuitState, 
 use crate::routing::{HealthRegistry, IRoutePlanner, RouteRequest};
 use crate::usage::{ITokenizer, IUsageSink, Usage, UsageEvent, UsageStatus};
 use futures_util::stream::Stream;
+use std::future::Future;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -405,13 +406,12 @@ impl GatewayExecutor {
             )
             .await?;
         let prompt_tokens = estimate_prompt_tokens(&*self.tokenizer, &ctx.model_alias, &request);
+        let max_tokens = request.sampling.max_tokens;
         let estimate = prompt_tokens.saturating_add(u64::from(
-            request
-                .sampling
-                .max_tokens
-                .unwrap_or(self.default_max_tokens),
+            max_tokens.unwrap_or(self.default_max_tokens),
         ));
-        let mut reservation = match self.reserve(ctx, estimate, 0).await {
+        let est_cost = self.estimated_cost(ctx, prompt_tokens, max_tokens);
+        let mut reservation = match self.reserve(ctx, estimate, 0, est_cost).await {
             Ok(reservation) => reservation,
             Err(error) => {
                 tracing::warn!(
@@ -445,6 +445,9 @@ impl GatewayExecutor {
             }
             let catalog = self.current_catalog();
             let Some(provider) = catalog.provider(&attempt.model.provider) else {
+                if let Some(circuit) = &self.circuit {
+                    circuit.release_probe(&attempt.model);
+                }
                 self.release(reservation.take()).await;
                 return Err(GatewayError::NoProvider(attempt.model.provider.clone()));
             };
@@ -452,6 +455,9 @@ impl GatewayExecutor {
                 Some(bulkhead) => match bulkhead.acquire(&attempt.model.provider).await {
                     Ok(permit) => Some(permit),
                     Err(error) => {
+                        if let Some(circuit) = &self.circuit {
+                            circuit.release_probe(&attempt.model);
+                        }
                         last_error = Some(ProviderError::Unavailable(error.to_string()));
                         continue;
                     }
@@ -610,13 +616,12 @@ impl GatewayExecutor {
             )
             .await?;
         let prompt_tokens = estimate_prompt_tokens(&*self.tokenizer, &ctx.model_alias, &request);
+        let max_tokens = request.sampling.max_tokens;
         let estimate = prompt_tokens.saturating_add(u64::from(
-            request
-                .sampling
-                .max_tokens
-                .unwrap_or(self.default_max_tokens),
+            max_tokens.unwrap_or(self.default_max_tokens),
         ));
-        let mut reservation = match self.reserve(ctx, estimate, 1).await {
+        let est_cost = self.estimated_cost(ctx, prompt_tokens, max_tokens);
+        let mut reservation = match self.reserve(ctx, estimate, 1, est_cost).await {
             Ok(reservation) => reservation,
             Err(error) => {
                 self.record_quota_rejection(&ctx.model_alias);
@@ -625,6 +630,7 @@ impl GatewayExecutor {
         };
         let mut last_error: Option<ProviderError> = None;
         let max_attempts = self.retry.max_attempts().min(plan.attempts.len()).max(1);
+        let stream_deadline = plan.deadline;
 
         for (index, attempt) in plan.attempts.into_iter().take(max_attempts).enumerate() {
             if Instant::now() >= plan.deadline {
@@ -644,6 +650,9 @@ impl GatewayExecutor {
             }
             let catalog = self.current_catalog();
             let Some(provider) = catalog.provider(&attempt.model.provider) else {
+                if let Some(circuit) = &self.circuit {
+                    circuit.release_probe(&attempt.model);
+                }
                 self.release(reservation.take()).await;
                 return Err(GatewayError::NoProvider(attempt.model.provider.clone()));
             };
@@ -651,6 +660,9 @@ impl GatewayExecutor {
                 Some(bulkhead) => match bulkhead.acquire(&attempt.model.provider).await {
                     Ok(permit) => Some(permit),
                     Err(error) => {
+                        if let Some(circuit) = &self.circuit {
+                            circuit.release_probe(&attempt.model);
+                        }
                         last_error = Some(ProviderError::Unavailable(error.to_string()));
                         continue;
                     }
@@ -689,6 +701,7 @@ impl GatewayExecutor {
                         ctx.clone(),
                         attempt.model,
                         started,
+                        stream_deadline,
                         prompt_tokens,
                         reservation.take(),
                         self.quota.clone(),
@@ -824,6 +837,7 @@ impl GatewayExecutor {
         ctx: &GatewayContext,
         estimated_tokens: u64,
         streams: u32,
+        estimated_cost_micros: u64,
     ) -> Result<Option<Reservation>, GatewayError> {
         let Some(store) = &self.quota else {
             return Ok(None);
@@ -834,21 +848,46 @@ impl GatewayExecutor {
                     QuotaKey::new(&ctx.tenant_id, &ctx.key_id, &ctx.model_alias),
                     estimated_tokens,
                 )
-                .streams(streams),
+                .streams(streams)
+                .estimated_cost_micros(estimated_cost_micros),
             )
             .await?;
         Ok(Some(reservation))
     }
 
+    /// Cost of the worst-case estimate (prompt + max completion tokens), used
+    /// for the up-front budget pre-check so `budget_micros` actually enforces a
+    /// cap instead of only recording spend after the fact.
+    fn estimated_cost(
+        &self,
+        ctx: &GatewayContext,
+        prompt_tokens: u64,
+        max_tokens: Option<u32>,
+    ) -> u64 {
+        let max_completion = u64::from(max_tokens.unwrap_or(self.default_max_tokens));
+        let usage = Usage::new(prompt_tokens, max_completion);
+        self.cost.cost_micros(&ctx.model_alias, &usage)
+    }
+
     async fn settle(&self, reservation: Option<Reservation>, usage: Usage, cost_micros: u64) {
         if let (Some(store), Some(reservation)) = (&self.quota, reservation) {
-            let _ = store.settle(reservation, usage, cost_micros).await;
+            if let Err(error) = store.settle(reservation, usage, cost_micros).await {
+                tracing::warn!(
+                    error = %error,
+                    "quota settlement failed; the lease will expire via TTL"
+                );
+            }
         }
     }
 
     async fn release(&self, reservation: Option<Reservation>) {
         if let (Some(store), Some(reservation)) = (&self.quota, reservation) {
-            let _ = store.release(reservation).await;
+            if let Err(error) = store.release(reservation).await {
+                tracing::warn!(
+                    error = %error,
+                    "quota release failed; the lease will expire via TTL"
+                );
+            }
         }
     }
 
@@ -908,6 +947,14 @@ pub struct GatewayStream {
     text: String,
     ttft_ms: Option<u32>,
     started_at: Instant,
+    /// Overall deadline watchdog. Polled on every `poll_next` so a provider
+    /// that emits headers then stalls cannot hold the bulkhead permit and quota
+    /// lease forever.
+    deadline_sleep: Pin<Box<tokio::time::Sleep>>,
+    /// Set when the gateway-side time budget expires. A timeout is our own
+    /// deadline, not a provider fault, so `finish` must not record it as a
+    /// health/circuit failure against an otherwise healthy provider.
+    deadline_hit: bool,
     saw_done: bool,
     finished: bool,
 }
@@ -919,6 +966,7 @@ impl GatewayStream {
         ctx: GatewayContext,
         model: ModelKey,
         started_at: Instant,
+        deadline: Instant,
         prompt_tokens: u64,
         reservation: Option<Reservation>,
         quota: Option<Arc<dyn IQuotaStore>>,
@@ -950,6 +998,8 @@ impl GatewayStream {
             text: String::new(),
             ttft_ms: None,
             started_at,
+            deadline_sleep: Box::pin(tokio::time::sleep_until(deadline.into())),
+            deadline_hit: false,
             saw_done: false,
             finished: false,
         }
@@ -973,13 +1023,19 @@ impl GatewayStream {
         }
         self.finished = true;
 
+        // A gateway-side deadline is not a provider fault: do not penalize a
+        // healthy (just slow) provider in the health registry or circuit. Still
+        // settle usage as UpstreamError so the request is not billed as success.
+        let provider_at_fault = status == UsageStatus::UpstreamError && !self.deadline_hit;
         if let Some(health) = &self.health {
             match status {
                 UsageStatus::Completed => {
                     health.record_success(&self.model, self.started_at.elapsed())
                 }
-                UsageStatus::UpstreamError => health.record_failure(&self.model),
-                UsageStatus::ClientGone => {}
+                UsageStatus::UpstreamError if provider_at_fault => {
+                    health.record_failure(&self.model)
+                }
+                _ => {}
             }
         }
         if let Some(circuit) = &self.circuit {
@@ -987,7 +1043,11 @@ impl GatewayStream {
                 UsageStatus::Completed | UsageStatus::ClientGone => {
                     circuit.record_success(&self.model)
                 }
-                UsageStatus::UpstreamError => circuit.record_failure(&self.model),
+                UsageStatus::UpstreamError if provider_at_fault => {
+                    circuit.record_failure(&self.model)
+                }
+                // Timeout / client-gone: leave the circuit state untouched.
+                _ => {}
             }
             record_circuit_state(self.meter.as_ref(), &self.model, circuit.state(&self.model));
         }
@@ -1024,6 +1084,17 @@ impl GatewayStream {
             trace_id = %trace_id(),
             "gateway stream finished"
         );
+        // Check for a runtime *before* taking ownership: if there is none, keep
+        // the reservation/sink in `self` so they are dropped with the stream
+        // (the lease then expires via TTL) rather than being silently stranded.
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            tracing::warn!(
+                request_id = %self.ctx.request_id,
+                "stream settled without a tokio runtime; quota lease will expire via TTL"
+            );
+            return;
+        };
+
         let quota = self.quota.take();
         let reservation = self.reservation.take();
         let usage_sink = self.usage_sink.take();
@@ -1045,17 +1116,18 @@ impl GatewayStream {
         if let Some(ttft_ms) = self.ttft_ms {
             event = event.with_ttft(ttft_ms);
         }
+        let request_id = self.ctx.request_id.clone();
 
-        let Ok(handle) = tokio::runtime::Handle::try_current() else {
-            // No runtime (tests outside tokio, or a misuse): nothing can run.
-            return;
-        };
         handle.spawn(async move {
             if let (Some(store), Some(reservation)) = (quota, reservation) {
-                let _ = store.settle(reservation, usage, cost).await;
+                if let Err(error) = store.settle(reservation, usage, cost).await {
+                    tracing::warn!(request_id = %request_id, error = %error, "deferred quota settlement failed");
+                }
             }
             if let Some(sink) = usage_sink {
-                let _ = sink.record(event).await;
+                if let Err(error) = sink.record(event).await {
+                    tracing::warn!(request_id = %request_id, error = %error, "deferred usage record failed");
+                }
             }
         });
     }
@@ -1070,6 +1142,12 @@ impl Stream for GatewayStream {
             return Poll::Ready(None);
         }
 
+        // Poll the inner stream first: if the provider has already buffered a
+        // Done/Usage (or any delta), deliver it even if the deadline has just
+        // elapsed. Only when the provider is genuinely idle do we enforce the
+        // overall deadline, tearing down the stream to free the permit + lease.
+        // Polling the timer here also registers its waker, so a stalled stream
+        // is still woken when the deadline fires.
         match this.inner.as_mut().poll_next(cx) {
             Poll::Ready(Some(Ok(event))) => match event {
                 StreamEvent::Start { id, model } => {
@@ -1081,6 +1159,14 @@ impl Stream for GatewayStream {
                     }
                     if let Some(content) = &delta.content {
                         this.text.push_str(content);
+                    }
+                    if let Some(reasoning) = &delta.reasoning {
+                        this.text.push_str(reasoning);
+                    }
+                    for tool_call in &delta.tool_calls {
+                        if let Some(arguments) = &tool_call.arguments_delta {
+                            this.text.push_str(arguments);
+                        }
                     }
                     Poll::Ready(Some(Ok(StreamEvent::Delta(delta))))
                 }
@@ -1105,7 +1191,15 @@ impl Stream for GatewayStream {
                 this.finish(UsageStatus::Completed);
                 Poll::Ready(None)
             }
-            Poll::Pending => Poll::Pending,
+            Poll::Pending => {
+                if this.deadline_sleep.as_mut().poll(cx).is_ready() {
+                    this.deadline_hit = true;
+                    this.finish(UsageStatus::UpstreamError);
+                    Poll::Ready(Some(Err(GatewayError::Provider(ProviderError::Timeout))))
+                } else {
+                    Poll::Pending
+                }
+            }
         }
     }
 }
@@ -1656,6 +1750,85 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stream_deadline_fires_when_provider_stalls_after_headers() {
+        let provider = MockProvider::pending(
+            "p",
+            Some(vec![Ok(StreamEvent::Start {
+                id: "stalled".into(),
+                model: "model-p".into(),
+            })]),
+        );
+        let catalog = catalog_version(provider as Arc<dyn ChatProvider>, 1);
+        let router = Arc::new(
+            CatalogRouter::new(Arc::clone(&catalog)).with_default_timeout(Duration::from_millis(40)),
+        );
+        let executor = GatewayExecutor::new(catalog, router);
+
+        let mut stream = executor
+            .stream(&context(), request())
+            .await
+            .expect("stream starts");
+        // First event is the Start frame; the next poll must hit the deadline
+        // rather than hanging forever on `stream::pending()`.
+        let first = stream.next().await.expect("start frame");
+        assert!(first.is_ok());
+        let timed = tokio::time::timeout(Duration::from_millis(500), stream.next()).await;
+        let timed = timed.expect("deadline must resolve the stalled stream");
+        assert!(
+            matches!(
+                timed,
+                Some(Err(GatewayError::Provider(ProviderError::Timeout)))
+            ),
+            "expected a timeout error, got {timed:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn stream_deadline_does_not_penalize_a_healthy_provider() {
+        // A gateway-side deadline is our own time budget, not a provider fault.
+        // Stalling the stream must not open the circuit against the provider.
+        let provider = MockProvider::pending(
+            "p",
+            Some(vec![Ok(StreamEvent::Start {
+                id: "slow".into(),
+                model: "model-p".into(),
+            })]),
+        );
+        let catalog = catalog_single(provider as Arc<dyn ChatProvider>);
+        let router = Arc::new(
+            CatalogRouter::new(Arc::clone(&catalog)).with_default_timeout(Duration::from_millis(30)),
+        );
+        // Threshold 1 means a single recorded failure would open the circuit.
+        let circuit = Arc::new(CircuitBreaker::new(1, Duration::from_secs(60)));
+        let executor = GatewayExecutor::new(catalog, router)
+            .with_circuit_breaker(Arc::clone(&circuit));
+
+        let mut stream = executor
+            .stream(&context(), request())
+            .await
+            .expect("stream starts");
+        let _ = stream.next().await.expect("start frame").expect("ok");
+        let timed = tokio::time::timeout(Duration::from_millis(500), stream.next())
+            .await
+            .expect("deadline resolves the stalled stream");
+        assert!(
+            matches!(
+                timed,
+                Some(Err(GatewayError::Provider(ProviderError::Timeout)))
+            ),
+            "expected timeout, got {timed:?}"
+        );
+
+        // The timeout must NOT have been counted as a provider failure: the
+        // circuit is still closed and allows another attempt through.
+        let key = ModelKey::new("p", "model-p");
+        assert!(
+            circuit.allow(&key),
+            "a healthy but slow provider must not be tripped by our deadline"
+        );
+    }
+
+    #[tokio::test]
     async fn dropping_a_stream_records_client_gone_and_releases_the_slot() {
         let a = MockProvider::mock("a", None, None);
         let b = MockProvider::pending(
@@ -2047,6 +2220,38 @@ mod tests {
         assert_eq!(
             meter.counter_value("ai_gateway_cost_micros_total", &[("model", "fast")]),
             6
+        );
+    }
+
+    #[tokio::test]
+    async fn up_front_budget_precheck_rejects_expensive_request() {
+        let provider = Arc::new(CountingSuccessProvider {
+            calls: AtomicUsize::new(0),
+            delay: Duration::ZERO,
+        });
+        let catalog = catalog_version(Arc::clone(&provider) as Arc<dyn ChatProvider>, 1);
+        let router = Arc::new(CatalogRouter::new(Arc::clone(&catalog)));
+        let costs = crate::cost::StaticCostTable::new().with_price(
+            "fast",
+            crate::cost::ModelPrice::new(1_000_000, 1_000_000, 0, 0),
+        );
+        let store = quota(QuotaLimits::default().budget_micros(1));
+        let executor = GatewayExecutor::new(catalog, router)
+            .with_cost_calculator(Arc::new(costs))
+            .with_quota(store);
+
+        let err = executor
+            .complete(&context(), request())
+            .await
+            .expect_err("estimated cost far exceeds the 1-micro budget");
+        assert!(
+            matches!(err, GatewayError::Quota(_)),
+            "expected quota rejection, got {err:?}"
+        );
+        assert_eq!(
+            provider.calls.load(Ordering::Relaxed),
+            0,
+            "provider must not be called when the budget pre-check rejects"
         );
     }
 

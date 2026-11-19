@@ -367,15 +367,26 @@ impl CatalogHandle {
 
     /// Replace the snapshot when `catalog.version` is not older.
     ///
-    /// Returns `false` for a stale version (current is unchanged).
+    /// Returns `false` for a stale version (current is unchanged). Uses an
+    /// atomic compare-and-swap loop so two concurrent reloads cannot roll the
+    /// catalog back: a slower watcher that loaded an older version before a
+    /// faster one committed will observe the new pointer and retry, then reject
+    /// its own older version.
     pub fn reload(&self, catalog: Arc<ModelCatalog>) -> bool {
-        let current = self.inner.load();
-        if catalog.version < current.version {
-            return false;
+        loop {
+            let current: Arc<ModelCatalog> = self.inner.load_full();
+            if catalog.version < current.version {
+                return false;
+            }
+            let expected_ptr = Arc::as_ptr(&current);
+            let previous = self.inner.compare_and_swap(&current, Arc::clone(&catalog));
+            if Arc::as_ptr(&*previous) == expected_ptr {
+                // Our CAS won; `previous` is exactly the snapshot we replaced.
+                return true;
+            }
+            // Another writer won between load and CAS. Loop and re-check the
+            // version against the now-current snapshot — never blindly store.
         }
-        drop(current);
-        self.inner.store(catalog);
-        true
     }
 }
 

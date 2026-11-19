@@ -123,7 +123,11 @@ pub struct CircuitSnapshot {
 enum State {
     Closed { failures: u32 },
     Open { until: Instant },
-    HalfOpen { probe_in_flight: bool },
+    /// A single probe window. `probe_until` bounds the probe so a caller that
+    /// obtains permission but never records a result (provider hot-reloaded
+    /// away, bulkhead full, task cancelled) cannot wedge the circuit forever.
+    /// Once the window elapses, the next request is allowed to probe again.
+    HalfOpen { probe_until: Instant },
 }
 
 /// Per-model circuit breaker.
@@ -154,7 +158,7 @@ impl CircuitBreaker {
                     states.insert(
                         key.clone(),
                         State::HalfOpen {
-                            probe_in_flight: true,
+                            probe_until: Instant::now() + self.cooldown,
                         },
                     );
                     true
@@ -162,14 +166,16 @@ impl CircuitBreaker {
                     false
                 }
             }
-            Some(State::HalfOpen { probe_in_flight }) => {
-                if probe_in_flight {
+            Some(State::HalfOpen { probe_until }) => {
+                if Instant::now() < probe_until {
                     false
                 } else {
+                    // The previous probe never reported back; start a fresh
+                    // window instead of wedging the circuit permanently.
                     states.insert(
                         key.clone(),
                         State::HalfOpen {
-                            probe_in_flight: true,
+                            probe_until: Instant::now() + self.cooldown,
                         },
                     );
                     true
@@ -182,6 +188,25 @@ impl CircuitBreaker {
     pub fn record_success(&self, key: &ModelKey) {
         self.lock()
             .insert(key.clone(), State::Closed { failures: 0 });
+    }
+
+    /// Abandon an in-flight probe without counting it as success or failure.
+    ///
+    /// Call this when a previously permitted attempt is given up before it
+    /// reaches the provider (provider hot-reloaded away, bulkhead full). It
+    /// releases the half-open window so the model is not locked out waiting for
+    /// a result that will never arrive.
+    pub fn release_probe(&self, key: &ModelKey) {
+        let mut states = self.lock();
+        if matches!(states.get(key), Some(State::HalfOpen { .. })) {
+            // Expire the probe immediately; the next request may try again.
+            states.insert(
+                key.clone(),
+                State::HalfOpen {
+                    probe_until: Instant::now(),
+                },
+            );
+        }
     }
 
     /// Record a failed call; opens the circuit at the threshold.
@@ -379,6 +404,29 @@ mod tests {
         assert!(!breaker.allow(&key()), "only one probe");
         breaker.record_success(&key());
         assert_eq!(breaker.state(&key()), CircuitState::Closed);
+    }
+
+    #[test]
+    fn half_open_probe_self_heals_when_result_is_never_recorded() {
+        let cooldown = Duration::from_millis(10);
+        let breaker = CircuitBreaker::new(1, cooldown);
+        assert!(breaker.allow(&key()));
+        breaker.record_failure(&key());
+        assert_eq!(breaker.state(&key()), CircuitState::Open);
+
+        std::thread::sleep(cooldown + Duration::from_millis(1));
+        // First probe is granted, then the caller disappears (never records).
+        assert!(breaker.allow(&key()));
+        assert_eq!(breaker.state(&key()), CircuitState::HalfOpen);
+        assert!(!breaker.allow(&key()), "one probe at a time");
+
+        // The probe window expires on its own: the circuit must not wedge.
+        std::thread::sleep(cooldown + Duration::from_millis(1));
+        assert!(breaker.allow(&key()), "a stuck probe must not lock the model out forever");
+
+        // release_probe hands back the window immediately.
+        breaker.release_probe(&key());
+        assert!(breaker.allow(&key()), "release_probe frees the window at once");
     }
 
     #[tokio::test]

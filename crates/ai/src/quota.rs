@@ -35,6 +35,8 @@ pub const DEFAULT_LEASE_TTL: Duration = Duration::from_secs(60);
 
 const MINUTE: Duration = Duration::from_secs(60);
 const DAY_SECS: u64 = 86_400;
+/// Minimum gap between full expired-lease scans (see [`Inner::purge_expired`]).
+const PURGE_INTERVAL: Duration = Duration::from_millis(500);
 
 /// Identity a quota applies to: tenant + API key + model.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -318,6 +320,10 @@ pub struct MemoryQuotaStore {
 struct Inner {
     states: HashMap<QuotaKey, KeyState>,
     next_lease: u64,
+    /// Last full expired-lease scan. The scan walks every key, so on a
+    /// high-cardinality gateway running it on every request is O(total keys)
+    /// per operation; throttle it to at most once per `PURGE_INTERVAL`.
+    last_purge: Instant,
 }
 
 struct KeyState {
@@ -374,17 +380,38 @@ impl Inner {
     /// Drop expired leases. Token/cost estimates stay charged; only the
     /// concurrency slot is released.
     fn purge_expired(&mut self, now: Instant) {
+        // A full scan is O(total keys). Throttle it; a lease can outlive its
+        // TTL by at most PURGE_INTERVAL, which is negligible against the 60s
+        // default lease and bounded even for tiny custom TTLs.
+        if now.saturating_duration_since(self.last_purge) < PURGE_INTERVAL {
+            return;
+        }
+        self.last_purge = now;
         for state in self.states.values_mut() {
-            let expired: Vec<String> = state
-                .active
-                .iter()
-                .filter(|(_, lease)| lease.expires_at <= now)
-                .map(|(id, _)| id.clone())
-                .collect();
-            for id in expired {
-                if let Some(lease) = state.active.remove(&id) {
-                    state.concurrent = state.concurrent.saturating_sub(lease.streams);
-                }
+            Self::purge_state(state, now);
+        }
+    }
+
+    /// Expire leases for a single key. This is O(active leases for that key),
+    /// not O(total keys), and is safe to call on every operation so a short
+    /// lease is never held past its TTL just because the global scan is
+    /// throttled.
+    fn purge_key(&mut self, key: &QuotaKey, now: Instant) {
+        if let Some(state) = self.states.get_mut(key) {
+            Self::purge_state(state, now);
+        }
+    }
+
+    fn purge_state(state: &mut KeyState, now: Instant) {
+        let expired: Vec<String> = state
+            .active
+            .iter()
+            .filter(|(_, lease)| lease.expires_at <= now)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in expired {
+            if let Some(lease) = state.active.remove(&id) {
+                state.concurrent = state.concurrent.saturating_sub(lease.streams);
             }
         }
     }
@@ -398,6 +425,7 @@ impl MemoryQuotaStore {
             inner: Mutex::new(Inner {
                 states: HashMap::new(),
                 next_lease: 0,
+                last_purge: Instant::now(),
             }),
         }
     }
@@ -413,6 +441,9 @@ impl IQuotaStore for MemoryQuotaStore {
         let now = Instant::now();
         let day_index = current_day_index();
         inner.purge_expired(now);
+        // Always expire this key's own leases so a short TTL frees its slot
+        // even while the global scan is throttled.
+        inner.purge_key(&request.key, now);
 
         let limits = self.policy.limits_for(&request.key);
         let lease_seq = inner.next_lease;

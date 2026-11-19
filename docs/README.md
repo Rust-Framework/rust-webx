@@ -31,10 +31,12 @@ docs/
 
 ## 阅读
 
+- **在线站点**：<https://rust-framework.github.io/rust-webx/>（mdBook，由 `.github/workflows/docs.yml` 自动构建部署）
 - **本地站点**：`cargo run -p docbit-host` → 作品集 → rust-webx → 文档
 - **API**：`GET /api/docs/rust-webx/index`、`GET /api/docs/rust-webx/content/{path}`
 
 ## 维护
 
 - 编辑 **`docs/rust-webx/`** 下的 Markdown；Docbit 启动时会自动确保 `INDEX.json` 存在。
+- 新增/重命名章节或小节时，先更新 `INDEX.json`，再运行 `python scripts/gen-mdbook-summary.py` 重新生成 `SUMMARY.md`（`docs.yml` 会校验两者一致，否则部署失败）；本地预览：`mdbook serve docs/rust-webx`。
 - 更新 sibling 手册：在上游仓库修改；发布时由 `docbit/publish.*` 从源仓库复制进 bundle。**不要**将 sibling 镜像 commit 到 `rust-webx/docs/`。

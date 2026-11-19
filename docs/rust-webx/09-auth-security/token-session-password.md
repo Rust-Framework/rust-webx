@@ -41,6 +41,40 @@ issued.expires_at_unix_secs // 注意单位：Unix 秒（Travel 侧毫秒字段�
 - `JwtTokenIssuer` **只支持 HS256**（与本框架 `JwtAuth` 的 `Validation::default()` 对齐）。RSA/EC 需要自定义 `ITokenIssuer` 且同时替换验签 handler，不支持混用。
 - 想改寿命而不改代码：`Jwt.ExpirationMinutes` 或 `APP__Jwt__ExpirationMinutes`；`0` 回退 60。
 
+### 自定义 `ITokenIssuer` 如何拿到最终密钥
+
+`Jwt.SecretFile` 在**应用 service 注册之前**解析为 `Jwt.Secret`，所以自定义 issuer 不需要、也不应该自己再读密钥文件：
+
+```rust
+use std::time::Duration;
+use webx::{ITokenIssuer, JwtTokenIssuer};
+
+Host::builder()
+    .add_authentication()
+    .register_with_options(|svc, options| {
+        // options.jwt.secret 已是 APP__Jwt__Secret / Jwt.Secret / SecretFile 的最终值
+        let issuer = JwtTokenIssuer::from_secret(
+            options.jwt.secret.as_bytes(),
+            Duration::from_secs(3600),
+        );
+        svc.try_add_singleton::<dyn ITokenIssuer>(move |_| Arc::new(issuer))
+    })
+    .build()
+```
+
+若 issuer 由 DI 工厂惰性构造，改为解析 host 注册的 `JwtSecret` 单例（同样在用户 service 配置之前完成注册）：
+
+```rust
+.register(|svc| {
+    svc.try_add_singleton::<dyn ITokenIssuer>(|resolver| {
+        let secret = resolver.resolve_arc::<JwtSecret>()?;
+        Arc::new(JwtTokenIssuer::from_secret(secret.as_str(), lifetime))
+    })
+})
+```
+
+只配置 `SecretFile` 时，这个顺序保证自定义 issuer 与同一 host 的 `JwtAuth` 使用同一把密钥。未配置任何密钥时**不会**注册 `JwtSecret`（解析失败即启动失败），不会用空密钥签发 token。既有 `register` 的签名与行为不变，老代码无需调整。
+
 ## 2. 登出：会话吊销
 
 ```rust

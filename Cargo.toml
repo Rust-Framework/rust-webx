@@ -24,29 +24,29 @@ members = [
 ]
 
 [workspace.package]
-version = "1.3.0"
+version = "1.4.0"
 edition = "2021"
 rust-version = "1.95"
 license = "MIT"
 authors = ["Start"]
-homepage = "https://github.com/Rust-Framework/rust-webx"
+homepage = "https://rust-framework.github.io/rust-webx/"
 repository = "https://github.com/Rust-Framework/rust-webx"
 documentation = "https://docs.rs/rust-webx"
 description = "rust-webx 鈥?A Rust WebApi framework inspired by ASP.NET Core, built on DI + Mediator pattern"
 
 [workspace.dependencies]
 # Internal crates
-rust-webx-core = { version = "1.3.0", path = "crates/core" }
-rust-webx-host = { version = "1.3.0", path = "crates/host" }
-rust-webx-macros = { version = "1.3.0", path = "crates/macros" }
-rust-webx = { version = "1.3.0", path = "crates/webx" }
-rust-webx-spa = { version = "1.3.0", path = "crates/spa" }
-rust-webx-build = { version = "1.3.0", path = "crates/build" }
-rust-webx-openapi = { version = "1.3.0", path = "crates/openapi" }
-rust-webx-ai = { version = "1.3.0", path = "crates/ai" }
-rust-webx-ai-ef = { version = "1.3.0", path = "crates/ai-ef" }
-rust-webx-client = { version = "1.3.0", path = "crates/client" }
-rust-webx-ai-gateway = { version = "1.3.0", path = "crates/gateway" }
+rust-webx-core = { version = "1.4.0", path = "crates/core" }
+rust-webx-host = { version = "1.4.0", path = "crates/host" }
+rust-webx-macros = { version = "1.4.0", path = "crates/macros" }
+rust-webx = { version = "1.4.0", path = "crates/webx" }
+rust-webx-spa = { version = "1.4.0", path = "crates/spa" }
+rust-webx-build = { version = "1.4.0", path = "crates/build" }
+rust-webx-openapi = { version = "1.4.0", path = "crates/openapi" }
+rust-webx-ai = { version = "1.4.0", path = "crates/ai" }
+rust-webx-ai-ef = { version = "1.4.0", path = "crates/ai-ef" }
+rust-webx-client = { version = "1.4.0", path = "crates/client" }
+rust-webx-ai-gateway = { version = "1.4.0", path = "crates/gateway" }
 
 # Docbit sub-crates
 docbit-contracts = { version = "0.1.0", path = "docbit/contracts" }

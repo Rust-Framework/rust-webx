@@ -18,7 +18,6 @@ name = "webx_core"
 
 [dependencies]
 async-trait.workspace = true
-arc-swap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -31,7 +30,6 @@ tracing.workspace = true
 tempfile.workspace = true
 zeroize.workspace = true
 bytes.workspace = true
-httpdate.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

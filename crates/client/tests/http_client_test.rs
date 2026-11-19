@@ -180,9 +180,10 @@ async fn spawn_h2c_server() -> String {
             };
             tokio::spawn(async move {
                 let io = TokioIo::new(stream);
-                let _ = hyper::server::conn::http2::Builder::new(hyper_util::rt::TokioExecutor::new())
-                    .serve_connection(io, service_fn(handle))
-                    .await;
+                let _ =
+                    hyper::server::conn::http2::Builder::new(hyper_util::rt::TokioExecutor::new())
+                        .serve_connection(io, service_fn(handle))
+                        .await;
             });
         }
     });
@@ -585,8 +586,11 @@ async fn ssrf_guard_blocks_metadata_and_private_literals() {
     // A public NAT64-mapped address (64:ff9b::/96 + 8.8.8.8) must NOT be
     // blocked. The IPv4 lives in segments 6-7; reading 5-6 would turn it into
     // 0.0.8.8 and falsely reject every public NAT64 destination.
-    HttpClient::new("nat64-public", HttpClientOptions::new("http://[64:ff9b::0808:0808]"))
-        .expect("a public NAT64 address must be allowed");
+    HttpClient::new(
+        "nat64-public",
+        HttpClientOptions::new("http://[64:ff9b::0808:0808]"),
+    )
+    .expect("a public NAT64 address must be allowed");
 
     // Loopback stays allowed, so a client can still talk to a local mock.
     let base = spawn_server().await;

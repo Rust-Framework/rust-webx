@@ -106,7 +106,10 @@ mod tests {
     fn debug_redacts_the_secret() {
         let parsed = parse_presented("sk-key-1-0123456789abcdef", DEFAULT_PREFIX).expect("parses");
         let rendered = format!("{parsed:?}");
-        assert!(!rendered.contains("0123456789abcdef"), "Debug leaked the secret: {rendered}");
+        assert!(
+            !rendered.contains("0123456789abcdef"),
+            "Debug leaked the secret: {rendered}"
+        );
         assert!(rendered.contains("key-1"));
         assert!(rendered.contains("<redacted>"));
     }

@@ -205,7 +205,9 @@ impl TryFrom<OpenAiChatRequest> for CanonicalRequest {
             })
             .unwrap_or_default();
         if stop.len() > MAX_STOP_SEQUENCES {
-            return Err(format!("too many stop sequences (max {MAX_STOP_SEQUENCES})"));
+            return Err(format!(
+                "too many stop sequences (max {MAX_STOP_SEQUENCES})"
+            ));
         }
         if stop.iter().any(|s| s.len() > MAX_TEXT_LEN) {
             return Err("stop sequence is too long".into());
@@ -571,7 +573,10 @@ mod tests {
             max_tokens: Some(u32::MAX),
             ..base_request()
         };
-        assert!(CanonicalRequest::try_from(request).is_err(), "max_tokens must be bounded");
+        assert!(
+            CanonicalRequest::try_from(request).is_err(),
+            "max_tokens must be bounded"
+        );
 
         let request = OpenAiChatRequest {
             messages: vec![
@@ -586,7 +591,10 @@ mod tests {
             ],
             ..base_request()
         };
-        assert!(CanonicalRequest::try_from(request).is_err(), "message count must be bounded");
+        assert!(
+            CanonicalRequest::try_from(request).is_err(),
+            "message count must be bounded"
+        );
     }
 
     #[test]
@@ -602,7 +610,10 @@ mod tests {
             }],
             ..base_request()
         };
-        assert!(CanonicalRequest::try_from(request).is_err(), "user text must be bounded");
+        assert!(
+            CanonicalRequest::try_from(request).is_err(),
+            "user text must be bounded"
+        );
 
         // Assistant tool-call arguments.
         let request = OpenAiChatRequest {
@@ -620,7 +631,10 @@ mod tests {
             }],
             ..base_request()
         };
-        assert!(CanonicalRequest::try_from(request).is_err(), "tool arguments must be bounded");
+        assert!(
+            CanonicalRequest::try_from(request).is_err(),
+            "tool arguments must be bounded"
+        );
 
         // Multimodal image URL.
         let image = json!([{
@@ -635,6 +649,9 @@ mod tests {
             }],
             ..base_request()
         };
-        assert!(CanonicalRequest::try_from(request).is_err(), "image url must be bounded");
+        assert!(
+            CanonicalRequest::try_from(request).is_err(),
+            "image url must be bounded"
+        );
     }
 }

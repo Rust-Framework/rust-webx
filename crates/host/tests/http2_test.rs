@@ -57,9 +57,10 @@ async fn http2_cleartext_prior_knowledge_is_accepted() {
     let stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
         .await
         .expect("connect");
-    let (mut send_request, connection) = http2::handshake(TokioExecutor::new(), TokioIo::new(stream))
-        .await
-        .expect("h2 handshake");
+    let (mut send_request, connection) =
+        http2::handshake(TokioExecutor::new(), TokioIo::new(stream))
+            .await
+            .expect("h2 handshake");
     tokio::spawn(async move {
         let _ = connection.await;
     });
@@ -69,7 +70,10 @@ async fn http2_cleartext_prior_knowledge_is_accepted() {
         .uri("/health/live")
         .body(Empty::<Bytes>::new())
         .expect("request");
-    let response = send_request.send_request(request).await.expect("send request");
+    let response = send_request
+        .send_request(request)
+        .await
+        .expect("send request");
     assert_eq!(
         response.version(),
         http::Version::HTTP_2,
@@ -124,7 +128,7 @@ async fn http2_over_tls_negotiates_h2_via_alpn() {
         .build();
     let handle = host.server_handle();
     tokio::spawn(async move { host.run().await.unwrap() });
-    tokio::time::sleep(tokio::time::Duration::from_millis(600)).await;
+    wait_ready(port).await;
 
     // reqwest with rustls advertises h2 + http/1.1 via ALPN; a compliant server
     // selects h2. A prior-knowledge http2::handshake cannot go through TLS here,

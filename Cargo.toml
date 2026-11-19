@@ -61,7 +61,7 @@ dmbit-contracts = { version = "0.1.0", path = "dmbit/contracts" }
 dmbit-domain = { version = "0.1.0", path = "dmbit/domain" }
 dmbit-handlers = { version = "0.1.0", path = "dmbit/handlers" }
 
-# DI framework (crates.io 鈥?no local path required)
+# DI framework (crates.io — no local path required)
 rust-dix = "1.0"
 rust-dix-macros = "1.0"
 

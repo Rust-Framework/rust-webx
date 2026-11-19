@@ -22,8 +22,8 @@ use crate::resilience::{Bulkhead, BulkheadPermit, CircuitBreaker, CircuitState, 
 use crate::routing::{HealthRegistry, IRoutePlanner, RouteRequest};
 use crate::usage::{ITokenizer, IUsageSink, Usage, UsageEvent, UsageStatus};
 use futures_util::stream::Stream;
-use std::future::Future;
 use std::collections::HashMap;
+use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
@@ -407,9 +407,8 @@ impl GatewayExecutor {
             .await?;
         let prompt_tokens = estimate_prompt_tokens(&*self.tokenizer, &ctx.model_alias, &request);
         let max_tokens = request.sampling.max_tokens;
-        let estimate = prompt_tokens.saturating_add(u64::from(
-            max_tokens.unwrap_or(self.default_max_tokens),
-        ));
+        let estimate =
+            prompt_tokens.saturating_add(u64::from(max_tokens.unwrap_or(self.default_max_tokens)));
         let est_cost = self.estimated_cost(ctx, prompt_tokens, max_tokens);
         let mut reservation = match self.reserve(ctx, estimate, 0, est_cost).await {
             Ok(reservation) => reservation,
@@ -617,9 +616,8 @@ impl GatewayExecutor {
             .await?;
         let prompt_tokens = estimate_prompt_tokens(&*self.tokenizer, &ctx.model_alias, &request);
         let max_tokens = request.sampling.max_tokens;
-        let estimate = prompt_tokens.saturating_add(u64::from(
-            max_tokens.unwrap_or(self.default_max_tokens),
-        ));
+        let estimate =
+            prompt_tokens.saturating_add(u64::from(max_tokens.unwrap_or(self.default_max_tokens)));
         let est_cost = self.estimated_cost(ctx, prompt_tokens, max_tokens);
         let mut reservation = match self.reserve(ctx, estimate, 1, est_cost).await {
             Ok(reservation) => reservation,
@@ -1760,7 +1758,8 @@ mod tests {
         );
         let catalog = catalog_version(provider as Arc<dyn ChatProvider>, 1);
         let router = Arc::new(
-            CatalogRouter::new(Arc::clone(&catalog)).with_default_timeout(Duration::from_millis(40)),
+            CatalogRouter::new(Arc::clone(&catalog))
+                .with_default_timeout(Duration::from_millis(40)),
         );
         let executor = GatewayExecutor::new(catalog, router);
 
@@ -1796,12 +1795,13 @@ mod tests {
         );
         let catalog = catalog_single(provider as Arc<dyn ChatProvider>);
         let router = Arc::new(
-            CatalogRouter::new(Arc::clone(&catalog)).with_default_timeout(Duration::from_millis(30)),
+            CatalogRouter::new(Arc::clone(&catalog))
+                .with_default_timeout(Duration::from_millis(30)),
         );
         // Threshold 1 means a single recorded failure would open the circuit.
         let circuit = Arc::new(CircuitBreaker::new(1, Duration::from_secs(60)));
-        let executor = GatewayExecutor::new(catalog, router)
-            .with_circuit_breaker(Arc::clone(&circuit));
+        let executor =
+            GatewayExecutor::new(catalog, router).with_circuit_breaker(Arc::clone(&circuit));
 
         let mut stream = executor
             .stream(&context(), request())

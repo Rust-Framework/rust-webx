@@ -244,7 +244,10 @@ impl ISecretStore for FileSecretStore {
                 return Err(SecretError::NotFound(name.to_string()));
             }
             Err(error) => {
-                return Err(unavailable(format!("cannot stat {}: {error}", path.display())));
+                return Err(unavailable(format!(
+                    "cannot stat {}: {error}",
+                    path.display()
+                )));
             }
             Ok(_) => {}
         }
@@ -271,7 +274,12 @@ impl ISecretStore for FileSecretStore {
             Err(error) if is_symlink_error(&error) => {
                 return Err(unavailable("secret file must not be a symlink".into()));
             }
-            Err(error) => return Err(unavailable(format!("cannot open {}: {error}", path.display()))),
+            Err(error) => {
+                return Err(unavailable(format!(
+                    "cannot open {}: {error}",
+                    path.display()
+                )))
+            }
         };
 
         // Permissions are checked on the already-open fd, so a race cannot swap
@@ -284,7 +292,10 @@ impl ISecretStore for FileSecretStore {
                     return Err(unavailable("secret file permissions must be 0600".into()));
                 }
                 Err(error) => {
-                    return Err(unavailable(format!("cannot stat {}: {error}", path.display())));
+                    return Err(unavailable(format!(
+                        "cannot stat {}: {error}",
+                        path.display()
+                    )));
                 }
                 _ => {}
             }

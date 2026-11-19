@@ -11,8 +11,8 @@ use http_body_util::combinators::UnsyncBoxBody;
 use http_body_util::{BodyExt, Full, StreamBody};
 use hyper::body::{Frame, Incoming};
 use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
-use hyper_util::client::legacy::connect::proxy::Tunnel;
 use hyper_util::client::legacy::connect::dns::{GaiResolver, Name};
+use hyper_util::client::legacy::connect::proxy::Tunnel;
 use hyper_util::client::legacy::connect::{Connect, HttpConnector};
 use hyper_util::client::legacy::Client as HyperClient;
 use hyper_util::rt::TokioExecutor;
@@ -262,9 +262,12 @@ pub struct HttpClientOptions {
     /// Loopback (`127.0.0.0/8`, `::1`, `localhost`) stays allowed for local
     /// development and tests.
     ///
-    /// The guard checks the URI host before connecting; DNS answers for a
-    /// public hostname are not re-checked at connect time. Redirects are not
-    /// followed by this client, so they cannot bypass the guard.
+    /// The guard checks the URI host before connecting and re-checks every
+    /// resolved address at connect time (closing the DNS-rebinding gap) for
+    /// direct connections. When a proxy is configured the proxy resolves the
+    /// CONNECT target, so operators must trust the proxy to enforce its own
+    /// egress policy. Redirects are not followed by this client, so they
+    /// cannot bypass the guard.
     pub ssrf_protection: bool,
     /// Allow private/link-local destinations (local vLLM/Ollama, intranet APIs).
     ///
@@ -817,12 +820,8 @@ fn ipv4_mapped(ip: std::net::Ipv6Addr) -> Option<std::net::Ipv4Addr> {
 /// falsely blocking every mapped public address as `0.0.x.y`.
 fn is_nat64_blocked(s: [u16; 8]) -> bool {
     if s[0] == 0x0064 && s[1] == 0xff9b && s[2] == 0 && s[3] == 0 && s[4] == 0 && s[5] == 0 {
-        let v4 = std::net::Ipv4Addr::new(
-            (s[6] >> 8) as u8,
-            s[6] as u8,
-            (s[7] >> 8) as u8,
-            s[7] as u8,
-        );
+        let v4 =
+            std::net::Ipv4Addr::new((s[6] >> 8) as u8, s[6] as u8, (s[7] >> 8) as u8, s[7] as u8);
         return is_blocked_ipv4(v4);
     }
     false

@@ -2239,11 +2239,9 @@ dependencies = [
 name = "rust-webx-core"
 version = "1.4.0"
 dependencies = [
- "arc-swap",
  "async-trait",
  "bytes",
  "futures-util",
- "httpdate",
  "inventory",
  "libc",
  "rust-dix",

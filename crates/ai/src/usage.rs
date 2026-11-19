@@ -72,8 +72,7 @@ impl Usage {
     /// already contained in those two buckets and are intentionally not added
     /// again (see the struct docs and `cost::cost_micros`).
     pub fn total_tokens(&self) -> u64 {
-        self.prompt_tokens
-            .saturating_add(self.completion_tokens)
+        self.prompt_tokens.saturating_add(self.completion_tokens)
     }
 
     /// Sum of all four reported buckets. Only for telemetry that deliberately
@@ -434,7 +433,11 @@ mod tests {
             cached_tokens: 3,
             reasoning_tokens: 5,
         };
-        assert_eq!(usage.total_tokens(), 30, "subsets must not be double-counted");
+        assert_eq!(
+            usage.total_tokens(),
+            30,
+            "subsets must not be double-counted"
+        );
         assert_eq!(usage.sum_all_buckets(), 38);
         assert!(!usage.is_empty());
     }

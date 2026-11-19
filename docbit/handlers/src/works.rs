@@ -1,4 +1,4 @@
-//! Documentation bundle upload 鈥?accept a zip, install it, re-sync the catalog.
+//! Documentation bundle upload — accept a zip, install it, re-sync the catalog.
 //!
 //! Flow (`POST /api/works/{slug}/docs`, admin only):
 //!
@@ -6,7 +6,7 @@
 //! 2. extract it into a staging directory, sandboxed (see [`extract_zip`])
 //! 3. require `INDEX.json` at the archive root
 //! 4. atomically swap it in as `<app_base>/docs/{slug}`
-//! 5. re-sync the catalog so the API reflects it immediately 鈥?no restart
+//! 5. re-sync the catalog so the API reflects it immediately — no restart
 //!
 //! Nothing outside the staging directory is written until step 4 succeeds, and
 //! step 4 rolls back if the swap fails, so the served documentation is never
@@ -27,7 +27,7 @@ use docbit_domain::new_id;
 
 use crate::catalog;
 
-/// Upper bound on archive entries 鈥?a docs bundle is hundreds of files, not
+/// Upper bound on archive entries — a docs bundle is hundreds of files, not
 /// hundreds of thousands.
 const MAX_ENTRIES: usize = 20_000;
 /// Upper bound on total uncompressed bytes (zip-bomb guard).
@@ -82,7 +82,7 @@ pub struct ExtractReport {
 /// A slug may only contain lowercase letters, digits and hyphens.
 ///
 /// This is the boundary that keeps an upload from naming a directory outside
-/// `docs/` 鈥?`../`, absolute paths and Windows separators are all rejected here
+/// `docs/` — `../`, absolute paths and Windows separators are all rejected here
 /// rather than being sanitised into something unexpected.
 fn sanitize_slug(raw: &str) -> Result<String> {
     if raw.is_empty() || raw.len() > 64 {

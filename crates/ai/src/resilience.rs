@@ -121,13 +121,19 @@ pub struct CircuitSnapshot {
 
 #[derive(Debug, Clone, Copy)]
 enum State {
-    Closed { failures: u32 },
-    Open { until: Instant },
+    Closed {
+        failures: u32,
+    },
+    Open {
+        until: Instant,
+    },
     /// A single probe window. `probe_until` bounds the probe so a caller that
     /// obtains permission but never records a result (provider hot-reloaded
     /// away, bulkhead full, task cancelled) cannot wedge the circuit forever.
     /// Once the window elapses, the next request is allowed to probe again.
-    HalfOpen { probe_until: Instant },
+    HalfOpen {
+        probe_until: Instant,
+    },
 }
 
 /// Per-model circuit breaker.
@@ -422,11 +428,17 @@ mod tests {
 
         // The probe window expires on its own: the circuit must not wedge.
         std::thread::sleep(cooldown + Duration::from_millis(1));
-        assert!(breaker.allow(&key()), "a stuck probe must not lock the model out forever");
+        assert!(
+            breaker.allow(&key()),
+            "a stuck probe must not lock the model out forever"
+        );
 
         // release_probe hands back the window immediately.
         breaker.release_probe(&key());
-        assert!(breaker.allow(&key()), "release_probe frees the window at once");
+        assert!(
+            breaker.allow(&key()),
+            "release_probe frees the window at once"
+        );
     }
 
     #[tokio::test]

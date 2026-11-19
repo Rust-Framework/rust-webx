@@ -119,6 +119,29 @@ let client = HttpClient::new("openai", HttpClientOptions {
   解析失败会让 `HttpClient::new` 直接返回 `InvalidRequest`，不会静默回退到公共根。
 - 代理 URL/CA 校验都在构造期完成；运行期不会因配置错误改连直连。
 
+## SSRF 防护
+
+默认拒绝私网/链路本地/云元数据目标（`ssrf_protection = true`）：
+
+```rust
+let client = HttpClient::new("public", HttpClientOptions {
+    base_url: "https://api.openai.com".into(),
+    // 默认即可；需要访问内网 vLLM/Ollama 时显式放开：
+    allow_private_networks: false,
+    ..HttpClientOptions::default()
+})?;
+```
+
+- 字面私有 IPv4（10/8、172.16/12、192.168/16、100.64/10 等）、链路本地
+  （169.254/16，含 `169.254.169.254`）、文档/基准地址、IPv6 ULA/链路本地/组播一律拒绝，
+  返回 `HttpClientError::BlockedAddress`。
+- 内部主机后缀 `.local`、`.internal`、`.home.arpa` 同样拒绝。
+- 回环（`127.0.0.0/8`、`::1`、`localhost`）允许，便于本地开发与 mock。
+- 内网/本地模型显式设置 `allow_private_networks: true` 才放行。
+- 目前按 URI 字面 host 校验；公网域名解析到私网地址（DNS rebinding）不在连接期复查，且客户端
+  不自动跟随重定向。对不可信输入仍应在应用层做 URL 允许列表。
+- 代理地址由运维配置，不经过该守卫；上游目标仍会校验。
+
 ## 限制（当前版本）
 
 - 客户端不实现自动重试/熔断；这些属于 `rust-webx-ai` 执行器的策略层（G9），本 crate 只提供

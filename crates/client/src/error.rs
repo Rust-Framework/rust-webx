@@ -30,6 +30,10 @@ pub enum HttpClientError {
     #[error("protocol error: {0}")]
     Protocol(String),
 
+    /// SSRF protection rejected a private/link-local/metadata destination.
+    #[error("blocked outbound destination: {0}")]
+    BlockedAddress(String),
+
     /// Reading the response body failed after the headers arrived.
     #[error("response body error: {0}")]
     Body(String),

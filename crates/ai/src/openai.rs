@@ -682,9 +682,9 @@ fn client_error(error: HttpClientError) -> ProviderError {
         | HttpClientError::Protocol(message)
         | HttpClientError::Body(message)
         | HttpClientError::UnknownClient(message) => ProviderError::Unavailable(message),
-        HttpClientError::InvalidRequest(message) | HttpClientError::InvalidUrl(message) => {
-            ProviderError::InvalidRequest(message)
-        }
+        HttpClientError::InvalidRequest(message)
+        | HttpClientError::InvalidUrl(message)
+        | HttpClientError::BlockedAddress(message) => ProviderError::InvalidRequest(message),
         HttpClientError::BodyTooLarge { limit } => {
             ProviderError::Protocol(format!("response body exceeded {limit} bytes"))
         }

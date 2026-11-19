@@ -500,6 +500,38 @@ async fn proxy_tunnels_requests_with_connect() {
 }
 
 #[tokio::test]
+async fn ssrf_guard_blocks_metadata_and_private_literals() {
+    let error = HttpClient::new("blocked", HttpClientOptions::new("http://169.254.169.254"))
+        .err()
+        .expect("the metadata address must be rejected");
+    assert!(matches!(error, HttpClientError::BlockedAddress(_)));
+
+    let error = HttpClient::new("blocked", HttpClientOptions::new("http://10.0.0.1"))
+        .err()
+        .expect("a private base URL must be rejected");
+    assert!(matches!(error, HttpClientError::BlockedAddress(_)));
+
+    // Loopback stays allowed, so a client can still talk to a local mock.
+    let base = spawn_server().await;
+    let client = HttpClient::new("local", options(base)).expect("loopback is allowed");
+    let error = client
+        .execute(OutboundRequest::get("http://10.0.0.2/internal"))
+        .await
+        .expect_err("an absolute private URL must be rejected");
+    assert!(matches!(error, HttpClientError::BlockedAddress(_)));
+
+    // Operators can opt in for intranet APIs / local vLLM.
+    HttpClient::new(
+        "intranet",
+        HttpClientOptions {
+            allow_private_networks: true,
+            ..HttpClientOptions::new("http://10.0.0.1")
+        },
+    )
+    .expect("explicit opt-in allows private networks");
+}
+
+#[tokio::test]
 async fn custom_root_certificates_are_loaded_and_bad_files_fail_fast() {
     let dir = tempfile::tempdir().expect("temp dir");
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).expect("generate");

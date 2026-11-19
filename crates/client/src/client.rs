@@ -158,6 +158,23 @@ pub struct HttpClientOptions {
     /// empty PEM file fails client construction instead of silently falling
     /// back to the public roots. `None` uses the webpki bundle.
     pub root_certificates: Option<PathBuf>,
+    /// Reject private/link-local/metadata destinations (SSRF guard).
+    ///
+    /// Enabled by default. Literal private IPs, link-local (for example the
+    /// cloud metadata address `169.254.169.254`) and internal host suffixes
+    /// (`.local`, `.internal`, `.home.arpa`) are rejected with
+    /// [`HttpClientError::BlockedAddress`](crate::HttpClientError::BlockedAddress).
+    /// Loopback (`127.0.0.0/8`, `::1`, `localhost`) stays allowed for local
+    /// development and tests.
+    ///
+    /// The guard checks the URI host before connecting; DNS answers for a
+    /// public hostname are not re-checked at connect time. Redirects are not
+    /// followed by this client, so they cannot bypass the guard.
+    pub ssrf_protection: bool,
+    /// Allow private/link-local destinations (local vLLM/Ollama, intranet APIs).
+    ///
+    /// Only meaningful when [`HttpClientOptions::ssrf_protection`] is enabled.
+    pub allow_private_networks: bool,
 }
 
 impl HttpClientOptions {
@@ -186,6 +203,8 @@ impl Default for HttpClientOptions {
             proxy: None,
             proxy_authorization: None,
             root_certificates: None,
+            ssrf_protection: true,
+            allow_private_networks: false,
         }
     }
 }
@@ -411,6 +430,7 @@ impl HttpClient {
                 options.base_url
             )));
         }
+        check_outbound_uri(&base, &options)?;
 
         let mut http = HttpConnector::new();
         http.set_connect_timeout(Some(options.connect_timeout));
@@ -468,25 +488,26 @@ impl HttpClient {
     }
 
     fn resolve(&self, path: &str) -> Result<Uri, HttpClientError> {
-        if path.starts_with("http://") || path.starts_with("https://") {
-            return path
-                .parse()
-                .map_err(|error| HttpClientError::InvalidUrl(format!("{path}: {error}")));
-        }
-
-        let base = self.base.to_string();
-        let base = base.trim_end_matches('/');
-        let path = path.trim_start_matches('/');
-        let joined = if path.is_empty() {
-            base.to_string()
-        } else if path.starts_with('?') {
-            format!("{base}{path}")
+        let uri = if path.starts_with("http://") || path.starts_with("https://") {
+            path.parse()
+                .map_err(|error| HttpClientError::InvalidUrl(format!("{path}: {error}")))?
         } else {
-            format!("{base}/{path}")
+            let base = self.base.to_string();
+            let base = base.trim_end_matches('/');
+            let path = path.trim_start_matches('/');
+            let joined = if path.is_empty() {
+                base.to_string()
+            } else if path.starts_with('?') {
+                format!("{base}{path}")
+            } else {
+                format!("{base}/{path}")
+            };
+            joined
+                .parse()
+                .map_err(|error| HttpClientError::InvalidUrl(format!("{joined}: {error}")))?
         };
-        joined
-            .parse()
-            .map_err(|error| HttpClientError::InvalidUrl(format!("{joined}: {error}")))
+        check_outbound_uri(&uri, &self.options)?;
+        Ok(uri)
     }
 }
 
@@ -593,6 +614,66 @@ where
             HttpClientError::Protocol(error.to_string())
         }
     })
+}
+
+/// SSRF guard: reject destinations that are private, link-local, metadata or
+/// internal by literal host. Loopback stays reachable for local development.
+fn check_outbound_uri(uri: &Uri, options: &HttpClientOptions) -> Result<(), HttpClientError> {
+    if !options.ssrf_protection || options.allow_private_networks {
+        return Ok(());
+    }
+    let Some(host) = uri.host() else {
+        return Ok(());
+    };
+    let host = host.trim_matches(['[', ']']);
+
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        if is_blocked_ip(ip) {
+            return Err(HttpClientError::BlockedAddress(host.to_string()));
+        }
+        return Ok(());
+    }
+
+    let lower = host.to_ascii_lowercase();
+    if lower.ends_with(".local")
+        || lower.ends_with(".internal")
+        || lower.ends_with(".home.arpa")
+        || lower == "metadata.google.internal"
+    {
+        return Err(HttpClientError::BlockedAddress(host.to_string()));
+    }
+    Ok(())
+}
+
+fn is_blocked_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(ip) => {
+            let octets = ip.octets();
+            !ip.is_loopback()
+                && (ip.is_private()
+                    || ip.is_link_local()
+                    || ip.is_unspecified()
+                    || ip.is_broadcast()
+                    || ip.is_documentation()
+                    // 0.0.0.0/8, 100.64/10 (CGNAT), 198.18/15 (benchmark),
+                    // 192.0.0/24 (IETF protocol assignments).
+                    || octets[0] == 0
+                    || (octets[0] == 100 && (octets[1] & 0xc0) == 64)
+                    || (octets[0] == 198 && (octets[1] & 0xfe) == 18)
+                    || (octets[0] == 192 && octets[1] == 0 && octets[2] == 0))
+        }
+        std::net::IpAddr::V6(ip) => {
+            let segments = ip.segments();
+            !ip.is_loopback()
+                && (ip.is_unspecified()
+                    // Unique local fc00::/7
+                    || (segments[0] & 0xfe00) == 0xfc00
+                    // Link-local fe80::/10
+                    || (segments[0] & 0xffc0) == 0xfe80
+                    // Multicast ff00::/8
+                    || (segments[0] & 0xff00) == 0xff00)
+        }
+    }
 }
 
 /// Build the rustls client config: webpki roots, or a PEM bundle that replaces

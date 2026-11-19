@@ -22,7 +22,7 @@
 | ID | 能力 | 状态 | 证据 |
 |---|---|---|---|
 | G1 | 流式响应/SSE | ✅ 已实现（流式响应 + 测试 + 手册；审计规则/发布待接入） | `crates/core/src/stream.rs`、`crates/webx/tests/sse_test.rs`、手册 `05-request-pattern/streaming-sse.md` |
-| G2 | 出站 HTTP 客户端 | ✅ 已实现（`rust-webx-client`：池化、流式、SSE 解码、超时、显式 `CONNECT` 代理、企业 CA、hop-by-hop 剥离、`traceparent` 注入；`HostBuilder::add_http_client` 注册 registry/factory） | `crates/client/src/{client,registry,sse}.rs`、`crates/client/tests/http_client_test.rs`、`crates/webx/tests/http_client_wiring_test.rs` |
+| G2 | 出站 HTTP 客户端 | ✅ 已实现（`rust-webx-client`：池化、流式、SSE 解码、超时、显式 `CONNECT` 代理、企业 CA、hop-by-hop 剥离、`traceparent` 注入、SSRF 私网/元数据守卫；`HostBuilder::add_http_client` 注册 registry/factory） | `crates/client/src/{client,registry,sse}.rs`、`crates/client/tests/http_client_test.rs`、`crates/webx/tests/http_client_wiring_test.rs` |
 | G3 | 认证 scheme + API Key | ✅ scheme 链 + `ApiKeyScheme`（含 `with_failure_limit` 失败限流 429）+ `IApiKeyStore`/`MemoryApiKeyStore`/`EfApiKeyStore`（`rust-webx-ai-ef`，`ai_api_keys`）+ `CachedApiKeyStore`（TTL、`invalidate`）+ `StoreApiKeyValidator`（HMAC、吊销/过期即时生效） | `crates/host/src/auth.rs`、`crates/ai/src/{api_key,api_key_store}.rs`、`crates/ai-ef/src/api_key.rs`、`crates/gateway/src/auth.rs` |
 | G4 | 配额预扣-结算 | ✅ 已实现 `IQuotaStore`/`MemoryQuotaStore`/`StaticQuotaPolicy`（RPM/TPM/TPD/并发/预算、租约、幂等结算）；Redis/分布式实现待补 | `crates/ai/src/quota.rs` |
 | G5 | 计量与计费 | ✅ `Usage`/`UsageEvent`/`IUsageSink`/`MemoryUsageSink`/`ITokenizer`/`HeuristicTokenizer`/`rollup_events` + `rust-webx-ai-ef` 的 `EfUsageSink`/outbox/rollup + `UsageOutboxWorker`/`UsageRollupWorker`（`PeriodicBackgroundService`） | `crates/ai/src/usage.rs`、`crates/ai-ef/src/{lib,worker}.rs` |
@@ -1215,8 +1215,10 @@ reserve ──► active ──(流完成)──────────► sett
 ## 13. 安全与滥用防护
 
 - **密钥**：API key 只存 HMAC；provider secret 信封加密；日志/错误/追踪全链路脱敏；`SecretValue` 无 `Debug`、Drop 零化。
-- **SSRF**：`base_url` 允许列表；默认拒绝私网/链路本地/元数据地址；禁止或重校验重定向；DNS 解析后校验 IP。
-- **头卫生**：剥离 hop-by-hop；客户端 `Authorization` 绝不转发上游；上游 key 绝不回显；响应头白名单。
+- **SSRF**：`rust-webx-client` 默认拒绝私网/链路本地/元数据字面地址与 `.local/.internal` 后缀
+  （`ssrf_protection`/`allow_private_networks`）；回环放行以便本地开发。DNS 解析后复查与重定向
+  重校验仍由应用 URL 允许列表补足。头卫生：剥离 hop-by-hop；客户端 `Authorization` 绝不转发上游；
+  上游 key 绝不回显；响应头白名单。
 - **租户隔离**：缓存、单飞、配额、用量全部带 tenant；跨租户复用视为严重缺陷。
 - **滥用**：认证失败限流、按前缀熔断、模型枚举防护、输出长度上限、并发上限。
 - **内容**：默认不记录 prompt/response；可选审核钩子（前置/后置）；保留期与删除策略。
@@ -1263,27 +1265,28 @@ reserve ──► active ──(流完成)──────────► sett
 
 **框架层（webx）**
 
-- [ ] `SseResult` 通过 OpenAI SDK 流式解析；断连/完成钩子恰好一次。
-- [ ] SSE 响应头正确（`text/event-stream`、`no-store`、`x-accel-buffering: no`），不被压缩。
-- [ ] `IHttpClient` 支持流式响应、连接池、HTTP/2、代理、超时分层；连接复用率达标。
-- [ ] 认证 scheme 可与 JWT 共存；`sk-` 撤销生效；错误限流生效。
-- [ ] `IErrorResponseWriter` 让 `/v1/*` 返回 OpenAI 信封，管理面仍 problem+json。
-- [ ] `IMeter` 输出带标签直方图；TTFT/token/成本可查询。
-- [ ] `IOptionsMonitor` 热更新生效；热路径无 DB。
-- [ ] 停机：长流按预算排空，结算不丢。
-- [ ] `TCP_NODELAY` 默认开启；drain 超时可配。
-- [ ] 审计新增规则落地（手写 SSE/重试/慢哈希/每请求查库/float 成本）。
-- [ ] 文档：设计页 + 能力目录 + 教学示例 + 升级说明同批更新。
+- [x] `SseResult` 帧/断连/完成钩子恰好一次；服务端有端到端测试。
+- [x] SSE 响应头正确（`text/event-stream`、`no-store`、`x-accel-buffering: no`），不被压缩。
+- [x] `IHttpClient` 支持流式响应、连接池、HTTP/2、代理、超时分层、企业 CA、SSRF 字面守卫。
+      （连接复用率未做基准测量。）
+- [x] 认证 scheme 可与 JWT 共存；`sk-` 撤销生效；失败限流生效。
+- [x] `IErrorResponseWriter` 让 `/v1/*` 返回 OpenAI 信封，管理面仍 problem+json。
+- [x] `IMeter` 输出带标签直方图；TTFT/token/成本/熔断状态可查询；`GatewayHealth` 就绪聚合。
+- [x] `IOptionsMonitor` / `CatalogFileWatcher` 热更新生效；热路径无 DB。
+- [x] 停机：长流按预算排空，`server_shutdown` 事件，结算由流结束/Drop 触发。
+- [x] `TCP_NODELAY` 默认开启；drain 超时可配；入站 `RequestTimeoutSeconds`。
+- [ ] 审计新增规则（rust_xazgo 审计的默认目标是 Travel `server/`，本仓库无该目录；规则文本待工具侧接入）。
+- [x] 文档：设计页 + 手册页 + 示例与设计进度同批更新。
 
 **网关层（rust-webx-ai）**
 
-- [ ] 新增 provider = 1 个 trait 实现 + 1 行注册。
-- [ ] 新增 OpenAI 兼容端点 = 1 个请求类型 + 1 个 handler。
-- [ ] 失败切换不改变客户端可见 model/响应形状。
-- [ ] 配额不超卖；断连槽位 5s 内释放；结算幂等。
-- [ ] 用量汇总 = 明细之和；对账差异可解释。
-- [ ] ≥10k 并发流压测达标（目标 20k）；p99 开销达标。
-- [ ] 安全：SSRF/租户隔离/密钥脱敏负例全过。
+- [x] 新增 provider = 1 个 trait 实现 + 1 行注册。
+- [x] 新增 OpenAI 兼容端点 = 1 个请求类型 + 1 个 handler。
+- [x] 失败切换不改变客户端可见 model/响应形状（执行器测试）。
+- [x] 配额不超卖（本地 store）；断连槽位释放；结算/释放幂等。分布式 store 属部署实现。
+- [x] 用量汇总 = 明细之和；rollup 幂等。（上游账单对账属部署任务。）
+- [ ] ≥10k 并发流压测达标（目标 20k）；p99 开销达标（需要独立压测环境，未在本仓库验证）。
+- [x] 安全：SSRF 字面守卫、缓存/配额租户隔离、密钥/凭据脱敏负例。
 
 ---
 

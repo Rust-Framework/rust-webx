@@ -193,14 +193,20 @@ impl IEndpoint for StubEndpoint {
 pub struct DirectRouteTarget {
     auth: Arc<StubEndpoint>,
     dispatch: webx_core::route::scan::HandlerDispatchFn,
+    encoder: webx_core::route::scan::DirectResponseEncoderFn,
 }
 
 impl DirectRouteTarget {
     pub fn new(
         auth: Arc<StubEndpoint>,
         dispatch: webx_core::route::scan::HandlerDispatchFn,
+        encoder: webx_core::route::scan::DirectResponseEncoderFn,
     ) -> Self {
-        Self { auth, dispatch }
+        Self {
+            auth,
+            dispatch,
+            encoder,
+        }
     }
 }
 
@@ -210,7 +216,7 @@ impl webx_engine::RouteTarget for DirectRouteTarget {
         if !self.auth.authorize(ctx).await? {
             return Ok(());
         }
-        let result = (self.dispatch)(ctx as &mut dyn IHttpContext).await?;
+        let result = (self.dispatch)(ctx as &mut dyn IHttpContext, self.encoder).await?;
         ctx.write_endpoint_result(result).await
     }
 }

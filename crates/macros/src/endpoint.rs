@@ -110,8 +110,19 @@ fn expand_endpoint(
 
     // Generate dispatch function
     let is_raw_response = is_raw_response_type(&rsp_type_str);
-    let dispatch_fn =
-        generate_dispatch_fn(self_ty, &rsp_type, rsp_type_str == "()", is_raw_response);
+    let is_unit_response = rsp_type_str == "()";
+    let dispatch_fn = generate_dispatch_fn(self_ty, &rsp_type, is_unit_response, is_raw_response);
+    let encoder_fn_name = format_ident!(
+        "__lrwf_encode_{}_{}",
+        method_str.to_lowercase(),
+        req_type_name.replace("::", "_")
+    );
+    let encoder_fn = generate_encoder_fn(
+        &rsp_type,
+        is_unit_response,
+        is_raw_response,
+        &encoder_fn_name,
+    );
 
     let dispatch_fn_name = format_ident!("__lrwf_dispatch_{}", req_type_name.replace("::", "_"));
     let bind_fn_name = format_ident!("__lrwf_bind_{}", req_type_name.replace("::", "_"));
@@ -163,7 +174,17 @@ fn expand_endpoint(
 
         #dispatch_fn
 
+        #encoder_fn
+
         #bind_fn
+
+        ::webx::inventory::submit! {
+            ::webx::DirectResponseEncoder {
+                req_type_id: ::std::any::TypeId::of::<#self_ty>(),
+                rsp_type_id: ::std::any::TypeId::of::<#rsp_type>(),
+                encode: #encoder_fn_name,
+            }
+        }
 
         ::webx::inventory::submit! {
             ::webx::RequestBinder {
@@ -193,6 +214,53 @@ fn expand_endpoint(
     };
 
     Ok(expanded.into())
+}
+
+/// Generate the route-owned direct-response encoder.
+///
+/// Only this generated function names the concrete response type, so a
+/// mediator-only `#[handler]` whose response is not `Serialize` no longer
+/// needs a marker: its direct bridge passes the borrowed value to whichever
+/// encoder the route provides. A real HTTP route with such a response still
+/// fails here, exactly where `JsonResult<T>: IActionResult` would fail.
+fn generate_encoder_fn(
+    rsp_type: &Type,
+    is_unit_response: bool,
+    is_raw_response: bool,
+    fn_name: &proc_macro2::Ident,
+) -> proc_macro2::TokenStream {
+    let body = if is_raw_response || is_unit_response {
+        // The direct bridge writes these as `Action`/`Empty` without calling
+        // the encoder; keep a typed fallback for the impossible call.
+        quote! {
+            ::core::result::Result::Err(::webx::Error::Internal(
+                "a raw/unit response does not use the JSON encoder".to_string()
+            ))
+        }
+    } else {
+        quote! {
+            let value = value.downcast_ref::<#rsp_type>().ok_or_else(|| {
+                ::webx::Error::Internal(
+                    "direct response encoder received an unexpected response type".to_string()
+                )
+            })?;
+            let body = ::webx::serde_json::to_vec(value)
+                .map_err(::webx::Error::ResponseSerialization)?;
+            ::core::result::Result::Ok(::webx::EndpointResult::Json {
+                status: 200,
+                body: ::webx::bytes::Bytes::from(body),
+            })
+        }
+    };
+
+    quote! {
+        #[doc(hidden)]
+        fn #fn_name(
+            value: &dyn ::std::any::Any,
+        ) -> ::webx::Result<::webx::EndpointResult> {
+            #body
+        }
+    }
 }
 
 /// Generate the dispatch function that runs the full request lifecycle.

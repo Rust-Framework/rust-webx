@@ -25,10 +25,10 @@ use crate::mediator::{IEventRequest, IRequest};
 /// free of auth concerns. Requests that need the caller declare
 /// `#[fromclaim] user: IdentityUser`; the binder fills it before `handle` runs.
 ///
-/// Register via `#[handler]` proc macro for compile-time collection; for
-/// non-HTTP Mediator use, register the handler in DI with rust-dix's
-/// `#[rust_dix::inject]` attribute (trait-impl registration) or
-/// `ServiceCollection::singleton`.
+/// Register via `#[handler]` for compile-time collection. A handler whose
+/// request has no HTTP route is a normal `IMediator` handler: the direct HTTP
+/// bridge is generated without a `Serialize` bound, and only the route (when
+/// one exists) contributes the response encoder.
 ///
 /// `handle(&mut self, ...)` enables the EFCore-style owned-DbContext pattern:
 /// handlers declare a bare `ctx: DbContext` field, resolved per-request via

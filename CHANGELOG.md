@@ -39,9 +39,13 @@ is admission, lifecycle, error semantics and wire-level verification.
   route `#[max_body_size]` can tighten **or raise** the global cap and works for
   declared `Content-Length`; `#[max_body_size(64 * 1024 * 1024)]` accepts
   compile-time integer expressions.
-- **Source migration / modes.** `#[handler(in_process)]` marks mediator-only
-  handlers: no direct HTTP dispatch and no `Serialize` requirement; Host
-  diagnostics no longer reject them as orphan routes. The obsolete concrete
+- **No handler annotation for mediator-only code.** `#[handler]` now generates
+  its direct bridge without naming the response type: the **route** supplies a
+  route-owned response encoder. A handler whose Request has no route therefore
+  compiles with any `Rsp` and is treated as `IMediator`-only; an actual HTTP
+  route with a non-`Serialize` response still fails at the route encoder. This
+  removes the 2.0 source break without a new `#[handler(in_process)]` syntax,
+  while keeping the direct path allocation-free. The obsolete concrete
   `webx_host::HttpContext`/`HttpRequest`/`HttpResponse` runtime types were
   removed (use `webx_engine::EngineContext`; `IHttpContext` remains the
   application contract). `Router::try_insert` lets Host fail startup on route
@@ -63,7 +67,7 @@ is admission, lifecycle, error semantics and wire-level verification.
   错误 writer 清理表示相关 headers，writer panic 回退 500。
 - 文件缓存策略、204/304、SSE shutdown waker、per-worker drain 修正。
 - JSON 非 JSON Content-Type 返回 415；route body limit 可收紧/放宽；
-  `#[handler(in_process)]` 支持无路由 mediator handler。
+  无路由的 `#[handler]` 自动作为 mediator handler，无需额外标注。
 - 删除旧具体 `HttpContext` 运行时类型；`IHttpContext` 应用契约不变。
 - 新增 admission/TLS/h2/lifecycle/错误写入/media/SSE 等 wire-level 测试。
 

@@ -49,14 +49,21 @@ impl BodyLimits { pub fn from_options(&AppOptions) -> Self; pub fn apply_spool_r
 // Alias of webx_core::route::scan::HandlerDispatchFn in the implementation:
 pub type DirectDispatchFn = for<'a> fn(
     &'a mut dyn IHttpContext,
+    DirectResponseEncoderFn,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<EndpointResult>> + Send + 'a>>;
+
+pub type DirectResponseEncoderFn =
+    for<'a> fn(&'a dyn std::any::Any) -> Result<EndpointResult>;
 
 #[async_trait::async_trait]
 pub trait RouteTarget: Send + Sync {
     async fn handle(&self, ctx: &mut EngineContext) -> Result<()>;
 }
 
-pub struct DirectTarget { pub dispatch: DirectDispatchFn }
+pub struct DirectTarget {
+    pub dispatch: DirectDispatchFn,
+    pub encoder: DirectResponseEncoderFn, // route-owned
+}
 pub struct EndpointTarget { pub endpoint: Arc<dyn IEndpoint> }
 
 pub struct RouteMatch {

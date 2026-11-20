@@ -79,11 +79,16 @@ Host::run_on
 - 删除构造期全局 `Content-Length` 预检；在路由解析后由 route target 设置
   `#[max_body_size]` 再校验，因此 route 可以**收紧或放宽**全局上限，404/405
   路径仍按全局上限拒绝超大声明。
-- `#[handler(in_process)]` 明确区分“只有 mediator、没有 HTTP 路由”的 handler：
-  不生成 direct dispatch/Serialize 要求，并注册 `InProcessHandler` marker，
-  使 Host 启动诊断不把合法 mediator handler 当 orphan route。
-- `#[handler]` 默认仍要求 HTTP 响应可序列化；`#[handler(in_process)]` 是
-  2.0 非 Serialize 进程内 handler 的迁移路径。
+- `#[handler]` 的 direct bridge 只负责绑定/构造/调用，**不命名响应编码**；路由宏
+  生成按 `(Req, Rsp)` 键控的 `DirectResponseEncoder`。因此：
+  - 无路由 handler 自动是 mediator-only，任意 `Rsp` 都能编译，不需要额外标注；
+  - 有 HTTP 路由但 `Rsp` 不可序列化时，在路由 encoder 处编译失败，保留 HTTP
+    编译期安全；
+  - direct 路径仍不装箱响应，只多一次 route encoder 的间接调用；/allocs 实测
+    仍为 **22.09 allocs/request**，与 2.0 的 23.1 相比没有增加（本机 co-tenant
+    负载下 RPS 波动较大，不作为绝对门禁）。
+- “handler 无路由”从启动 hard error 降为 debug/doctor 诊断：HTTP 能力由 Request
+  的路由决定，而非 handler 标注。
 
 ## 7. 验证矩阵
 
@@ -97,7 +102,8 @@ Host::run_on
   清除表示 headers。
 - `crates/webx/tests/media_body_contract_test.rs`：415、route body limit 放宽。
 - `crates/webx/tests/error_writer_panic_test.rs`：writer panic 回退 500。
-- `crates/webx/tests/in_process_handler_test.rs`：无路由 mediator handler 可构建 Host。
+- `crates/webx/tests/mediator_handler_test.rs`：无路由 mediator handler（无标注）
+  可编译并构建 Host。
 - `crates/host/tests/lifecycle_test.rs`：Host 单次运行。
 - SSE quiet shutdown 测试在 `crates/webx/tests/sse_test.rs`。
 

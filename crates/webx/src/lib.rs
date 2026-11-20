@@ -97,9 +97,10 @@ pub use webx_core::route::ext::{
 };
 pub use webx_core::route::scan::{
     bind_request, AuthorizeRule, BoxedBindFuture, BoxedBindFutureFn, BoxedDispatch,
-    BoxedDispatchFn, BoxedDispatchFuture, HandlerCache, HandlerDispatch, HandlerDispatchFn,
-    HandlerEntry, HandlerRegistration, HandlerRegistry, InProcessHandler, ParamMeta, RequestBinder,
-    RequestParamEntry, RouteDispatch, RouteDispatchById, RouteDispatchFn, RouteEntry,
+    BoxedDispatchFn, BoxedDispatchFuture, DirectResponseEncoder, DirectResponseEncoderFn,
+    HandlerCache, HandlerDispatch, HandlerDispatchFn, HandlerEntry, HandlerRegistration,
+    HandlerRegistry, ParamMeta, RequestBinder, RequestParamEntry, RouteDispatch, RouteDispatchById,
+    RouteDispatchFn, RouteEntry,
 };
 
 // --- HTTP layer ---

@@ -1374,6 +1374,10 @@ impl HostBuilder {
             (std::any::TypeId, std::any::TypeId),
             webx_core::route::scan::HandlerDispatchFn,
         > = std::collections::HashMap::new();
+        let mut encoder_by_pair: std::collections::HashMap<
+            (std::any::TypeId, std::any::TypeId),
+            webx_core::route::scan::DirectResponseEncoderFn,
+        > = std::collections::HashMap::new();
         if direct_dispatch_enabled {
             for dispatch in inventory::iter::<webx_core::route::scan::HandlerDispatch> {
                 let key = (dispatch.req_type_id, dispatch.rsp_type_id);
@@ -1384,6 +1388,9 @@ impl HostBuilder {
                         dispatch.req_type_name
                     )));
                 }
+            }
+            for encoder in inventory::iter::<webx_core::route::scan::DirectResponseEncoder> {
+                encoder_by_pair.insert((encoder.req_type_id, encoder.rsp_type_id), encoder.encode);
             }
         }
 
@@ -1403,13 +1410,18 @@ impl HostBuilder {
                 authorizers: authorizers.clone(),
                 max_body_size: entry.max_body_size,
             });
-            let direct = entry
-                .rsp_type_id
-                .and_then(|rsp| direct_by_pair.get(&(entry.req_type_id, rsp)).copied());
+            let direct = entry.rsp_type_id.and_then(|rsp| {
+                let key = (entry.req_type_id, rsp);
+                direct_by_pair
+                    .get(&key)
+                    .zip(encoder_by_pair.get(&key))
+                    .map(|(dispatch, encoder)| (*dispatch, *encoder))
+            });
             let engine_target: Arc<dyn webx_engine::RouteTarget> = match direct {
-                Some(dispatch) => Arc::new(crate::endpoint::DirectRouteTarget::new(
+                Some((dispatch, encoder)) => Arc::new(crate::endpoint::DirectRouteTarget::new(
                     Arc::clone(&stub),
                     dispatch,
+                    encoder,
                 )),
                 None => Arc::new(webx_engine::EndpointTarget::new(
                     Arc::clone(&stub) as Arc<dyn IEndpoint>

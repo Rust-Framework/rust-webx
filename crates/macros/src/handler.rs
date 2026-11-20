@@ -42,13 +42,11 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
         return quote!(#item_impl).into();
     }
 
-    // Check for `#[handler(inject)]` / `#[handler(in_process)]`.
-    let mode = match parse_mode(attr) {
-        Ok(mode) => mode,
+    // Check for `#[handler(inject)]`.
+    let use_inject = match parse_mode(attr) {
+        Ok(use_inject) => use_inject,
         Err(error) => return error.to_compile_error().into(),
     };
-    let use_inject = mode.inject;
-    let direct_dispatch = !mode.in_process;
 
     // Extract T (request type) and R (response type) from IRequestHandler<T, R>
     let (req_ty_opt, rsp_ty_opt) = extract_handler_types(&item_impl);
@@ -68,24 +66,16 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
         );
     let is_unit_response = rsp_tokens.trim() == "()";
 
+    // The response encoder is provided by the route macro. Keeping it out of
+    // this bridge is what lets route-less mediator handlers return a
+    // non-`Serialize` value without an opt-in attribute, while a real HTTP
+    // route still fails to compile if its declared response is not encodable.
     let response_expr = if is_action_response {
-        quote! { ::webx::EndpointResult::Action(__result) }
+        quote! { ::core::result::Result::Ok(::webx::EndpointResult::Action(__result)) }
     } else if is_unit_response {
-        quote! { ::webx::EndpointResult::Empty }
+        quote! { ::core::result::Result::Ok(::webx::EndpointResult::Empty) }
     } else {
-        quote! {
-            match ::webx::serde_json::to_vec(&__result) {
-                ::core::result::Result::Ok(__body) => ::webx::EndpointResult::Json {
-                    status: 200,
-                    body: ::webx::bytes::Bytes::from(__body),
-                },
-                ::core::result::Result::Err(__error) => {
-                    return ::core::result::Result::Err(
-                        ::webx::Error::ResponseSerialization(__error)
-                    );
-                }
-            }
-        }
+        quote! { (encoder)(&__result) }
     };
 
     let construct_handler = if use_inject {
@@ -172,23 +162,11 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
-    let in_process_marker = if direct_dispatch {
-        quote! {}
-    } else {
-        quote! {
-            ::webx::inventory::submit! {
-                ::webx::InProcessHandler {
-                    req_type_id: ::std::any::TypeId::of::<#req_ty>(),
-                }
-            }
-        }
-    };
-
-    let direct_registration = if direct_dispatch {
-        quote! {
+    let direct_registration = quote! {
         #[doc(hidden)]
         fn #direct_fn<'__webx_direct>(
             ctx: &'__webx_direct mut dyn ::webx::IHttpContext,
+            encoder: ::webx::DirectResponseEncoderFn,
         ) -> ::std::pin::Pin<
             Box<
                 dyn ::std::future::Future<
@@ -211,7 +189,8 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
                         #rsp_ty,
                     >>::handle(&mut __handler, __request)
                     .await?;
-                    ::core::result::Result::Ok(#response_expr)
+                    let _ = &encoder;
+                    #response_expr
                 })
                 .await
             })
@@ -226,15 +205,11 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
                 dispatch: #direct_fn,
             }
         }
-        }
-    } else {
-        quote! {}
     };
 
     let expanded = quote! {
         #item_impl
 
-        #in_process_marker
         #direct_registration
 
         #[doc(hidden)]
@@ -342,33 +317,25 @@ fn extract_type_name(ty: &Type) -> String {
     }
 }
 
-#[derive(Default)]
-struct HandlerMode {
-    inject: bool,
-    in_process: bool,
-}
-
-fn parse_mode(attr: TokenStream) -> syn::Result<HandlerMode> {
+fn parse_mode(attr: TokenStream) -> syn::Result<bool> {
     if attr.is_empty() {
-        return Ok(HandlerMode::default());
+        return Ok(false);
     }
     use syn::parse::Parser;
     let flags =
         syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated.parse(attr)?;
-    let mut mode = HandlerMode::default();
+    let mut use_inject = false;
     for flag in flags {
         if flag.is_ident("inject") {
-            mode.inject = true;
-        } else if flag.is_ident("in_process") {
-            mode.in_process = true;
+            use_inject = true;
         } else {
             return Err(syn::Error::new_spanned(
                 flag,
-                "unsupported `#[handler]` option; expected `inject` or `in_process`",
+                "unsupported `#[handler]` option; expected `#[handler]` or `#[handler(inject)]`",
             ));
         }
     }
-    Ok(mode)
+    Ok(use_inject)
 }
 
 fn type_to_string(ty: &Type) -> String {

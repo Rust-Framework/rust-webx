@@ -14,9 +14,11 @@ use webx_core::route::scan::{
 ///
 /// Panics at `HostBuilder::build()` when:
 /// - a route exists without a matching `#[handler]` registration
-/// - a `#[handler]` exists without a matching route
 /// - a route has a handler but no generated dispatch bridge
 /// - two routes share `(method, path)`, or two handlers share a request `TypeId`
+///
+/// A handler without a route is valid: it is an `IMediator`-only handler and
+/// is reported only through debug diagnostics/`--doctor`.
 ///
 /// `HostBuilder::try_build()` calls [`validate_route_configuration`] instead, so
 /// it can report the same problem as an `Err`.
@@ -105,8 +107,17 @@ pub fn validate_route_configuration() -> webx_core::error::Result<()> {
         dupes
     };
 
+    // A handler without a route is a valid mediator-only handler: HTTP-ness is
+    // determined by the Request's route, not by an annotation on the handler.
+    // Keep the list for `--doctor`/debug diagnostics, but do not fail startup.
+    for request in &missing_routes {
+        tracing::debug!(
+            request,
+            "handler has no HTTP route; treating it as mediator-only"
+        );
+    }
+
     if orphan_route_rows.is_empty()
-        && missing_routes.is_empty()
         && missing_dispatch.is_empty()
         && duplicate_routes.is_empty()
         && duplicate_dispatches.is_empty()
@@ -126,15 +137,6 @@ pub fn validate_route_configuration() -> webx_core::error::Result<()> {
                 "  - {} {} ({})\n",
                 route.method, route.path, route.request_type
             ));
-        }
-    }
-    if !missing_routes.is_empty() {
-        message.push_str("\nHandlers without route:\n");
-        message.push_str(
-            "  Fix: add #[get]/#[post]/... impl IRequest<R> for the request type, or remove the orphan #[handler]\n",
-        );
-        for req in &missing_routes {
-            message.push_str(&format!("  - {req}\n"));
         }
     }
     if !missing_dispatch.is_empty() {
@@ -173,7 +175,7 @@ pub fn validate_route_configuration() -> webx_core::error::Result<()> {
     Err(webx_core::error::Error::Di(message))
 }
 
-/// Log route table and warn on orphan routes/handlers.
+/// Log the route table; route-less (mediator-only) handlers are debug-level.
 pub fn log_startup_diagnostics() {
     let routes = route_snapshots();
     tracing::info!(count = routes.len(), "Registered HTTP routes");
@@ -197,9 +199,9 @@ pub fn log_startup_diagnostics() {
     }
 
     for handler in orphan_handlers() {
-        tracing::warn!(
+        tracing::debug!(
             request = handler,
-            "handler has no matching route — add #[get]/#[post] on IRequest impl or remove #[handler]"
+            "handler has no matching route; it is available to IMediator only"
         );
     }
 

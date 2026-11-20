@@ -55,13 +55,17 @@ pub trait RouteTarget: Send + Sync {
 pub struct DirectTarget {
     /// The generated dispatch function (see [`DirectDispatchFn`]).
     pub dispatch: DirectDispatchFn,
+    /// Route-owned response encoder for the declared response type.
+    pub encoder: webx_core::route::scan::DirectResponseEncoderFn,
 }
 
 impl DirectTarget {
-    /// Wrap a dispatch function, e.g. `HandlerDispatch::dispatch` from the
-    /// compile-time registry.
-    pub fn new(dispatch: DirectDispatchFn) -> Self {
-        Self { dispatch }
+    /// Wrap a dispatch function and its route-owned response encoder.
+    pub fn new(
+        dispatch: DirectDispatchFn,
+        encoder: webx_core::route::scan::DirectResponseEncoderFn,
+    ) -> Self {
+        Self { dispatch, encoder }
     }
 }
 
@@ -71,7 +75,7 @@ impl RouteTarget for DirectTarget {
         // The generated bridge takes the 1.5-compatible trait object, so the
         // engine context is handed over as `&mut dyn IHttpContext`; the result
         // is written through the concrete context afterwards.
-        let result = (self.dispatch)(&mut *ctx).await?;
+        let result = (self.dispatch)(&mut *ctx, self.encoder).await?;
         ctx.write_endpoint_result(result).await
     }
 }
@@ -592,8 +596,15 @@ mod tests {
         )
     }
 
+    fn ignore_encoder(_value: &dyn std::any::Any) -> Result<EndpointResult> {
+        Err(webx_core::error::Error::Internal(
+            "test encoder must not be called".to_string(),
+        ))
+    }
+
     fn dispatch_json<'a>(
         _ctx: &'a mut dyn IHttpContext,
+        _encoder: webx_core::route::scan::DirectResponseEncoderFn,
     ) -> Pin<Box<dyn Future<Output = Result<EndpointResult>> + Send + 'a>> {
         Box::pin(async move {
             Ok(EndpointResult::Json {
@@ -605,7 +616,7 @@ mod tests {
 
     #[tokio::test]
     async fn direct_target_writes_the_endpoint_result() {
-        let target = DirectTarget::new(dispatch_json);
+        let target = DirectTarget::new(dispatch_json, ignore_encoder);
         let mut ctx = test_context();
 
         target

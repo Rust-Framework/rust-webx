@@ -95,7 +95,7 @@ sequenceDiagram
 
 ## 与 Mediator 的关系
 
-普通 HTTP 快路径不经过 `Mediator`：`#[handler]` 生成按 `(Req, Rsp)` 键控的直接 dispatch，Host 在启动时与路由 join。注册了任意 `IPipelineBehavior` 时，Host 保守回退到 mediated 路径，保证行为链语义不变。需要纯进程内调用的 handler 应使用 `#[handler(in_process)]`：它只注册 `IMediator` 路径，不要求响应实现 `Serialize`，也不会被“无路由”启动诊断拒绝。
+普通 HTTP 快路径不经过 `Mediator`：`#[handler]` 生成按 `(Req, Rsp)` 键控的直接 dispatch，Host 在启动时与路由 join。响应编码由**路由宏**提供（`DirectResponseEncoder`），所以 handler 侧不要求 `Rsp: Serialize`；没有路由的 handler 自然就是 `IMediator` handler，无需额外标注。注册了任意 `IPipelineBehavior` 时，Host 保守回退到 mediated 路径，保证行为链语义不变。
 
 ## DispatchRuntime
 

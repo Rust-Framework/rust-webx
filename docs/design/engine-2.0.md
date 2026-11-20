@@ -82,7 +82,7 @@ tokio listener (acceptor task)
 
 **结论**：per-worker current-thread runtime 是跨档的关键；`SO_REUSEPORT` 不是必需（actix 也没有用它），且 Windows 不支持。单 acceptor + 安全 `into_std/from_std` 交接可跨平台；代价是每连接两次注册，对 keep-alive 可忽略。
 
-- 默认 `Workers = available_parallelism()`，clamp `1..=64`；`Workers=1` 仍可显式指定；配置键 `Server.Workers` / `APP__Server__Workers`。
+- 默认 `Workers = available_parallelism()`，clamp `1..=64`（Development 自动上限 8，避免测试主机线程膨胀）；显式值仍在 `1..=64`；配置键 `Server.Workers` / `APP__Server__Workers`。
 - 每个 worker 独立 `current_thread` runtime；连接不迁移；请求 future 仍 `Send`（不引入 `!Send`/`Rc`，保持现有 `IMiddleware`/DI/`Arc` 兼容）。
 - 单 acceptor 负责 round-robin + 容量感知；worker 用有界 channel；连接上限按 worker 分摊但总量仍以 `App.MaxConnections` 为准。
 - TLS 在 worker 内握手（超时保护），HTTP/2 ALPN 不变。

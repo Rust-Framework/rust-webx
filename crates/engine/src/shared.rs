@@ -134,12 +134,21 @@ impl ActiveStreamGuard {
 impl Drop for ActiveStreamGuard {
     fn drop(&mut self) {
         if self.marked.load(Ordering::Relaxed) {
-            // `checked_sub` keeps a double drop from wrapping the counter.
-            let _ = self
-                .counter
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-                    current.checked_sub(1)
-                });
+            // Saturating compare-exchange keeps a double drop from wrapping the
+            // counter and avoids the newly-deprecated `fetch_update` on newer
+            // toolchains while staying compatible with the 1.95 MSRV.
+            let mut current = self.counter.load(Ordering::Relaxed);
+            while current > 0 {
+                match self.counter.compare_exchange_weak(
+                    current,
+                    current - 1,
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                ) {
+                    Ok(_) => break,
+                    Err(actual) => current = actual,
+                }
+            }
         }
     }
 }

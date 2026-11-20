@@ -420,9 +420,20 @@ pub(crate) fn increment(counter: &AtomicUsize) {
 }
 
 pub(crate) fn decrement(counter: &AtomicUsize) {
-    let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-        current.checked_sub(1)
-    });
+    // Saturating CAS: no wrap on a buggy double-decrement, and no dependence on
+    // the `fetch_update` method that newer toolchains deprecate.
+    let mut current = counter.load(Ordering::Relaxed);
+    while current > 0 {
+        match counter.compare_exchange_weak(
+            current,
+            current - 1,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => break,
+            Err(actual) => current = actual,
+        }
+    }
 }
 
 #[cfg(test)]

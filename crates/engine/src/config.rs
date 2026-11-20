@@ -133,7 +133,14 @@ impl EngineConfig {
             let available = std::thread::available_parallelism()
                 .map(|parallelism| parallelism.get())
                 .unwrap_or(1);
-            available.clamp(1, MAX_WORKERS)
+            // Development/test hosts are often spawned many-at-a-time; keep their
+            // thread footprint bounded. Production uses the full core count.
+            let limit = if self.mode == AppMode::Development {
+                8
+            } else {
+                MAX_WORKERS
+            };
+            available.clamp(1, limit)
         } else {
             self.workers.clamp(1, MAX_WORKERS)
         }

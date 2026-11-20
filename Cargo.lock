@@ -2129,7 +2129,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2153,7 +2153,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-ai"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -2172,7 +2172,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-ai-ef"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "async-trait",
  "rust-ef",
@@ -2187,7 +2187,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-ai-gateway"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -2205,7 +2205,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-build"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "brotli",
  "mime_guess",
@@ -2215,7 +2215,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-client"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2240,7 +2240,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-core"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2260,7 +2260,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-engine"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2273,6 +2273,8 @@ dependencies = [
  "matchit",
  "mime_guess",
  "multer",
+ "rcgen",
+ "rust-dix",
  "rust-webx-core",
  "rustls",
  "rustls-pemfile",
@@ -2287,7 +2289,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-host"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "argon2",
  "async-trait",
@@ -2333,7 +2335,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-macros"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2342,7 +2344,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-openapi"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "inventory",
  "rust-webx-core",
@@ -2351,7 +2353,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-spa"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "async-trait",
  "brotli",

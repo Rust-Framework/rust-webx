@@ -4,11 +4,11 @@
 //! status/header layout, byte bodies, file bodies (validators, conditional
 //! requests, byte ranges, `multipart/byteranges`) and HEAD body suppression.
 //!
-//! The file/range logic is the proven 1.5 implementation moved out of
-//! `webx_host::context`, including its range and validator tests. The one
-//! behavioural difference is that the framework's default `Cache-Control` is
-//! no longer applied here: cache policy is host middleware in 2.0, while this
-//! module owns only content-type/body/status.
+//! The file/range logic is the proven implementation moved into the engine,
+//! including its range and validator tests. Response policy also lives here:
+//! byte responses default to `no-store`, represented files with validators
+//! revalidate, and unknown-length streams are not stored. Error replacement
+//! strips stale entity headers before writing `problem+json`.
 
 use bytes::Bytes;
 use http_body_util::combinators::UnsyncBoxBody;
@@ -87,33 +87,46 @@ impl ResponseParts {
             body,
         } = self;
         let is_head = req.method().eq_ignore_ascii_case("HEAD");
+        // 1xx, 204 and 304 never carry a body (RFC 9110 §6.4.1/§8.6). The
+        // representation headers of a 304 are retained for cache validation.
+        let is_bodyless_status = status == 204 || status == 304 || (100..200).contains(&status);
         apply_security_headers(&mut headers);
 
         let mut response = match body {
             ResponseBodyState::File(file) => file_response(req, status, headers, file).await,
             ResponseBodyState::Bytes(bytes) => {
-                if is_head && !headers.contains_key("content-length") {
+                if is_head && !is_bodyless_status && !headers.contains_key("content-length") {
                     set_content_length(&mut headers, bytes.len() as u64);
                 }
                 // Framework default for API/byte responses; a handler or
-                // middleware that set a policy keeps it.
-                if !headers.contains_key("cache-control") {
+                // middleware that set a policy keeps it. A 304 must retain the
+                // stored response's caching metadata, not gain `no-store`.
+                if !headers.contains_key("cache-control") && status != 304 {
                     insert_static_header(&mut headers, "cache-control", "no-store");
                 }
                 bytes_response(status, headers, bytes)
             }
             ResponseBodyState::None => {
-                if is_head && !headers.contains_key("content-length") {
+                if is_head && !is_bodyless_status && !headers.contains_key("content-length") {
                     set_content_length(&mut headers, 0);
                 }
-                if !headers.contains_key("cache-control") {
+                if !headers.contains_key("cache-control") && status != 304 {
                     insert_static_header(&mut headers, "cache-control", "no-store");
                 }
                 bytes_response(status, headers, Bytes::new())
             }
         };
 
-        suppress_head_body(&mut response, is_head);
+        if is_bodyless_status {
+            // A handler may have written a body before setting 204/304; never
+            // let it reach the wire. 204/1xx also must not carry Content-Length.
+            suppress_head_body(&mut response, true);
+            if status != 304 {
+                response.headers_mut().remove("content-length");
+            }
+        } else {
+            suppress_head_body(&mut response, is_head);
+        }
         response
     }
 }
@@ -192,6 +205,29 @@ pub(crate) fn insert_static_header(
         HeaderName::from_static(name),
         HeaderValue::from_static(value),
     );
+}
+
+/// Strip representation-specific headers before replacing a response body
+/// with an error.
+///
+/// A handler/middleware or a file response may have set validators, an encoding
+/// or a cache policy for the successful representation. Those headers are
+/// wrong for a `problem+json` body (and a shared cache must not store a 416/500
+/// with `immutable`). `Allow`, CORS and `Vary` are deliberately preserved.
+pub(crate) fn strip_entity_headers(headers: &mut HeaderMap) {
+    for name in [
+        "cache-control",
+        "content-encoding",
+        "content-length",
+        "content-range",
+        "content-disposition",
+        "etag",
+        "last-modified",
+        "accept-ranges",
+        "transfer-encoding",
+    ] {
+        headers.remove(name);
+    }
 }
 
 fn set_content_length(headers: &mut HeaderMap, len: u64) {
@@ -380,6 +416,17 @@ async fn file_response(
             "last-modified",
             &httpdate::fmt_http_date(modified),
         );
+    }
+    if !headers.contains_key("cache-control") {
+        // Restore the 1.5 file policy: a represented file with validators is
+        // revalidated, not stored heuristically; a stream without validators
+        // must not be stored at all. Application/middleware policy wins.
+        let policy = if etag.is_some() || modified.is_some() {
+            "public, max-age=0, must-revalidate"
+        } else {
+            "no-store"
+        };
+        insert_static_header(&mut headers, "cache-control", policy);
     }
 
     // `Accept-Ranges: none` tells download managers not to bother trying, which
@@ -692,6 +739,15 @@ fn problem_response(
     mut headers: HeaderMap,
     detail: &str,
 ) -> hyper::Response<RespBody> {
+    // `Content-Range: bytes */len` is the required metadata of a 416, not a
+    // stale representation header; preserve it while stripping the rest.
+    let unsatisfied_range = (status == 416)
+        .then(|| headers.get("content-range").cloned())
+        .flatten();
+    strip_entity_headers(&mut headers);
+    if let Some(value) = unsatisfied_range {
+        headers.insert(hyper::header::CONTENT_RANGE, value);
+    }
     insert_static_header(&mut headers, "content-type", "application/problem+json");
     let problem = ProblemDetails {
         typ: Some(format!("https://httpstatuses.com/{status}")),
@@ -909,14 +965,17 @@ fn is_not_modified(
     etag: Option<&str>,
     modified: Option<SystemTime>,
 ) -> bool {
-    if let Some(if_none_match) = req.header("if-none-match") {
+    if req.header("if-none-match").is_some() {
         let Some(etag) = etag else {
             return false;
         };
         let expected = etag_value(etag);
-        return if_none_match.split(',').any(|candidate| {
-            let candidate = candidate.trim();
-            candidate == "*" || etag_value(candidate) == expected
+        // RFC 9110 allows the field to be repeated; inspect every instance.
+        return req.header_all("if-none-match").into_iter().any(|value| {
+            value.split(',').any(|candidate| {
+                let candidate = candidate.trim();
+                candidate == "*" || etag_value(candidate) == expected
+            })
         });
     }
 

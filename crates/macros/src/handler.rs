@@ -42,11 +42,13 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
         return quote!(#item_impl).into();
     }
 
-    // Check for #[handler(inject)] — signals DI-based construction via #[derive(Inject)].
-    let use_inject = match parse_mode(attr) {
+    // Check for `#[handler(inject)]` / `#[handler(in_process)]`.
+    let mode = match parse_mode(attr) {
         Ok(mode) => mode,
         Err(error) => return error.to_compile_error().into(),
     };
+    let use_inject = mode.inject;
+    let direct_dispatch = !mode.in_process;
 
     // Extract T (request type) and R (response type) from IRequestHandler<T, R>
     let (req_ty_opt, rsp_ty_opt) = extract_handler_types(&item_impl);
@@ -170,9 +172,20 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
-    let expanded = quote! {
-        #item_impl
+    let in_process_marker = if direct_dispatch {
+        quote! {}
+    } else {
+        quote! {
+            ::webx::inventory::submit! {
+                ::webx::InProcessHandler {
+                    req_type_id: ::std::any::TypeId::of::<#req_ty>(),
+                }
+            }
+        }
+    };
 
+    let direct_registration = if direct_dispatch {
+        quote! {
         #[doc(hidden)]
         fn #direct_fn<'__webx_direct>(
             ctx: &'__webx_direct mut dyn ::webx::IHttpContext,
@@ -213,6 +226,16 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
                 dispatch: #direct_fn,
             }
         }
+        }
+    } else {
+        quote! {}
+    };
+
+    let expanded = quote! {
+        #item_impl
+
+        #in_process_marker
+        #direct_registration
 
         #[doc(hidden)]
         fn #factory_fn(
@@ -319,17 +342,33 @@ fn extract_type_name(ty: &Type) -> String {
     }
 }
 
-fn parse_mode(attr: TokenStream) -> syn::Result<bool> {
+#[derive(Default)]
+struct HandlerMode {
+    inject: bool,
+    in_process: bool,
+}
+
+fn parse_mode(attr: TokenStream) -> syn::Result<HandlerMode> {
     if attr.is_empty() {
-        return Ok(false);
+        return Ok(HandlerMode::default());
     }
-    match syn::parse::<syn::Meta>(attr)? {
-        syn::Meta::Path(path) if path.is_ident("inject") => Ok(true),
-        other => Err(syn::Error::new_spanned(
-            other,
-            "unsupported `#[handler]` option; expected `#[handler]` or `#[handler(inject)]`",
-        )),
+    use syn::parse::Parser;
+    let flags =
+        syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated.parse(attr)?;
+    let mut mode = HandlerMode::default();
+    for flag in flags {
+        if flag.is_ident("inject") {
+            mode.inject = true;
+        } else if flag.is_ident("in_process") {
+            mode.in_process = true;
+        } else {
+            return Err(syn::Error::new_spanned(
+                flag,
+                "unsupported `#[handler]` option; expected `inject` or `in_process`",
+            ));
+        }
     }
+    Ok(mode)
 }
 
 fn type_to_string(ty: &Type) -> String {

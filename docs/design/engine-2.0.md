@@ -183,3 +183,8 @@ co-tenant 时绝对值下降，因此 CI 门禁只做**相对 1.5 基线**的回
 **遗留（非 2.0 阻塞）**：自定义 HTTP/1 编码器与 `!Send`/`Rc` 引擎可把持续吞吐再推
 向 250k+，但会破坏现有 `Send` trait 与 DI 形状，留作独立产品决策；RequestId /
 Metrics 仍是 `IMiddleware` boxing，后续可迁入 engine 快路径。
+
+**2.1 稳定性收口**：准入/首请求期限、单次运行生命周期、错误写入顺序、
+per-worker SSE drain、全局 connection governor、wire-level admission/TLS/h2
+测试等见 [engine-2.1-stability.md](engine-2.1-stability.md)。2.0 的性能结论
+仍以 `rw-bench` 的一次性测量为准，2.1 不改变该口径。

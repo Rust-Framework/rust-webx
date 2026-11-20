@@ -490,6 +490,14 @@ pub trait IHttpRequest: Send {
     fn method(&self) -> &str;
     fn path(&self) -> &str;
     fn header(&self, name: &str) -> Option<&str>;
+
+    /// Every value of a repeated request header, in wire order.
+    ///
+    /// Default implementations expose only the single-value view; the HTTP
+    /// engine returns all values so conditional/CORS code can honor duplicates.
+    fn header_all(&self, name: &str) -> Vec<&str> {
+        self.header(name).into_iter().collect()
+    }
     fn query(&self) -> &HashMap<String, String>;
 
     /// The peer address of the client connection, when the host exposes it.
@@ -507,6 +515,15 @@ pub trait IHttpRequest: Send {
     /// `#[max_body_size(..)]`. The default is a no-op so alternative/test
     /// contexts keep compiling; such a host simply keeps its global limit.
     fn set_max_body_size(&mut self, _limit: usize) {}
+
+    /// Validate a declared `Content-Length` against the current body limit.
+    ///
+    /// Called by the endpoint after applying a per-route `#[max_body_size]`
+    /// and still before binding. Engines that do not track a declared length
+    /// keep the default no-op.
+    fn validate_declared_body_limit(&mut self) -> Result<()> {
+        Ok(())
+    }
 
     /// Every value per query key, in the order they appeared.
     ///

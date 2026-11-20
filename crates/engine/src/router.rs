@@ -174,19 +174,33 @@ impl Router {
     /// is logged and not registered (the 1.5 behavior), so the process still
     /// starts and the route answers 404 instead of panicking mid-boot.
     pub fn insert(&mut self, method: HttpMethod, path: &'static str, target: Arc<dyn RouteTarget>) {
+        if let Err(error) = self.try_insert(method, path, target) {
+            tracing::warn!("{error}");
+        }
+    }
+
+    /// Register a route, surfacing a malformed/conflicting pattern as a typed
+    /// startup error.
+    pub fn try_insert(
+        &mut self,
+        method: HttpMethod,
+        path: &'static str,
+        target: Arc<dyn RouteTarget>,
+    ) -> Result<()> {
         let value = RouteValue {
             target,
             pattern: Arc::from(path),
             param_names: param_names(path).into_boxed_slice(),
         };
-        if let Err(error) = self.routes[method_index(method)].insert(path, value) {
-            tracing::warn!(
-                "[Router] Failed to register route '{} {}': {}",
-                method.as_str(),
-                path,
-                error
-            );
-        }
+        self.routes[method_index(method)]
+            .insert(path, value)
+            .map_err(|error| {
+                webx_core::error::Error::Http(format!(
+                    "failed to register route {} {}: {error}",
+                    method.as_str(),
+                    path
+                ))
+            })
     }
 
     /// Set the target for a genuine miss (SPA index fallback or a branded 404).

@@ -21,13 +21,27 @@ impl Default for RequestIdMiddleware {
     }
 }
 
+/// Whether an upstream correlation id is safe to echo and use as a trace id.
+///
+/// Request ids are attacker-controlled. Unbounded values can create huge
+/// response headers, and arbitrary whitespace/control bytes belong nowhere in
+/// audit correlation fields.
+pub(crate) fn is_valid_request_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+}
+
 #[async_trait::async_trait]
 impl IMiddleware for RequestIdMiddleware {
     async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
         let id = ctx
             .request()
             .header("x-request-id")
-            .map(|s| s.to_string())
+            .filter(|value| is_valid_request_id(value))
+            .map(str::to_string)
             .unwrap_or_else(|| Uuid::new_v4().to_string());
         ctx.response_mut().set_header("x-request-id", &id);
         Ok(ControlFlow::Continue(()))

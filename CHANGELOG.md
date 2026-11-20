@@ -3,6 +3,70 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [2.1.0] — 2026-11-20
+
+Production-stability pass over the 2.0 engine. No feature expansion; the focus
+is admission, lifecycle, error semantics and wire-level verification.
+
+> **English** · **简体中文**
+
+### English
+
+- **Global connection admission.** One `Semaphore(App.MaxConnections)` per
+  `Server`, shared by every http/https listener and worker. Removes the
+  per-worker floor that could exceed the documented global cap and the
+  per-listener multiplication of workers/connections.
+- **Pre-request deadline.** `Server.FirstRequestTimeoutSeconds` (default 10;
+  zero uses the secure default) closes TCP connections that send no first
+  request/partial h2 preface; HTTP/2 keepalive is enabled. Silent sockets can no
+  longer pin admission permits forever.
+- **Single-use lifecycle guards.** Host states Built/Running/Disposed/Failed;
+  concurrent/repeated runs return `Error::State`. Dropping/aborting a run future
+  triggers immediate shutdown; a join timeout no longer disposes DI while a
+  blocking worker can still resolve it. Engine/Worker/Host cleanup is guarded
+  against cancellation.
+- **Error before after-hooks.** `Pipeline::execute_with_error` writes the error
+  response before the reverse `after` pass, so metrics, tracing and compression
+  observe the real 4xx/5xx status. The writer strips stale entity headers
+  (`cache-control`, `content-encoding`, validators, ranges) and preserves
+  `Allow`/CORS/`Vary`; a panicking custom writer falls back to a fixed 500.
+- **File/cache/204/304 semantics.** Files with validators revalidate; unknown
+  streams are `no-store`; 204/1xx never carry `Content-Length`; 304 keeps cache
+  metadata instead of gaining `no-store`.
+- **SSE and drain.** Shutdown cancellation is polled as a waker (quiet streams
+  emit `event:server_shutdown`); drain budget is per worker, not process-global.
+- **Request contracts.** JSON body binding returns 415 for non-JSON media types;
+  route `#[max_body_size]` can tighten **or raise** the global cap and works for
+  declared `Content-Length`; `#[max_body_size(64 * 1024 * 1024)]` accepts
+  compile-time integer expressions.
+- **Source migration / modes.** `#[handler(in_process)]` marks mediator-only
+  handlers: no direct HTTP dispatch and no `Serialize` requirement; Host
+  diagnostics no longer reject them as orphan routes. The obsolete concrete
+  `webx_host::HttpContext`/`HttpRequest`/`HttpResponse` runtime types were
+  removed (use `webx_engine::EngineContext`; `IHttpContext` remains the
+  application contract). `Router::try_insert` lets Host fail startup on route
+  conflicts.
+- **Verification.** New wire-level tests cover silent-connection admission,
+  cross-listener global MaxConnections, TLS handshake + HTTP, h2c, Host
+  single-use lifecycle, error-writer panic, metrics error status, media/body
+  contracts and quiet SSE shutdown.
+
+### 简体中文
+
+- 连接准入改为每个 `Server` 一个全局 `MaxConnections` Semaphore，所有
+  http/https listener 和 worker 共享；删除会被放大上限的 per-worker floor。
+- 新增首请求超时（默认 10s，0 回退默认）和 h2 keepalive，静默连接不再永久
+  占用 admission permit。
+- Host 单次运行状态机 + run drop guard；并发/重复运行返回 `Error::State`；
+  join 超时不再提前 dispose DI。
+- 错误响应在 after hooks 之前写入，metrics/tracing/compression 看到真实状态；
+  错误 writer 清理表示相关 headers，writer panic 回退 500。
+- 文件缓存策略、204/304、SSE shutdown waker、per-worker drain 修正。
+- JSON 非 JSON Content-Type 返回 415；route body limit 可收紧/放宽；
+  `#[handler(in_process)]` 支持无路由 mediator handler。
+- 删除旧具体 `HttpContext` 运行时类型；`IHttpContext` 应用契约不变。
+- 新增 admission/TLS/h2/lifecycle/错误写入/media/SSE 等 wire-level 测试。
+
 ## [2.0.0] — 2026-11-20
 
 The execution engine is rewritten from first principles on the new

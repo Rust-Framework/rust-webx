@@ -305,6 +305,17 @@ pub struct RequestBinder {
 
 inventory::collect!(RequestBinder);
 
+/// Marker for a handler that is intentionally in-process only.
+///
+/// Such handlers participate in `IMediator` dispatch but are exempt from the
+/// "every handler needs a route" startup diagnostic.
+pub struct InProcessHandler {
+    /// Request type handled without an HTTP route.
+    pub req_type_id: std::any::TypeId,
+}
+
+inventory::collect!(InProcessHandler);
+
 /// Future returned by a type-erased request binder.
 pub type BoxedBindFuture<'a> = std::pin::Pin<
     Box<

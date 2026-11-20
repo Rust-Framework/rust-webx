@@ -104,7 +104,7 @@ The framework is split into a small set of focused crates, re-exported through t
 
 ```
 rust-webx/
-├── Cargo.toml                 # workspace root (v2.0.0)
+├── Cargo.toml                 # workspace root (v2.1.0)
 ├── crates/
 │   ├── core/                  # rust-webx-core  — traits, configuration
 │   ├── engine/                # rust-webx-engine — 2.0 worker pool, direct dispatch
@@ -194,23 +194,26 @@ Routing discovery, handler resolution, middleware orchestration, and graceful sh
 HTTP Request
     │
     ▼
-HttpContext::new(req).await            ← read body bytes
+EngineContext::new(req)                ← move hyper Parts, lazy body
     │
     ▼
-MiddlewarePipeline::execute()          ← middleware run in registration order;
-    │                                      each may short-circuit the response
+engine Pipeline::execute()             ← IMiddleware in registration order;
+    │                                      short-circuit supported
     ▼
-Router::match_route(ctx)               ← Trie match on method + path;
-    │                                      {param} values → route_params
+matchit Router::match_route            ← method + path; {param} → route_params
+    │
     ▼
-Route matched?  ──No──▶  404 "Not Found"
+Route matched?  ──No──▶  405/OPTIONS/SPA fallback or 404
     │ Yes
     ▼
-IEndpoint::handle(ctx)                 ← invoke handler, serialize response
+RouteTarget                            ← #[authorize] guard + max_body_size
+    │
+    ├─ no typed behavior ─▶ handler direct dispatch → EndpointResult
+    └─ typed behavior ────▶ mediated HandlerCache path
     ▼
-HttpResponse → hyper::Response         ← on Err, built-in exception middleware maps status
+after hooks (real error status) → EngineContext::finalize()
     ▼
-JSON: RFC 7807 application/problem+json (4xx / 5xx)
+hyper::Response                        ← problem+json for errors; bytes/file/SSE for success
 ```
 
 ## Example Applications

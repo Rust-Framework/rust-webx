@@ -1,15 +1,15 @@
 //! HTTP server, middleware pipeline, and routing (package `rust-webx-host`,
 //! imported as `webx_host`).
 //!
-//! Implements the [`webx_core`] contracts on hyper + tokio: the `Host` builder,
-//! the middleware pipeline, the Trie router, JWT auth/authorization, and the
-//! production middleware (compression, timing, tracing, rate limiting).
+//! Implements the [`webx_core`] contracts on the 2.0 worker engine: the `Host`
+//! builder, middleware assembly, route/direct-dispatch adaptation, JWT
+//! auth/authorization, and production middleware (compression, timing, tracing,
+//! rate limiting).
 
 pub mod auth;
 pub mod auth_jwt;
 pub mod authz;
 pub mod compression;
-pub mod context;
 pub mod cors;
 pub mod diagnostics;
 pub mod endpoint;
@@ -36,7 +36,6 @@ pub use auth::*;
 pub use auth_jwt::*;
 pub use authz::*;
 pub use compression::*;
-pub use context::*;
 pub use cors::*;
 pub use diagnostics::*;
 pub use endpoint::*;

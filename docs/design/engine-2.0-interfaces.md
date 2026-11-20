@@ -19,6 +19,7 @@ pub struct EngineConfig {
     pub drain_timeout: Duration,
     pub stream_drain_timeout: Duration,
     pub request_timeout: Option<Duration>,
+    pub first_request_timeout: Duration,
     pub tls: Option<TlsConfig>,
     pub mode: AppMode,
 }
@@ -148,7 +149,9 @@ pub struct Shared {
     pub tls: Option<Arc<rustls::ServerConfig>>,
     pub shutdown: tokio::sync::watch::Sender<bool>,
     pub shutdown_token: webx_core::hosted::CancellationToken,
-    pub active_streams: Arc<std::sync::atomic::AtomicUsize>,
+    pub immediate_shutdown: Arc<std::sync::atomic::AtomicBool>,
+    pub immediate_watch: tokio::sync::watch::Sender<bool>,
+    pub started: Arc<std::sync::atomic::AtomicBool>,
 }
 ```
 
@@ -160,6 +163,7 @@ impl Server {
     pub fn new(shared: Arc<Shared>) -> Self;
     pub fn handle(&self) -> ServerHandle;
     pub async fn run(self, listener: std::net::TcpListener) -> Result<()>;
+    pub async fn run_listeners(self, listeners: Vec<Listener>) -> Result<()>;
 }
 
 #[derive(Clone)]

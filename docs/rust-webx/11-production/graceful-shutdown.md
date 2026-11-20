@@ -36,11 +36,13 @@ Tokio runtime 和 hyper `auto::Builder`，连接通过有界 channel 交接，�
 `Workers = available_parallelism()`（`Development` 下限到 8，避免测试同时起大量主机时线程膨胀），范围 `1..=64`：
 
 ```json
-{ "Server": { "Workers": 8 } }
+{ "Server": { "Workers": 8, "FirstRequestTimeoutSeconds": 10 } }
 ```
 
 也可用环境变量 `APP__Server__Workers` 覆盖；`1` 适合调试/单核容器，`0` 表示自动。
-`App.MaxConnections` 仍是**全局**连接上限，引擎内部按 worker 分摊预算。
+`App.MaxConnections` 是**单个引擎实例的全局**准入上限：所有 http/https listener
+和 worker 共享一个 Semaphore，不会按 worker/listener 重复计算。首请求超时关闭
+只建连不发送首个请求（或不完整 h2 preface）的连接，避免静默连接占满准入槽。
 
 ### 入站请求超时
 

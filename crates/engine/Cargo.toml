@@ -39,5 +39,9 @@ httpdate.workspace = true
 socket2 = "0.6"
 serde_json.workspace = true
 
+[dev-dependencies]
+rust-dix.workspace = true
+rcgen = "0.13"
+
 [lints]
 workspace = true

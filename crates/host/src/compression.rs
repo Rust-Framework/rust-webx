@@ -81,6 +81,12 @@ impl IMiddleware for CompressionMiddleware {
     }
 
     async fn after(&self, ctx: &mut dyn IHttpContext) -> Result<()> {
+        // A handler may already return a pre-encoded representation (for
+        // example a gzipped export). Gzip(gzip(bytes)) is unreadable by the
+        // client and must never be emitted.
+        if ctx.response().header("content-encoding").is_some() {
+            return Ok(());
+        }
         let accept = ctx.request().header("accept-encoding").unwrap_or("");
         if !accept.to_lowercase().contains("gzip") {
             return Ok(());

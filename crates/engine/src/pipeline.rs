@@ -44,6 +44,13 @@ pub type FinalHandler = Arc<
         + Sync,
 >;
 
+/// Converts a pipeline error into a response before the reverse `after` pass.
+pub type ErrorHandler = Arc<
+    dyn for<'a> Fn(&'a mut EngineContext, Error) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>
+        + Send
+        + Sync,
+>;
+
 /// The ordered middleware stages plus the optimized execution loop.
 pub struct Pipeline {
     /// Stages in registration order (the host owns slot placement).
@@ -67,6 +74,78 @@ impl Pipeline {
     ) -> Result<()> {
         self.run(ctx, move |ctx: &mut EngineContext| final_handler(ctx))
             .await
+    }
+
+    /// Run the pipeline and convert a forward/terminal failure into a response
+    /// **before** the reverse `after` pass.
+    ///
+    /// This is the production path: metrics, tracing, compression and any other
+    /// `after` hook must see the real status/body of a handler or middleware
+    /// error, not the default `200` placeholder that used to exist until the
+    /// connection layer wrote the error after the whole pipeline had finished.
+    ///
+    /// The error handler runs inside the same panic boundary as the middleware,
+    /// so a broken custom `IErrorResponseWriter` is contained by the caller.
+    pub async fn execute_with_error(
+        &self,
+        ctx: &mut EngineContext,
+        final_handler: FinalHandler,
+        on_error: ErrorHandler,
+    ) -> Result<()> {
+        self.run_with_error(ctx, final_handler, on_error).await
+    }
+
+    async fn run_with_error(
+        &self,
+        ctx: &mut EngineContext,
+        final_handler: FinalHandler,
+        on_error: ErrorHandler,
+    ) -> Result<()> {
+        let mut executed = 0usize;
+        let mut short_circuited = false;
+        let mut failure: Option<Error> = None;
+
+        for stage in &self.stages {
+            match stage.invoke(ctx).await {
+                Ok(ControlFlow::Continue(())) => executed += 1,
+                Ok(ControlFlow::Break(())) => {
+                    short_circuited = true;
+                    break;
+                }
+                Err(error) => {
+                    failure = Some(error);
+                    break;
+                }
+            }
+        }
+
+        if !short_circuited && failure.is_none() {
+            if let Err(error) = final_handler(ctx).await {
+                failure = Some(error);
+            }
+        }
+
+        // Convert forward/terminal failure while the stage count is still the
+        // set of stages whose invoke completed. Those stages' after hooks then
+        // observe the real error response.
+        let mut written = false;
+        if let Some(error) = failure.take() {
+            on_error(ctx, error).await;
+            written = true;
+        }
+
+        for index in (0..executed).rev() {
+            if let Err(error) = self.stages[index].after(ctx).await {
+                if written {
+                    tracing::error!(error = %error, "middleware after hook failed");
+                } else {
+                    on_error(ctx, error).await;
+                    written = true;
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// The execution loop.

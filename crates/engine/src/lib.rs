@@ -21,5 +21,5 @@ pub use context::EngineContext;
 pub use pipeline::{FinalHandler, Pipeline};
 pub use response::{EndpointResult, RespBody};
 pub use router::{DirectDispatchFn, DirectTarget, EndpointTarget, RouteMatch, RouteTarget, Router};
-pub use server::{Server, ServerHandle};
+pub use server::{Listener, Server, ServerHandle};
 pub use shared::Shared;

@@ -5,32 +5,35 @@
 ```mermaid
 sequenceDiagram
     participant Client
-    participant Hyper as hyper 服务器
+    participant Engine as 2.0 Engine worker
     participant Pipeline as 中间件管道
-    participant Router as Trie 路由器
-    participant Endpoint as IEndpoint
+    participant Router as matchit Router
+    participant Target as RouteTarget
+    participant Handler as #[handler]
     participant DI as ServiceProvider
-    participant Handler as IRequestHandler
-    participant Mediator as IMediator
 
-    Client->>Hyper: HTTP Request
-    Hyper->>Pipeline: 创建 HttpContext
+    Client->>Engine: HTTP Request
+    Engine->>Pipeline: EngineContext（移动 Parts，惰性 body）
     loop 每个中间件
         Pipeline->>Pipeline: IMiddleware::invoke
         Note over Pipeline: 可短路（设置 response status）
     end
     Pipeline->>Router: match_route(method, path)
     alt 匹配成功
-        Router->>Endpoint: 提取 route_params
-        Endpoint->>Handler: HandlerCache 查找（经 DI 构造依赖）
-        Endpoint->>Mediator: send(request)
-        Mediator->>Handler: handle(request)
-        Handler-->>Mediator: ActionResult<Response>
-        Mediator-->>Endpoint: Response
-        Endpoint-->>Client: JSON 序列化 + HTTP 200
+        Router->>Target: 路由 pattern + route_params
+        Target->>Target: #[authorize] / max_body_size 守卫
+        alt 无 typed behavior
+            Target->>Handler: 直接 bind + handle(request)
+        else 有 IPipelineBehavior
+            Target->>DI: mediated fallback（HandlerCache + scope）
+        end
+        Handler-->>Target: EndpointResult::{Empty, Json, Action}
+        Target-->>Engine: 状态/头/Bytes
     else 未匹配
-        Router-->>Client: 404 Not Found
+        Router-->>Engine: 404/405/OPTIONS/SPA fallback
     end
+    Engine->>Pipeline: 逆序 after hooks（已写入真实错误状态）
+    Pipeline-->>Client: finalize + hyper 响应
 ```
 
 ## 阶段详解
@@ -73,7 +76,7 @@ sequenceDiagram
 
 ### 5. 错误处理
 
-若 Handler 返回 `Err(Error::...)` 或管道中抛出错误，内置异常中间件捕获并映射：
+若 Handler 返回 `Err(Error::...)`、中间件失败或触发 panic，engine 在 **after hooks 之前** 把错误转换成响应，使 metrics/tracing/compression 看到真实状态；随后由单一错误渲染器写入统一的 `problem+json`，并清除成功表示特有的 `content-encoding`、`etag`、`cache-control` 等头：
 
 ```json
 {
@@ -88,23 +91,17 @@ sequenceDiagram
 
 ### 6. 响应发送
 
-`HttpResponse` 转为 `hyper::Response`，通过已建立的连接返回客户端。
+`EngineContext::finalize()` 生成 `hyper::Response`，通过已建立的连接返回客户端；HEAD/204/304、Range/ETag/SSE 语义在此统一处理。
 
 ## 与 Mediator 的关系
 
-对于 `#[endpoint]` / `#[get]` 等宏注册的路由，HTTP 适配层在构造 request 后调用：
-
-```
-RouteDispatch → Mediator::send(request) → dispatch → HandlerCache → IRequestHandler::handle
-```
-
-`IPipelineBehavior` 在 `dispatch` 内部包装 Handler 调用，实现验证、缓存等横切逻辑。
+普通 HTTP 快路径不经过 `Mediator`：`#[handler]` 生成按 `(Req, Rsp)` 键控的直接 dispatch，Host 在启动时与路由 join。注册了任意 `IPipelineBehavior` 时，Host 保守回退到 mediated 路径，保证行为链语义不变。需要纯进程内调用的 handler 应使用 `#[handler(in_process)]`：它只注册 `IMediator` 路径，不要求响应实现 `Serialize`，也不会被“无路由”启动诊断拒绝。
 
 ## DispatchRuntime
 
 每个 `Host` 持有实例级 `DispatchRuntime`（`ServiceProvider` + `HandlerCache`），它只是显式句柄：
-HTTP 请求通过 `IHttpContext::dispatch_runtime()` 取得该句柄，宏生成的 `RouteDispatch` 用其中的
-provider + registry 构造 `Mediator`；没有 task-local 全局入口。
+HTTP 请求通过 `IHttpContext::dispatch_runtime()` 取得该句柄；直接 dispatch 只在需要时打开 scope，
+typed-pipeline fallback 才用其中的 provider + registry 构造 `Mediator`。没有 task-local 全局入口。
 
 多 Host 集成测试：`host.dispatch_runtime()` / `host.provider()` 直接使用；后台任务通过注入的
 `Arc<dyn ScopeFactory>`（rust-dix 内建）显式 `create_scope()`。

@@ -89,6 +89,7 @@ impl StubEndpoint {
         if let Some(limit) = self.max_body_size {
             ctx.request_mut().set_max_body_size(limit);
         }
+        ctx.request_mut().validate_declared_body_limit()?;
         if !self.authorization.is_empty() || self.authorization_dynamic {
             if ctx.claims().is_none() {
                 return Err(webx_core::error::Error::Unauthorized(
@@ -187,14 +188,14 @@ impl IEndpoint for StubEndpoint {
     }
 }
 
-/// Engine target that runs the same guard as [`StubEndpoint`], then the
-/// macro-generated direct dispatch (no mediator, no `Box<dyn Any>` request).
-pub struct DirectStubEndpoint {
+/// Engine-native direct target: authorization guard + compile-time dispatch,
+/// without crossing the legacy `IEndpoint` trait object.
+pub struct DirectRouteTarget {
     auth: Arc<StubEndpoint>,
     dispatch: webx_core::route::scan::HandlerDispatchFn,
 }
 
-impl DirectStubEndpoint {
+impl DirectRouteTarget {
     pub fn new(
         auth: Arc<StubEndpoint>,
         dispatch: webx_core::route::scan::HandlerDispatchFn,
@@ -204,32 +205,13 @@ impl DirectStubEndpoint {
 }
 
 #[async_trait::async_trait]
-impl IEndpoint for DirectStubEndpoint {
-    async fn handle(&self, ctx: &mut dyn IHttpContext) -> Result<()> {
+impl webx_engine::RouteTarget for DirectRouteTarget {
+    async fn handle(&self, ctx: &mut webx_engine::EngineContext) -> Result<()> {
         if !self.auth.authorize(ctx).await? {
             return Ok(());
         }
-        let result = (self.dispatch)(ctx).await?;
-        write_direct_result(ctx, result).await
-    }
-}
-
-async fn write_direct_result(
-    ctx: &mut dyn IHttpContext,
-    result: webx_core::action::EndpointResult,
-) -> Result<()> {
-    match result {
-        webx_core::action::EndpointResult::Empty => {
-            ctx.response_mut().set_status(204);
-            Ok(())
-        }
-        webx_core::action::EndpointResult::Json { status, body } => {
-            ctx.response_mut().set_status(status);
-            ctx.response_mut()
-                .set_header_static("content-type", "application/json");
-            ctx.response_mut().write_bytes_shared(body).await
-        }
-        webx_core::action::EndpointResult::Action(action) => action.execute(ctx).await,
+        let result = (self.dispatch)(ctx as &mut dyn IHttpContext).await?;
+        ctx.write_endpoint_result(result).await
     }
 }
 

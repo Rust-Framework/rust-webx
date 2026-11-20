@@ -36,7 +36,8 @@ impl IMiddleware for RequestTracing {
         let tid = ctx
             .request()
             .header("x-request-id")
-            .map(|s| s.to_string())
+            .filter(|value| crate::request_id::is_valid_request_id(value))
+            .map(str::to_string)
             .or_else(|| {
                 ctx.request()
                     .header("traceparent")

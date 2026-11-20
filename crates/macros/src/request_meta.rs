@@ -1248,6 +1248,7 @@ fn bind_fn(fields: &[FieldSpec], plan: &BindingPlan) -> TokenStream2 {
             let mut __body: ::core::option::Option<::webx::serde_json::Value> =
                 ::core::option::Option::None;
             if __is_body_method && !__is_multipart {
+                ::webx::binding::require_json_content_type(ctx.request())?;
                 let __bytes = ctx.request_mut().body_bytes_shared().await?;
                 let __slice: &[u8] = if __bytes.is_empty() { b"{}" } else { &__bytes };
                 let __value: ::webx::serde_json::Value =

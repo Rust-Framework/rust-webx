@@ -383,8 +383,8 @@ fn max_body_size_attr(attrs: &[Attribute]) -> syn::Result<Option<usize>> {
                 "duplicate `#[max_body_size(..)]`",
             ));
         }
-        let value: syn::LitInt = attr.parse_args()?;
-        let limit: usize = value.base10_parse()?;
+        let expression: syn::Expr = attr.parse_args()?;
+        let limit = eval_body_limit(&expression)?;
         if limit == 0 {
             return Err(syn::Error::new_spanned(
                 attr,
@@ -394,6 +394,41 @@ fn max_body_size_attr(attrs: &[Attribute]) -> syn::Result<Option<usize>> {
         found = Some(limit);
     }
     Ok(found)
+}
+
+/// Evaluate the integer arithmetic accepted by `#[max_body_size(..)]`.
+///
+/// Supports decimal literals and `+`, `-`, `*`, `/`, `%` with parentheses, so
+/// the documented `64 * 1024 * 1024` form works without accepting arbitrary
+/// runtime expressions.
+fn eval_body_limit(expression: &syn::Expr) -> syn::Result<usize> {
+    match expression {
+        syn::Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Int(value),
+            ..
+        }) => value.base10_parse(),
+        syn::Expr::Paren(paren) => eval_body_limit(&paren.expr),
+        syn::Expr::Group(group) => eval_body_limit(&group.expr),
+        syn::Expr::Binary(binary) => {
+            let left = eval_body_limit(&binary.left)?;
+            let right = eval_body_limit(&binary.right)?;
+            match binary.op {
+                syn::BinOp::Add(_) => left.checked_add(right),
+                syn::BinOp::Sub(_) => left.checked_sub(right),
+                syn::BinOp::Mul(_) => left.checked_mul(right),
+                syn::BinOp::Div(_) => left.checked_div(right),
+                syn::BinOp::Rem(_) => left.checked_rem(right),
+                _ => None,
+            }
+            .ok_or_else(|| {
+                syn::Error::new_spanned(expression, "invalid `#[max_body_size(..)]` arithmetic")
+            })
+        }
+        _ => Err(syn::Error::new_spanned(
+            expression,
+            "`#[max_body_size(..)]` accepts an integer expression",
+        )),
+    }
 }
 
 fn parse_endpoint_attr(attr: &str) -> (String, String) {

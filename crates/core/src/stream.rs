@@ -273,7 +273,9 @@ impl SseResult {
             keep_alive: keep_alive.map(|every| Box::pin(tokio::time::sleep(every))),
             keep_alive_every: keep_alive,
             max_lifetime: max_lifetime.map(|lifetime| Box::pin(tokio::time::sleep(lifetime))),
-            shutdown,
+            shutdown_wait: shutdown.map(|token| {
+                Box::pin(token.cancelled_owned()) as Pin<Box<dyn Future<Output = ()> + Send>>
+            }),
             finished: false,
             guard: CompletionGuard {
                 hook: on_close,
@@ -311,7 +313,10 @@ struct SseBodyStream {
     keep_alive: Option<Pin<Box<Sleep>>>,
     keep_alive_every: Option<Duration>,
     max_lifetime: Option<Pin<Box<Sleep>>>,
-    shutdown: Option<CancellationToken>,
+    /// A future that becomes ready when the host starts shutting down. Polling
+    /// it registers the waker, so a quiet source stream cannot keep the SSE
+    /// stream pending past the server-shutdown frame.
+    shutdown_wait: Option<Pin<Box<dyn Future<Output = ()> + Send>>>,
     finished: bool,
     guard: CompletionGuard,
 }
@@ -343,11 +348,15 @@ impl Stream for SseBodyStream {
 
             // Graceful shutdown wins over new events: stop producing tokens and
             // tell the client why, so it can reconnect against the next instance.
-            if this
-                .shutdown
-                .as_ref()
-                .is_some_and(|token| token.is_cancelled())
-            {
+            // Polling the cancellation future (rather than only checking
+            // `is_cancelled`) registers this task's waker; a quiet source with
+            // no keep-alive would otherwise never be polled again.
+            let shutdown_ready = this
+                .shutdown_wait
+                .as_mut()
+                .is_some_and(|wait| wait.as_mut().poll(cx).is_ready());
+            if shutdown_ready {
+                this.shutdown_wait = None;
                 this.pending
                     .put_slice(b"event:server_shutdown\ndata:{}\n\n");
                 this.finished = true;

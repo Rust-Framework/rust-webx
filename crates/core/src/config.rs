@@ -356,6 +356,10 @@ fn default_memory_threshold() -> usize {
     1024 * 1024
 }
 
+fn default_first_request_timeout_seconds() -> u64 {
+    10
+}
+
 fn default_drain_timeout_seconds() -> u64 {
     30
 }
@@ -383,6 +387,18 @@ pub struct ServerSection {
     /// under its own `max_lifetime` / drain budget.
     #[serde(default)]
     pub request_timeout_seconds: u64,
+    /// Number of engine worker threads. `0` means auto (available parallelism,
+    /// clamped to 1..=64). Explicit values are clamped to the same range.
+    #[serde(default)]
+    pub workers: usize,
+    /// Deadline, in seconds, for an accepted connection to begin its first
+    /// request. A connection that sends no bytes (or a partial HTTP/2 preface)
+    /// is closed, releasing its connection slot. Default: 10.
+    ///
+    /// Zero is treated as the default rather than "disabled": an unbounded
+    /// pre-request connection is a denial-of-service vector.
+    #[serde(default = "default_first_request_timeout_seconds")]
+    pub first_request_timeout_seconds: u64,
 }
 
 impl Default for ServerSection {
@@ -391,6 +407,8 @@ impl Default for ServerSection {
             drain_timeout_seconds: default_drain_timeout_seconds(),
             stream_drain_timeout_seconds: default_stream_drain_timeout_seconds(),
             request_timeout_seconds: 0,
+            workers: 0,
+            first_request_timeout_seconds: default_first_request_timeout_seconds(),
         }
     }
 }

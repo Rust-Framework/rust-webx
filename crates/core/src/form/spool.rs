@@ -58,8 +58,28 @@ pub fn sanitize_file_name(raw: &str) -> String {
     // Windows rejects trailing dots and spaces; "." and ".." are traversal.
     let trimmed = cleaned.trim().trim_end_matches(['.', ' ']);
     let candidate = if trimmed.is_empty() { "file" } else { trimmed };
+    let candidate = if is_windows_reserved(candidate) {
+        // `CON`, `NUL`, `COM1`, ... resolve to devices even inside a directory.
+        format!("_{candidate}")
+    } else {
+        candidate.to_string()
+    };
 
-    truncate_preserving_extension(candidate, MAX_FILE_NAME_LEN)
+    truncate_preserving_extension(&candidate, MAX_FILE_NAME_LEN)
+}
+
+fn is_windows_reserved(name: &str) -> bool {
+    let stem = name
+        .split('.')
+        .next()
+        .unwrap_or(name)
+        .trim_end_matches(' ')
+        .to_ascii_uppercase();
+    matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || stem
+            .strip_prefix("COM")
+            .or_else(|| stem.strip_prefix("LPT"))
+            .is_some_and(|suffix| suffix.len() == 1 && matches!(suffix.as_bytes()[0], b'1'..=b'9'))
 }
 
 fn truncate_preserving_extension(name: &str, max: usize) -> String {

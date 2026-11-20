@@ -45,10 +45,6 @@ pub struct EngineContext {
     resp: EngineResponse,
     /// Authentication claims set by authentication middleware.
     claims: Option<Box<dyn IClaims>>,
-    /// A request rejection recorded at construction (e.g. an oversized declared
-    /// `Content-Length`). The pipeline turns it into a normal error response
-    /// from the innermost handler so CORS/security headers/logging still run.
-    early_error: Option<Error>,
     /// DI handles (provider + handler registry) for endpoint dispatch.
     dispatch_runtime: Option<Arc<DispatchRuntime>>,
     /// Trace id assigned by the tracing middleware; the same value the
@@ -105,12 +101,10 @@ impl EngineContext {
     }
 
     fn from_request(req: EngineRequest) -> Self {
-        let early_error = early_error_for(&req.parts.headers, &req.limits);
         Self {
             req,
             resp: EngineResponse::new(200),
             claims: None,
-            early_error,
             dispatch_runtime: None,
             trace_id: None,
         }
@@ -123,6 +117,12 @@ impl EngineContext {
     /// the compatibility `route_params()` map stays empty and allocation-free.
     pub fn set_route(&mut self, pattern: Arc<str>, params: Vec<(&'static str, String)>) {
         self.req.set_route(pattern, params);
+    }
+
+    /// Strip representation-specific headers before replacing the response with
+    /// an error. Used by the engine's single error writer.
+    pub(crate) fn strip_entity_headers(&mut self) {
+        response::strip_entity_headers(&mut self.resp.headers);
     }
 
     /// Write the result of one endpoint dispatch into the response.
@@ -191,7 +191,10 @@ impl IHttpContext for EngineContext {
     }
 
     fn take_early_error(&mut self) -> Option<Error> {
-        self.early_error.take()
+        // Declared-length validation now happens after route/limit resolution
+        // and inside the body accessors, so there is no construction-time
+        // error to report here.
+        None
     }
 
     fn dispatch_runtime(&self) -> Option<&Arc<DispatchRuntime>> {
@@ -233,6 +236,9 @@ pub struct EngineRequest {
     /// Effective non-multipart body cap; `#[max_body_size]` overrides it per
     /// route through [`IHttpRequest::set_max_body_size`].
     body_limit: usize,
+    /// Declared `Content-Length`, if any. Evaluated after routing so a route
+    /// limit can lower *or raise* the global default.
+    declared_length: Option<u64>,
     route_params: HashMap<String, String>,
     /// Matched route template, kept as an `Arc<str>` so static routes do not
     /// allocate a `String` per request.
@@ -252,12 +258,18 @@ impl EngineRequest {
         peer: Option<SocketAddr>,
     ) -> Self {
         let body_limit = limits.body;
+        let declared_length = parts
+            .headers
+            .get("content-length")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u64>().ok());
         Self {
             parts,
             peer,
             body,
             limits,
             body_limit,
+            declared_length,
             route_params: HashMap::new(),
             route_pattern: None,
             route_pattern_compat: None,
@@ -282,6 +294,15 @@ impl EngineRequest {
             _ => QueryViews::default(),
         })
     }
+
+    fn ensure_declared_within(&self, limit: u64) -> Result<()> {
+        match self.declared_length {
+            Some(declared) if declared > limit => Err(Error::PayloadTooLarge(format!(
+                "request body exceeds the {limit}-byte limit"
+            ))),
+            _ => Ok(()),
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -301,6 +322,15 @@ impl IHttpRequest for EngineRequest {
             .and_then(|value| value.to_str().ok())
     }
 
+    fn header_all(&self, name: &str) -> Vec<&str> {
+        self.parts
+            .headers
+            .get_all(name)
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .collect()
+    }
+
     fn query(&self) -> &HashMap<String, String> {
         &self.query_views().flat
     }
@@ -315,6 +345,10 @@ impl IHttpRequest for EngineRequest {
 
     fn set_max_body_size(&mut self, limit: usize) {
         self.body_limit = limit;
+    }
+
+    fn validate_declared_body_limit(&mut self) -> Result<()> {
+        self.ensure_declared_within(self.body_limit as u64)
     }
 
     fn route_params(&self) -> &HashMap<String, String> {
@@ -346,8 +380,17 @@ impl IHttpRequest for EngineRequest {
     }
 
     async fn body_bytes_shared(&mut self) -> Result<Bytes> {
+        self.ensure_declared_within(self.body_limit as u64)?;
         match &self.body {
-            BodyState::Buffered(bytes) => return Ok(bytes.clone()),
+            BodyState::Buffered(bytes) => {
+                if bytes.len() > self.body_limit {
+                    return Err(Error::PayloadTooLarge(format!(
+                        "request body exceeds the {}-byte limit",
+                        self.body_limit
+                    )));
+                }
+                return Ok(bytes.clone());
+            }
             BodyState::Form(_) => {
                 return Err(Error::State(
                     "request body was already read as multipart/form-data".to_string(),
@@ -376,6 +419,7 @@ impl IHttpRequest for EngineRequest {
     }
 
     async fn body_stream(&mut self) -> Result<RequestBodyStream> {
+        self.ensure_declared_within(self.body_limit as u64)?;
         match &self.body {
             BodyState::Form(_) => {
                 return Err(Error::State(
@@ -415,6 +459,7 @@ impl IHttpRequest for EngineRequest {
     }
 
     async fn multipart(&mut self) -> Result<Arc<MultipartForm>> {
+        self.ensure_declared_within(self.limits.multipart_body)?;
         if let BodyState::Form(form) = &self.body {
             return Ok(Arc::clone(form));
         }
@@ -481,7 +526,10 @@ fn parse_query_string(query: &str) -> QueryViews {
             continue;
         }
         let mut parts = pair.splitn(2, '=');
-        if let (Some(key), Some(value)) = (parts.next(), parts.next()) {
+        if let Some(key) = parts.next() {
+            // `?verbose` is a present-empty query value in the HTTP binding
+            // model (`?verbose=` is equivalent for scalar fields).
+            let value = parts.next().unwrap_or("");
             let key = percent_decode(key);
             let value = percent_decode(value);
             views.flat.insert(key.clone(), value.clone());
@@ -500,46 +548,39 @@ fn percent_decode(s: &str) -> String {
         return s.to_string();
     }
 
-    let mut bytes = Vec::with_capacity(s.len());
-    let mut chars = s.bytes();
-    while let Some(byte) = chars.next() {
-        match byte {
-            b'%' => {
-                let hi = chars.next().and_then(|c| (c as char).to_digit(16));
-                let lo = chars.next().and_then(|c| (c as char).to_digit(16));
-                match (hi, lo) {
-                    (Some(hi), Some(lo)) => bytes.push((hi * 16 + lo) as u8),
-                    _ => bytes.push(b'%'),
+    let raw = s.as_bytes();
+    let mut bytes = Vec::with_capacity(raw.len());
+    let mut index = 0;
+    while index < raw.len() {
+        match raw[index] {
+            b'%' if index + 2 < raw.len() => {
+                let hi = (raw[index + 1] as char).to_digit(16);
+                let lo = (raw[index + 2] as char).to_digit(16);
+                if let (Some(hi), Some(lo)) = (hi, lo) {
+                    bytes.push((hi * 16 + lo) as u8);
+                    index += 3;
+                    continue;
                 }
+                // Invalid escape: preserve all three bytes rather than
+                // silently dropping the characters that followed `%`.
+                bytes.push(b'%');
+                index += 1;
             }
-            b'+' => bytes.push(b' '),
-            other => bytes.push(other),
+            b'%' => {
+                bytes.push(b'%');
+                index += 1;
+            }
+            b'+' => {
+                bytes.push(b' ');
+                index += 1;
+            }
+            other => {
+                bytes.push(other);
+                index += 1;
+            }
         }
     }
     String::from_utf8_lossy(&bytes).into_owned()
-}
-
-/// An oversized declared `Content-Length` is recorded, not written eagerly:
-/// writing here used to bypass the middleware pipeline (no CORS, no security
-/// headers, no access log, no metrics). The router handler turns it into a
-/// normal `PayloadTooLarge` error on the way in.
-fn early_error_for(headers: &HeaderMap, limits: &BodyLimits) -> Option<Error> {
-    let content_type = headers.get("content-type").and_then(|v| v.to_str().ok());
-    let declared_limit = if body::is_multipart_content_type(content_type) {
-        limits.multipart_body
-    } else {
-        limits.body as u64
-    };
-    headers
-        .get("content-length")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<u64>().ok())
-        .filter(|declared| *declared > declared_limit)
-        .map(|_| {
-            Error::PayloadTooLarge(format!(
-                "request body exceeds the {declared_limit}-byte limit"
-            ))
-        })
 }
 
 // ---------------------------------------------------------------------------
@@ -818,14 +859,15 @@ mod tests {
     }
 
     #[test]
-    fn oversized_declared_content_length_is_recorded_not_written() {
+    fn oversized_declared_content_length_is_a_body_limit_error() {
         let mut ctx = context("POST", "/upload", &[("content-length", "999999999")], b"");
-        // The default limit is 10 MiB, so the declared length is oversized.
+        // The default limit is 10 MiB; the check now runs after the route has
+        // had a chance to apply `#[max_body_size]`.
         assert!(matches!(
-            ctx.take_early_error(),
-            Some(Error::PayloadTooLarge(_))
+            ctx.request_mut().validate_declared_body_limit(),
+            Err(Error::PayloadTooLarge(_))
         ));
-        // The rejection is taken once; the response was never written eagerly.
+        // The response was never written eagerly.
         assert_eq!(ctx.response().status(), 200);
         assert!(ctx.take_early_error().is_none());
     }

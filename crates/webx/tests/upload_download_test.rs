@@ -592,6 +592,11 @@ async fn file_download_sets_headers_and_streams_the_body() {
         "16"
     );
     assert_eq!(
+        headers.get("cache-control").unwrap().to_str().unwrap(),
+        "public, max-age=0, must-revalidate",
+        "file responses with validators must revalidate"
+    );
+    assert_eq!(
         headers.get("accept-ranges").unwrap().to_str().unwrap(),
         "bytes"
     );

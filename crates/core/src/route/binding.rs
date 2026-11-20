@@ -28,6 +28,36 @@ use crate::route::scan::ParamMeta;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
+
+use crate::http::IHttpRequest;
+
+/// Whether a media type denotes JSON (`application/json` or `*/*+json`).
+pub fn is_json_content_type(value: &str) -> bool {
+    let media = value
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    media == "application/json" || media.ends_with("+json")
+}
+
+/// Reject a non-JSON media type before a generated JSON binder parses the body.
+///
+/// An absent `Content-Type` is allowed for an empty/legacy body; when a body is
+/// present and declares another media type, parsing it as JSON would accept
+/// `text/plain` or form payloads as if they were JSON (RFC 9110 media type
+/// discipline, and the multipart/JSON symmetry in the binder).
+pub fn require_json_content_type(req: &dyn IHttpRequest) -> Result<()> {
+    if let Some(content_type) = req.header("content-type") {
+        if !is_json_content_type(content_type) {
+            return Err(Error::UnsupportedMediaType(
+                "this endpoint binds a JSON body; send Content-Type: application/json".to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
 use std::str::FromStr;
 
 /// Where a request field's value comes from.

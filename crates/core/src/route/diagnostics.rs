@@ -72,8 +72,14 @@ pub fn orphan_handlers() -> Vec<&'static str> {
         .map(|e| e.handler_type)
         .collect();
 
+    let in_process: HashSet<TypeId> = inventory::iter::<crate::route::scan::InProcessHandler>()
+        .map(|handler| handler.req_type_id)
+        .collect();
     let mut orphans = Vec::new();
     for reg in inventory::iter::<HandlerRegistration>() {
+        if in_process.contains(&reg.req_type_id) {
+            continue;
+        }
         if !routed_ids.contains(&reg.req_type_id) && !routed_names.contains(reg.req_type_name) {
             orphans.push(reg.req_type_name);
         }

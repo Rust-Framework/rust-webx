@@ -10,10 +10,9 @@
 //! * a `current_thread` runtime (`enable_all` for the IO/time drivers);
 //! * one hyper `auto::Builder` — configured once, cloned per connection because
 //!   `serve_connection` borrows it and `into_owned` needs `Clone`;
-//! * a `JoinSet` of live connections and its own connection budget (a
-//!   `Semaphore` whose permits are acquired by the acceptor and travel with the
-//!   socket in `Handoff`, so a permit is released exactly when the connection
-//!   task ends).
+//! * a `JoinSet` of live connections; global admission is a single `Semaphore`
+//!   shared by every listener (its permit travels with the socket in `Handoff`,
+//!   so it is released exactly when the connection task ends).
 //!
 //! # Handoff
 //!
@@ -33,14 +32,14 @@
 //! worker thread is bounded.
 
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
 use hyper_util::server::conn::auto;
 use tokio::runtime::Builder;
-use tokio::sync::{mpsc, watch, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{mpsc, watch, OwnedSemaphorePermit};
 use tokio::task::JoinSet;
 use tokio_rustls::TlsAcceptor;
 use webx_core::error::{Error, Result};
@@ -66,25 +65,56 @@ const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Even a zero-configured drain gets one second to finish in-flight requests.
 const MIN_DRAIN_BUDGET: Duration = Duration::from_secs(1);
 
-/// A connection handed from the acceptor to a worker.
+/// A connection handed from an acceptor to a worker.
 pub(crate) struct Handoff {
     /// Already in nonblocking mode; the worker registers it on its runtime.
     pub stream: std::net::TcpStream,
     pub peer: SocketAddr,
-    /// Connection-budget permit; dropped when the connection task ends.
+    /// TLS configuration for the listener this connection arrived on.
+    pub tls: Option<Arc<rustls::ServerConfig>>,
+    /// Global admission permit; dropped when the connection task ends.
     pub permit: OwnedSemaphorePermit,
+    /// Queue gauge; dropped exactly once, whether the message is delivered,
+    /// rejected, or dropped at shutdown.
+    pub pending: PendingGuard,
+}
+
+/// RAII gauge for the number of connections queued to a worker.
+///
+/// The acceptor increments it when creating the handoff and the worker (or a
+/// failed/dropped send) drops it. Keeping the decrement in `Drop` removes the
+/// send/recv double-accounting race that a pair of manual decrements had.
+pub(crate) struct PendingGuard {
+    counter: Arc<AtomicUsize>,
+}
+
+impl PendingGuard {
+    pub(crate) fn new(counter: Arc<AtomicUsize>) -> Self {
+        counter.fetch_add(1, Ordering::Relaxed);
+        Self { counter }
+    }
+}
+
+impl Drop for PendingGuard {
+    fn drop(&mut self) {
+        decrement(&self.counter);
+    }
+}
+
+/// The acceptor-facing half of a worker; cheap to clone per listener.
+#[derive(Clone)]
+pub(crate) struct WorkerFeed {
+    pub index: usize,
+    pub tx: mpsc::Sender<Handoff>,
+    /// Connections currently being served.
+    pub active: Arc<AtomicUsize>,
+    /// Connections queued in `tx` but not yet picked up.
+    pub pending: Arc<AtomicUsize>,
 }
 
 /// One worker thread plus the handles the acceptor needs to feed it.
 pub(crate) struct Worker {
-    pub index: usize,
-    pub tx: mpsc::Sender<Handoff>,
-    /// Per-worker connection budget.
-    pub budget: Arc<Semaphore>,
-    /// Connections currently being served.
-    pub active: Arc<AtomicUsize>,
-    /// Connections queued in [`Worker::tx`] but not yet picked up.
-    pub pending: Arc<AtomicUsize>,
+    pub feed: WorkerFeed,
     join: std::thread::JoinHandle<()>,
 }
 
@@ -93,59 +123,34 @@ impl Worker {
     pub(crate) fn join(self) -> std::result::Result<(), String> {
         self.join
             .join()
-            .map_err(|_| format!("engine worker {} panicked", self.index))
+            .map_err(|_| format!("engine worker {} panicked", self.feed.index))
     }
 }
 
 /// How the acceptor reports "my runtime is live" / "startup failed".
 pub(crate) type ReadySender = mpsc::UnboundedSender<std::result::Result<(), String>>;
 
-/// Per-worker connection budget derived from the documented global limit.
-///
-/// Integer division keeps `budget * workers <= max_connections`, so the
-/// effective global cap never exceeds the configured `App.MaxConnections`; the
-/// floor of 1 keeps the server usable when there are more workers than
-/// connections.
-pub(crate) fn connection_budget(max_connections: usize, workers: usize) -> usize {
-    (max_connections / workers.max(1)).max(1)
-}
-
 /// Spawn one worker thread and hand back its channel/gates.
 pub(crate) fn spawn(index: usize, shared: Arc<Shared>, ready: ReadySender) -> Result<Worker> {
-    let budget = connection_budget(
-        shared.config.max_connections,
-        shared.config.resolved_workers(),
-    );
     let (tx, rx) = mpsc::channel(WORKER_QUEUE_DEPTH);
-    let budget_gate = Arc::new(Semaphore::new(budget));
     let active = Arc::new(AtomicUsize::new(0));
     let pending = Arc::new(AtomicUsize::new(0));
+    let feed = WorkerFeed {
+        index,
+        tx,
+        active: Arc::clone(&active),
+        pending: Arc::clone(&pending),
+    };
 
     let thread_shared = Arc::clone(&shared);
-    let thread_active = Arc::clone(&active);
-    let thread_pending = Arc::clone(&pending);
     let join = std::thread::Builder::new()
         .name(format!("webx-worker-{index}"))
         .spawn(move || {
-            worker_main(
-                index,
-                thread_shared,
-                rx,
-                thread_active,
-                thread_pending,
-                ready,
-            );
+            worker_main(index, thread_shared, rx, active, pending, ready);
         })
         .map_err(|err| Error::Internal(format!("failed to spawn engine worker {index}: {err}")))?;
 
-    Ok(Worker {
-        index,
-        tx,
-        budget: budget_gate,
-        active,
-        pending,
-        join,
-    })
+    Ok(Worker { feed, join })
 }
 
 fn worker_main(
@@ -188,13 +193,13 @@ async fn worker_loop(
 ) {
     let mut connections: JoinSet<()> = JoinSet::new();
     let mut shutdown = shared.subscribe_shutdown();
+    // Stream accounting is per worker: one SSE connection in another worker
+    // must not force this worker's normal connections to wait the 300s stream
+    // drain budget.
+    let worker_streams = Arc::new(AtomicUsize::new(0));
     // Built once per worker; cloned per connection because hyper's
     // `serve_connection` borrows the builder and `into_owned` requires `Clone`.
     let terminal: FinalHandler = connection::final_handler(Arc::clone(&shared));
-    let tls = shared
-        .tls
-        .as_ref()
-        .map(|config| TlsAcceptor::from(Arc::clone(config)));
 
     let mut builder = auto::Builder::new(TokioExecutor::new());
     builder
@@ -202,7 +207,11 @@ async fn worker_loop(
         .timer(TokioTimer::new())
         .header_read_timeout(shared.config.header_read_timeout)
         .max_buf_size(shared.config.max_header_buf);
-    builder.http2().timer(TokioTimer::new());
+    builder
+        .http2()
+        .timer(TokioTimer::new())
+        .keep_alive_interval(Some(shared.config.header_read_timeout))
+        .keep_alive_timeout(shared.config.header_read_timeout);
 
     loop {
         tokio::select! {
@@ -210,49 +219,78 @@ async fn worker_loop(
             _ = wait_for_shutdown(&mut shutdown) => break,
             received = rx.recv() => {
                 let Some(handoff) = received else { break };
-                decrement(&pending);
+                let Handoff {
+                    stream,
+                    peer,
+                    tls,
+                    permit,
+                    pending: pending_guard,
+                } = handoff;
+                // Pending -> active transition: the guard is dropped exactly
+                // once and the active guard owns the opposite transition.
+                drop(pending_guard);
                 // One sweep per accepted connection keeps the JoinSet small
                 // without a separate reaper task.
                 while connections.try_join_next().is_some() {}
 
-                increment(&active);
                 let connection_shared = Arc::clone(&shared);
                 let connection_terminal = terminal.clone();
-                let connection_tls = tls.clone();
                 let connection_builder = builder.clone();
-                let connection_active = Arc::clone(&active);
+                let active_guard = ActiveGuard::new(Arc::clone(&active));
+                let connection_streams = Arc::clone(&worker_streams);
                 connections.spawn(async move {
-                    let _permit = handoff.permit;
+                    let _permit = permit;
+                    let _active = active_guard;
                     run_connection(
                         connection_shared,
                         connection_terminal,
-                        connection_tls,
+                        tls,
                         connection_builder,
-                        handoff.stream,
-                        handoff.peer,
+                        stream,
+                        peer,
+                        connection_streams,
                     )
                     .await;
-                    decrement(&connection_active);
                 });
             }
         }
     }
 
-    // Stop intake; queued handoffs are dropped, which closes their sockets and
-    // releases their budget permits.
+    // Stop intake; queued handoffs are dropped, closing their sockets and
+    // releasing both the global permit and the pending gauge.
     drop(rx);
+    let _ = pending;
     let label = format!("engine worker {index}");
-    drain_connections(&mut connections, &label, shared.as_ref()).await;
+    drain_connections(&mut connections, &label, shared.as_ref(), &worker_streams).await;
+}
+
+/// RAII gauge for connections currently being served by one worker.
+struct ActiveGuard {
+    counter: Arc<AtomicUsize>,
+}
+
+impl ActiveGuard {
+    fn new(counter: Arc<AtomicUsize>) -> Self {
+        counter.fetch_add(1, Ordering::Relaxed);
+        Self { counter }
+    }
+}
+
+impl Drop for ActiveGuard {
+    fn drop(&mut self) {
+        decrement(&self.counter);
+    }
 }
 
 /// Serve one socket until it closes or the server shuts down.
 async fn run_connection(
     shared: Arc<Shared>,
     terminal: FinalHandler,
-    tls: Option<TlsAcceptor>,
+    tls: Option<Arc<rustls::ServerConfig>>,
     builder: auto::Builder<TokioExecutor>,
     stream: std::net::TcpStream,
     peer: SocketAddr,
+    worker_streams: Arc<AtomicUsize>,
 ) {
     if let Err(err) = stream.set_nonblocking(true) {
         tracing::debug!(peer = %peer, error = %err, "engine: dropped connection (nonblocking mode)");
@@ -267,12 +305,18 @@ async fn run_connection(
     };
 
     let shutdown = shared.subscribe_shutdown();
-    let streams = Arc::new(shared.active_stream_guard());
+    let streams = Arc::new(ActiveStreamGuard::new(worker_streams));
 
     match tls {
-        Some(acceptor) => {
-            let handshake =
-                tokio::time::timeout(TLS_HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await;
+        Some(config) => {
+            let acceptor = TlsAcceptor::from(config);
+            let handshake = tokio::time::timeout(TLS_HANDSHAKE_TIMEOUT, acceptor.accept(stream));
+            let mut handshake_shutdown = shutdown.clone();
+            let handshake = tokio::select! {
+                biased;
+                _ = wait_for_shutdown(&mut handshake_shutdown) => return,
+                result = handshake => result,
+            };
             match handshake {
                 Ok(Ok(tls_stream)) => {
                     serve_io(
@@ -325,8 +369,18 @@ async fn serve_io<I>(
 ) where
     I: hyper::rt::Read + hyper::rt::Write + Unpin + Send + 'static,
 {
+    let first_request_started = Arc::new(AtomicBool::new(false));
+    let first_request_notify = Arc::new(tokio::sync::Notify::new());
+    let service_first = Arc::clone(&first_request_started);
+    let service_notify = Arc::clone(&first_request_notify);
+    let timeout = shared.config.first_request_timeout;
+
     let service =
         hyper::service::service_fn(move |request: hyper::Request<hyper::body::Incoming>| {
+            // This is the transition from "connection admitted" to "request
+            // processing". The first-request watchdog stops once this fires.
+            service_first.store(true, Ordering::Release);
+            service_notify.notify_one();
             let shared = Arc::clone(&shared);
             let terminal = terminal.clone();
             let streams = Arc::clone(&streams);
@@ -338,35 +392,97 @@ async fn serve_io<I>(
     let conn = builder.serve_connection(io, service).into_owned();
     let mut conn = std::pin::pin!(conn);
 
-    tokio::select! {
-        result = conn.as_mut() => {
-            if let Err(err) = result {
-                tracing::debug!(peer = %peer, error = %err, "engine: connection closed");
+    let mut first_wait = Box::pin(wait_for_first_request(
+        Arc::clone(&first_request_started),
+        Arc::clone(&first_request_notify),
+        timeout,
+    ));
+    let mut first_done = first_request_started.load(Ordering::Acquire);
+
+    loop {
+        tokio::select! {
+            result = conn.as_mut() => {
+                if let Err(err) = result {
+                    tracing::debug!(peer = %peer, error = %err, "engine: connection closed");
+                }
+                return;
             }
-        }
-        _ = wait_for_shutdown(&mut shutdown) => {
-            // Finish in-flight requests and answer with `Connection: close`
-            // instead of aborting the socket; the drain budget bounds this.
-            conn.as_mut().graceful_shutdown();
-            if let Err(err) = conn.await {
-                tracing::debug!(peer = %peer, error = %err, "engine: connection closed during shutdown");
+            _ = first_wait.as_mut(), if !first_done => {
+                first_done = true;
+                if !first_request_started.load(Ordering::Acquire) {
+                    tracing::debug!(
+                        peer = %peer,
+                        timeout_secs = timeout.as_secs(),
+                        "engine: closing connection before its first request"
+                    );
+                    return;
+                }
+            }
+            _ = wait_for_shutdown(&mut shutdown) => {
+                // Finish in-flight requests and answer with `Connection: close`
+                // instead of aborting the socket; the drain budget bounds this.
+                conn.as_mut().graceful_shutdown();
+                if let Err(err) = conn.await {
+                    tracing::debug!(peer = %peer, error = %err, "engine: connection closed during shutdown");
+                }
+                return;
             }
         }
     }
 }
 
+/// Wait until the first request starts, or the pre-request deadline expires.
+async fn wait_for_first_request(
+    started: Arc<AtomicBool>,
+    notify: Arc<tokio::sync::Notify>,
+    timeout: Duration,
+) {
+    if started.load(Ordering::Acquire) {
+        return;
+    }
+    tokio::select! {
+        _ = notify.notified() => {}
+        _ = tokio::time::sleep(timeout) => {}
+    }
+}
+
 /// Drain the worker's live connections within the shutdown budget.
-async fn drain_connections(connections: &mut JoinSet<()>, label: &str, shared: &Shared) {
+async fn drain_connections(
+    connections: &mut JoinSet<()>,
+    label: &str,
+    shared: &Shared,
+    worker_streams: &AtomicUsize,
+) {
+    if shared.immediate_shutdown.load(Ordering::Acquire) {
+        tracing::warn!(label, "engine run was abandoned; aborting connections");
+        connections.abort_all();
+        while connections.join_next().await.is_some() {}
+        return;
+    }
+
     let budget = drain_timeout_for(
         shared.config.drain_timeout,
         shared.config.stream_drain_timeout,
-        shared.active_streams.load(Ordering::Relaxed),
+        worker_streams.load(Ordering::Relaxed),
     );
+    let mut immediate = shared.immediate_watch.subscribe();
 
     let drain = async {
-        while let Some(result) = connections.join_next().await {
-            if let Err(err) = result {
-                tracing::debug!(error = %err, "engine: connection task ended abnormally");
+        loop {
+            tokio::select! {
+                joined = connections.join_next() => match joined {
+                    Some(Ok(())) => {}
+                    Some(Err(err)) => {
+                        tracing::debug!(error = %err, "engine: connection task ended abnormally");
+                    }
+                    None => break,
+                },
+                _ = immediate.wait_for(|value| *value) => {
+                    tracing::warn!(label, "engine run was abandoned; aborting connections");
+                    connections.abort_all();
+                    while connections.join_next().await.is_some() {}
+                    return;
+                }
             }
         }
     };
@@ -383,10 +499,10 @@ async fn drain_connections(connections: &mut JoinSet<()>, label: &str, shared: &
 
 /// Drain budget for one worker.
 ///
-/// While any connection in the process serves an SSE response the stream budget
-/// is used, so a live event stream can end cleanly instead of being cut off;
-/// otherwise the normal drain budget applies. A configured zero is clamped to
-/// one second.
+/// The worker-local SSE gauge selects the stream budget, so one streaming
+/// connection in another worker cannot force this worker's ordinary
+/// connections to wait the long budget. A configured zero is clamped to one
+/// second.
 pub(crate) fn drain_timeout_for(
     normal: Duration,
     streaming: Duration,
@@ -415,10 +531,6 @@ pub(crate) async fn wait_for_shutdown(shutdown: &mut watch::Receiver<bool>) {
     }
 }
 
-pub(crate) fn increment(counter: &AtomicUsize) {
-    counter.fetch_add(1, Ordering::Relaxed);
-}
-
 pub(crate) fn decrement(counter: &AtomicUsize) {
     // Saturating CAS: no wrap on a buggy double-decrement, and no dependence on
     // the `fetch_update` method that newer toolchains deprecate.
@@ -441,20 +553,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn connection_budget_never_exceeds_the_global_limit() {
-        assert_eq!(connection_budget(10_000, 22), 454);
-        assert_eq!(connection_budget(10_000, 1), 10_000);
-        // More workers than connections still yields one slot each.
-        assert_eq!(connection_budget(2, 8), 1);
-    }
-
-    #[test]
-    fn connection_budget_floor_guards_a_zero_connection_limit() {
-        assert_eq!(connection_budget(0, 4), 1);
-        assert_eq!(connection_budget(4, 0), 4);
-    }
-
-    #[test]
     fn streaming_connections_get_the_stream_budget() {
         let normal = Duration::from_secs(30);
         let streaming = Duration::from_secs(300);
@@ -475,8 +573,8 @@ mod tests {
         let counter = AtomicUsize::new(0);
         decrement(&counter);
         assert_eq!(counter.load(Ordering::Relaxed), 0);
-        increment(&counter);
-        increment(&counter);
+        counter.fetch_add(1, Ordering::Relaxed);
+        counter.fetch_add(1, Ordering::Relaxed);
         assert_eq!(counter.load(Ordering::Relaxed), 2);
         decrement(&counter);
         assert_eq!(counter.load(Ordering::Relaxed), 1);

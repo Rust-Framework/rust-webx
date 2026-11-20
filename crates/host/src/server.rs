@@ -15,14 +15,13 @@ use webx_core::localization::{IStringLocalizer, LocalizationOptions, StringLocal
 use webx_core::middleware::IMiddleware;
 use webx_core::mode::AppMode;
 use webx_core::route::catalog::{EndpointCatalog, IEndpointCatalog};
-use webx_core::routing::{HttpMethod, IEndpoint, IRouter};
+use webx_core::routing::{HttpMethod, IEndpoint};
 use webx_core::security::{ISessionStore, ITokenIssuer};
 
 use crate::auth::{AuthenticationMiddleware, JwtScheme};
 use crate::auth_jwt::{init_jwt_secret, JwtAuth, JwtSecret, JwtTokenIssuer};
-use crate::context::BodyLimits;
 use crate::cors::{CorsConfig, CorsMiddleware};
-use crate::endpoint::{DirectStubEndpoint, StaticHtmlEndpoint, StaticJsonEndpoint, StubEndpoint};
+use crate::endpoint::{StaticHtmlEndpoint, StaticJsonEndpoint, StubEndpoint};
 use crate::health::{
     HealthCheckEndpoint, HealthCheckRegistry, HealthStatus, IHealthCheck,
     DEFAULT_HEALTH_CHECK_TIMEOUT,
@@ -31,17 +30,15 @@ use crate::memory_cache::MemoryCache;
 use crate::metrics::{HttpMetrics, MetricsEndpoint, MetricsMiddleware};
 use crate::pipeline::MiddlewarePipeline;
 use crate::rate_limit::RateLimitMiddleware;
-use crate::router::Router;
 use jsonwebtoken::{DecodingKey, Validation};
 use webx_core::route::scan::RouteEntry;
 use webx_core::DispatchRuntime;
 use webx_openapi::{generate_openapi_spec, APIUI_HTML};
 use webx_spa::{EmbeddedAssets, SpaMiddleware, SpaSource};
 
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::task::JoinSet;
 
 /// Returns true when the JWT secret is missing, too short, or a known placeholder.
 fn is_weak_jwt_secret(secret: &str) -> bool {
@@ -125,11 +122,7 @@ pub struct Host {
     endpoints: Arc<dyn IEndpointCatalog>,
     /// Resolves endpoint resource keys for the host's configured culture.
     localizer: Arc<dyn IStringLocalizer>,
-    /// The matchit router (retained for introspection).
-    #[allow(dead_code)]
-    router: Arc<Router>,
-    /// 2.0 execution engine state (workers, router, pipeline). The legacy
-    /// `router_handler`/`pipeline` fields remain until `serve_http` is deleted.
+    /// 2.0 execution engine state (workers, router, pipeline).
     engine: Arc<webx_engine::Shared>,
     /// Kept for introspection; the middleware already holds its own copy.
     #[allow(dead_code)]
@@ -145,6 +138,49 @@ pub struct Host {
     /// Cancelled when the host starts graceful shutdown; registered in DI as
     /// [`ShutdownToken`] so long-lived SSE responses can end cleanly.
     shutdown_token: CancellationToken,
+    /// Single-use lifecycle state; see [`HostState`].
+    state: std::sync::atomic::AtomicU8,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HostState {
+    Built,
+    Running,
+    Disposed,
+    Failed,
+}
+
+impl HostState {
+    fn load(self) -> u8 {
+        self as u8
+    }
+}
+
+/// Cancellation guard for one host run.
+struct HostRunGuard<'a> {
+    host: &'a Host,
+    armed: bool,
+}
+
+impl<'a> HostRunGuard<'a> {
+    fn new(host: &'a Host) -> Self {
+        Self { host, armed: true }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for HostRunGuard<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            self.host
+                .state
+                .store(HostState::Failed.load(), Ordering::Release);
+            self.host.request_immediate_shutdown();
+        }
+    }
 }
 
 /// Factory for a user-registered middleware.
@@ -1102,7 +1138,7 @@ impl HostBuilder {
         let dispatch_runtime = Arc::new(DispatchRuntime::new(Arc::clone(&provider), handler_cache));
 
         // Upload spooling and body limits come from the same merged config.
-        let body_limits = BodyLimits::from_options(&options);
+        let body_limits = Arc::new(webx_engine::BodyLimits::from_options(&options));
         body_limits.apply_spool_root();
         tracing::info!(
             "[Host] Uploads: max request {} bytes, max file {} bytes, spool >{} bytes to {}",
@@ -1130,6 +1166,14 @@ impl HostBuilder {
         // public `SecurityHeadersMiddleware` remains available for custom
         // pipelines, but the host does not add it a second time.
         pipeline.add_middleware(Arc::new(crate::request_id::RequestIdMiddleware::new()));
+
+        // Metrics wrap CORS so preflight responses (which short-circuit in the
+        // CORS stage) are observable, and wrap rate limiting/auth so rejected
+        // requests are counted with their real status.
+        if options.metrics.enabled {
+            tracing::info!("[Host] Metrics enabled at GET /metrics");
+            pipeline.add_middleware(Arc::new(MetricsMiddleware::new(Arc::clone(&http_metrics))));
+        }
 
         for spec in self
             .middleware_specs
@@ -1161,11 +1205,6 @@ impl HostBuilder {
         }
         if !cors.origins.is_empty() {
             pipeline.add_middleware(Arc::new(CorsMiddleware::new(cors)));
-        }
-
-        if options.metrics.enabled {
-            tracing::info!("[Host] Metrics enabled at GET /metrics");
-            pipeline.add_middleware(Arc::new(MetricsMiddleware::new(Arc::clone(&http_metrics))));
         }
 
         if options.rate_limit.enabled {
@@ -1287,7 +1326,6 @@ impl HostBuilder {
             ));
         }
 
-        let mut router = Router::new();
         let mut engine_router = webx_engine::Router::new();
         let mut route_count = 0usize;
 
@@ -1368,16 +1406,16 @@ impl HostBuilder {
             let direct = entry
                 .rsp_type_id
                 .and_then(|rsp| direct_by_pair.get(&(entry.req_type_id, rsp)).copied());
-            let engine_target: Arc<dyn IEndpoint> = match direct {
-                Some(dispatch) => Arc::new(DirectStubEndpoint::new(Arc::clone(&stub), dispatch)),
-                None => Arc::clone(&stub) as Arc<dyn IEndpoint>,
+            let engine_target: Arc<dyn webx_engine::RouteTarget> = match direct {
+                Some(dispatch) => Arc::new(crate::endpoint::DirectRouteTarget::new(
+                    Arc::clone(&stub),
+                    dispatch,
+                )),
+                None => Arc::new(webx_engine::EndpointTarget::new(
+                    Arc::clone(&stub) as Arc<dyn IEndpoint>
+                )),
             };
-            router.register(entry.method, entry.path, stub as Arc<dyn IEndpoint>);
-            engine_router.insert(
-                entry.method,
-                entry.path,
-                Arc::new(webx_engine::EndpointTarget::new(engine_target)),
-            );
+            engine_router.try_insert(entry.method, entry.path, engine_target)?;
         }
 
         tracing::info!(
@@ -1395,28 +1433,18 @@ impl HostBuilder {
         if self.mode == AppMode::Development {
             let openapi_bytes = serde_json::to_vec(&openapi_spec).unwrap_or_default();
             let openapi_json: Arc<dyn IEndpoint> = Arc::new(StaticJsonEndpoint::new(openapi_bytes));
-            router.register(
-                HttpMethod::Get,
-                "/api/openapi.json",
-                Arc::clone(&openapi_json),
-            );
-            engine_router.insert(
+            engine_router.try_insert(
                 HttpMethod::Get,
                 "/api/openapi.json",
                 Arc::new(webx_engine::EndpointTarget::new(openapi_json)),
-            );
+            )?;
             let openapi_html: Arc<dyn IEndpoint> =
                 Arc::new(StaticHtmlEndpoint { body: APIUI_HTML });
-            router.register(
-                HttpMethod::Get,
-                "/api/openapi.html",
-                Arc::clone(&openapi_html),
-            );
-            engine_router.insert(
+            engine_router.try_insert(
                 HttpMethod::Get,
                 "/api/openapi.html",
                 Arc::new(webx_engine::EndpointTarget::new(openapi_html)),
-            );
+            )?;
         }
 
         // Health check endpoints (RFC 8407 application/health+json)
@@ -1424,20 +1452,18 @@ impl HostBuilder {
         let health_registry = Arc::clone(&self.health_registry);
         let health_endpoint: Arc<dyn IEndpoint> =
             Arc::new(HealthCheckEndpoint::new(Arc::clone(&health_registry)));
-        router.register(HttpMethod::Get, "/health", Arc::clone(&health_endpoint));
-        engine_router.insert(
+        engine_router.try_insert(
             HttpMethod::Get,
             "/health",
             Arc::new(webx_engine::EndpointTarget::new(Arc::clone(
                 &health_endpoint,
             ))),
-        );
-        router.register(HttpMethod::Get, "/healthz", Arc::clone(&health_endpoint));
-        engine_router.insert(
+        )?;
+        engine_router.try_insert(
             HttpMethod::Get,
             "/healthz",
             Arc::new(webx_engine::EndpointTarget::new(health_endpoint)),
-        );
+        )?;
 
         // /health/live: liveness (process alive → pass, no probe queries)
         let live_body =
@@ -1446,35 +1472,28 @@ impl HostBuilder {
             body: live_body,
             content_type: "application/health+json",
         });
-        router.register(HttpMethod::Get, "/health/live", Arc::clone(&live_endpoint));
-        engine_router.insert(
+        engine_router.try_insert(
             HttpMethod::Get,
             "/health/live",
             Arc::new(webx_engine::EndpointTarget::new(live_endpoint)),
-        );
+        )?;
 
         // /health/ready: readiness (queries registry, same as /health)
         let ready_endpoint: Arc<dyn IEndpoint> =
             Arc::new(HealthCheckEndpoint::new(health_registry));
-        router.register(
-            HttpMethod::Get,
-            "/health/ready",
-            Arc::clone(&ready_endpoint),
-        );
-        engine_router.insert(
+        engine_router.try_insert(
             HttpMethod::Get,
             "/health/ready",
             Arc::new(webx_engine::EndpointTarget::new(ready_endpoint)),
-        );
+        )?;
 
         if options.metrics.enabled {
             let metrics_endpoint: Arc<dyn IEndpoint> = Arc::new(MetricsEndpoint::new(http_metrics));
-            router.register(HttpMethod::Get, "/metrics", Arc::clone(&metrics_endpoint));
-            engine_router.insert(
+            engine_router.try_insert(
                 HttpMethod::Get,
                 "/metrics",
                 Arc::new(webx_engine::EndpointTarget::new(metrics_endpoint)),
-            );
+            )?;
         }
 
         if self.mode == AppMode::Development {
@@ -1534,7 +1553,6 @@ impl HostBuilder {
             engine_router.set_fallback(Arc::new(webx_engine::EndpointTarget::new(fallback)));
         }
 
-        let router = Arc::new(router);
         let error_writers = Arc::new(self.error_writers);
 
         // Build the 2.0 engine state. TLS is attached per run for HTTPS
@@ -1547,12 +1565,14 @@ impl HostBuilder {
             router: Arc::new(engine_router),
             pipeline: Arc::new(webx_engine::Pipeline::new(pipeline.stages().to_vec())),
             dispatch: Arc::clone(&dispatch_runtime),
-            body_limits: Arc::new(webx_engine::BodyLimits::from_options(&options)),
+            body_limits: Arc::clone(&body_limits),
             error_writers: Arc::clone(&error_writers),
             tls: None,
             shutdown: engine_shutdown,
             shutdown_token: CancellationToken::new(),
-            active_streams: Arc::new(AtomicUsize::new(0)),
+            immediate_shutdown: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            immediate_watch: tokio::sync::watch::channel(false).0,
+            started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
         // Resolve all registered hosted services from the DI container.
         // These will be started when `run()` is called and stopped on shutdown.
@@ -1570,13 +1590,13 @@ impl HostBuilder {
             options,
             endpoints,
             localizer,
-            router,
             engine,
             spa_source,
             shutdown: Arc::new(tokio::sync::watch::channel(false).0),
             hosted_services: Arc::new(hosted_services),
             hosted_stopped: Arc::new(tokio::sync::OnceCell::new()),
             shutdown_token,
+            state: AtomicU8::new(HostState::Built.load()),
         })
     }
 
@@ -1693,6 +1713,13 @@ impl Host {
     fn dispose_di(&self) {
         self.provider.dispose();
         tracing::debug!("[Host] DI provider disposed");
+    }
+
+    /// Immediate, non-graceful teardown used when a supervising future is
+    /// dropped. Normal shutdowns use [`Host::stop`] or `ServerHandle::shutdown`.
+    fn request_immediate_shutdown(&self) {
+        trigger_shutdown(&self.shutdown, &self.shutdown_token);
+        self.engine.trigger_immediate_shutdown();
     }
 
     /// Stop every hosted service exactly once (reverse start order).
@@ -1813,13 +1840,34 @@ impl Host {
             }
         }
 
+        if self
+            .state
+            .compare_exchange(
+                HostState::Built.load(),
+                HostState::Running.load(),
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_err()
+        {
+            return Err(Error::State(
+                "Host is single-use; build a new Host to run again".to_string(),
+            ));
+        }
+        let mut run_guard = HostRunGuard::new(self);
+
         if let Err(err) = start_hosted_services(&self.hosted_services).await {
-            self.dispose_di();
+            // Startup rollback already stopped the services that did start; the
+            // provider is still valid, so leave the host retryable instead of
+            // disposing it and turning every later construction into a 500.
+            self.state.store(HostState::Built.load(), Ordering::Release);
+            run_guard.disarm();
             return Err(err);
         }
 
         install_shutdown_handler(Arc::clone(&self.shutdown), self.shutdown_token.clone());
-        spawn_async_shutdown_listener(Arc::clone(&self.shutdown), self.shutdown_token.clone());
+        let signal_listener =
+            spawn_async_shutdown_listener(Arc::clone(&self.shutdown), self.shutdown_token.clone());
         let hosted_watcher = self.spawn_hosted_shutdown_watcher();
 
         let engine_for_shutdown = (*self.engine).clone();
@@ -1830,69 +1878,67 @@ impl Host {
             }
         });
 
-        let mut tasks: JoinSet<(String, Result<()>)> = JoinSet::new();
-        for ((scheme, addr, listener), tls) in listeners.into_iter().zip(tls_configs) {
-            let mut shared = (*self.engine).clone();
-            shared.shutdown_token = self.shutdown_token.clone();
-            let mut config = (*shared.config).clone();
-            config.tls = if scheme == "https" {
-                Some(webx_engine::TlsConfig {
-                    cert_path: self.options.tls.cert_path.clone(),
-                    key_path: self.options.tls.key_path.clone(),
-                })
-            } else {
-                None
-            };
-            shared.config = Arc::new(config);
-            shared.tls = tls;
-            let label = format!("{scheme}://{addr}");
-            tasks.spawn(async move {
-                let result = webx_engine::Server::new(Arc::new(shared))
-                    .run(listener)
-                    .await;
-                (label, result)
+        // The reverse direction matters on engine-internal failure: the engine
+        // signals its own shutdown before it drains. Mirror that into the host
+        // watch so hosted services stop before in-flight requests are joined.
+        let engine_shutdown_watch = self.engine.shutdown.subscribe();
+        let host_shutdown_signal = Arc::clone(&self.shutdown);
+        let host_shutdown_token = self.shutdown_token.clone();
+        let engine_to_host_shutdown = tokio::spawn(async move {
+            let mut watch = engine_shutdown_watch;
+            if watch.wait_for(|value| *value).await.is_ok() {
+                trigger_shutdown(&host_shutdown_signal, &host_shutdown_token);
+            }
+        });
+
+        let mut engine_listeners = Vec::with_capacity(listeners.len());
+        for ((_scheme, _addr, raw), tls) in listeners.into_iter().zip(tls_configs) {
+            engine_listeners.push(match tls {
+                Some(tls) => webx_engine::Listener::tls(raw, tls),
+                None => webx_engine::Listener::plain(raw),
             });
         }
 
-        let mut run_error: Option<Error> = None;
-        while let Some(joined) = tasks.join_next().await {
-            match joined {
-                Ok((label, Err(err))) => {
-                    tracing::error!(listener = %label, error = %err, "engine listener failed");
-                    // Stop the remaining listeners instead of leaving them
-                    // serving after a fatal engine error.
-                    self.engine.trigger_shutdown();
-                    if run_error.is_none() {
-                        run_error = Some(err);
-                    }
-                }
-                Ok((_, Ok(()))) => {}
-                Err(join_err) => {
-                    if run_error.is_none() {
-                        run_error = Some(Error::Internal(format!(
-                            "a listener task failed: {join_err}"
-                        )));
-                    }
-                }
-            }
-        }
+        // One Shared, one worker pool, one global connection governor for all
+        // URLs. TLS is per Listener; `config.tls` must not leak one certificate
+        // onto another listener.
+        let mut shared = (*self.engine).clone();
+        shared.shutdown_token = self.shutdown_token.clone();
+        let mut config = (*shared.config).clone();
+        config.tls = None;
+        shared.config = Arc::new(config);
+        shared.tls = None;
+
+        let run_result = webx_engine::Server::new(Arc::new(shared))
+            .run_listeners(engine_listeners)
+            .await;
 
         self.stop_hosted_services_once().await;
         shutdown_bridge.abort();
+        engine_to_host_shutdown.abort();
         hosted_watcher.abort();
-        self.dispose_di();
-        match run_error {
-            Some(err) => Err(err),
-            None => Ok(()),
+        signal_listener.abort();
+
+        if run_result.is_ok() {
+            self.dispose_di();
+            self.state
+                .store(HostState::Disposed.load(), Ordering::Release);
+        } else {
+            // A join timeout can leave a blocking worker alive; disposing the
+            // provider here would let that worker resolve a disposed container.
+            // Keep the provider and make the host permanently unusable.
+            self.state
+                .store(HostState::Failed.load(), Ordering::Release);
         }
+        run_guard.disarm();
+        run_result
     }
 
     /// Start the server at a single explicit address.
     ///
-    /// This is the 2.0 engine path: bind once, start hosted services, map the
-    /// host shutdown signal to the engine signal, then let the worker pool
-    /// accept/drain. The legacy `serve_http` path remains only for `run()`'s
-    /// multi-listener code until it is switched in the next milestone.
+    /// This is the engine path: bind once, start hosted services, map both
+    /// shutdown directions (host↔engine), then let the shared worker pool
+    /// accept/drain.
     pub async fn run_at(&self, addr: &str) -> Result<()> {
         let (scheme, bind_addr) = match parse_url(addr) {
             Ok((scheme, bind_addr)) => (scheme.to_string(), bind_addr),
@@ -1999,7 +2045,10 @@ fn install_shutdown_handler(shutdown: ShutdownSignal, token: CancellationToken) 
     }
 }
 
-fn spawn_async_shutdown_listener(shutdown: ShutdownSignal, token: CancellationToken) {
+fn spawn_async_shutdown_listener(
+    shutdown: ShutdownSignal,
+    token: CancellationToken,
+) -> tokio::task::JoinHandle<()> {
     let cancelled = token.clone();
     tokio::spawn(async move {
         // Exit if shutdown was triggered by another source (another host, an
@@ -2016,7 +2065,7 @@ fn spawn_async_shutdown_listener(shutdown: ShutdownSignal, token: CancellationTo
                 tracing::debug!("Shutdown listener stopped: already shutting down");
             }
         }
-    });
+    })
 }
 
 async fn start_hosted_services(services: &[Arc<dyn IHostedService>]) -> Result<()> {
@@ -2025,6 +2074,7 @@ async fn start_hosted_services(services: &[Arc<dyn IHostedService>]) -> Result<(
     }
     tracing::info!("Starting {} hosted service(s)...", services.len());
     let mut started = 0usize;
+    let mut timed_out: Option<usize> = None;
     let mut failure: Option<webx_core::error::Error> = None;
 
     for svc in services {
@@ -2043,6 +2093,7 @@ async fn start_hosted_services(services: &[Arc<dyn IHostedService>]) -> Result<(
                 break;
             }
             Err(_) => {
+                timed_out = Some(started);
                 failure = Some(webx_core::error::Error::Internal(format!(
                     "hosted service start timed out after {HOSTED_START_TIMEOUT_SECS}s"
                 )));
@@ -2057,6 +2108,13 @@ async fn start_hosted_services(services: &[Arc<dyn IHostedService>]) -> Result<(
             Ok(())
         }
         Some(err) => {
+            // A timed-out `start` may have spawned its loop before blocking;
+            // include it in the best-effort rollback.
+            if let Some(index) = timed_out {
+                if let Some(svc) = services.get(index) {
+                    stop_hosted_service(index, svc).await;
+                }
+            }
             // Roll back the services that did start, newest first, so a failed
             // startup does not leave pools/loops running.
             for (index, svc) in services[..started].iter().enumerate().rev() {

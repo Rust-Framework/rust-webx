@@ -66,7 +66,7 @@ Cargo **包名**带连字符，Rust **导入名**用下划线库名。两者不�
 |------|------|
 | HTTP 服务 | hyper + tokio |
 | 路由 | matchit radix 树 `Router` |
-| 上下文 | `HttpContext`, `HttpRequest`, `HttpResponse` |
+| 上下文 | `webx_engine::EngineContext`（应用契约仍是 `IHttpContext`；旧 `webx_host::HttpContext` 已在 2.1 删除） |
 | 管道 | `MiddlewarePipeline` |
 | 认证 | `JwtAuth`, `jwt_middleware`, `AuthenticationMiddleware` + `JwtScheme` / `ApiKeyScheme` 链 |
 | 授权 | 端点执行 `#[authorize]` 规则；`resource_auth_middleware` 已弃用（路由前无法读取 `route_pattern`） |

@@ -54,11 +54,18 @@ pub struct Shared {
     /// (SSE) can end with a `server_shutdown` event instead of being aborted at
     /// the drain deadline.
     pub shutdown_token: CancellationToken,
-    /// Number of connections currently serving at least one SSE response.
+    /// Set when the owner abandons `Server::run` (future dropped/aborted).
     ///
-    /// Drives the drain budget: while this is non-zero the server uses
-    /// `stream_drain_timeout` instead of `drain_timeout`.
-    pub active_streams: Arc<AtomicUsize>,
+    /// Graceful shutdown still drains; this flag switches workers to aborting
+    /// their remaining connections so a cancelled supervisor does not leave
+    /// detached worker threads running for the stream drain budget.
+    pub immediate_shutdown: Arc<AtomicBool>,
+    /// Wakes workers already inside `drain_connections` when the immediate
+    /// flag is raised. A `watch` (rather than `Notify`) stores the signal, so
+    /// a worker that subscribes after the trigger cannot miss it.
+    pub immediate_watch: watch::Sender<bool>,
+    /// One-shot engine lifecycle guard: a `Shared` cannot be served twice.
+    pub started: Arc<AtomicBool>,
 }
 
 impl Shared {
@@ -81,17 +88,20 @@ impl Shared {
         self.shutdown_token.cancel();
     }
 
-    /// Guard that counts this connection as serving a stream while it lives.
+    /// Abandon the run: signal shutdown and make workers abort their remaining
+    /// connections instead of draining for up to `stream_drain_timeout`.
     ///
-    /// Call [`ActiveStreamGuard::mark`] when an SSE response is produced; the
-    /// counter is decremented when the guard drops (connection end), so an
-    /// aborted connection never leaks a "streaming" slot.
-    pub fn active_stream_guard(&self) -> ActiveStreamGuard {
-        ActiveStreamGuard::new(Arc::clone(&self.active_streams))
+    /// Used by the engine/host run guard when the caller drops the `run` future
+    /// or aborts the supervising task. It is not a normal graceful-shutdown
+    /// path.
+    pub fn trigger_immediate_shutdown(&self) {
+        self.immediate_shutdown.store(true, Ordering::Release);
+        self.immediate_watch.send_replace(true);
+        self.trigger_shutdown();
     }
 }
 
-/// `Drop` guard for [`Shared::active_streams`].
+/// Per-worker stream gauge.
 ///
 /// One guard exists per connection. The first SSE response on that connection
 /// calls [`Self::mark`] — HTTP/2 multiplexes several requests over one

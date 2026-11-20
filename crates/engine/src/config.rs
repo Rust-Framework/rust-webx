@@ -7,21 +7,26 @@
 //!
 //! # Worker count
 //!
-//! `Server.Workers` is read from the merged appsettings (so
-//! `APP__Server__Workers` wins over the JSON value) because the current
-//! `webx_core::config::ServerSection` has no `workers` field yet. `0` means
-//! **auto**: `available_parallelism()`, clamped to `1..=64`. An explicit value
-//! is clamped the same way, so a typo cannot spawn thousands of threads. When
-//! `webx_core` exposes `ServerSection::workers`, the JSON lookup below collapses
-//! into `options.server.workers`.
+//! `Server.Workers` is projected from the merged [`AppOptions`] (the same
+//! `Server` section as every other lifecycle setting), so a builder modifier
+//! and `APP__Server__Workers` both reach the engine. `0` means **auto**:
+//! `available_parallelism()`, clamped to `1..=64`. An explicit value is clamped
+//! the same way, so a typo cannot spawn thousands of threads.
 //!
 //! # Connection limit
 //!
-//! `App.MaxConnections` stays the documented **global** limit. The acceptor
-//! splits it into one budget per worker
-//! (`max_connections / workers`, floored at 1), so the effective global cap is
-//! `budget * workers <= max_connections`. The limiter is not applied per client
-//! address: per-IP throttling belongs to the rate-limit middleware.
+//! `App.MaxConnections` is a **global server admission cap**. `Server` creates
+//! one `Semaphore` for the whole worker pool (all listeners share it); a
+//! connection is admitted only after acquiring that permit. There is no
+//! per-worker floor or per-listener multiplication. Per-IP throttling belongs
+//! to the rate-limit middleware.
+//!
+//! # Pre-request deadline
+//!
+//! `Server.FirstRequestTimeoutSeconds` bounds the interval between accepting a
+//! connection and the first request reaching the service. It closes silent
+//! TCP/partial-h2-preface connections before they can pin an admission slot.
+//! Zero falls back to the secure default rather than disabling the deadline.
 
 use std::time::Duration;
 
@@ -77,6 +82,12 @@ pub struct EngineConfig {
     pub drain_timeout: Duration,
     /// Drain budget used when at least one SSE response is active.
     pub stream_drain_timeout: Duration,
+    /// Deadline for an accepted connection to start its first request.
+    ///
+    /// This is the admission guard for zero-byte/partial-preface connections;
+    /// it is separate from hyper's per-request header timeout, which starts only
+    /// after the protocol has been selected.
+    pub first_request_timeout: Duration,
     /// Per-request deadline from `Server.RequestTimeoutSeconds`; `None` disables.
     pub request_timeout: Option<Duration>,
     /// TLS material when the listener terminates TLS.
@@ -113,12 +124,17 @@ impl EngineConfig {
         };
 
         Self {
-            workers: configured_workers(mode).unwrap_or(0),
+            workers: options.server.workers,
             max_connections: options.app.max_connections.max(1),
             header_read_timeout: DEFAULT_HEADER_READ_TIMEOUT,
             max_header_buf: DEFAULT_MAX_HEADER_BUF,
             drain_timeout: Duration::from_secs(options.server.drain_timeout_seconds),
             stream_drain_timeout: Duration::from_secs(options.server.stream_drain_timeout_seconds),
+            // Zero is a secure fallback, not "disable": an unbounded
+            // pre-request connection is a denial-of-service vector.
+            first_request_timeout: Duration::from_secs(
+                options.server.first_request_timeout_seconds.max(1),
+            ),
             request_timeout: (options.server.request_timeout_seconds > 0)
                 .then(|| Duration::from_secs(options.server.request_timeout_seconds)),
             tls,
@@ -157,6 +173,7 @@ impl Default for EngineConfig {
             max_header_buf: DEFAULT_MAX_HEADER_BUF,
             drain_timeout: Duration::from_secs(30),
             stream_drain_timeout: Duration::from_secs(300),
+            first_request_timeout: Duration::from_secs(10),
             request_timeout: None,
             tls: None,
             mode: AppMode::Production,
@@ -164,44 +181,18 @@ impl Default for EngineConfig {
     }
 }
 
-/// Environment override for `Server.Workers`.
-const WORKERS_ENV: &str = "APP__Server__Workers";
+/// Upper bound accepted by Tokio's `Semaphore`; used to turn an invalid
+/// `MaxConnections` into a typed startup error instead of a panic.
+pub const MAX_SEMAPHORE_PERMITS: usize = tokio::sync::Semaphore::MAX_PERMITS;
 
-/// Read `Server.Workers` from the environment or the merged appsettings.
-///
-/// Returns `None` when the key is absent or not a valid non-negative integer;
-/// a malformed value is logged rather than silently treated as auto so a typo
-/// in a deployment file stays visible.
-fn configured_workers(mode: AppMode) -> Option<usize> {
-    if let Ok(raw) = std::env::var(WORKERS_ENV) {
-        let parsed = parse_workers(&raw);
-        if parsed.is_none() {
-            tracing::warn!(
-                value = raw.as_str(),
-                "[Engine] {WORKERS_ENV} is not a valid worker count; using auto"
-            );
-        }
-        return parsed;
+/// Validate configuration values that feed allocation/admission primitives.
+pub fn validate_max_connections(max_connections: usize) -> webx_core::error::Result<()> {
+    if max_connections == 0 || max_connections > MAX_SEMAPHORE_PERMITS {
+        return Err(webx_core::error::Error::Http(format!(
+            "App.MaxConnections={max_connections} is outside the supported range 1..={MAX_SEMAPHORE_PERMITS}"
+        )));
     }
-
-    let appsettings = webx_core::config::load_appsettings(mode)?;
-    let value = appsettings.get("Server")?.get("Workers")?;
-    let parsed = value
-        .as_u64()
-        .map(|value| value as usize)
-        .or_else(|| value.as_str().and_then(parse_workers));
-    if parsed.is_none() {
-        tracing::warn!(
-            value = %value,
-            "[Engine] Server.Workers is not a valid worker count; using auto"
-        );
-    }
-    parsed
-}
-
-/// Parse a worker count from text; `0` means auto.
-fn parse_workers(raw: &str) -> Option<usize> {
-    raw.trim().parse::<usize>().ok()
+    Ok(())
 }
 
 #[cfg(test)]
@@ -239,16 +230,6 @@ mod tests {
     }
 
     #[test]
-    fn worker_count_parsing_rejects_garbage() {
-        assert_eq!(parse_workers("8"), Some(8));
-        assert_eq!(parse_workers(" 22 "), Some(22));
-        assert_eq!(parse_workers("0"), Some(0));
-        assert_eq!(parse_workers("auto"), None);
-        assert_eq!(parse_workers("-1"), None);
-        assert_eq!(parse_workers(""), None);
-    }
-
-    #[test]
     fn from_options_projects_app_server_and_tls_sections() {
         let options: AppOptions = serde_json::from_value(serde_json::json!({
             "App": { "MaxConnections": 512 },
@@ -269,10 +250,8 @@ mod tests {
         let tls = config.tls.expect("both TLS paths configured");
         assert_eq!(tls.cert_path, "certs/site.pem");
         assert_eq!(tls.key_path, "certs/site.key");
-        // No appsettings in the test environment; absent key keeps auto.
-        if std::env::var(WORKERS_ENV).is_err() {
-            assert_eq!(config.workers, 0);
-        }
+        assert_eq!(config.workers, 0);
+        assert_eq!(config.first_request_timeout, Duration::from_secs(10));
     }
 
     #[test]

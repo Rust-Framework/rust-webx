@@ -98,7 +98,7 @@ pub use webx_core::route::ext::{
 pub use webx_core::route::scan::{
     bind_request, AuthorizeRule, BoxedBindFuture, BoxedBindFutureFn, BoxedDispatch,
     BoxedDispatchFn, BoxedDispatchFuture, HandlerCache, HandlerDispatch, HandlerDispatchFn,
-    HandlerEntry, HandlerRegistration, HandlerRegistry, ParamMeta, RequestBinder,
+    HandlerEntry, HandlerRegistration, HandlerRegistry, InProcessHandler, ParamMeta, RequestBinder,
     RequestParamEntry, RouteDispatch, RouteDispatchById, RouteDispatchFn, RouteEntry,
 };
 
@@ -120,7 +120,6 @@ pub use webx_host::authz::collect_authorizers;
 pub use webx_host::authz::resource_auth_middleware;
 pub use webx_host::authz::{AuthorizerSet, ResourceAuthorization};
 pub use webx_host::compression::{compress_gzip, CompressionConfig, CompressionMiddleware};
-pub use webx_host::context::{HttpContext, HttpRequest, HttpResponse};
 pub use webx_host::cors::{CorsConfig, CorsMiddleware};
 pub use webx_host::diagnostics::log_startup_diagnostics;
 pub use webx_host::endpoint::{

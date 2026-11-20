@@ -33,14 +33,45 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::net::TcpListener;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, watch, Semaphore};
 use webx_core::error::{Error, Result};
 
 use crate::shared::Shared;
-use crate::worker::{self, Worker};
+use crate::worker::{self, Worker, WorkerFeed};
 
 /// Pause before retrying a failed `accept` (EMFILE, transient network error).
 const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(50);
+
+/// One bound listener plus its transport configuration.
+///
+/// Multiple listeners deliberately share one worker pool and one global
+/// connection governor. TLS is per listener because an http and an https URL
+/// usually have different transport settings.
+pub struct Listener {
+    /// An already-bound blocking listener; the engine puts it in nonblocking
+    /// mode on the runtime that owns the acceptor.
+    pub listener: std::net::TcpListener,
+    /// TLS configuration for this listener, or `None` for cleartext.
+    pub tls: Option<Arc<rustls::ServerConfig>>,
+}
+
+impl Listener {
+    /// Wrap a cleartext listener.
+    pub fn plain(listener: std::net::TcpListener) -> Self {
+        Self {
+            listener,
+            tls: None,
+        }
+    }
+
+    /// Wrap a TLS listener.
+    pub fn tls(listener: std::net::TcpListener, tls: Arc<rustls::ServerConfig>) -> Self {
+        Self {
+            listener,
+            tls: Some(tls),
+        }
+    }
+}
 
 /// How long a worker thread may take to build its runtime before startup fails.
 const WORKER_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -71,31 +102,52 @@ impl Server {
         }
     }
 
-    /// Serve on `listener` until shutdown, then drain and join all workers.
+    /// Serve one listener until shutdown.
     ///
-    /// The listener is converted onto the caller's runtime; connections are
-    /// accepted there and handed to worker threads. Binding still belongs to
-    /// the caller so a port conflict fails startup before any worker is
-    /// spawned.
+    /// This is the single-listener convenience wrapper. `config.tls` is
+    /// honoured here if `Shared.tls` was not pre-built, so the published
+    /// `EngineConfig` cannot silently fall back to cleartext.
     pub async fn run(self, listener: std::net::TcpListener) -> Result<()> {
+        let tls = match self.shared.tls.clone() {
+            Some(config) => Some(config),
+            None => match self.shared.config.tls.as_ref() {
+                Some(config) => Some(crate::tls::build_server_config(
+                    &config.cert_path,
+                    &config.key_path,
+                )?),
+                None => None,
+            },
+        };
+        self.run_listeners(vec![Listener { listener, tls }]).await
+    }
+
+    /// Serve all listeners with one worker pool and one global connection
+    /// governor.
+    ///
+    /// This is the production entry point for `App.Urls`: http and https URLs
+    /// share `App.MaxConnections` and the same worker threads, instead of
+    /// multiplying both by the number of listeners.
+    pub async fn run_listeners(self, listeners: Vec<Listener>) -> Result<()> {
+        if listeners.is_empty() {
+            return Err(Error::Http("engine has no listener to serve".to_string()));
+        }
+        crate::config::validate_max_connections(self.shared.config.max_connections)?;
+
         let shared = Arc::clone(&self.shared);
-
-        listener.set_nonblocking(true).map_err(|err| {
-            Error::Http(format!(
-                "engine listener could not be put in nonblocking mode: {err}"
-            ))
-        })?;
-        let listener = TcpListener::from_std(listener).map_err(|err| {
-            Error::Http(format!("engine listener could not join the runtime: {err}"))
-        })?;
-
+        if shared.started.swap(true, Ordering::AcqRel) {
+            return Err(Error::State(
+                "engine Shared is single-use; build a new engine for another run".to_string(),
+            ));
+        }
+        // If the caller's `run` future is dropped (timeout/select/abort), do not
+        // leave detached worker threads draining for the SSE budget or serving
+        // requests after the supervisor believes the server stopped.
+        let mut run_guard = ServerRunGuard::new(Arc::clone(&shared));
         let workers = shared.config.resolved_workers();
-        let budget = worker::connection_budget(shared.config.max_connections, workers);
         tracing::info!(
             workers,
-            connection_budget_per_worker = budget,
             max_connections = shared.config.max_connections,
-            tls = shared.tls.is_some(),
+            listeners = listeners.len(),
             "engine accepting connections"
         );
 
@@ -103,23 +155,62 @@ impl Server {
         if let Some(error) = startup_error {
             tracing::error!(error = %error, "engine worker startup failed");
             shared.trigger_shutdown();
-            let _ = join_workers(handles, join_budget(&shared)).await;
+            let join_failure = join_workers(handles, join_budget(&shared)).await;
+            if join_failure.is_none() {
+                run_guard.disarm();
+            }
             return Err(error);
         }
 
-        let accept_result = accept_loop(&shared, &listener, &handles).await;
+        let feeds = Arc::new(
+            handles
+                .iter()
+                .map(|worker| worker.feed.clone())
+                .collect::<Vec<_>>(),
+        );
+        let governor = Arc::new(Semaphore::new(shared.config.max_connections));
+        let mut acceptors = tokio::task::JoinSet::new();
+        for listener in listeners {
+            let shared = Arc::clone(&shared);
+            let feeds = Arc::clone(&feeds);
+            let governor = Arc::clone(&governor);
+            acceptors.spawn(async move { accept_loop(shared, listener, feeds, governor).await });
+        }
 
-        // The acceptor also exits when a worker disappears; stopping the whole
-        // server is the only safe answer to a dead worker.
+        let mut accept_error: Option<Error> = None;
+        while let Some(result) = acceptors.join_next().await {
+            match result {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    tracing::error!(error = %error, "engine acceptor failed");
+                    shared.trigger_shutdown();
+                    if accept_error.is_none() {
+                        accept_error = Some(error);
+                    }
+                }
+                Err(error) => {
+                    tracing::error!(error = %error, "engine acceptor task failed");
+                    shared.trigger_shutdown();
+                    if accept_error.is_none() {
+                        accept_error = Some(Error::Internal(format!(
+                            "engine acceptor task failed: {error}"
+                        )));
+                    }
+                }
+            }
+        }
+
+        // Every acceptor has stopped (shutdown, error, or worker loss).
         shared.trigger_shutdown();
-        drop(listener);
-
         let join_failure = join_workers(handles, join_budget(&shared)).await;
+        if join_failure.is_none() {
+            run_guard.disarm();
+        }
 
-        match (accept_result, join_failure) {
-            (Err(error), _) => Err(error),
-            (Ok(()), Some(message)) => Err(Error::Internal(message)),
-            (Ok(()), None) => Ok(()),
+        match (accept_error, join_failure) {
+            (Some(error), _) => Err(error),
+            (None, Some(message)) => Err(Error::Internal(message)),
+            (None, None) => Ok(()),
         }
     }
 
@@ -151,7 +242,14 @@ impl Server {
                 Ok(Some(Err(message))) => {
                     return (handles, Some(Error::Internal(message)));
                 }
-                Ok(None) => break,
+                Ok(None) => {
+                    return (
+                        handles,
+                        Some(Error::Internal(
+                            "an engine worker died before reporting ready".to_string(),
+                        )),
+                    );
+                }
                 Err(_) => {
                     return (
                         handles,
@@ -165,6 +263,33 @@ impl Server {
         }
 
         (handles, None)
+    }
+}
+
+/// Cancellation guard for one `Server::run_listeners` invocation.
+struct ServerRunGuard {
+    shared: Arc<Shared>,
+    armed: bool,
+}
+
+impl ServerRunGuard {
+    fn new(shared: Arc<Shared>) -> Self {
+        Self {
+            shared,
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for ServerRunGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            self.shared.trigger_immediate_shutdown();
+        }
     }
 }
 
@@ -186,8 +311,29 @@ impl ServerHandle {
     }
 }
 
-/// Accept connections until shutdown, handing each to a worker.
-async fn accept_loop(shared: &Shared, listener: &TcpListener, workers: &[Worker]) -> Result<()> {
+/// Accept connections until shutdown, handing each to the shared worker pool.
+async fn accept_loop(
+    shared: Arc<Shared>,
+    listener: Listener,
+    workers: Arc<Vec<WorkerFeed>>,
+    governor: Arc<Semaphore>,
+) -> Result<()> {
+    let Listener {
+        listener: raw_listener,
+        tls: explicit_tls,
+    } = listener;
+    raw_listener.set_nonblocking(true).map_err(|err| {
+        Error::Http(format!(
+            "engine listener could not be put in nonblocking mode: {err}"
+        ))
+    })?;
+    let listener = TcpListener::from_std(raw_listener)
+        .map_err(|err| Error::Http(format!("engine listener could not join the runtime: {err}")))?;
+    // `Server::run` resolves the default listener's TLS before calling here;
+    // `run_listeners` is explicit so one listener's config never leaks onto
+    // another (for example an https URL's certificate onto an http URL).
+    let tls = explicit_tls;
+
     let mut shutdown = shared.subscribe_shutdown();
     let mut cursor = 0usize;
 
@@ -211,6 +357,18 @@ async fn accept_loop(shared: &Shared, listener: &TcpListener, workers: &[Worker]
             }
         };
 
+        // Admission is global: no per-listener or per-worker multiplication.
+        // At most one already-accepted socket per listener waits here, so the
+        // kernel backlog remains the queue when the governor is full.
+        let permit = tokio::select! {
+            biased;
+            _ = worker::wait_for_shutdown(&mut shutdown) => break,
+            acquired = Arc::clone(&governor).acquire_owned() => match acquired {
+                Ok(permit) => permit,
+                Err(_) => return Err(Error::Internal("connection governor closed".to_string())),
+            },
+        };
+
         if let Err(err) = stream.set_nodelay(true) {
             tracing::debug!(peer = %peer, error = %err, "engine: TCP_NODELAY unavailable");
         }
@@ -225,7 +383,16 @@ async fn accept_loop(shared: &Shared, listener: &TcpListener, workers: &[Worker]
             }
         };
 
-        handoff(workers, &mut cursor, stream, peer, &mut shutdown).await?;
+        handoff(
+            &workers,
+            &mut cursor,
+            stream,
+            peer,
+            tls.clone(),
+            permit,
+            &mut shutdown,
+        )
+        .await?;
     }
 
     tracing::debug!("engine acceptor stopped");
@@ -241,10 +408,12 @@ async fn accept_loop(shared: &Shared, listener: &TcpListener, workers: &[Worker]
 /// be stopped.
 #[allow(clippy::needless_return)]
 async fn handoff(
-    workers: &[Worker],
+    workers: &[WorkerFeed],
     cursor: &mut usize,
     stream: std::net::TcpStream,
     peer: SocketAddr,
+    tls: Option<Arc<rustls::ServerConfig>>,
+    permit: tokio::sync::OwnedSemaphorePermit,
     shutdown: &mut watch::Receiver<bool>,
 ) -> Result<()> {
     if workers.is_empty() {
@@ -271,59 +440,40 @@ async fn handoff(
     *cursor = (chosen + 1) % count;
     let worker = &workers[chosen];
 
-    let permit = match Arc::clone(&worker.budget).try_acquire_owned() {
-        Ok(permit) => permit,
-        Err(_) => {
-            tokio::select! {
-                biased;
-                _ = worker::wait_for_shutdown(shutdown) => return Ok(()),
-                acquired = Arc::clone(&worker.budget).acquire_owned() => match acquired {
-                    Ok(permit) => permit,
-                    Err(_) => {
-                        return Err(Error::Internal(
-                            "engine connection gate is closed".to_string(),
-                        ))
-                    }
-                },
-            }
-        }
-    };
-
-    worker::increment(&worker.pending);
-    match worker.tx.try_send(worker::Handoff {
+    // The gauge is owned by the message from this point on. If the message is
+    // dropped by a full-channel shutdown or a closed worker, `Drop` releases it;
+    // the worker drops it when it dequeues. No manual decrement races.
+    let pending = worker::PendingGuard::new(Arc::clone(&worker.pending));
+    let handoff = worker::Handoff {
         stream,
         peer,
+        tls,
         permit,
-    }) {
-        Ok(()) => return Ok(()),
+        pending,
+    };
+
+    match worker.tx.try_send(handoff) {
+        Ok(()) => Ok(()),
         Err(mpsc::error::TrySendError::Full(handoff)) => {
-            worker::decrement(&worker.pending);
             // The channel is bounded; wait for room instead of dropping a
-            // client that already connected.
+            // client that already connected. On shutdown the send future is
+            // dropped together with the handoff and its permit/gauge.
             tokio::select! {
                 biased;
-                _ = worker::wait_for_shutdown(shutdown) => return Ok(()),
+                _ = worker::wait_for_shutdown(shutdown) => Ok(()),
                 sent = worker.tx.send(handoff) => match sent {
-                    Ok(()) => {
-                        worker::increment(&worker.pending);
-                        return Ok(());
-                    }
-                    Err(_) => {
-                        return Err(Error::Internal(
-                            "engine worker channel closed".to_string(),
-                        ))
-                    }
+                    Ok(()) => Ok(()),
+                    Err(_) => Err(Error::Internal("engine worker channel closed".to_string())),
                 },
             }
         }
         Err(mpsc::error::TrySendError::Closed(_)) => {
-            worker::decrement(&worker.pending);
-            return Err(Error::Internal("engine worker channel closed".to_string()));
+            Err(Error::Internal("engine worker channel closed".to_string()))
         }
     }
 }
 
-fn worker_load(worker: &Worker) -> usize {
+fn worker_load(worker: &WorkerFeed) -> usize {
     worker.pending.load(Ordering::Relaxed) + worker.active.load(Ordering::Relaxed)
 }
 
@@ -423,20 +573,34 @@ pub(crate) mod connection {
             Arc::clone(&shared.dispatch),
         );
 
-        let outcome = std::panic::AssertUnwindSafe(shared.pipeline.execute(&mut ctx, terminal))
-            .catch_unwind()
-            .await;
-
-        let result = match outcome {
-            Ok(result) => result,
-            Err(payload) => {
-                tracing::error!(panic = %panic_message(&payload), "engine: request panicked");
-                Err(Error::Internal("request handler panicked".to_string()))
-            }
+        let error_writer: crate::pipeline::ErrorHandler = {
+            let shared = Arc::clone(&shared);
+            Arc::new(move |ctx: &mut EngineContext, error: Error| {
+                let shared = Arc::clone(&shared);
+                Box::pin(async move {
+                    write_error(&shared, ctx, &error).await;
+                })
+                    as std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>>
+            })
         };
 
-        if let Err(error) = result {
-            write_error(&shared, &mut ctx, &error).await;
+        let outcome = std::panic::AssertUnwindSafe(shared.pipeline.execute_with_error(
+            &mut ctx,
+            terminal,
+            error_writer,
+        ))
+        .catch_unwind()
+        .await;
+
+        if let Err(payload) = outcome {
+            tracing::error!(panic = %panic_message(&payload), "engine: request panicked");
+            // The error writer itself may have panicked. Use a fixed
+            // problem+json response, outside the failing writer path.
+            write_problem(
+                &mut ctx,
+                problem_details(500, "an unexpected error occurred"),
+            )
+            .await;
         }
 
         let response = ctx.finalize().await;
@@ -479,6 +643,10 @@ pub(crate) mod connection {
             match matched {
                 Some(hit) => {
                     ctx.set_route(hit.pattern, hit.params);
+                    // The route target applies a possible `#[max_body_size]`
+                    // and validates the declared length itself, so a route may
+                    // raise the global default. Unmatched requests have no
+                    // route limit and validate against the global cap below.
                     match shared.config.request_timeout {
                         Some(limit) => {
                             match tokio::time::timeout(limit, hit.target.handle(ctx)).await {
@@ -489,7 +657,13 @@ pub(crate) mod connection {
                         None => hit.target.handle(ctx).await,
                     }
                 }
-                None => handle_no_route(&shared, ctx).await,
+                None => {
+                    // Preserve the authoritative global check for 404/405: an
+                    // oversized declared body is rejected before routing only
+                    // when no route owns a per-route limit.
+                    ctx.request_mut().validate_declared_body_limit()?;
+                    handle_no_route(&shared, ctx).await
+                }
             }
         })
     }
@@ -551,6 +725,9 @@ pub(crate) mod connection {
 
     /// Write an error response, preferring the host's registered writers.
     async fn write_error(shared: &Shared, ctx: &mut EngineContext, error: &Error) {
+        // The successful representation's validators/encoding/cache policy are
+        // not valid for a problem response. Keep Allow/CORS/Vary.
+        ctx.strip_entity_headers();
         let route = ctx.request().route_pattern().map(str::to_string);
         let path = ctx.request().path().to_string();
         let accept = ctx
@@ -602,6 +779,7 @@ pub(crate) mod connection {
     }
 
     async fn write_problem(ctx: &mut EngineContext, problem: ProblemDetails) {
+        ctx.strip_entity_headers();
         let status = problem.status;
         // Serializing a `ProblemDetails` cannot fail; an empty body is still a
         // well-formed error response with the right status.

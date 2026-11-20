@@ -216,6 +216,29 @@ impl IRequestHandler<EndlessRequest, Response> for EndlessHandler {
 }
 
 #[derive(Debug, Default, WebxRequestMeta)]
+struct QuietRequest;
+
+#[get("/sse/quiet")]
+impl IRequest<Response> for QuietRequest {}
+
+#[derive(Inject)]
+struct QuietHandler {
+    #[inject]
+    shutdown: Arc<ShutdownToken>,
+}
+
+#[handler(inject)]
+#[async_trait::async_trait]
+impl IRequestHandler<QuietRequest, Response> for QuietHandler {
+    async fn handle(&mut self, _req: QuietRequest) -> ActionResult<Response> {
+        Ok(Box::new(
+            SseResult::new(futures_util::stream::pending())
+                .on_server_shutdown(self.shutdown.token().clone()),
+        ))
+    }
+}
+
+#[derive(Debug, Default, WebxRequestMeta)]
 struct ShutdownAwareRequest;
 
 #[get("/sse/shutdown-aware")]
@@ -385,4 +408,33 @@ async fn graceful_shutdown_ends_the_stream_with_a_server_shutdown_event() {
     );
     assert!(seen.contains("data:{}"), "empty shutdown payload: {seen:?}");
     wait_for_close(&log, "server-shutdown").await;
+}
+
+#[tokio::test]
+async fn graceful_shutdown_wakes_a_quiet_stream() {
+    let (base, _log, handle) = spawn_host_with_handle().await;
+
+    let mut resp = reqwest::get(format!("{base}/sse/quiet"))
+        .await
+        .expect("request succeeds");
+    assert_eq!(resp.status().as_u16(), 200);
+    // Give the request time to enter the SSE body before shutting down.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    handle.shutdown();
+
+    let mut seen = String::new();
+    while !seen.contains("event:server_shutdown") {
+        let Some(chunk) = tokio::time::timeout(Duration::from_secs(2), resp.chunk())
+            .await
+            .expect("a quiet stream must be woken by the shutdown token")
+            .expect("body reads")
+        else {
+            break;
+        };
+        seen.push_str(&String::from_utf8_lossy(&chunk));
+    }
+    assert!(
+        seen.contains("event:server_shutdown"),
+        "quiet stream did not receive the shutdown frame: {seen:?}"
+    );
 }

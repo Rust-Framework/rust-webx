@@ -22,6 +22,7 @@ A type-safe, convention-over-configuration platform where *requests are endpoint
 
 - [What is rust-webx](#what-is-rust-webx)
 - [Key Features](#key-features)
+- [Why rust-webx in 2.1](#why-rust-webx-in-21)
 - [Architecture](#architecture)
 - [Request-as-Endpoint: Hello World](#request-as-endpoint-hello-world)
 - [Core Concepts](#core-concepts)
@@ -53,7 +54,7 @@ rust-webx folds these cross-cutting concerns into the framework layer:
 | Routing divorced from handlers | `IRequest<T>` carries route metadata; `#[get("/path")]` registers at compile time |
 | Handler registration boilerplate | `#[handler]` auto-registers the handler with the DI container |
 | Tight coupling between modules | `IMediator::send()` dispatches requests; `publish()` publishes events |
-| Scattered error → HTTP mapping | Unified `Error` type + built-in exception middleware |
+| Scattered error → HTTP mapping | Unified `Error` type + engine error pipeline (error status is visible to metrics/after hooks before the response is finalized) |
 | Ad-hoc auth/authorization | `add_authentication()` + declarative `#[authorize]` |
 
 rust-webx is **not** a full-stack UI framework (pair it with any frontend), **not** an ORM (bring your own or use [`rust-ef`](https://crates.io/crates/rust-ef)), and **not** a microservice-governance platform. The optional `rust-webx-ai*` crates build an OpenAI-compatible gateway on top of the framework; they are a separate, opt-in product surface, not a dependency of the core Web API story.
@@ -71,6 +72,25 @@ rust-webx is **not** a full-stack UI framework (pair it with any frontend), **no
 - **Production capabilities out of the box** — graceful shutdown, live health checks, security headers, request IDs, CORS, TLS, rate limiting, compression, OpenAPI + SPA hosting.
 - **File upload & download** — typed `FormFile` binding for `multipart/form-data` (streamed, spooled to disk, size-limited) and ASP.NET Core-shaped file responses (`FileResult::path` / `::stream` / `::seekable_stream`, `ContentResult`) with `Content-Disposition`, `ETag`, `Last-Modified` and `Range`.
 - **ORM-agnostic** — the framework does not depend on `rust-ef`; the `docbit` reference app wires it in with minimal glue.
+- **Mediator without an annotation tax** — a `#[handler]` whose Request has no HTTP route is automatically an `IMediator` handler; its response does not need `Serialize`. HTTP capability belongs to the route, not to a handler mode flag.
+
+## Why rust-webx in 2.1
+
+| Advantage | What it means in practice |
+|---|---|
+| **ASP.NET Core-shaped model** | Requests are endpoints: `#[get]`/`#[post]` on `impl IRequest<R>`, `#[handler]` on the implementation, DI and middleware configured once in `Host`. |
+| **Compile-time dispatch, no stringly route tables** | Route metadata and direct handler bridges are collected by `inventory`; `Host::build()` joins them and fails fast on inconsistent configuration. |
+| **Low-allocation hot path** | The direct JSON path binds, constructs and encodes without a mediator round trip or request/response `Box<dyn Any>`. 2.1 measures **22.06 allocations/request** on the reference `/hello` benchmark (2.0: ~23.1). |
+| **Performance without giving up correctness** | Same-host 2.1 vs 2.0 comparison shows no meaningful throughput regression and unchanged latency within co-tenant noise; route-owned encoders keep non-`Serialize` mediator handlers source-compatible. See the [2.1.0 performance report](docs/design/performance-2.1.0.md). |
+| **Production admission and lifecycle** | One global connection governor across all listeners, first-request deadline, HTTP/2 keepalive, graceful/immediate shutdown guards, Host single-use state, and per-worker SSE drain. |
+| **Errors that downstream systems can trust** | Error responses are written before reverse `after` hooks, so metrics/tracing/compression see the real status; representation headers from a failed success path are stripped and `problem+json` is consistent. |
+| **Native-first integrations** | `rust-dix` 1.0 DI scopes, `rust-ef` 2.5 ORM, JWT/session/password ports, and `rust-webx-client` are framework capabilities rather than ad-hoc app glue. |
+| **Explicit HTTP vs in-process capabilities** | `#[handler]` without a route is mediator-only; a route adds the response encoder. No `#[handler(in_process)]`-style mode flag and no hidden HTTP endpoint for a command handler. |
+
+The performance numbers above are a local same-host comparison, not a capacity
+guarantee; the host is shared and RPS varies with co-tenant load. Allocation
+counts and the wire-level correctness suite are the release regression signals.
+The full matrix is in the [2.1.0 performance report](docs/design/performance-2.1.0.md).
 
 ## Architecture
 
@@ -82,9 +102,10 @@ The framework is split into a small set of focused crates, re-exported through t
 │  re-exports core / host / macros / spa / openapi + rust_dix│
 ├──────────┬──────────┬──────────┬─────────────────────────┤
 │rust-webx-│rust-webx-│rust-webx-│ rust-webx-macros         │
-│host      │core      │openapi   │ #[get] #[post] #[handler]│
-│Host +    │traits +  │OpenAPI   │ #[authorize] #[fromclaim]│
-│pipeline  │config    │generation│                          │
+│host      │core      │engine    │ #[get] #[post] #[handler]│
+│Host +    │traits +  │worker    │ #[authorize] #[fromclaim]│
+│pipeline  │config    │pool +    │                          │
+│          │          │dispatch  │                          │
 ├──────────┴──────────┴──────────┴─────────────────────────┤
 │                    rust-webx-core                        │
 │  IHost / IHttpContext / IMiddleware / IRequestHandler    │

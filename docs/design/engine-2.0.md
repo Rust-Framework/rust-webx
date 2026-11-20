@@ -186,5 +186,6 @@ Metrics 仍是 `IMiddleware` boxing，后续可迁入 engine 快路径。
 
 **2.1 稳定性收口**：准入/首请求期限、单次运行生命周期、错误写入顺序、
 per-worker SSE drain、全局 connection governor、wire-level admission/TLS/h2
-测试等见 [engine-2.1-stability.md](engine-2.1-stability.md)。2.0 的性能结论
-仍以 `rw-bench` 的一次性测量为准，2.1 不改变该口径。
+测试等见 [engine-2.1-stability.md](engine-2.1-stability.md)。2.1 的发布候选
+性能报告（2.0 vs 2.1 同机比较）见
+[performance-2.1.0.md](performance-2.1.0.md)。

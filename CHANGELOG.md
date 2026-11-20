@@ -12,6 +12,11 @@ is admission, lifecycle, error semantics and wire-level verification.
 
 ### English
 
+- **Performance:** the direct JSON path remains allocation-free; same-host
+  `/allocs` measurement is **22.06** allocs/request vs **23.06–23.07** in 2.0
+  (about 4.4% fewer allocations). Median throughput is within co-tenant noise
+  (152k vs 158k RPS in the 5-round 4-worker run; 2.0/2.1 latency effectively
+  unchanged). Full methodology and tables: [performance-2.1.0.md](docs/design/performance-2.1.0.md).
 - **Global connection admission.** One `Semaphore(App.MaxConnections)` per
   `Server`, shared by every http/https listener and worker. Removes the
   per-worker floor that could exceed the documented global cap and the

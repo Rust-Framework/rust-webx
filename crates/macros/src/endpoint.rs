@@ -158,6 +158,14 @@ fn expand_endpoint(
         }
 
         ::webx::inventory::submit! {
+            ::webx::RouteDispatchById {
+                req_type_id: ::std::any::TypeId::of::<#self_ty>(),
+                handler_type: #req_type_name,
+                dispatch: #dispatch_fn_name,
+            }
+        }
+
+        ::webx::inventory::submit! {
             #route_entry
         }
     };
@@ -690,7 +698,17 @@ fn extract_authorization(attrs: &[Attribute]) -> syn::Result<(proc_macro2::Token
     let mut rules = Vec::new();
     let mut dynamic = false;
     for attr in attrs {
-        if !attr.path().is_ident("authorize") {
+        // `authorize` is the public spelling; `__webx_authorize` is the
+        // order-independent carrier emitted when the public attribute is
+        // written above the route macro. Match the last path segment because
+        // the carrier is emitted as `#[::webx::__webx_authorize(...)]`.
+        let is_authorize = attr
+            .path()
+            .segments
+            .last()
+            .map(|segment| segment.ident == "authorize" || segment.ident == "__webx_authorize")
+            .unwrap_or(false);
+        if !is_authorize {
             continue;
         }
         let parsed = match &attr.meta {

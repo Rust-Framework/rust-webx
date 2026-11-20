@@ -85,7 +85,13 @@ impl GatewayHealth {
             }
         }
         if let Some(catalog) = &self.catalog {
-            for key in catalog.current().models.keys() {
+            let snapshot = catalog.current();
+            if snapshot.models.is_empty() {
+                // An empty catalog cannot serve any request; reporting "pass"
+                // would keep a broken gateway in the load balancer.
+                return HealthStatus::fail("model catalog is empty");
+            }
+            for key in snapshot.models.keys() {
                 known.insert(format!("{}/{}", key.provider, key.model));
             }
         }

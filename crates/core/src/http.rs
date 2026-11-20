@@ -532,6 +532,15 @@ pub trait IHttpRequest: Send {
     /// than silently returning an empty body.
     async fn body_bytes(&mut self) -> Result<Vec<u8>>;
 
+    /// Buffer the body and return a cheaply cloneable handle.
+    ///
+    /// The default copies the bytes returned by [`IHttpRequest::body_bytes`].
+    /// The HTTP host overrides it to hand out a reference-counted buffer, so a
+    /// JSON request body is not copied again just to be parsed.
+    async fn body_bytes_shared(&mut self) -> Result<bytes::Bytes> {
+        Ok(bytes::Bytes::from(self.body_bytes().await?))
+    }
+
     /// Return the request body as a stream of chunks.
     ///
     /// The default buffers [`body_bytes`](Self::body_bytes) and replays it as a
@@ -597,6 +606,16 @@ pub trait IHttpResponse: Send {
     /// Header names are case-insensitive: setting the same name with different
     /// casing replaces the previous value instead of emitting a duplicate.
     fn set_header(&mut self, key: &str, value: &str);
+
+    /// Add a header without removing an existing value with the same name.
+    ///
+    /// The default falls back to [`IHttpResponse::set_header`] so simple
+    /// in-memory implementations stay source-compatible. The HTTP host
+    /// overrides it to preserve multiple values (for example two
+    /// `Set-Cookie` headers or an existing `Vary` list).
+    fn append_header(&mut self, key: &str, value: &str) {
+        self.set_header(key, value);
+    }
 
     /// Remove a response header by name (case-insensitive). Default is a no-op.
     fn remove_header(&mut self, _key: &str) {}

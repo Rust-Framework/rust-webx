@@ -9,7 +9,7 @@
 //! ```
 
 use crate::problem_response::write_problem;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::IpAddr;
 use std::ops::ControlFlow;
 use std::str::FromStr;
@@ -23,13 +23,17 @@ use webx_core::middleware::IMiddleware;
 struct TokenBucket {
     tokens: f64,
     last_refill: Instant,
+    /// Insertion generation, used to discard stale FIFO entries when an IP is
+    /// evicted and later reappears.
+    generation: u64,
 }
 
 impl TokenBucket {
-    fn new(burst_size: f64) -> Self {
+    fn new(burst_size: f64, generation: u64) -> Self {
         Self {
             tokens: burst_size,
             last_refill: Instant::now(),
+            generation,
         }
     }
 
@@ -49,8 +53,17 @@ impl TokenBucket {
 }
 
 /// Inner rate-limiting state shared behind a [`Mutex`].
+struct Buckets {
+    map: HashMap<IpAddr, TokenBucket>,
+    /// FIFO of (ip, generation). Eviction pops the front instead of scanning
+    /// every tracked address (the previous `min_by_key` made an IP-cycling
+    /// client O(max_ips) per request).
+    order: VecDeque<(IpAddr, u64)>,
+    next_generation: u64,
+}
+
 pub struct RateLimiter {
-    buckets: Mutex<HashMap<IpAddr, TokenBucket>>,
+    buckets: Mutex<Buckets>,
     rate: f64,
     burst: f64,
     max_ips: usize,
@@ -60,7 +73,11 @@ pub struct RateLimiter {
 impl RateLimiter {
     pub fn new(requests_per_second: f64, burst_size: u32, max_tracked_ips: usize) -> Self {
         Self {
-            buckets: Mutex::new(HashMap::new()),
+            buckets: Mutex::new(Buckets {
+                map: HashMap::new(),
+                order: VecDeque::new(),
+                next_generation: 0,
+            }),
             rate: requests_per_second,
             burst: burst_size as f64,
             max_ips: max_tracked_ips.max(1),
@@ -75,18 +92,36 @@ impl RateLimiter {
 
     async fn allow(&self, ip: IpAddr) -> bool {
         let mut buckets = self.buckets.lock().await;
-        if !buckets.contains_key(&ip) && buckets.len() >= self.max_ips {
-            evict_oldest(&mut buckets);
+        if !buckets.map.contains_key(&ip) {
+            while buckets.map.len() >= self.max_ips {
+                let Some((candidate, generation)) = buckets.order.pop_front() else {
+                    break;
+                };
+                // Only remove the exact bucket that entered the FIFO here; the
+                // IP may have been evicted and re-inserted since.
+                if buckets
+                    .map
+                    .get(&candidate)
+                    .is_some_and(|bucket| bucket.generation == generation)
+                {
+                    buckets.map.remove(&candidate);
+                    break;
+                }
+            }
+            let generation = buckets.next_generation;
+            buckets.next_generation = buckets.next_generation.wrapping_add(1);
+            buckets.order.push_back((ip, generation));
+            buckets
+                .map
+                .insert(ip, TokenBucket::new(self.burst, generation));
         }
-        let bucket = buckets
-            .entry(ip)
-            .or_insert_with(|| TokenBucket::new(self.burst));
+        let bucket = buckets.map.get_mut(&ip).expect("bucket was just inserted");
         bucket.try_consume(self.rate, self.burst)
     }
 
     /// Current number of tracked client IPs (for tests).
     pub async fn tracked_ip_count(&self) -> usize {
-        self.buckets.lock().await.len()
+        self.buckets.lock().await.map.len()
     }
 
     /// Seconds a client should wait before retrying (RFC 6585 `Retry-After`).
@@ -98,19 +133,6 @@ impl RateLimiter {
             return 1;
         }
         ((1.0 / self.rate).ceil() as u64).max(1)
-    }
-}
-
-fn evict_oldest(buckets: &mut HashMap<IpAddr, TokenBucket>) {
-    if buckets.is_empty() {
-        return;
-    }
-    let oldest = buckets
-        .iter()
-        .min_by_key(|(_, b)| b.last_refill)
-        .map(|(ip, _)| *ip);
-    if let Some(ip) = oldest {
-        buckets.remove(&ip);
     }
 }
 

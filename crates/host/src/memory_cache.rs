@@ -68,13 +68,17 @@ pub struct MemoryCache {
 }
 
 impl MemoryCache {
+    /// Default cap: enough for typical session/tenant caches, bounded so a
+    /// user-controlled key space cannot grow RSS without limit.
+    pub const DEFAULT_MAX_ENTRIES: usize = 100_000;
+
     pub fn new() -> Self {
         Self {
             inner: RwLock::new(CacheInner {
                 entries: HashMap::new(),
                 insertion_order: VecDeque::new(),
             }),
-            max_entries: 0,
+            max_entries: Self::DEFAULT_MAX_ENTRIES,
         }
     }
     pub fn with_max_entries(mut self, n: usize) -> Self {

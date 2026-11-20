@@ -1248,7 +1248,7 @@ fn bind_fn(fields: &[FieldSpec], plan: &BindingPlan) -> TokenStream2 {
             let mut __body: ::core::option::Option<::webx::serde_json::Value> =
                 ::core::option::Option::None;
             if __is_body_method && !__is_multipart {
-                let __bytes = ctx.request_mut().body_bytes().await?;
+                let __bytes = ctx.request_mut().body_bytes_shared().await?;
                 let __slice: &[u8] = if __bytes.is_empty() { b"{}" } else { &__bytes };
                 let __value: ::webx::serde_json::Value =
                     ::webx::serde_json::from_slice(__slice)
@@ -1482,20 +1482,35 @@ fn bind_field(f: &FieldSpec, plan: &BindingPlan) -> TokenStream2 {
     };
 
     if is_current_user(&f.ty) {
+        // The HTTP adapter has already built the request's `IdentityUser` and
+        // put it in `RequestContext` (shared with audit). Reuse that Arc and
+        // clone the owned request field instead of rebuilding the whole claim
+        // snapshot a second time. The `__in.claims` fallback keeps direct
+        // binder tests and non-HTTP callers working.
         let expr = if f.shape.is_optional() {
-            quote! { __in.claims.map(::webx::IdentityUser::from_claims) }
+            quote! {
+                ::webx::RequestContext::identity()
+                    .map(|__identity| (*__identity).clone())
+                    .or_else(|| __in.claims.map(::webx::IdentityUser::from_claims))
+            }
         } else {
             quote! {
-                match __in.claims {
-                    ::core::option::Option::Some(__claims) => {
-                        ::core::option::Option::Some(
-                            ::webx::IdentityUser::from_claims(__claims),
-                        )
-                    }
-                    ::core::option::Option::None => {
-                        return ::core::result::Result::Err(::webx::Error::Unauthorized(
-                            "authentication required".to_string(),
-                        ));
+                if let ::core::option::Option::Some(__identity) =
+                    ::webx::RequestContext::identity()
+                {
+                    ::core::option::Option::Some((*__identity).clone())
+                } else {
+                    match __in.claims {
+                        ::core::option::Option::Some(__claims) => {
+                            ::core::option::Option::Some(
+                                ::webx::IdentityUser::from_claims(__claims),
+                            )
+                        }
+                        ::core::option::Option::None => {
+                            return ::core::result::Result::Err(::webx::Error::Unauthorized(
+                                "authentication required".to_string(),
+                            ));
+                        }
                     }
                 }
             }

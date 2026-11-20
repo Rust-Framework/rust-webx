@@ -317,7 +317,7 @@ async fn serve_embedded(
         // Only an encoded payload can vary by `Accept-Encoding`; a verbatim one
         // is the same bytes either way, so it is left without `Vary` rather
         // than fragmenting a cache for no reason.
-        ctx.response_mut().set_header("vary", VARY);
+        ctx.response_mut().append_header("vary", VARY);
         if accepts_encoding(ctx, token) {
             return send_embedded(ctx, asset, asset.bytes, Some(token)).await;
         }

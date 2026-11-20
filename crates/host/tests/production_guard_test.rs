@@ -37,6 +37,37 @@ fn production_build_rejects_wildcard_cors() {
 }
 
 #[test]
+#[should_panic(expected = "Production forbids CORS origin '*'")]
+fn production_rejects_wildcard_use_cors_override() {
+    // The guard must inspect the configuration the middleware actually uses,
+    // not only the `Cors` options section.
+    Host::builder()
+        .mode(AppMode::Production)
+        .no_spa()
+        .configure(|app| {
+            app.useOptions(|o| {
+                o.cors.origins = vec!["https://example.com".into()];
+            });
+        })
+        .use_cors(webx_host::cors::CorsConfig {
+            origins: vec!["*".into()],
+            ..Default::default()
+        })
+        .build();
+}
+
+#[test]
+fn production_build_succeeds_without_cors_configuration() {
+    // No CORS configuration is the safe default: no cross-origin headers and,
+    // crucially, a host that starts without operator setup.
+    Host::builder()
+        .mode(AppMode::Production)
+        .no_spa()
+        .try_build()
+        .expect("a production host without CORS must build");
+}
+
+#[test]
 fn production_build_succeeds_with_strong_jwt_and_explicit_cors() {
     Host::builder()
         .mode(AppMode::Production)

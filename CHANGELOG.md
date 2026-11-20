@@ -3,6 +3,117 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [1.5.0] — 2026-11-20
+
+Security/correctness hardening plus the 1.5 capability line (SSE, outbound client,
+API-key auth, secrets, metrics, options hot reload, request-body streaming,
+error writers, HTTP/2, AI gateway crates).
+
+> **English** · **简体中文**
+
+### English
+
+#### Security / correctness (behaviour changes)
+
+- **Route dispatch is keyed by `TypeId`, not by request-type name.** Two request
+  types that share a bare name in different modules previously collided in the
+  dispatch map, so one route could execute another module's handler. The endpoint
+  macros now also submit `RouteDispatchById`; `Host::build` keys dispatch by
+  `TypeId` and falls back to the name only for hand-written fixtures. Duplicate
+  `(method, path)` routes, duplicate dispatch bridges and duplicate `#[handler]`
+  registrations now fail startup instead of being silently dropped.
+- **`#[authorize]` is order-independent.** It is rewritten to `__webx_authorize`,
+  the same mechanism `#[display]` already used, so writing it above `#[get]` no
+  longer produces a public endpoint.
+- **Dynamic authorization fails closed.** A route declaring
+  `#[authorize(dynamic)]` without a registered `IDynamicAuthorizer` now fails
+  `Host::build` (previously it silently degraded to "authenticated only").
+- **`resource_auth_middleware` is deprecated and fails closed.** It runs before
+  routing and can never see the matched pattern; it now returns `403` with a
+  pointer to `#[authorize]` / `IDynamicAuthorizer` instead of allowing every
+  request.
+- **CORS is opt-in.** `Cors.Origins` defaults to an empty list (no CORS headers)
+  instead of `"*"`, so a default Production host starts. The Production wildcard
+  guard now validates the effective `CorsConfig` (including `use_cors`) and
+  responses add `Vary: Origin`.
+- **Header read timeout is enforced.** The hyper `auto` builders install a
+  `TokioTimer` and bound the header buffer; previously hyper's 30s default was
+  silently disabled, leaving the server open to slowloris. The accept loop also
+  observes shutdown while waiting for a connection slot.
+- **Panic isolation.** `#[handler(inject)]` uses the fallible rust-dix
+  constructor and maps `RdiError` to `Error::Di`; the host catches middleware or
+  handler panics at the request boundary and returns `500` (the workspace release
+  profile no longer uses `panic = "abort"`).
+- **Multi-valued response headers.** `IHttpResponse::append_header` and a
+  `HeaderMap`-backed host response allow two `Set-Cookie` headers and correct
+  `Vary` composition.
+
+#### Performance
+
+- Request and response headers use `http::HeaderMap` directly: no per-header
+  `String` copies and no second copy into hyper.
+- Request bodies are buffered as `Bytes`; `body_bytes_shared` lets JSON binding
+  use the first read without copying the whole body again.
+- Development access logging moved from `info` to `debug` (one synchronous line
+  per request previously dominated local throughput by ~12x).
+- Rate-limiter eviction is FIFO O(1) instead of an O(tracked IPs) scan;
+  `MemoryCache` is bounded at 100,000 entries by default.
+- AI quota leases are sized from the request deadline and released on
+  cancellation; client-caused 4xx errors no longer trip shared model circuits.
+
+#### Added
+
+- `rust-webx-client` (pooled HTTP/1.1+HTTP/2 client, SSE, SSRF guard),
+  `rust-webx-ai`, `rust-webx-ai-ef`, `rust-webx-ai-gateway`.
+- `SseResult`/`SseEvent`, `#[max_body_size]`, `IErrorResponseWriter`,
+  `IAuthenticationScheme`/API-key auth, `ISecretStore`, `IMeter`,
+  `IOptionsMonitor` + `watch_options_file`, `IHealthCheck` async checks,
+  `PagedRequest::from_parts`, `OperationResult`.
+- Inbound/outbound HTTP/2 and request-level `Server.RequestTimeoutSeconds`.
+
+#### Fixed
+
+- AI gateway billing ids are server-generated UUIDs; the client `x-request-id`
+  is correlation metadata only. Provider responses without a usage block settle
+  with the reserved estimate instead of zero tokens.
+- Gateway readiness fails on an empty model catalog.
+
+### 简体中文
+
+#### 安全 / 正确性（行为变更）
+
+- **路由派发改为按 `TypeId` 键控**，不同模块中同名的请求类型不会再互相覆盖；
+  重复路由、重复派发桥、重复 `#[handler]` 会在启动期失败。
+- **`#[authorize]` 与书写顺序无关**；写在 `#[get]` 上方也不会再静默变成公开端点。
+- **动态授权 fail-closed**：有 `#[authorize(dynamic)]` 路由但未注册
+  `IDynamicAuthorizer` 时启动失败，不再降级为“仅已认证”。
+- **`resource_auth_middleware` 弃用并 fail-closed**：它在路由前运行、看不到匹配
+  模式，现在返回 403 并提示改用 `#[authorize]` / `IDynamicAuthorizer`。
+- **CORS 默认关闭**：`Cors.Origins` 默认空列表，默认 Production host 可以启动；
+  wildcard 守卫校验实际生效的 `CorsConfig`（含 `use_cors`），并发送
+  `Vary: Origin`。
+- **启用 header 读超时**（hyper `TokioTimer` + 有界 header 缓冲），修复 slowloris；
+  accept 循环在等待连接槽时也能观察到停机。
+- **panic 隔离**：`#[handler(inject)]` 改用可失败构造器；host 在请求边界捕获
+  panic 并返回 500；workspace release 不再 `panic = "abort"`。
+- **支持多值响应头**：`append_header` + `HeaderMap`，可发送多个 `Set-Cookie`
+  并正确组合 `Vary`。
+
+#### 性能
+
+- 请求/响应头直接使用 `http::HeaderMap`，去掉每头两次 `String` 复制与二次拷贝。
+- 请求体以 `Bytes` 缓冲；`body_bytes_shared` 避免 JSON 绑定时的整段复制。
+- 开发模式访问日志从 `info` 降到 `debug`（此前默认每请求同步一行，实测拖慢约 12 倍）。
+- 限流器改为 O(1) FIFO 淘汰；`MemoryCache` 默认上限 10 万条。
+- AI 配额租约按请求 deadline 计算并在取消时释放；客户端 4xx 不再触发共享模型熔断。
+
+#### 新增 / 修复
+
+- 新增 `client`、`ai`、`ai-ef`、`ai-gateway` 四个 crate；SSE、出站客户端、
+  API Key、密钥、指标、热配置、请求体流式、错误写入器、HTTP/2 等能力。
+- AI 计费 id 改为服务端生成；provider 未返回 usage 时按预估值结算；
+  空模型目录时 readiness 失败。
+
 ## [1.4.0] — 2026-11-14
 
 Additive release on the 1.3 line: every existing API keeps working (`register`, `add_health_check`,

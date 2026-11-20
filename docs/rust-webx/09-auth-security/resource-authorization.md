@@ -47,11 +47,11 @@ Host::builder()
 - `#[authorize]` / `#[authorize(role = "…")]` / `#[authorize(permission = "…")]` → 端点规则，由 endpoint 执行
 - `#[authorize(dynamic, …)]` → 静态 gate 只要求已认证，声明交给 `IDynamicAuthorizer`（"DB 为权限真相"）
 - `IDynamicAuthorizer` → 应用自定义的动态路由授权（如 docbit `RoleAuthorizer`），详见[动态授权](authorize-macro.md#动态授权idynamicauthorizer)
-- `ResourceAuthorization` + `resource_auth_middleware` → 仅用于自定义 `IAuthorizationPolicy`
+- `IAuthorizationPolicy` 对象 → 仅作为策略数据模型保留；不要把它接到中间件上
 
-## 手动 middleware（高级）
+## 手动 middleware（已弃用）
 
-`resource_auth_middleware` 仍可用于自定义 `IAuthorizationPolicy`，但须在路由匹配之后才能读取 `route_pattern()`。内置的路由授权已在 endpoint 层处理此场景。
+`resource_auth_middleware` 在路由匹配**之前**运行，拿不到 `route_pattern()`，因此无法真正授权。1.5.0 起它被标记为 deprecated，并在请求期 fail-closed（返回 403 并提示迁移）；请不要在新代码中使用。路由级授权请使用 `#[authorize]` 静态规则或 `#[authorize(dynamic)]` + `IDynamicAuthorizer`，两者都在 endpoint 层、路由匹配之后执行。
 
 ## 资源键的匹配方式
 

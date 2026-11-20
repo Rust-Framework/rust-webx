@@ -69,7 +69,7 @@ Cargo **包名**带连字符，Rust **导入名**用下划线库名。两者不�
 | 上下文 | `HttpContext`, `HttpRequest`, `HttpResponse` |
 | 管道 | `MiddlewarePipeline` |
 | 认证 | `JwtAuth`, `jwt_middleware`, `AuthenticationMiddleware` + `JwtScheme` / `ApiKeyScheme` 链 |
-| 授权 | 端点执行 `#[authorize]` 规则；`ResourceAuthorization` / `resource_auth_middleware` 仅用于自定义策略 |
+| 授权 | 端点执行 `#[authorize]` 规则；`resource_auth_middleware` 已弃用（路由前无法读取 `route_pattern`） |
 | 端点 | `StubEndpoint`（路由宏端点）, `RequestEndpoint`, `ControllerEndpoint`, `StaticJsonEndpoint`, `StaticHtmlEndpoint` |
 | 宿主 | `Host`, `HostBuilder`, `Server` |
 
@@ -171,7 +171,7 @@ src/ ──────> rust-webx (伞) ──> host / macros / spa / openapi �
 
 ```toml
 [dependencies]
-rust-webx = "1.1"
+rust-webx = "1.5"
 ```
 
 ```rust

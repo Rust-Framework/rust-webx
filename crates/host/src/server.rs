@@ -26,7 +26,6 @@ use webx_core::security::{ISessionStore, ITokenIssuer};
 
 use crate::auth::{AuthenticationMiddleware, JwtScheme};
 use crate::auth_jwt::{init_jwt_secret, JwtAuth, JwtSecret, JwtTokenIssuer};
-use crate::authz::collect_authorizers;
 use crate::context::{BodyLimits, HttpContext, RespBody};
 use crate::cors::{CorsConfig, CorsMiddleware};
 use crate::endpoint::{StaticHtmlEndpoint, StaticJsonEndpoint, StubEndpoint};
@@ -46,6 +45,7 @@ use webx_core::DispatchRuntime;
 use webx_openapi::{generate_openapi_spec, APIUI_HTML};
 use webx_spa::{EmbeddedAssets, SpaMiddleware, SpaSource};
 
+use futures_util::FutureExt;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig;
 use rustls_pemfile::{certs, pkcs8_private_keys, rsa_private_keys};
@@ -237,6 +237,14 @@ impl HostAppBuilder {
     {
         self.options_modifiers.push(Box::new(f));
     }
+
+    /// Snake-case alias for [`HostAppBuilder::useOptions`].
+    pub fn use_options<F>(&mut self, f: F)
+    where
+        F: FnOnce(&mut AppOptions) + Send + 'static,
+    {
+        self.useOptions(f);
+    }
 }
 
 impl HostBuilder {
@@ -376,7 +384,8 @@ impl HostBuilder {
     ///
     /// The monitor is registered twice, for both injection styles:
     ///
-    /// * `Arc<OptionsMonitor<T>>` — concrete, with [`OptionsMonitor::set`];
+    /// * `Arc<OptionsMonitor<T>>` — concrete, with
+    ///   [`OptionsMonitor::set`](webx_core::options_monitor::OptionsMonitor::set);
     /// * `Arc<dyn IOptionsMonitor<T>>` — the port, for handlers/services.
     ///
     /// Pair it with [`HostBuilder::watch_options_file`] (or a custom
@@ -1152,6 +1161,15 @@ impl HostBuilder {
                 max_age: cs.max_age,
             }
         });
+        // Validate the configuration the middleware will actually use. The
+        // previous guard checked `options.cors` only, so
+        // `use_cors(CorsConfig::default())` could ship `ACAO: *` in Production.
+        if self.mode == AppMode::Production && cors.origins.iter().any(|o| o == "*") {
+            return Err(Error::Di(
+                "Production forbids CORS origin '*'. Set explicit origins via Cors.Origins or APP__Cors__Origins."
+                    .to_string(),
+            ));
+        }
         pipeline.add_middleware(Arc::new(CorsMiddleware::new(cors)));
 
         if options.metrics.enabled {
@@ -1278,39 +1296,59 @@ impl HostBuilder {
             ));
         }
 
-        // Security: fail fast in production when CORS allows all origins
-        if self.mode == AppMode::Production && options.cors.origins.iter().any(|o| o == "*") {
-            return Err(Error::Di(
-                "Production forbids CORS origin '*'. Set explicit origins via Cors.Origins or APP__Cors__Origins."
-                    .to_string(),
-            ));
-        }
-
         let mut router = Router::new();
         let mut route_count = 0usize;
 
         crate::diagnostics::validate_route_configuration()?;
 
-        // Build dispatch map: handler_type → dispatch function
+        // Build dispatch maps. The TypeId map is authoritative for routes
+        // produced by the endpoint macros; the name map remains only as a
+        // compatibility fallback for hand-written fixtures.
         let mut dispatch_map: std::collections::HashMap<
             &'static str,
+            webx_core::route::scan::RouteDispatchFn,
+        > = std::collections::HashMap::new();
+        let mut dispatch_by_id: std::collections::HashMap<
+            std::any::TypeId,
             webx_core::route::scan::RouteDispatchFn,
         > = std::collections::HashMap::new();
 
         for dispatch in inventory::iter::<webx_core::route::scan::RouteDispatch> {
             dispatch_map.insert(dispatch.handler_type, dispatch.dispatch);
         }
+        for dispatch in inventory::iter::<webx_core::route::scan::RouteDispatchById> {
+            dispatch_by_id.insert(dispatch.req_type_id, dispatch.dispatch);
+        }
+
+        // Collect dynamic authorizers once for the whole host. A dynamic
+        // endpoint without one used to fall open (authenticated-only); make
+        // that a startup error instead of a silent permission downgrade.
+        let authorizers = crate::authz::collect_authorizers(provider.as_ref());
+        let has_dynamic_routes =
+            inventory::iter::<RouteEntry>().any(|entry| entry.authorization_dynamic);
+        if has_dynamic_routes && authorizers.is_none() {
+            return Err(Error::Di(
+                "A route declares `#[authorize(dynamic)]` but no IDynamicAuthorizer is \
+                 registered. Register one with `instance::<dyn IDynamicAuthorizer>(...)` \
+                 or remove the dynamic declaration."
+                    .to_string(),
+            ));
+        }
 
         for entry in inventory::iter::<RouteEntry> {
             route_count += 1;
+            let dispatch_fn = dispatch_by_id
+                .get(&entry.req_type_id)
+                .copied()
+                .or_else(|| dispatch_map.get(entry.handler_type).copied());
             let stub = Arc::new(StubEndpoint {
                 method: entry.method.as_str(),
                 path: entry.path,
                 handler_type: entry.handler_type,
-                dispatch_fn: dispatch_map.get(entry.handler_type).copied(),
+                dispatch_fn,
                 authorization: entry.authorization,
                 authorization_dynamic: entry.authorization_dynamic,
-                authorizers: collect_authorizers(provider.as_ref()),
+                authorizers: authorizers.clone(),
                 max_body_size: entry.max_body_size,
             });
             router.register(entry.method, entry.path, stub);
@@ -1377,7 +1415,14 @@ impl HostBuilder {
             tracing::info!("    Rust WebX Framework v{}", version);
             tracing::info!("  ----------------------------------------------------------------");
             tracing::info!("    App:      {}", options.app.name);
-            tracing::info!("    CORS:     enabled");
+            tracing::info!(
+                "    CORS:     {}",
+                if options.cors.origins.is_empty() {
+                    "disabled (no origins configured)"
+                } else {
+                    "enabled"
+                }
+            );
             if let Some(source) = spa_source.as_ref() {
                 tracing::info!("    SPA Root: {}", source.disk_root());
                 if let Some(assets) = source.embedded() {
@@ -1947,7 +1992,22 @@ async fn handle_request(
 ) -> std::result::Result<hyper::Response<RespBody>, std::convert::Infallible> {
     let mut ctx = HttpContext::new(req, body_limits, remote_addr, Arc::clone(&dispatch_runtime));
 
-    let result = pipeline.execute(&mut ctx, router_handler).await;
+    // Contain panics from middleware/handlers at the request boundary: one
+    // `unwrap()` in business code must produce a 500, not a dropped connection
+    // (and, with `panic = "abort"`, not kill the process).
+    let result = match std::panic::AssertUnwindSafe(pipeline.execute(&mut ctx, router_handler))
+        .catch_unwind()
+        .await
+    {
+        Ok(result) => result,
+        Err(payload) => {
+            let message = panic_message(&payload);
+            tracing::error!(panic = %message, "request panicked");
+            Err(webx_core::error::Error::Internal(
+                "request handler panicked".to_string(),
+            ))
+        }
+    };
     if let Err(error) = result {
         let route = ctx.request().route_pattern().map(str::to_string);
         let accept = ctx.request().header("accept").map(str::to_string);
@@ -1975,6 +2035,17 @@ async fn handle_request(
     }
 
     Ok(ctx.into_response().await)
+}
+
+/// Best-effort text for a caught panic payload.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        (*message).to_string()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "non-string panic payload".to_string()
+    }
 }
 
 /// Write an error the framework itself produced (not an `Error::Problem`).
@@ -2368,9 +2439,18 @@ async fn serve_http(
 
                 while join_set.try_join_next().is_some() {}
 
-                let permit = match sem.clone().acquire_owned().await {
-                    Ok(p) => p,
-                    Err(_) => continue,
+                // Wait for a connection slot *while still observing shutdown*.
+                // Previously this await sat outside the select, so a saturated
+                // server could not break the accept loop and start draining.
+                let permit = tokio::select! {
+                    _ = shutdown.changed() => {
+                        tracing::info!("HTTP {}: stop accepting while waiting for a connection slot", addr);
+                        break;
+                    }
+                    permit = sem.clone().acquire_owned() => match permit {
+                        Ok(permit) => permit,
+                        Err(_) => continue,
+                    },
                 };
 
                 let io = TokioIo::new(stream);
@@ -2422,7 +2502,10 @@ async fn serve_http(
                             if mode == AppMode::Development {
                                 let status =
                                     result.as_ref().map(|r| r.status().as_u16()).unwrap_or(500);
-                                tracing::info!(
+                                // Debug-only: at `info` (the default) one
+                                // synchronous line per request dominated local
+                                // throughput (measured ~12x).
+                                tracing::debug!(
                                     "[{}] {} -> {} ({:.0}ms)",
                                     method,
                                     path,
@@ -2436,7 +2519,18 @@ async fn serve_http(
 
                     // Version-adaptive connection: accepts HTTP/1.1 and
                     // HTTP/2 (cleartext h2c prior-knowledge and TLS ALPN h2).
-                    let builder = auto::Builder::new(TokioExecutor::new());
+                    let mut builder = auto::Builder::new(TokioExecutor::new());
+                    // hyper only enforces its default `header_read_timeout`
+                    // when a timer is installed; without one it warns and
+                    // disables the timeout, leaving the server open to
+                    // slowloris. `max_buf_size` bounds the per-connection
+                    // header buffer (hyper's default is ~400 KiB).
+                    builder
+                        .http1()
+                        .timer(hyper_util::rt::TokioTimer::new())
+                        .header_read_timeout(Duration::from_secs(30))
+                        .max_buf_size(64 * 1024);
+                    builder.http2().timer(hyper_util::rt::TokioTimer::new());
                     let conn = builder.serve_connection(io, svc_fn);
                     let mut conn = std::pin::pin!(conn);
                     let mut conn_shutdown = conn_shutdown;
@@ -2518,9 +2612,18 @@ async fn serve_https(
 
                 while join_set.try_join_next().is_some() {}
 
-                let permit = match sem.clone().acquire_owned().await {
-                    Ok(p) => p,
-                    Err(_) => continue,
+                // Wait for a connection slot *while still observing shutdown*.
+                // Previously this await sat outside the select, so a saturated
+                // server could not break the accept loop and start draining.
+                let permit = tokio::select! {
+                    _ = shutdown.changed() => {
+                        tracing::info!("HTTP {}: stop accepting while waiting for a connection slot", addr);
+                        break;
+                    }
+                    permit = sem.clone().acquire_owned() => match permit {
+                        Ok(permit) => permit,
+                        Err(_) => continue,
+                    },
                 };
 
                 let acceptor = acceptor.clone();
@@ -2574,7 +2677,11 @@ async fn serve_https(
                                     if mode == AppMode::Development {
                                         let status =
                                             result.as_ref().map(|r| r.status().as_u16()).unwrap_or(500);
-                                        tracing::info!(
+                                        // Access logging is debug-only: at
+                                        // `info` (the default) one synchronous
+                                        // line per request dominated local
+                                        // throughput (measured ~12x).
+                                        tracing::debug!(
                                             "[{}] {} -> {} ({:.0}ms)",
                                             method,
                                             path,
@@ -2588,7 +2695,13 @@ async fn serve_https(
 
                             // TLS connection with ALPN h2/http1.1; the version
                             // is picked from the negotiated ALPN protocol.
-                            let builder = auto::Builder::new(TokioExecutor::new());
+                            let mut builder = auto::Builder::new(TokioExecutor::new());
+                            builder
+                                .http1()
+                                .timer(hyper_util::rt::TokioTimer::new())
+                                .header_read_timeout(Duration::from_secs(30))
+                                .max_buf_size(64 * 1024);
+                            builder.http2().timer(hyper_util::rt::TokioTimer::new());
                             let conn = builder.serve_connection(io, svc_fn);
                             let mut conn = std::pin::pin!(conn);
                             let mut conn_shutdown = conn_shutdown;

@@ -126,17 +126,48 @@ impl IEndpoint for StubEndpoint {
                 }
 
                 // ── Dynamic authorization via IDynamicAuthorizer ──
-                if let Some(ref authorizers) = self.authorizers {
+                //
+                // A dynamic endpoint *requires* an authorizer: without one,
+                // falling through would silently reduce a permission
+                // declaration to "any authenticated user". Host::build already
+                // rejects that configuration; this is the fail-closed guard for
+                // hand-built endpoints.
+                if self.authorization_dynamic {
+                    let authorizers = self
+                        .authorizers
+                        .as_ref()
+                        .filter(|set| !set.is_empty())
+                        .ok_or_else(|| {
+                            webx_core::error::Error::Internal(
+                                "dynamic authorization requires a registered IDynamicAuthorizer"
+                                    .to_string(),
+                            )
+                        })?;
+                    if let Some(claims) = ctx.claims() {
+                        let resource_key = ctx.request().route_pattern().unwrap_or(self.path);
+                        let method = ctx.request().method();
+                        // Hand the endpoint's `#[authorize]` rules to the
+                        // backend as the `&'static [AuthorizeRule]` slice
+                        // itself (no per-request flattening or wrapper), so
+                        // multiple rules keep their AND structure and a
+                        // dynamic endpoint's whole declaration reaches the
+                        // authorizer.
+                        authorizers
+                            .authorize_with_declared_rules(
+                                claims,
+                                resource_key,
+                                method,
+                                self.authorization,
+                            )
+                            .await?;
+                    }
+                } else if let Some(authorizers) = self.authorizers.as_ref() {
+                    // Hybrid mode: a static endpoint may still register
+                    // dynamic authorizers as an additional gate.
                     if !authorizers.is_empty() {
                         if let Some(claims) = ctx.claims() {
                             let resource_key = ctx.request().route_pattern().unwrap_or(self.path);
                             let method = ctx.request().method();
-                            // Hand the endpoint's `#[authorize]` rules to the
-                            // backend as the `&'static [AuthorizeRule]` slice
-                            // itself (no per-request flattening or wrapper), so
-                            // multiple rules keep their AND structure and a
-                            // dynamic endpoint's whole declaration reaches the
-                            // authorizer.
                             authorizers
                                 .authorize_with_declared_rules(
                                     claims,

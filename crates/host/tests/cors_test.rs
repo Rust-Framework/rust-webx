@@ -12,7 +12,10 @@ fn find_header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a st
 
 #[tokio::test]
 async fn cors_wildcard_sets_star_origin() {
-    let config = CorsConfig::default();
+    let config = CorsConfig {
+        origins: vec!["*".to_string()],
+        ..Default::default()
+    };
     let middleware = CorsMiddleware::new(config);
     let mut ctx = test_utils::TestHttpContext::new("GET", "/api/data")
         .with_header("origin", "https://example.com");
@@ -68,7 +71,10 @@ async fn cors_disallowed_origin_no_header() {
 
 #[tokio::test]
 async fn cors_preflight_options_request() {
-    let config = CorsConfig::default();
+    let config = CorsConfig {
+        origins: vec!["*".to_string()],
+        ..Default::default()
+    };
     let middleware = CorsMiddleware::new(config);
     // A real CORS preflight is `OPTIONS` + `Origin` +
     // `Access-Control-Request-Method` (Fetch spec); the middleware only
@@ -129,6 +135,7 @@ async fn cors_no_origin_header_no_cors_response() {
 #[tokio::test]
 async fn cors_credentials_allowed() {
     let config = CorsConfig {
+        origins: vec!["*".to_string()],
         allow_credentials: true,
         ..Default::default()
     };

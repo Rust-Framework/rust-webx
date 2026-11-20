@@ -123,6 +123,32 @@ jobs:
           name: coverage-report
           path: coverage/
 
+  docs:
+    name: Rustdoc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build documentation
+        run: cargo doc --workspace --no-deps --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+      - name: Check feature matrix
+        run: |
+          cargo check -p rust-webx --all-features --locked
+          cargo check -p rust-webx --no-default-features --locked
+
+  benches:
+    name: Benchmarks (smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Router and pipeline benchmarks
+        run: |
+          cargo bench -p rust-webx-host --bench router_bench -- --warm-up-time 1 --measurement-time 1
+          cargo bench -p rust-webx-host --bench pipeline_bench -- --warm-up-time 1 --measurement-time 1
+
   build:
     name: Build (release)
     runs-on: ubuntu-latest

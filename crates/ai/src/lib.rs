@@ -15,7 +15,7 @@
 //!
 //! `rust-webx-ai` is a workspace member with `version.workspace = true`, so it
 //! always shares the `rust-webx` version number. There is no independent 0.x
-//! line: a `rust-webx` 1.4.0 release ships `rust-webx-ai` 1.4.0.
+//! line: a `rust-webx` 1.5.0 release ships `rust-webx-ai` 1.5.0.
 //!
 //! # Scope rules
 //!

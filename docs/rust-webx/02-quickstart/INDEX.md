@@ -17,7 +17,7 @@
 
 ## 前置要求
 
-- Rust 1.75+（2021 edition）
+- Rust 1.95+（2021 edition）
 - 基本 async/await 概念
 - 已安装 `cargo`
 

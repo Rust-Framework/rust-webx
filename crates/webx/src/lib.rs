@@ -96,7 +96,7 @@ pub use webx_core::route::ext::{is_mediator_active, should_scan_endpoints, IServ
 pub use webx_core::route::scan::{
     AuthorizeRule, BoxedDispatch, BoxedDispatchFn, BoxedDispatchFuture, HandlerCache, HandlerEntry,
     HandlerRegistration, HandlerRegistry, ParamMeta, RequestParamEntry, RouteDispatch,
-    RouteDispatchFn, RouteEntry,
+    RouteDispatchById, RouteDispatchFn, RouteEntry,
 };
 
 // --- HTTP layer ---
@@ -113,6 +113,7 @@ pub use webx_host::auth_jwt::{
     MIN_JWT_SECRET_LEN,
 };
 pub use webx_host::authz::collect_authorizers;
+#[allow(deprecated)]
 pub use webx_host::authz::resource_auth_middleware;
 pub use webx_host::authz::{AuthorizerSet, ResourceAuthorization};
 pub use webx_host::compression::{compress_gzip, CompressionConfig, CompressionMiddleware};
@@ -177,7 +178,7 @@ pub use webx_openapi::{generate_openapi_spec, APIUI_HTML};
 // --- Macros ---
 pub use webx_macros::__webx_max_body_size;
 #[doc(hidden)]
-pub use webx_macros::{__webx_category, __webx_description, __webx_display};
+pub use webx_macros::{__webx_authorize, __webx_category, __webx_description, __webx_display};
 pub use webx_macros::{
     authorize, category, delete, description, display, embed_assets, endpoint, get, handler, main,
     max_body_size, post, put, WebxRequestMeta,

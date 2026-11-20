@@ -1,8 +1,7 @@
 //! Provider port, capabilities and model catalog.
 //!
 //! A [`ChatProvider`] is a vendor adapter. It speaks the canonical
-//! [`CanonicalRequest`](crate::ir::CanonicalRequest) /
-//! [`StreamEvent`](crate::ir::StreamEvent) types, so the router can treat all
+//! [`CanonicalRequest`] / [`StreamEvent`] types, so the router can treat all
 //! providers uniformly. The [`ModelCatalog`] is the immutable snapshot the data
 //! plane reads: which providers exist, which models they expose, and which
 //! aliases route to which models.
@@ -58,6 +57,15 @@ impl ProviderError {
             self,
             Self::RateLimited { .. } | Self::Unavailable(_) | Self::Timeout
         )
+    }
+
+    /// Whether this error is the *upstream's* fault rather than a bad request.
+    ///
+    /// Circuit breakers and shared model health must only respond to upstream
+    /// failures; a tenant sending `temperature: 999` (or another invalid
+    /// parameter) must not trip the model for everyone.
+    pub fn is_upstream_fault(&self) -> bool {
+        !matches!(self, Self::InvalidRequest(_) | Self::Unsupported(_))
     }
 
     /// Suggested HTTP status when this error is surfaced directly.

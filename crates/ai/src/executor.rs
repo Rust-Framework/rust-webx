@@ -1,7 +1,7 @@
 //! Request executor: route ->reserve ->provider attempts ->settle/usage.
 //!
 //! The executor is the glue between the pure routing/quota/usage pieces and a
-//! concrete [`ChatProvider`]. It enforces the two rules that cannot live in the
+//! concrete [`ChatProvider`](crate::provider::ChatProvider). It enforces the two rules that cannot live in the
 //! router:
 //!
 //! * **Reserve before calling upstream**, settle/release exactly once.
@@ -124,6 +124,44 @@ pub struct GatewayEstimate {
     pub max_completion_tokens: u64,
     /// Estimated cost in micro-USD.
     pub estimated_cost_micros: u64,
+}
+
+/// Releases a quota reservation if the request future is dropped before it is
+/// settled or explicitly released (client disconnect, host request timeout,
+/// handler cancellation).
+struct ReservationGuard {
+    store: Option<Arc<dyn IQuotaStore>>,
+    reservation: Option<Reservation>,
+}
+
+impl ReservationGuard {
+    fn new(store: &Option<Arc<dyn IQuotaStore>>, reservation: Option<Reservation>) -> Self {
+        Self {
+            store: store.clone(),
+            reservation,
+        }
+    }
+
+    fn take(&mut self) -> Option<Reservation> {
+        self.reservation.take()
+    }
+}
+
+impl Drop for ReservationGuard {
+    fn drop(&mut self) {
+        let (Some(store), Some(reservation)) = (self.store.take(), self.reservation.take()) else {
+            return;
+        };
+        // Drop cannot await. Release on the runtime; the lease TTL is the
+        // fallback if the runtime is already gone.
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                if let Err(error) = store.release(reservation).await {
+                    tracing::warn!(error = %error, "cancelled request lease release failed");
+                }
+            });
+        }
+    }
 }
 
 /// Data-plane entry point.
@@ -410,8 +448,11 @@ impl GatewayExecutor {
         let estimate =
             prompt_tokens.saturating_add(u64::from(max_tokens.unwrap_or(self.default_max_tokens)));
         let est_cost = self.estimated_cost(ctx, prompt_tokens, max_tokens);
-        let mut reservation = match self.reserve(ctx, estimate, 0, est_cost).await {
-            Ok(reservation) => reservation,
+        let lease_ttl =
+            plan.deadline.saturating_duration_since(Instant::now()) + Duration::from_secs(60);
+        let lease_ttl = lease_ttl.max(crate::quota::DEFAULT_LEASE_TTL);
+        let mut reservation = match self.reserve(ctx, estimate, 0, est_cost, lease_ttl).await {
+            Ok(reservation) => ReservationGuard::new(&self.quota, reservation),
             Err(error) => {
                 tracing::warn!(
                     request_id = %ctx.request_id,
@@ -485,12 +526,28 @@ impl GatewayExecutor {
                     if let Some(health) = &self.health {
                         health.record_success(&attempt.model, started.elapsed());
                     }
-                    let cost = self.cost.cost_micros(&ctx.model_alias, &response.usage);
-                    self.settle(reservation.take(), response.usage, cost).await;
+                    // A completed provider response without a usage block must
+                    // not become free usage: settle with the reserved
+                    // prompt+completion estimate and flag it in the log.
+                    let usage = if response.usage.is_empty() {
+                        tracing::warn!(
+                            request_id = %ctx.request_id,
+                            provider = %attempt.model.provider,
+                            "provider omitted usage; settling with the estimate"
+                        );
+                        Usage::new(
+                            prompt_tokens,
+                            u64::from(max_tokens.unwrap_or(self.default_max_tokens)),
+                        )
+                    } else {
+                        response.usage
+                    };
+                    let cost = self.cost.cost_micros(&ctx.model_alias, &usage);
+                    self.settle(reservation.take(), usage, cost).await;
                     self.record_usage(
                         ctx,
                         &attempt.model,
-                        response.usage,
+                        usage,
                         UsageStatus::Completed,
                         started,
                         None,
@@ -506,10 +563,10 @@ impl GatewayExecutor {
                         mode = "complete",
                         status = "ok",
                         latency_ms = elapsed_ms(started),
-                        prompt_tokens = response.usage.prompt_tokens,
-                        completion_tokens = response.usage.completion_tokens,
-                        cached_tokens = response.usage.cached_tokens,
-                        reasoning_tokens = response.usage.reasoning_tokens,
+                        prompt_tokens = usage.prompt_tokens,
+                        completion_tokens = usage.completion_tokens,
+                        cached_tokens = usage.cached_tokens,
+                        reasoning_tokens = usage.reasoning_tokens,
                         cost_micros = cost,
                         trace_id = %trace_id(),
                         "gateway request"
@@ -521,7 +578,7 @@ impl GatewayExecutor {
                         "ok",
                         elapsed_ms(started),
                         None,
-                        response.usage,
+                        usage,
                     );
                     if let (Some(cache), Some(key)) = (&self.cache, cache_key.as_ref()) {
                         cache
@@ -531,16 +588,22 @@ impl GatewayExecutor {
                     return Ok(response);
                 }
                 Err(error) => {
-                    if let Some(circuit) = &self.circuit {
-                        circuit.record_failure(&attempt.model);
-                        record_circuit_state(
-                            self.meter.as_ref(),
-                            &attempt.model,
-                            circuit.state(&attempt.model),
-                        );
-                    }
-                    if let Some(health) = &self.health {
-                        health.record_failure(&attempt.model);
+                    if error.is_upstream_fault() {
+                        if let Some(circuit) = &self.circuit {
+                            circuit.record_failure(&attempt.model);
+                            record_circuit_state(
+                                self.meter.as_ref(),
+                                &attempt.model,
+                                circuit.state(&attempt.model),
+                            );
+                        }
+                        if let Some(health) = &self.health {
+                            health.record_failure(&attempt.model);
+                        }
+                    } else if let Some(circuit) = &self.circuit {
+                        // A client-caused error must not close a half-open
+                        // probe against a healthy upstream.
+                        circuit.release_probe(&attempt.model);
                     }
                     self.record_upstream_error(&attempt.model.provider, &error);
                     tracing::warn!(
@@ -619,8 +682,11 @@ impl GatewayExecutor {
         let estimate =
             prompt_tokens.saturating_add(u64::from(max_tokens.unwrap_or(self.default_max_tokens)));
         let est_cost = self.estimated_cost(ctx, prompt_tokens, max_tokens);
-        let mut reservation = match self.reserve(ctx, estimate, 1, est_cost).await {
-            Ok(reservation) => reservation,
+        let lease_ttl =
+            plan.deadline.saturating_duration_since(Instant::now()) + Duration::from_secs(60);
+        let lease_ttl = lease_ttl.max(crate::quota::DEFAULT_LEASE_TTL);
+        let mut reservation = match self.reserve(ctx, estimate, 1, est_cost, lease_ttl).await {
+            Ok(reservation) => ReservationGuard::new(&self.quota, reservation),
             Err(error) => {
                 self.record_quota_rejection(&ctx.model_alias);
                 return Err(error);
@@ -714,16 +780,22 @@ impl GatewayExecutor {
                     ));
                 }
                 Err(error) => {
-                    if let Some(circuit) = &self.circuit {
-                        circuit.record_failure(&attempt.model);
-                        record_circuit_state(
-                            self.meter.as_ref(),
-                            &attempt.model,
-                            circuit.state(&attempt.model),
-                        );
-                    }
-                    if let Some(health) = &self.health {
-                        health.record_failure(&attempt.model);
+                    if error.is_upstream_fault() {
+                        if let Some(circuit) = &self.circuit {
+                            circuit.record_failure(&attempt.model);
+                            record_circuit_state(
+                                self.meter.as_ref(),
+                                &attempt.model,
+                                circuit.state(&attempt.model),
+                            );
+                        }
+                        if let Some(health) = &self.health {
+                            health.record_failure(&attempt.model);
+                        }
+                    } else if let Some(circuit) = &self.circuit {
+                        // A client-caused error must not close a half-open
+                        // probe against a healthy upstream.
+                        circuit.release_probe(&attempt.model);
                     }
                     self.record_upstream_error(&attempt.model.provider, &error);
                     tracing::warn!(
@@ -830,12 +902,14 @@ impl GatewayExecutor {
             .inc();
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn reserve(
         &self,
         ctx: &GatewayContext,
         estimated_tokens: u64,
         streams: u32,
         estimated_cost_micros: u64,
+        lease_ttl: Duration,
     ) -> Result<Option<Reservation>, GatewayError> {
         let Some(store) = &self.quota else {
             return Ok(None);
@@ -847,7 +921,8 @@ impl GatewayExecutor {
                     estimated_tokens,
                 )
                 .streams(streams)
-                .estimated_cost_micros(estimated_cost_micros),
+                .estimated_cost_micros(estimated_cost_micros)
+                .lease_ttl(lease_ttl),
             )
             .await?;
         Ok(Some(reservation))

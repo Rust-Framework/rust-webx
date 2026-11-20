@@ -28,7 +28,8 @@ pub struct CorsConfig {
 impl Default for CorsConfig {
     fn default() -> Self {
         Self {
-            origins: vec!["*".to_string()],
+            // CORS is opt-in: an empty origin list sends no CORS headers.
+            origins: Vec::new(),
             methods: vec![
                 "GET".to_string(),
                 "POST".to_string(),
@@ -66,6 +67,12 @@ impl IMiddleware for CorsMiddleware {
         // Owned, because the response is mutated below while the Origin value
         // is still needed for the preflight decision.
         let origin = ctx.request().header("origin").map(str::to_string);
+
+        // A response that may change with Origin must say so, otherwise a
+        // shared cache can serve one origin's CORS headers to another.
+        if !self.config.origins.is_empty() {
+            ctx.response_mut().append_header("vary", "Origin");
+        }
 
         // Determine allowed origin
         let allowed = self
@@ -109,7 +116,7 @@ impl IMiddleware for CorsMiddleware {
                 .request()
                 .header("access-control-request-method")
                 .is_some();
-        if is_preflight {
+        if is_preflight && allowed.is_some() {
             ctx.response_mut().set_status(204);
             ctx.response_mut().set_header(
                 "access-control-allow-methods",

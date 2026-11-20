@@ -1,8 +1,15 @@
 //! Compile-time route and handler diagnostics.
 
+use std::any::TypeId;
 use std::collections::HashSet;
 
 use crate::route::scan::{HandlerCache, HandlerRegistration, RouteEntry};
+
+/// `RouteEntry::new` records this sentinel when the entry has no request type
+/// identity; such fixtures are matched by name for backwards compatibility.
+fn has_type_id(entry: &RouteEntry) -> bool {
+    entry.req_type_id != TypeId::of::<()>()
+}
 
 /// Snapshot of a registered HTTP route.
 #[derive(Debug, Clone)]
@@ -23,7 +30,14 @@ pub fn route_snapshots() -> Vec<RouteSnapshot> {
             path: entry.path,
             request_type: entry.handler_type,
             response_type: entry.rsp_type,
-            has_handler: cache.get(entry.handler_type).is_some(),
+            // Prefer the type identity: a bare name is not unique across
+            // modules, and a same-named handler for a different request type
+            // must not make this route look handled.
+            has_handler: if has_type_id(entry) {
+                cache.get_by_type_id(entry.req_type_id).is_some()
+            } else {
+                cache.get(entry.handler_type).is_some()
+            },
         })
         .collect();
     routes.sort_by(|a, b| a.path.cmp(b.path).then(a.method.cmp(&b.method)));
@@ -49,13 +63,18 @@ pub fn orphan_route_details() -> Vec<RouteSnapshot> {
 
 /// Request types registered via `#[handler]` without a matching route.
 pub fn orphan_handlers() -> Vec<&'static str> {
-    let routed: HashSet<&'static str> = inventory::iter::<RouteEntry>()
+    let routed_ids: HashSet<TypeId> = inventory::iter::<RouteEntry>()
+        .filter(|e| has_type_id(e))
+        .map(|e| e.req_type_id)
+        .collect();
+    let routed_names: HashSet<&'static str> = inventory::iter::<RouteEntry>()
+        .filter(|e| !has_type_id(e))
         .map(|e| e.handler_type)
         .collect();
 
     let mut orphans = Vec::new();
     for reg in inventory::iter::<HandlerRegistration>() {
-        if !routed.contains(reg.req_type_name) {
+        if !routed_ids.contains(&reg.req_type_id) && !routed_names.contains(reg.req_type_name) {
             orphans.push(reg.req_type_name);
         }
     }
@@ -64,13 +83,23 @@ pub fn orphan_handlers() -> Vec<&'static str> {
 }
 
 /// Request types with more than one `#[handler]` registration (last wins at runtime).
+///
+/// Keyed by [`TypeId`]: the same bare name in two modules is two distinct
+/// request types, not a duplicate registration.
 pub fn duplicate_handlers() -> Vec<(&'static str, usize)> {
-    let mut counts: std::collections::HashMap<&'static str, usize> =
+    let mut counts: std::collections::HashMap<TypeId, (&'static str, usize)> =
         std::collections::HashMap::new();
     for reg in inventory::iter::<HandlerRegistration>() {
-        *counts.entry(reg.req_type_name).or_default() += 1;
+        let entry = counts
+            .entry(reg.req_type_id)
+            .or_insert((reg.req_type_name, 0));
+        entry.1 += 1;
     }
-    let mut dupes: Vec<_> = counts.into_iter().filter(|(_, count)| *count > 1).collect();
+    let mut dupes: Vec<_> = counts
+        .into_iter()
+        .filter(|(_, (_, count))| *count > 1)
+        .map(|(_, (name, count))| (name, count))
+        .collect();
     dupes.sort_by_key(|(name, _)| *name);
     dupes
 }

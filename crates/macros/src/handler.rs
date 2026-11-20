@@ -61,10 +61,19 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     // `Arc::try_unwrap` succeeds — yielding an owned `Handler` that supports
     // `handle(&mut self, ...)`.
     let factory_body = if use_inject {
-        let constructor_fn =
-            format_ident!("__rdi_construct_{}", handler_ty_name.replace("::", "_"));
+        let try_constructor_fn =
+            format_ident!("__rdi_try_construct_{}", handler_ty_name.replace("::", "_"));
         quote! {
-            let arc: ::std::sync::Arc<#handler_ty> = #constructor_fn(resolver);
+            // Typed construction: a missing/unresolvable dependency must be a
+            // normal handler error, not a panic inside the connection task.
+            let arc: ::std::sync::Arc<#handler_ty> = match #try_constructor_fn(resolver) {
+                ::std::result::Result::Ok(arc) => arc,
+                ::std::result::Result::Err(error) => {
+                    return ::std::result::Result::Err(::webx::Error::Di(
+                        format!("cannot construct handler {}: {error}", #handler_ty_name)
+                    ));
+                }
+            };
             match ::std::sync::Arc::try_unwrap(arc) {
                 Ok(owned) => Ok(::std::boxed::Box::new(owned) as ::std::boxed::Box<dyn ::std::any::Any + Send>),
                 Err(_) => Err(::webx::Error::Internal(

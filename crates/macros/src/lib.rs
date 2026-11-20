@@ -258,9 +258,17 @@ pub fn webx_request_meta(input: TokenStream) -> TokenStream {
 /// impl IRequest<()> for DeleteOrderRequest {}
 /// ```
 #[proc_macro_attribute]
-pub fn authorize(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    // Pass through — the attribute is read by emit_endpoint inside
-    // the route macro (get, post, etc.) via item_impl.attrs.
+pub fn authorize(attr: TokenStream, item: TokenStream) -> TokenStream {
+    // Rewrite to a hidden attribute so the declaration survives either order:
+    // `#[authorize]` above `#[get]` expands first and would otherwise be
+    // invisible to the route macro. Same mechanism as `#[display]`.
+    rewrite_as_hidden(attr, item, "__webx_authorize", "authorize")
+}
+
+/// Internal carrier for [`authorize`] — do not use directly.
+#[doc(hidden)]
+#[proc_macro_attribute]
+pub fn __webx_authorize(_attr: TokenStream, item: TokenStream) -> TokenStream {
     item
 }
 

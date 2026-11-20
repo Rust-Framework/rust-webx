@@ -77,11 +77,11 @@ internal_deps() {
         rust-webx-core|rust-webx-macros|rust-webx-build) ;;
         rust-webx-client) echo "rust-webx-core" ;;
         rust-webx-ai) echo "rust-webx-core rust-webx-client" ;;
-        rust-webx-ai-ef) echo "rust-webx-ai" ;;
+        rust-webx-ai-ef) echo "rust-webx-ai rust-webx-core" ;;
         rust-webx-ai-gateway) echo "rust-webx rust-webx-ai" ;;
         rust-webx-spa|rust-webx-openapi) echo "rust-webx-core" ;;
-        rust-webx-host) echo "rust-webx-core rust-webx-spa rust-webx-openapi" ;;
-        rust-webx) echo "rust-webx-core rust-webx-host rust-webx-macros rust-webx-spa rust-webx-openapi" ;;
+        rust-webx-host) echo "rust-webx-core rust-webx-client rust-webx-spa rust-webx-openapi" ;;
+        rust-webx) echo "rust-webx-core rust-webx-host rust-webx-client rust-webx-macros rust-webx-spa rust-webx-openapi" ;;
     esac
 }
 

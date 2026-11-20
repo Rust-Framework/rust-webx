@@ -56,11 +56,11 @@ rust-webx folds these cross-cutting concerns into the framework layer:
 | Scattered error → HTTP mapping | Unified `Error` type + built-in exception middleware |
 | Ad-hoc auth/authorization | `add_authentication()` + declarative `#[authorize]` |
 
-rust-webx is **not** a full-stack UI framework (pair it with any frontend), **not** an ORM (bring your own or use [`rust-ef`](https://crates.io/crates/rust-ef)), and **not** a microservice-governance platform.
+rust-webx is **not** a full-stack UI framework (pair it with any frontend), **not** an ORM (bring your own or use [`rust-ef`](https://crates.io/crates/rust-ef)), and **not** a microservice-governance platform. The optional `rust-webx-ai*` crates build an OpenAI-compatible gateway on top of the framework; they are a separate, opt-in product surface, not a dependency of the core Web API story.
 
 ## Key Features
 
-- **DI + Mediator dual core** — `IRequest<T>` + `IRequestHandler<T, R>` as the carrier; the framework handles route mapping and DI resolution automatically.
+- **DI + compile-time dispatch core** — `IRequest<T>` + `IRequestHandler<T, R>` as the carrier; the route/handler registry is built at compile time and resolved by `TypeId`, while `IMediator` is the optional in-process façade over the same path.
 - **Compile-time route shortcuts** — `#[get("/path")]`, `#[post("/path")]`, `#[put("/path")]`, `#[delete("/path")]` define a full endpoint in one line.
 - **Compile-time scanning** — route metadata is collected at compile time via `inventory`; registered automatically in `Host::build()`.
 - **Zero-config handler registration** — the `#[handler]` attribute macro registers a handler with the DI container automatically.
@@ -104,7 +104,7 @@ The framework is split into a small set of focused crates, re-exported through t
 
 ```
 rust-webx/
-├── Cargo.toml                 # workspace root (v1.3.0)
+├── Cargo.toml                 # workspace root (v1.5.0)
 ├── crates/
 │   ├── core/                  # rust-webx-core  — traits, configuration
 │   ├── host/                  # rust-webx-host  — Host builder, middleware
@@ -308,10 +308,12 @@ $env:CARGO_PROFILE_DEV_INCREMENTAL = 'true'    # incremental compilation back on
 |------------|--------|
 | Graceful shutdown (Ctrl+C / SIGTERM) | ✅ |
 | Connection drain (30s in Production) | ✅ |
+| Header read timeout (slowloris) | ✅ 30s, bounded header buffer |
 | Health checks `/health` `/health/ready` (runtime probes, fail → 503) | ✅ |
 | Security response headers + Request ID | ✅ on by default |
 | JWT production fail-fast | ✅ |
 | CORS `*` production fail-fast | ✅ |
+| Panic isolation (handler → 500, process survives) | ✅ |
 | OpenAPI UI | Development mode only |
 | Rate limiting / compression | app-layer opt-in (`use_middleware`) |
 | File uploads (streamed, disk-spooled, size-limited) | ✅ |
@@ -322,7 +324,7 @@ $env:CARGO_PROFILE_DEV_INCREMENTAL = 'true'    # incremental compilation back on
 
 - `APP_ENV` — application environment (`Development` / `Production`).
 - `WEBX_APP_BASE` — application base directory.
-- `JWT_SECRET` — JWT signing secret (≥32 chars; requires `APP_ENV=Production`).
+- `JWT_SECRET` — JWT signing secret. Read in every mode; `APP_ENV=Production` additionally rejects secrets shorter than 32 bytes or known placeholders.
 - `APP__Jwt__Secret` — overrides `JWT_SECRET`.
 - `DATABASE_URL` — optional DB override (docbit defaults to SQLite `app.db` beside the binary).
 - `APP__*` — inline JSON override of any `appsettings.json` key (e.g. `APP__App__Urls`, `APP__Cors__Origins`).

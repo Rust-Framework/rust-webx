@@ -101,8 +101,9 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler { ... }
 额外动态检查。
 
 > **注意：** `add_authentication()` 仅注册 JWT 中间件，让受保护端点拿到 claims；`#[authorize]` 规则
-> 由端点自己执行，不需要额外的策略开关。`resource_auth_middleware` 仅用于自定义
-> `IAuthorizationPolicy`，需在路由匹配后使用。详见 [资源授权](../09-auth-security/resource-authorization.md)。
+> 由端点自己执行，不需要额外的策略开关。`resource_auth_middleware` 在路由前运行、
+> 拿不到 `route_pattern()`，1.5.0 起已弃用并 fail-closed；请改用 `#[authorize]` /
+> `IDynamicAuthorizer`。详见 [资源授权](../09-auth-security/resource-authorization.md)。
 
 ## 注意事项
 

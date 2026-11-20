@@ -1,12 +1,12 @@
 //! `/v1/chat/completions` handler.
 
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use serde_json::json;
 use webx::{
     async_trait, get, handler, post, ActionResult, IMediator, IRequest, IRequestHandler,
-    IdentityUser, Inject, JsonResult, RequestContext, Response, SseResult, WebxRequestMeta,
+    IdentityUser, Inject, JsonResult, Response, SseResult, WebxRequestMeta,
 };
 use webx_ai::{CanonicalRequest, GatewayContext, GatewayError, GatewayExecutor};
 
@@ -70,11 +70,19 @@ impl IRequestHandler<OpenAiModelsRequest, serde_json::Value> for OpenAiModelsHan
 #[async_trait]
 impl IRequestHandler<OpenAiChatRequest, Response> for OpenAiChatHandler {
     async fn handle(&mut self, request: OpenAiChatRequest) -> ActionResult<Response> {
-        let request_id = request
-            .request_id
-            .clone()
-            .or_else(|| RequestContext::trace_id().map(|id| id.to_string()))
-            .unwrap_or_else(fallback_request_id);
+        // The billing/idempotency id is server-generated. A client-supplied
+        // `x-request-id` is correlation metadata only: using it as the ledger's
+        // unique key let a client replay one value and suppress every later
+        // usage row (free usage), and colliding ids could hide another tenant's.
+        let client_request_id = request.request_id.clone();
+        let request_id = uuid::Uuid::new_v4().to_string();
+        if let Some(correlation) = client_request_id {
+            tracing::debug!(
+                %correlation,
+                request_id = %request_id,
+                "client request id is correlation metadata only"
+            );
+        }
         let tenant = request.user.require_tenant()?.to_string();
         let key_id = request.user.id.clone();
         let alias = request.model.clone();
@@ -125,12 +133,4 @@ fn error_response(error: GatewayError) -> Response {
 
 fn invalid_response(message: String) -> Response {
     Box::new(OpenAiErrorResult::invalid(message))
-}
-
-fn fallback_request_id() -> String {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_nanos())
-        .unwrap_or_default();
-    format!("req-{nanos}")
 }

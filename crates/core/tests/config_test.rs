@@ -123,7 +123,10 @@ fn config_app_options_defaults() {
     assert_eq!(defaults.app.urls, vec!["http://0.0.0.0:5000"]);
     assert_eq!(defaults.app.max_body_size, 10 * 1024 * 1024);
     assert!(defaults.jwt.secret.is_empty());
-    assert!(defaults.cors.origins.contains(&"*".to_string()));
+    assert!(
+        defaults.cors.origins.is_empty(),
+        "CORS must be opt-in: a wildcard default cannot start in Production"
+    );
     assert!(!defaults.rate_limit.enabled);
     assert_eq!(defaults.rate_limit.requests_per_second, 100.0);
     assert!(!defaults.metrics.enabled);
@@ -132,7 +135,7 @@ fn config_app_options_defaults() {
 #[test]
 fn config_cors_section_defaults() {
     let defaults = webx_core::config::CorsSection::default();
-    assert!(defaults.origins.contains(&"*".to_string()));
+    assert!(defaults.origins.is_empty());
     assert!(defaults.methods.contains(&"GET".to_string()));
     assert!(defaults.headers.contains(&"Authorization".to_string()));
     assert!(!defaults.allow_credentials);

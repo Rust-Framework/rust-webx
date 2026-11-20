@@ -16,7 +16,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-rust-webx = "1.1"
+rust-webx = "1.5"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 async-trait = "0.1"
@@ -45,14 +45,14 @@ rust-webx = { path = "../crates/webx" }
     "Secret": "change-me-in-production"
   },
   "Cors": {
-    "Origins": ["*"],
+    "Origins": ["http://localhost:5173"],
     "Methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     "Headers": ["Content-Type", "Authorization"]
   }
 }
 ```
 
-开发环境可额外提供 `appsettings.Development.json`，框架在 `AppMode::Development` 下自动合并。
+CORS 默认关闭（`Origins` 为空 = 不发送 CORS 头）；需要跨域时显式列出前端 origin。Production 拒绝 `"*"`，开发环境可额外提供 `appsettings.Development.json`，框架在 `AppMode::Development` 下自动合并。
 
 ## 项目目录建议
 

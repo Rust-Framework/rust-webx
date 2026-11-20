@@ -245,6 +245,25 @@ pub struct RouteDispatch {
 
 inventory::collect!(RouteDispatch);
 
+/// Type-identified route dispatch.
+///
+/// The endpoint macros submit this alongside [`RouteDispatch`]. Unlike the
+/// legacy name-keyed entry, the request type's [`std::any::TypeId`] is the key,
+/// so two request types that happen to share a bare name in different modules
+/// can never dispatch to each other's handler.
+///
+/// Hand-written registrations may keep using [`RouteDispatch`]; the host falls
+/// back to the name lookup only for routes whose request type has no entry
+/// here (e.g. fixtures using [`RouteEntry::new`]).
+pub struct RouteDispatchById {
+    pub req_type_id: std::any::TypeId,
+    /// Request type name, for diagnostics only.
+    pub handler_type: &'static str,
+    pub dispatch: RouteDispatchFn,
+}
+
+inventory::collect!(RouteDispatchById);
+
 impl RouteEntry {
     /// Create a new route entry without a request type identity.
     ///

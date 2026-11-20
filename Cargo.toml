@@ -27,7 +27,7 @@ members = [
 unsafe_code = "forbid"
 
 [workspace.package]
-version = "1.4.0"
+version = "1.5.0"
 edition = "2021"
 rust-version = "1.95"
 license = "MIT"
@@ -39,17 +39,17 @@ description = "rust-webx - A Rust WebApi framework inspired by ASP.NET Core, bui
 
 [workspace.dependencies]
 # Internal crates
-rust-webx-core = { version = "1.4.0", path = "crates/core" }
-rust-webx-host = { version = "1.4.0", path = "crates/host" }
-rust-webx-macros = { version = "1.4.0", path = "crates/macros" }
-rust-webx = { version = "1.4.0", path = "crates/webx" }
-rust-webx-spa = { version = "1.4.0", path = "crates/spa" }
-rust-webx-build = { version = "1.4.0", path = "crates/build" }
-rust-webx-openapi = { version = "1.4.0", path = "crates/openapi" }
-rust-webx-ai = { version = "1.4.0", path = "crates/ai" }
-rust-webx-ai-ef = { version = "1.4.0", path = "crates/ai-ef" }
-rust-webx-client = { version = "1.4.0", path = "crates/client" }
-rust-webx-ai-gateway = { version = "1.4.0", path = "crates/gateway" }
+rust-webx-core = { version = "1.5.0", path = "crates/core" }
+rust-webx-host = { version = "1.5.0", path = "crates/host" }
+rust-webx-macros = { version = "1.5.0", path = "crates/macros" }
+rust-webx = { version = "1.5.0", path = "crates/webx" }
+rust-webx-spa = { version = "1.5.0", path = "crates/spa" }
+rust-webx-build = { version = "1.5.0", path = "crates/build" }
+rust-webx-openapi = { version = "1.5.0", path = "crates/openapi" }
+rust-webx-ai = { version = "1.5.0", path = "crates/ai" }
+rust-webx-ai-ef = { version = "1.5.0", path = "crates/ai-ef" }
+rust-webx-client = { version = "1.5.0", path = "crates/client" }
+rust-webx-ai-gateway = { version = "1.5.0", path = "crates/gateway" }
 
 # Docbit sub-crates
 docbit-contracts = { version = "0.1.0", path = "docbit/contracts" }
@@ -65,10 +65,9 @@ dmbit-handlers = { version = "0.1.0", path = "dmbit/handlers" }
 rust-dix = "1.0"
 rust-dix-macros = "1.0"
 
-# rust-ef ORM (rust-ef 2.3 / rust-dix 1.0 integration via add_dbcontext + owned resolution)
-rust-ef = "2.3.0"
-rust-ef-sqlite = "2.3.0"
-rust-ef-mysql = "2.3.0"
+# rust-ef ORM (rust-ef 2.5 / rust-dix 1.0 integration via add_dbcontext + owned resolution)
+rust-ef = "2.5"
+rust-ef-sqlite = "2.5"
 
 # External dependencies
 arc-swap = "1"
@@ -116,7 +115,9 @@ opt-level = 3
 lto = "fat"
 codegen-units = 1
 strip = true
-panic = "abort"
+# Keep unwinding: the host catches panics at the request boundary and turns
+# them into 500 responses. `panic = "abort"` would defeat that isolation and
+# let one bad handler kill the process.
 
 # 鈹€鈹€ Dev/test build hygiene 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 # Windows MSVC emits one .pdb per linked binary, and with the default

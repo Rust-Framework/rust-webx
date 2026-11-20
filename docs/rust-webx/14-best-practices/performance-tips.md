@@ -1,12 +1,12 @@
 # 性能优化技巧
 
-## Handler 缓存
+## Handler 构造
 
-框架在 `HandlerCache` 中缓存 Handler 解析结果，避免每次请求重新查 DI 容器。
+`HandlerCache` 缓存的是编译期注册的 **工厂 + 调用桥**（按请求类型 `TypeId` 查找），不是 Handler 实例：每个请求用请求作用域构造一个 owned Handler，因此 Scoped 依赖（如 DbContext）是全新的。它省掉的是“扫描/反射找 Handler”，不是 DI 解析本身。
 
 ## 路由匹配
 
-`Router` 基于 `matchit` 的基数树（radix tree）匹配，请求期零堆分配。
+`Router` 基于 `matchit` 的基数树（radix tree）匹配。匹配本身无堆分配；路由参数会被复制进请求上下文（每个参数一个 `String`），因此不要宣称“请求期零分配”。实测见 `cargo bench -p rust-webx-host`。
 
 ## Arc 共享
 

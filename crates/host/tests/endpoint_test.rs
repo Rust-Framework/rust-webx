@@ -789,10 +789,11 @@ async fn dynamic_endpoint_without_claims_returns_401() {
 }
 
 #[tokio::test]
-async fn dynamic_endpoint_without_registered_authorizer_is_pass_through() {
-    // Documented 1.3.0 behaviour: no `IDynamicAuthorizer` registered means no
-    // dynamic checks; the endpoint only requires authentication. Applications
-    // must not rely on the static gate while using `dynamic`.
+async fn dynamic_endpoint_without_registered_authorizer_fails_closed() {
+    // A dynamic declaration is a permission statement. Without a registered
+    // `IDynamicAuthorizer` the endpoint must not silently degrade to
+    // "authenticated only" — `Host::build` rejects this at startup and a
+    // hand-built endpoint must fail closed as well.
     let endpoint = StubEndpoint {
         method: "POST",
         path: "/orders",
@@ -807,12 +808,17 @@ async fn dynamic_endpoint_without_registered_authorizer_is_pass_through() {
     let mut ctx = test_utils::TestHttpContext::new("POST", "/orders");
     ctx.set_claims(Box::new(claims_without_permissions()));
 
-    endpoint
+    let err = endpoint
         .handle(&mut ctx)
         .await
-        .expect("no authorizer registered means pass-through");
-    let (status, _, _) = ctx.into_response_parts();
+        .expect_err("dynamic mode without an authorizer must not run the handler");
+    assert!(
+        matches!(&err, Error::Internal(detail) if detail.contains("IDynamicAuthorizer")),
+        "expected a fail-closed internal error, got {err:?}"
+    );
+    let (status, _, body) = ctx.into_response_parts();
     assert_eq!(status, 200);
+    assert!(body.is_none(), "the handler must not have run");
 }
 
 #[tokio::test]

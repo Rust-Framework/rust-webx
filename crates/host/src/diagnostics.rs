@@ -1,16 +1,22 @@
 //! Route/handler startup diagnostics (uses tracing — host layer only).
 
+use std::any::TypeId;
+use std::collections::{HashMap, HashSet};
+
 use webx_core::route::diagnostics::{
     duplicate_handlers, orphan_handlers, orphan_route_details, route_snapshots,
 };
-use webx_core::route::scan::{RouteDispatch, RouteEntry};
+use webx_core::route::scan::{
+    HandlerCache, HandlerRegistration, RouteDispatch, RouteDispatchById, RouteEntry,
+};
 
 /// Fail fast when route/handler configuration is inconsistent.
 ///
 /// Panics at `HostBuilder::build()` when:
 /// - a route exists without a matching `#[handler]` registration
 /// - a `#[handler]` exists without a matching route
-/// - a route has a handler but no generated `RouteDispatch` bridge
+/// - a route has a handler but no generated dispatch bridge
+/// - two routes share `(method, path)`, or two handlers share a request `TypeId`
 ///
 /// `HostBuilder::try_build()` calls [`validate_route_configuration`] instead, so
 /// it can report the same problem as an `Err`.
@@ -32,19 +38,80 @@ pub fn validate_route_configuration() -> webx_core::error::Result<()> {
     let missing_routes = orphan_handlers();
 
     let mut missing_dispatch: Vec<(&'static str, &'static str, &'static str)> = Vec::new();
-    let cache = webx_core::route::scan::HandlerCache::build();
-    let dispatch_types: std::collections::HashSet<&'static str> =
-        inventory::iter::<RouteDispatch>()
-            .map(|d| d.handler_type)
-            .collect();
+    let cache = HandlerCache::build();
+    let dispatch_ids: HashSet<TypeId> = inventory::iter::<RouteDispatchById>()
+        .map(|d| d.req_type_id)
+        .collect();
+    let dispatch_names: HashSet<&'static str> = inventory::iter::<RouteDispatch>()
+        .map(|d| d.handler_type)
+        .collect();
 
     for entry in inventory::iter::<RouteEntry> {
-        if cache.get(entry.handler_type).is_some() && !dispatch_types.contains(entry.handler_type) {
+        let handled = cache.get_by_type_id(entry.req_type_id).is_some()
+            || cache.get(entry.handler_type).is_some();
+        // A route produced by the endpoint macro has both identities. A
+        // hand-written fixture (RouteEntry::new + RouteDispatch) only has the
+        // name, so keep the name fallback for that compatibility path.
+        let dispatched = dispatch_ids.contains(&entry.req_type_id)
+            || dispatch_names.contains(entry.handler_type);
+        if handled && !dispatched {
             missing_dispatch.push((entry.method.as_str(), entry.path, entry.handler_type));
         }
     }
 
-    if orphan_route_rows.is_empty() && missing_routes.is_empty() && missing_dispatch.is_empty() {
+    let mut duplicate_routes: Vec<(&'static str, &'static str)> = Vec::new();
+    let mut route_keys: HashMap<(&'static str, &'static str), usize> = HashMap::new();
+    for entry in inventory::iter::<RouteEntry> {
+        *route_keys
+            .entry((entry.method.as_str(), entry.path))
+            .or_default() += 1;
+    }
+    for ((method, path), count) in route_keys {
+        if count > 1 {
+            duplicate_routes.push((method, path));
+        }
+    }
+    duplicate_routes.sort_unstable();
+
+    let mut duplicate_dispatches: Vec<&'static str> = Vec::new();
+    let mut dispatch_key_counts: HashMap<TypeId, (&'static str, usize)> = HashMap::new();
+    for dispatch in inventory::iter::<RouteDispatchById> {
+        let entry = dispatch_key_counts
+            .entry(dispatch.req_type_id)
+            .or_insert((dispatch.handler_type, 0));
+        entry.1 += 1;
+    }
+    for (_, (name, count)) in dispatch_key_counts {
+        if count > 1 {
+            duplicate_dispatches.push(name);
+        }
+    }
+    duplicate_dispatches.sort_unstable();
+
+    let duplicate_handler_ids: Vec<&'static str> = {
+        let mut counts: HashMap<TypeId, (&'static str, usize)> = HashMap::new();
+        for reg in inventory::iter::<HandlerRegistration>() {
+            let entry = counts
+                .entry(reg.req_type_id)
+                .or_insert((reg.req_type_name, 0));
+            entry.1 += 1;
+        }
+        let mut dupes: Vec<&'static str> = counts
+            .into_iter()
+            .filter(|(_, (_, count))| *count > 1)
+            .map(|(_, (name, _))| name)
+            .collect();
+        dupes.sort_unstable();
+        dupes
+    };
+
+    if orphan_route_rows.is_empty()
+        && missing_routes.is_empty()
+        && missing_dispatch.is_empty()
+        && duplicate_routes.is_empty()
+        && duplicate_dispatches.is_empty()
+        && duplicate_handler_ids.is_empty()
+    {
         return Ok(());
     }
 
@@ -71,12 +138,35 @@ pub fn validate_route_configuration() -> webx_core::error::Result<()> {
         }
     }
     if !missing_dispatch.is_empty() {
-        message.push_str("\nRoutes with handler but no RouteDispatch:\n");
+        message.push_str("\nRoutes with handler but no dispatch bridge:\n");
         message.push_str(
             "  Fix: ensure the request type has a route macro (#[get]/#[post]/...) on its IRequest impl\n",
         );
         for (method, path, req) in &missing_dispatch {
             message.push_str(&format!("  - {method} {path} ({req})\n"));
+        }
+    }
+    if !duplicate_routes.is_empty() {
+        message.push_str("\nDuplicate routes (same method and path):\n");
+        message.push_str(
+            "  Fix: keep one endpoint per method/path; the router would silently drop the later one\n",
+        );
+        for (method, path) in &duplicate_routes {
+            message.push_str(&format!("  - {method} {path}\n"));
+        }
+    }
+    if !duplicate_dispatches.is_empty() {
+        message.push_str("\nDuplicate dispatch bridges for one request type:\n");
+        message.push_str("  Fix: keep one route macro per request type\n");
+        for name in &duplicate_dispatches {
+            message.push_str(&format!("  - {name}\n"));
+        }
+    }
+    if !duplicate_handler_ids.is_empty() {
+        message.push_str("\nDuplicate #[handler] registrations for one request type:\n");
+        message.push_str("  Fix: keep one #[handler] impl per request type\n");
+        for name in &duplicate_handler_ids {
+            message.push_str(&format!("  - {name}\n"));
         }
     }
     message.push_str("\nRun: cargo run -p <host-crate> -- --doctor");
@@ -117,7 +207,7 @@ pub fn log_startup_diagnostics() {
         tracing::warn!(
             request = handler,
             count,
-            "duplicate #[handler] registration; last inventory entry wins"
+            "duplicate #[handler] registration for one request type; the build will fail"
         );
     }
 }

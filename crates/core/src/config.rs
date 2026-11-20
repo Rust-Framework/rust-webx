@@ -169,7 +169,11 @@ impl Default for CorsSection {
 }
 
 fn default_origins() -> Vec<String> {
-    vec!["*".to_string()]
+    // No CORS by default. The old `"*"` default made the framework's own
+    // Production guard refuse to start an unconfigured host, so the README
+    // "Hello World" could never run. An application that wants cross-origin
+    // access opts in explicitly (`Cors.Origins` or `use_cors`).
+    Vec::new()
 }
 
 fn default_cors_methods() -> Vec<String> {

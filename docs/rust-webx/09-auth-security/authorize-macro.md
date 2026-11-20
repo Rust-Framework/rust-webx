@@ -182,7 +182,7 @@ pub trait IDynamicAuthorizer: Send + Sync {
 ```text
 路由匹配（route_pattern 可用）
   → 认证检查（无 claims → 401）
-  → 已注册的 IDynamicAuthorizer 拿整条声明裁决（未注册 → 直通）
+  → 已注册的 IDynamicAuthorizer 拿整条声明裁决（未注册 → 启动失败，不再直通）
   → Handler
 ```
 
@@ -193,7 +193,7 @@ pub trait IDynamicAuthorizer: Send + Sync {
    要求已认证；更推荐 `#[authorize(dynamic)]`，让意图显式化。
 2. 多个 `IDynamicAuthorizer` 是 **AND**：任意一个返回 `Err` 即拒绝，后续不再执行。
    静态端点里静态规则与动态授权之间也是 AND（先过静态规则）；动态端点里静态规则不参与判定。
-3. 动态端点**必须**注册授权器才有权限检查；未注册时框架只保证"已认证"。
+3. 动态端点**必须**注册授权器：存在 `#[authorize(dynamic)]` 路由但没有任何 `IDynamicAuthorizer` 时，`Host::build()` 直接失败（fail-closed），不会降级为“仅已认证”。
 
 ### 注册方式
 
@@ -337,7 +337,7 @@ Ok(())
 | 「用户是否能修改 id=123 这条记录」 | Handler 内读取路径参数/实体后判断 |
 | 「租户只能访问自己租户的数据」 | Handler 内按路径参数/实体判断 |
 | 全局限流、CORS、压缩 | 中间件 |
-| 自定义策略对象（旧式） | `IAuthorizationPolicy` + `resource_auth_middleware` |
+| 自定义策略对象（旧式） | `IAuthorizationPolicy` 仅作策略数据；`resource_auth_middleware` 已弃用并 fail-closed |
 
 ### 选择哪种授权
 
@@ -356,7 +356,7 @@ Ok(())
 | 无 claims | 401 | 401 |
 | 声明规则由谁评判 | `StubEndpoint`（claims 快照） | `IDynamicAuthorizer` |
 | claims 缺 permission | 403（动态不执行） | 交给授权器，可能放行 |
-| 未注册授权器 | 声明规则照常执行 | 只要求已认证（直通） |
+| 未注册授权器 | 声明规则照常执行 | 启动失败（fail-closed） |
 | 新增授权何时生效 | 重新登录/刷新 token 快照 | 下一次请求（授权器查 DB/cache） |
 | 声明规则是否保留 | 是 | 是（作为授权器输入） |
 

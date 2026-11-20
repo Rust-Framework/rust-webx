@@ -27,6 +27,7 @@
 use futures_util::{StreamExt, TryStreamExt};
 use http_body_util::{combinators::UnsyncBoxBody, BodyExt, BodyStream, Full};
 use hyper::body::{Bytes, Frame, Incoming};
+use hyper::header::{HeaderMap, HeaderName, HeaderValue};
 use hyper::Request;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -151,13 +152,10 @@ impl HttpContext {
         dispatch_runtime: Arc<webx_core::DispatchRuntime>,
     ) -> Self {
         let (parts, body) = req.into_parts();
-
-        let mut headers = HashMap::new();
-        for (name, value) in parts.headers.iter() {
-            if let Ok(value) = value.to_str() {
-                headers.insert(name.to_string(), value.to_string());
-            }
-        }
+        // Move hyper's HeaderMap directly: it is already case-insensitive and
+        // multi-valued, so copying it into a HashMap<String, String> would only
+        // add per-header allocations and lose duplicate header values.
+        let headers = parts.headers;
 
         let (query_params, query_multi) = parts
             .uri
@@ -175,13 +173,15 @@ impl HttpContext {
         // here used to bypass the whole middleware pipeline (no CORS, no
         // security headers, no access log, no metrics). The router handler
         // turns it into a normal `PayloadTooLarge` error on the way in.
-        let declared_limit = if is_multipart_content_type(headers.get("content-type")) {
+        let content_type = headers.get("content-type").and_then(|v| v.to_str().ok());
+        let declared_limit = if is_multipart_content_type(content_type) {
             limits.multipart_body
         } else {
             limits.body as u64
         };
         let early_error = headers
             .get("content-length")
+            .and_then(|value| value.to_str().ok())
             .and_then(|value| value.parse::<u64>().ok())
             .filter(|declared| *declared > declared_limit)
             .map(|_| {
@@ -272,8 +272,9 @@ impl IHttpContext for HttpContext {
 enum RequestBody {
     /// Still streaming from the connection.
     Pending(Option<Incoming>),
-    /// Fully buffered, replayable.
-    Buffered(Vec<u8>),
+    /// Fully buffered, replayable. `Bytes` keeps the first-read handle cheap
+    /// to clone instead of copying the whole body again.
+    Buffered(Bytes),
     /// Parsed as a multipart form.
     Form(Arc<MultipartForm>),
 }
@@ -282,7 +283,7 @@ enum RequestBody {
 pub struct HttpRequest {
     method: String,
     path: String,
-    headers: HashMap<String, String>,
+    headers: HeaderMap,
     query_params: HashMap<String, String>,
     query_multi: HashMap<String, Vec<String>>,
     route_params: HashMap<String, String>,
@@ -304,11 +305,7 @@ impl IHttpRequest for HttpRequest {
 
     /// Header values are looked up case-insensitively, as HTTP requires.
     fn header(&self, name: &str) -> Option<&str> {
-        if let Some(value) = self.headers.get(name) {
-            return Some(value.as_str());
-        }
-        let lower = name.to_ascii_lowercase();
-        self.headers.get(&lower).map(|s| s.as_str())
+        self.headers.get(name).and_then(|value| value.to_str().ok())
     }
 
     fn query(&self) -> &HashMap<String, String> {
@@ -344,6 +341,10 @@ impl IHttpRequest for HttpRequest {
     }
 
     async fn body_bytes(&mut self) -> Result<Vec<u8>> {
+        Ok(self.body_bytes_shared().await?.to_vec())
+    }
+
+    async fn body_bytes_shared(&mut self) -> Result<Bytes> {
         let mut guard = self.body.lock().await;
         let incoming = match &mut *guard {
             RequestBody::Buffered(bytes) => return Ok(bytes.clone()),
@@ -370,7 +371,7 @@ impl IHttpRequest for HttpRequest {
         let mut guard = self.body.lock().await;
         match &mut *guard {
             RequestBody::Buffered(bytes) => {
-                let bytes = Bytes::from(bytes.clone());
+                let bytes = bytes.clone();
                 return Ok(Box::pin(futures_util::stream::once(async move {
                     Ok::<Bytes, Error>(bytes)
                 })));
@@ -455,8 +456,8 @@ impl IHttpRequest for HttpRequest {
 }
 
 /// Drain a body stream into memory, enforcing `limit`.
-async fn read_body(incoming: Incoming, limit: usize) -> Result<Vec<u8>> {
-    let mut out = Vec::new();
+async fn read_body(incoming: Incoming, limit: usize) -> Result<Bytes> {
+    let mut out = bytes::BytesMut::new();
     let mut total = 0usize;
     let mut stream = incoming.into_data_stream();
 
@@ -476,11 +477,11 @@ async fn read_body(incoming: Incoming, limit: usize) -> Result<Vec<u8>> {
         out.extend_from_slice(&chunk);
     }
 
-    Ok(out)
+    Ok(out.freeze())
 }
 
 /// Whether a raw `Content-Type` header value declares a multipart form.
-fn is_multipart_content_type(content_type: Option<&String>) -> bool {
+fn is_multipart_content_type(content_type: Option<&str>) -> bool {
     content_type
         .map(|value| {
             value
@@ -605,7 +606,7 @@ fn multer_error(err: multer::Error) -> Error {
 /// Concrete implementation of IHttpResponse.
 pub struct HttpResponse {
     status: u16,
-    headers: HashMap<String, String>,
+    headers: HeaderMap,
     body: Option<ResponseBody>,
 }
 
@@ -613,10 +614,34 @@ impl HttpResponse {
     pub fn new(status: u16) -> Self {
         Self {
             status,
-            headers: HashMap::new(),
+            headers: HeaderMap::new(),
             body: None,
         }
     }
+}
+
+/// Insert/replace a header, ignoring names/values that are not valid HTTP.
+fn insert_header(headers: &mut HeaderMap, key: &str, value: &str) {
+    let (Ok(name), Ok(value)) = (
+        HeaderName::from_bytes(key.as_bytes()),
+        HeaderValue::from_str(value),
+    ) else {
+        tracing::warn!(header = key, "ignoring invalid response header");
+        return;
+    };
+    headers.insert(name, value);
+}
+
+/// Append a header without replacing existing values.
+fn append_header(headers: &mut HeaderMap, key: &str, value: &str) {
+    let (Ok(name), Ok(value)) = (
+        HeaderName::from_bytes(key.as_bytes()),
+        HeaderValue::from_str(value),
+    ) else {
+        tracing::warn!(header = key, "ignoring invalid response header");
+        return;
+    };
+    headers.append(name, value);
 }
 
 #[async_trait::async_trait]
@@ -634,15 +659,17 @@ impl IHttpResponse for HttpResponse {
     }
 
     fn set_header(&mut self, key: &str, value: &str) {
-        // HTTP header names are case-insensitive but this map is not. Normalize
-        // on the way in so `Content-Type` and `content-type` cannot coexist
-        // (which would emit duplicate headers when the map is written to hyper).
-        self.headers
-            .insert(key.to_ascii_lowercase(), value.to_string());
+        insert_header(&mut self.headers, key, value);
+    }
+
+    fn append_header(&mut self, key: &str, value: &str) {
+        append_header(&mut self.headers, key, value);
     }
 
     fn remove_header(&mut self, key: &str) {
-        self.headers.remove(&key.to_ascii_lowercase());
+        if let Ok(name) = HeaderName::from_bytes(key.as_bytes()) {
+            self.headers.remove(name);
+        }
     }
 
     async fn write_bytes(&mut self, data: Vec<u8>) -> Result<()> {
@@ -669,9 +696,7 @@ impl IHttpResponse for HttpResponse {
     }
 
     fn header(&self, key: &str) -> Option<&str> {
-        self.headers
-            .get(&key.to_ascii_lowercase())
-            .map(|s| s.as_str())
+        self.headers.get(key).and_then(|value| value.to_str().ok())
     }
 }
 
@@ -686,16 +711,27 @@ async fn finalize_response(req: &HttpRequest, resp: HttpResponse) -> hyper::Resp
         body,
     } = resp;
 
-    match body.unwrap_or(ResponseBody::Bytes(Vec::new())) {
+    let is_head = req.method.eq_ignore_ascii_case("HEAD");
+    let mut response = match body.unwrap_or(ResponseBody::Bytes(Vec::new())) {
         ResponseBody::Bytes(bytes) => {
             default_cache_control(&mut headers, false);
+            // hyper suppresses the body for HEAD on HTTP/1.1, but its HTTP/2
+            // server does not; do it here so both protocols agree. Keep the
+            // representation's Content-Length, as RFC 9110 requires.
+            if is_head && !headers.contains_key("content-length") {
+                insert_header(&mut headers, "content-length", &bytes.len().to_string());
+            }
             bytes_response(status, headers, bytes)
         }
         ResponseBody::File(file) => {
             default_cache_control(&mut headers, true);
             file_response(req, status, headers, file).await
         }
+    };
+    if is_head {
+        *response.body_mut() = full_body(Vec::new());
     }
+    response
 }
 
 /// Apply the framework's default `Cache-Control` when the response has none.
@@ -703,16 +739,17 @@ async fn finalize_response(req: &HttpRequest, resp: HttpResponse) -> hyper::Resp
 /// Ordinary API responses must not be stored; a file response with validators is
 /// exactly the case where `no-store` would defeat the `ETag` we just sent, so it
 /// revalidates instead. Anything the application set explicitly wins.
-fn default_cache_control(headers: &mut HashMap<String, String>, is_file: bool) {
+fn default_cache_control(headers: &mut HeaderMap, is_file: bool) {
     if headers.contains_key("cache-control") {
         return;
     }
-    headers.insert(
-        "cache-control".to_string(),
+    insert_header(
+        headers,
+        "cache-control",
         if is_file {
-            "public, max-age=0, must-revalidate".to_string()
+            "public, max-age=0, must-revalidate"
         } else {
-            "no-store".to_string()
+            "no-store"
         },
     );
 }
@@ -740,7 +777,7 @@ impl PreparedSource {
 async fn file_response(
     req: &HttpRequest,
     status: u16,
-    mut headers: HashMap<String, String>,
+    mut headers: HeaderMap,
     file: FileBody,
 ) -> hyper::Response<RespBody> {
     let FileBody {
@@ -826,32 +863,35 @@ async fn file_response(
         let resolved = content_type
             .or_else(|| source_path.as_deref().and_then(guess_content_type))
             .unwrap_or_else(|| "application/octet-stream".to_string());
-        headers.insert("content-type".to_string(), resolved);
+        insert_header(&mut headers, "content-type", &resolved);
     }
     if !headers.contains_key("content-disposition") {
         if let Some(name) = &file_name {
-            headers.insert(
-                "content-disposition".to_string(),
-                content_disposition_value(disposition, name),
+            insert_header(
+                &mut headers,
+                "content-disposition",
+                &content_disposition_value(disposition, name),
             );
         }
     }
     if let Some(tag) = &etag {
-        headers.insert("etag".to_string(), tag.clone());
+        insert_header(&mut headers, "etag", tag);
     }
     if let Some(modified) = modified {
-        headers.insert(
-            "last-modified".to_string(),
-            httpdate::fmt_http_date(modified),
+        insert_header(
+            &mut headers,
+            "last-modified",
+            &httpdate::fmt_http_date(modified),
         );
     }
 
     // `Accept-Ranges: none` tells download managers not to bother trying, which
     // is more useful than the header's absence (absence means "unknown").
     let range_capable = enable_range_processing && prepared.is_seekable() && known_len.is_some();
-    headers.insert(
-        "accept-ranges".to_string(),
-        if range_capable { "bytes" } else { "none" }.to_string(),
+    insert_header(
+        &mut headers,
+        "accept-ranges",
+        if range_capable { "bytes" } else { "none" },
     );
 
     // ── Conditional GET: the representation is unchanged ──
@@ -872,7 +912,7 @@ async fn file_response(
                 match parse_ranges(raw, len) {
                     RangeOutcome::Ignored => {}
                     RangeOutcome::Unsatisfiable => {
-                        headers.insert("content-range".to_string(), format!("bytes */{len}"));
+                        insert_header(&mut headers, "content-range", &format!("bytes */{len}"));
                         return problem_bytes(416, headers, "Range Not Satisfiable");
                     }
                     RangeOutcome::Satisfiable(parsed) => ranges = parsed,
@@ -897,9 +937,10 @@ async fn file_response(
     let (status, start, count) = match ranges.first() {
         Some(range) => {
             let len = known_len.expect("range-capable sources know their length");
-            headers.insert(
-                "content-range".to_string(),
-                format!("bytes {}-{}/{len}", range.start, range.end),
+            insert_header(
+                &mut headers,
+                "content-range",
+                &format!("bytes {}-{}/{len}", range.start, range.end),
             );
             (206, range.start, range.len())
         }
@@ -908,7 +949,7 @@ async fn file_response(
 
     match prepared {
         PreparedSource::Path(mut handle) => {
-            headers.insert("content-length".to_string(), count.to_string());
+            insert_header(&mut headers, "content-length", &count.to_string());
             if count == 0 {
                 return bytes_response(status, headers, Vec::new());
             }
@@ -921,7 +962,7 @@ async fn file_response(
             build_response(status, headers, reader_body(handle.take(count)))
         }
         PreparedSource::Seekable(mut reader) => {
-            headers.insert("content-length".to_string(), count.to_string());
+            insert_header(&mut headers, "content-length", &count.to_string());
             if count == 0 {
                 return bytes_response(status, headers, Vec::new());
             }
@@ -945,12 +986,13 @@ async fn file_response(
 ///
 /// The response-level `Content-Type` is about to be replaced, so the original
 /// representation type has to be captured first.
-fn representation_content_type(headers: &HashMap<String, String>) -> String {
+fn representation_content_type(headers: &HeaderMap) -> String {
     headers
         .get("content-type")
+        .and_then(|value| value.to_str().ok())
         .filter(|value| !value.starts_with("multipart/byteranges"))
-        .cloned()
-        .unwrap_or_else(|| "application/octet-stream".to_string())
+        .unwrap_or("application/octet-stream")
+        .to_string()
 }
 
 /// Serve several disjoint ranges as one `multipart/byteranges` response.
@@ -961,7 +1003,7 @@ fn representation_content_type(headers: &HashMap<String, String>) -> String {
 /// because every part's size is known up front.
 fn multipart_byteranges_response(
     prepared: PreparedSource,
-    mut headers: HashMap<String, String>,
+    mut headers: HeaderMap,
     ranges: Vec<ByteRange>,
     known_len: Option<u64>,
 ) -> hyper::Response<RespBody> {
@@ -993,11 +1035,12 @@ fn multipart_byteranges_response(
         .sum::<u64>()
         + closing.len() as u64;
 
-    headers.insert(
-        "content-type".to_string(),
-        format!("multipart/byteranges; boundary={boundary}"),
+    insert_header(
+        &mut headers,
+        "content-type",
+        &format!("multipart/byteranges; boundary={boundary}"),
     );
-    headers.insert("content-length".to_string(), content_length.to_string());
+    insert_header(&mut headers, "content-length", &content_length.to_string());
     // `Content-Range` is per part here, so the message must not carry one.
     headers.remove("content-range");
 
@@ -1140,11 +1183,7 @@ where
     BodyExt::boxed_unsync(body)
 }
 
-fn bytes_response(
-    status: u16,
-    headers: HashMap<String, String>,
-    bytes: Vec<u8>,
-) -> hyper::Response<RespBody> {
+fn bytes_response(status: u16, headers: HeaderMap, bytes: Vec<u8>) -> hyper::Response<RespBody> {
     build_response(status, headers, full_body(bytes))
 }
 
@@ -1155,15 +1194,8 @@ fn full_body(bytes: Vec<u8>) -> RespBody {
 }
 
 /// Build an RFC 7807 `application/problem+json` response for a file error.
-fn problem_bytes(
-    status: u16,
-    mut headers: HashMap<String, String>,
-    detail: &str,
-) -> hyper::Response<RespBody> {
-    headers.insert(
-        "content-type".to_string(),
-        "application/problem+json".to_string(),
-    );
+fn problem_bytes(status: u16, mut headers: HeaderMap, detail: &str) -> hyper::Response<RespBody> {
+    insert_header(&mut headers, "content-type", "application/problem+json");
     bytes_response(
         status,
         headers,
@@ -1171,21 +1203,15 @@ fn problem_bytes(
     )
 }
 
-fn build_response(
-    status: u16,
-    headers: HashMap<String, String>,
-    body: RespBody,
-) -> hyper::Response<RespBody> {
-    let mut builder = hyper::Response::builder().status(status);
-    for (key, value) in &headers {
-        builder = builder.header(key.as_str(), value.as_str());
-    }
-    builder.body(body).unwrap_or_else(|_| {
-        hyper::Response::builder()
-            .status(hyper::StatusCode::INTERNAL_SERVER_ERROR)
-            .body(full_body(b"Internal Server Error".to_vec()))
-            .expect("static error response is valid")
-    })
+fn build_response(status: u16, headers: HeaderMap, body: RespBody) -> hyper::Response<RespBody> {
+    let mut response = hyper::Response::new(body);
+    *response.status_mut() =
+        hyper::StatusCode::from_u16(status).unwrap_or(hyper::StatusCode::INTERNAL_SERVER_ERROR);
+    // Move the HeaderMap instead of rebuilding it through the builder: this
+    // keeps duplicate headers (e.g. two `Set-Cookie`s) and avoids a second
+    // allocation/copy pass for every response.
+    *response.headers_mut() = headers;
+    response
 }
 
 /// Result of parsing a `Range` header.

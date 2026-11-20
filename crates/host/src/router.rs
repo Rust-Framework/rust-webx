@@ -1,7 +1,9 @@
-//! Matchit-based router with zero-alloc route matching.
+//! Matchit-based router.
 //!
-//! Uses `matchit::Router` (the same library as Axum) for efficient
-//! radix-tree based route matching with zero heap allocations per request.
+//! Uses `matchit::Router` (the same library as Axum) for efficient radix-tree
+//! route matching. Matching itself allocates nothing; the matched `{param}`
+//! keys/values and the route pattern are copied into the request context, so
+//! do not claim "zero allocations per request" for the whole path.
 
 use std::collections::HashMap;
 use std::sync::Arc;

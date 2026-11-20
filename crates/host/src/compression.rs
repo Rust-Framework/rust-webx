@@ -76,7 +76,7 @@ impl CompressionMiddleware {
 #[async_trait::async_trait]
 impl IMiddleware for CompressionMiddleware {
     async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
-        ctx.response_mut().set_header("vary", "accept-encoding");
+        ctx.response_mut().append_header("vary", "accept-encoding");
         Ok(ControlFlow::Continue(()))
     }
 

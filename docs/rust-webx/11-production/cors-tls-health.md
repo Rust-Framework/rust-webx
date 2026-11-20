@@ -3,12 +3,15 @@
 ## CORS
 
 ```rust
-Host::builder().use_cors(CorsConfig::default())
+Host::builder().use_cors(CorsConfig {
+    origins: vec!["https://app.example.com".into()],
+    ..Default::default()
+})
 ```
 
-或从 `appsettings.json` 自动加载 `Cors` 节。
+或从 `appsettings.json` 自动加载 `Cors` 节。CORS 默认关闭（空 `origins` 不发送任何 CORS 头）。
 
-Production 环境禁止使用 `Cors.Origins: ["*"]`：builder 会直接 panic 硬失败，必须通过 `Cors.Origins` 或环境变量 `APP__Cors__Origins` 设置明确白名单。
+Production 环境禁止使用 `Cors.Origins: ["*"]`：builder 会直接 panic 硬失败，必须通过 `Cors.Origins` 或环境变量 `APP__Cors__Origins` 设置明确白名单。守卫校验的是**实际生效**的 `CorsConfig`（包括 `use_cors`），并在响应中追加 `Vary: Origin`。
 
 ## TLS
 

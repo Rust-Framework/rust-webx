@@ -44,4 +44,4 @@ pub use client::{
 };
 pub use error::HttpClientError;
 pub use registry::{HttpClientRegistry, IHttpClientFactory};
-pub use sse::SseStream;
+pub use sse::{SseStream, DEFAULT_MAX_BUFFER};

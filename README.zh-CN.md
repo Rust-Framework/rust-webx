@@ -102,7 +102,7 @@ rust-webx **不是** 全栈 UI 框架（可搭配任意前端）、**不是** OR
 
 ```
 rust-webx/
-├── Cargo.toml                 # workspace 根 (v1.3.0)
+├── Cargo.toml                 # workspace 根 (v1.5.0)
 ├── crates/
 │   ├── core/                  # rust-webx-core  — trait 与配置
 │   ├── host/                  # rust-webx-host  — Host 构建器、中间件管道
@@ -274,10 +274,12 @@ docker compose -f docbit/docker-compose.yml --env-file docbit/.env up --build
 |------|------|
 | 优雅关闭（Ctrl+C / SIGTERM） | ✅ |
 | 连接 drain（Production 30 秒） | ✅ |
+| Header 读超时（slowloris） | ✅ 30 秒，header 缓冲有界 |
 | 健康检查 `/health` `/health/ready`（运行时探针，失败 → 503） | ✅ |
 | 安全响应头 + 请求 ID | ✅ 默认启用 |
 | JWT production fail-fast | ✅ |
 | CORS `*` production fail-fast | ✅ |
+| panic 隔离（handler → 500，进程存活） | ✅ |
 | OpenAPI UI | 仅 Development 模式 |
 | 速率限制 / 压缩 | 应用层 opt-in（`use_middleware`） |
 | 文件上传（流式、落盘、限流） | ✅ |
@@ -288,7 +290,7 @@ docker compose -f docbit/docker-compose.yml --env-file docbit/.env up --build
 
 - `APP_ENV` — 应用环境（`Development` / `Production`）。
 - `WEBX_APP_BASE` — 应用基础目录。
-- `JWT_SECRET` — JWT 签名密钥（≥32 字符；需 `APP_ENV=Production`）。
+- `JWT_SECRET` — JWT 签名密钥。所有模式都会读取；`APP_ENV=Production` 额外拒绝短于 32 字节或已知占位符的密钥。
 - `APP__Jwt__Secret` — 覆盖 `JWT_SECRET`。
 - `DATABASE_URL` — 可选数据库覆盖（docbit 默认使用可执行文件旁的 SQLite `app.db`）。
 - `APP__*` — 覆盖 `appsettings.json` 任意键的内联 JSON（如 `APP__App__Urls`、`APP__Cors__Origins`）。

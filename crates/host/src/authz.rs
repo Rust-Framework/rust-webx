@@ -163,8 +163,15 @@ impl IMiddleware for ResourceAuthMiddleware {
         let route_pattern = match ctx.request().route_pattern() {
             Some(p) => p.to_string(),
             None => {
-                // No route matched —skip authorization (e.g., static files, health checks)
-                return Ok(ControlFlow::Continue(()));
+                // This middleware runs before the router terminal, which is
+                // the only place that writes `route_pattern`. It therefore
+                // cannot authorize anything; returning Continue would ship a
+                // security no-op. Fail closed and point at the replacement.
+                return Err(webx_core::error::Error::Forbidden(
+                    "resource_auth_middleware cannot see the matched route before routing; \
+                     use #[authorize] / IDynamicAuthorizer instead"
+                        .to_string(),
+                ));
             }
         };
 
@@ -187,9 +194,16 @@ impl IMiddleware for ResourceAuthMiddleware {
 
 /// Create a resource-based authorization middleware.
 ///
-/// Register this middleware AFTER the authentication middleware in the pipeline.
-/// The middleware reads the route pattern (set by the router) and
-/// claims (set by the auth middleware) to enforce the policy.
+/// # Deprecated
+///
+/// This middleware runs before the router terminal, so `route_pattern` is not
+/// available yet and it cannot authorize requests. It now fails closed. Use
+/// the `authorize` attribute (static or dynamic) + `IDynamicAuthorizer`
+/// instead.
+#[deprecated(
+    since = "1.5.0",
+    note = "cannot see the matched route before routing; use the authorize attribute / IDynamicAuthorizer"
+)]
 pub fn resource_auth_middleware(policy: Arc<dyn IAuthorizationPolicy>) -> impl IMiddleware {
     ResourceAuthMiddleware { policy }
 }

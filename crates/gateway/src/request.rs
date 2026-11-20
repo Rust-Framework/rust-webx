@@ -135,7 +135,11 @@ pub struct OpenAiChatRequest {
     #[fromclaim]
     #[serde(skip)]
     pub user: IdentityUser,
-    /// Optional gateway request id.
+    /// Optional client correlation id.
+    ///
+    /// Never used as the billing/idempotency key: the gateway generates a
+    /// server-side UUID for `UsageEvent.request_id`. This value is logged for
+    /// tracing only.
     #[fromheader("x-request-id")]
     #[serde(skip)]
     pub request_id: Option<String>,

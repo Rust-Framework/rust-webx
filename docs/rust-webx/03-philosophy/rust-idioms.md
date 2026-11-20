@@ -44,7 +44,7 @@ struct GetUserHandler { repo: Arc<Repo> }
 
 框架的 trait 抽象在运行时开销极低：
 
-- 路由匹配使用 matchit（radix 树），每请求零堆分配
+- 路由匹配使用 matchit（radix 树）；匹配本身零分配，匹配到的路径参数会复制进请求上下文
 - Handler 解析结果缓存在 `HandlerCache` 中
 - `inventory` 元数据在编译期收集，`build()` 时一次性注册
 

@@ -104,11 +104,13 @@ The framework is split into a small set of focused crates, re-exported through t
 
 ```
 rust-webx/
-├── Cargo.toml                 # workspace root (v1.5.0)
+├── Cargo.toml                 # workspace root (v2.0.0)
 ├── crates/
 │   ├── core/                  # rust-webx-core  — traits, configuration
+│   ├── engine/                # rust-webx-engine — 2.0 worker pool, direct dispatch
+│   │                          #   zero-copy context, pipeline, TLS/HTTP2
 │   ├── host/                  # rust-webx-host  — Host builder, middleware
-│   │                          #   pipeline, Trie-based router, hyper integration
+│   │                          #   routing/health/SPA adapters over the engine
 │   ├── macros/                # rust-webx-macros — procedural macros
 │   ├── spa/                   # rust-webx-spa   — static-file / SPA middleware
 │   ├── openapi/               # rust-webx-openapi — OpenAPI spec generation + UI
@@ -124,7 +126,8 @@ rust-webx/
 
 > **Package vs import name**: the dependency is `rust-webx`, the code is
 > `use webx::*;`. Same for the sub-crates — `rust-webx-core` → `webx_core`,
-> `rust-webx-host` → `webx_host`, `rust-webx-macros` → `webx_macros`,
+> `rust-webx-engine` → `webx_engine`, `rust-webx-host` → `webx_host`,
+> `rust-webx-macros` → `webx_macros`,
 > `rust-webx-spa` → `webx_spa`, `rust-webx-openapi` → `webx_openapi`,
 > `rust-webx-ai` → `webx_ai`, `rust-webx-client` → `webx_client`,
 > `rust-webx-ai-ef` → `webx_ai_ef`, `rust-webx-ai-gateway` → `webx_ai_gateway`.

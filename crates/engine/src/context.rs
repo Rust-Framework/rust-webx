@@ -1,0 +1,848 @@
+//! `EngineContext` — the per-request request/response state of the 2.0 engine.
+//!
+//! The context holds hyper's request `Parts` (method, URI and headers moved out
+//! of the request, never rebuilt into `String`s), the still-live request body,
+//! the matched route and the outgoing response. It implements the
+//! `webx_core` HTTP traits, so the binder, middleware and endpoint adapters
+//! keep working unchanged.
+//!
+//! Zero-copy decisions:
+//!
+//! * [`IHttpRequest::method`]/[`IHttpRequest::path`] borrow from hyper's
+//!   `Method`/`Uri`;
+//! * headers are the original `HeaderMap` (case-insensitive, multi-valued);
+//! * the query string is parsed lazily, on the first `query()`/`query_all()`;
+//! * the route pattern is an `Arc<str>`; the `route_pattern_mut()` compatibility
+//!   view materializes a `String` only when someone asks for it;
+//! * route parameters are collected only when the router reports some;
+//! * `body_bytes_shared()` hands out `Bytes`, with a single-frame fast path, and
+//!   [`body_bytes`](IHttpRequest::body_bytes) is the compatible copy.
+//!
+//! The body is a small state machine (`Pending` -> `Buffered`/`Form`) and every
+//! body method takes `&mut self`; there is no `Mutex` around it.
+
+use bytes::Bytes;
+use hyper::body::Incoming;
+use hyper::header::{HeaderMap, HeaderName};
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::sync::{Arc, OnceLock};
+
+use webx_core::auth::IClaims;
+use webx_core::dispatch_runtime::DispatchRuntime;
+use webx_core::error::{Error, Result};
+use webx_core::form::MultipartForm;
+use webx_core::http::{
+    IClaimsExt, IHttpContext, IHttpRequest, IHttpResponse, RequestBodyStream, ResponseBody,
+};
+
+use crate::body::{self, BodyLimits};
+use crate::response::{self, EndpointResult, RespBody, ResponseBodyState, ResponseParts};
+
+/// Concrete implementation of `IHttpContext` for one engine request.
+pub struct EngineContext {
+    req: EngineRequest,
+    resp: EngineResponse,
+    /// Authentication claims set by authentication middleware.
+    claims: Option<Box<dyn IClaims>>,
+    /// A request rejection recorded at construction (e.g. an oversized declared
+    /// `Content-Length`). The pipeline turns it into a normal error response
+    /// from the innermost handler so CORS/security headers/logging still run.
+    early_error: Option<Error>,
+    /// DI handles (provider + handler registry) for endpoint dispatch.
+    dispatch_runtime: Option<Arc<DispatchRuntime>>,
+    /// Trace id assigned by the tracing middleware; the same value the
+    /// `x-trace-id` response header carries and handlers read through
+    /// `RequestContext::trace_id()`.
+    trace_id: Option<String>,
+}
+
+impl EngineContext {
+    /// Create a context around `req`.
+    ///
+    /// No I/O happens here: the body stays a live stream until the endpoint
+    /// asks for it. `peer` is the client address captured by the accept loop
+    /// (`None` when the host cannot report it).
+    pub fn new(
+        req: hyper::Request<Incoming>,
+        limits: Arc<BodyLimits>,
+        peer: Option<SocketAddr>,
+        dispatch: Arc<DispatchRuntime>,
+    ) -> Self {
+        let (parts, body) = req.into_parts();
+        let mut context = Self::from_request(EngineRequest::new(
+            parts,
+            BodyState::Pending(Some(body)),
+            limits,
+            peer,
+        ));
+        context.dispatch_runtime = Some(dispatch);
+        context
+    }
+
+    /// Create a context from moved hyper request parts and an already-buffered
+    /// body.
+    ///
+    /// `hyper::body::Incoming` cannot be constructed outside a live connection,
+    /// so this is the in-process/test constructor (the host adapter's embedded
+    /// tests use it too). The early oversized-`Content-Length` check is the
+    /// same one [`EngineContext::new`] performs.
+    pub fn from_parts(
+        parts: http::request::Parts,
+        body: Bytes,
+        limits: Arc<BodyLimits>,
+        peer: Option<SocketAddr>,
+        dispatch: Option<Arc<DispatchRuntime>>,
+    ) -> Self {
+        let mut context = Self::from_request(EngineRequest::new(
+            parts,
+            BodyState::Buffered(body),
+            limits,
+            peer,
+        ));
+        context.dispatch_runtime = dispatch;
+        context
+    }
+
+    fn from_request(req: EngineRequest) -> Self {
+        let early_error = early_error_for(&req.parts.headers, &req.limits);
+        Self {
+            req,
+            resp: EngineResponse::new(200),
+            claims: None,
+            early_error,
+            dispatch_runtime: None,
+            trace_id: None,
+        }
+    }
+
+    /// Record the route matched by the router.
+    ///
+    /// `pattern` is the matched template (e.g. `/api/users/{id}`) and `params`
+    /// the values captured from it. Static routes pass an empty `params`, and
+    /// the compatibility `route_params()` map stays empty and allocation-free.
+    pub fn set_route(&mut self, pattern: Arc<str>, params: Vec<(&'static str, String)>) {
+        self.req.set_route(pattern, params);
+    }
+
+    /// Write the result of one endpoint dispatch into the response.
+    ///
+    /// * [`EndpointResult::Empty`] — `204 No Content` with no body;
+    /// * [`EndpointResult::Json`] — the serialized bytes with an explicit
+    ///   status and `content-type: application/json`;
+    /// * [`EndpointResult::Action`] — the action result executes itself (files,
+    ///   SSE, custom headers/status/body).
+    pub async fn write_endpoint_result(&mut self, result: EndpointResult) -> Result<()> {
+        match result {
+            EndpointResult::Empty => {
+                self.resp.status = 204;
+                self.resp.body = ResponseBodyState::None;
+            }
+            EndpointResult::Json { status, body } => {
+                self.resp.status = status;
+                response::insert_static_header(
+                    &mut self.resp.headers,
+                    "content-type",
+                    "application/json",
+                );
+                self.resp.body = ResponseBodyState::Bytes(body);
+            }
+            EndpointResult::Action(action) => action.execute(self).await?,
+        }
+        Ok(())
+    }
+
+    /// Finish the request and produce the hyper response.
+    ///
+    /// Security headers, request ids and cache policy are middleware concerns;
+    /// this applies only status, headers, content type and the body (including
+    /// HEAD suppression and file/range semantics).
+    pub async fn finalize(self) -> hyper::Response<RespBody> {
+        let Self { mut req, resp, .. } = self;
+        resp.finalize(&mut req).await
+    }
+}
+
+impl IClaimsExt for EngineContext {
+    fn set_claims(&mut self, claims: Box<dyn IClaims>) {
+        self.claims = Some(claims);
+    }
+
+    fn claims(&self) -> Option<&dyn IClaims> {
+        self.claims.as_deref()
+    }
+}
+
+impl IHttpContext for EngineContext {
+    fn request(&self) -> &dyn IHttpRequest {
+        &self.req
+    }
+
+    fn request_mut(&mut self) -> &mut dyn IHttpRequest {
+        &mut self.req
+    }
+
+    fn response(&self) -> &dyn IHttpResponse {
+        &self.resp
+    }
+
+    fn response_mut(&mut self) -> &mut dyn IHttpResponse {
+        &mut self.resp
+    }
+
+    fn take_early_error(&mut self) -> Option<Error> {
+        self.early_error.take()
+    }
+
+    fn dispatch_runtime(&self) -> Option<&Arc<DispatchRuntime>> {
+        self.dispatch_runtime.as_ref()
+    }
+
+    fn trace_id(&self) -> Option<&str> {
+        self.trace_id.as_deref()
+    }
+
+    fn set_trace_id(&mut self, trace_id: &str) {
+        self.trace_id = Some(trace_id.to_string());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Request
+// ---------------------------------------------------------------------------
+
+/// State of the request body.
+enum BodyState {
+    /// Still streaming from the connection. `None` means it was already taken.
+    Pending(Option<Incoming>),
+    /// Fully buffered, replayable. `Bytes` keeps a clone cheap instead of
+    /// copying the whole body again.
+    Buffered(Bytes),
+    /// Parsed as a multipart form.
+    Form(Arc<MultipartForm>),
+}
+
+/// Concrete implementation of `IHttpRequest`.
+pub struct EngineRequest {
+    /// hyper's request parts: method, URI, headers and extensions, moved.
+    parts: http::request::Parts,
+    peer: Option<SocketAddr>,
+    body: BodyState,
+    /// Global body/upload limits shared with the engine.
+    limits: Arc<BodyLimits>,
+    /// Effective non-multipart body cap; `#[max_body_size]` overrides it per
+    /// route through [`IHttpRequest::set_max_body_size`].
+    body_limit: usize,
+    route_params: HashMap<String, String>,
+    /// Matched route template, kept as an `Arc<str>` so static routes do not
+    /// allocate a `String` per request.
+    route_pattern: Option<Arc<str>>,
+    /// Compatibility view for [`IHttpRequest::route_pattern_mut`]; `Some`
+    /// once someone asked for mutable access.
+    route_pattern_compat: Option<Option<String>>,
+    /// Lazily parsed query-string views.
+    query: OnceLock<QueryViews>,
+}
+
+impl EngineRequest {
+    fn new(
+        parts: http::request::Parts,
+        body: BodyState,
+        limits: Arc<BodyLimits>,
+        peer: Option<SocketAddr>,
+    ) -> Self {
+        let body_limit = limits.body;
+        Self {
+            parts,
+            peer,
+            body,
+            limits,
+            body_limit,
+            route_params: HashMap::new(),
+            route_pattern: None,
+            route_pattern_compat: None,
+            query: OnceLock::new(),
+        }
+    }
+
+    fn set_route(&mut self, pattern: Arc<str>, params: Vec<(&'static str, String)>) {
+        self.route_pattern = Some(pattern);
+        self.route_pattern_compat = None;
+        // An empty iterator collects into an empty map without allocating, so a
+        // static route keeps the map untouched.
+        self.route_params = params
+            .into_iter()
+            .map(|(name, value)| (name.to_string(), value))
+            .collect();
+    }
+
+    fn query_views(&self) -> &QueryViews {
+        self.query.get_or_init(|| match self.parts.uri.query() {
+            Some(query) if !query.is_empty() => parse_query_string(query),
+            _ => QueryViews::default(),
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl IHttpRequest for EngineRequest {
+    fn method(&self) -> &str {
+        self.parts.method.as_str()
+    }
+
+    fn path(&self) -> &str {
+        self.parts.uri.path()
+    }
+
+    fn header(&self, name: &str) -> Option<&str> {
+        self.parts
+            .headers
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+    }
+
+    fn query(&self) -> &HashMap<String, String> {
+        &self.query_views().flat
+    }
+
+    fn query_all(&self) -> Option<&HashMap<String, Vec<String>>> {
+        Some(&self.query_views().multi)
+    }
+
+    fn remote_addr(&self) -> Option<SocketAddr> {
+        self.peer
+    }
+
+    fn set_max_body_size(&mut self, limit: usize) {
+        self.body_limit = limit;
+    }
+
+    fn route_params(&self) -> &HashMap<String, String> {
+        &self.route_params
+    }
+
+    fn route_params_mut(&mut self) -> &mut HashMap<String, String> {
+        &mut self.route_params
+    }
+
+    fn route_pattern(&self) -> Option<&str> {
+        match &self.route_pattern_compat {
+            Some(view) => view.as_deref(),
+            None => self.route_pattern.as_deref(),
+        }
+    }
+
+    fn route_pattern_mut(&mut self) -> &mut Option<String> {
+        if self.route_pattern_compat.is_none() {
+            self.route_pattern_compat = Some(self.route_pattern.as_deref().map(str::to_owned));
+        }
+        self.route_pattern_compat
+            .as_mut()
+            .expect("the compatibility view was initialised above")
+    }
+
+    async fn body_bytes(&mut self) -> Result<Vec<u8>> {
+        Ok(self.body_bytes_shared().await?.to_vec())
+    }
+
+    async fn body_bytes_shared(&mut self) -> Result<Bytes> {
+        match &self.body {
+            BodyState::Buffered(bytes) => return Ok(bytes.clone()),
+            BodyState::Form(_) => {
+                return Err(Error::State(
+                    "request body was already read as multipart/form-data".to_string(),
+                ))
+            }
+            BodyState::Pending(_) => {}
+        }
+
+        let incoming = match &mut self.body {
+            BodyState::Pending(slot) => slot.take(),
+            _ => {
+                return Err(Error::State(
+                    "request body has already been consumed".to_string(),
+                ))
+            }
+        };
+        let Some(incoming) = incoming else {
+            return Err(Error::State(
+                "request body has already been consumed".to_string(),
+            ));
+        };
+
+        let bytes = body::read_body(incoming, self.body_limit).await?;
+        self.body = BodyState::Buffered(bytes.clone());
+        Ok(bytes)
+    }
+
+    async fn body_stream(&mut self) -> Result<RequestBodyStream> {
+        match &self.body {
+            BodyState::Form(_) => {
+                return Err(Error::State(
+                    "request body was already read as multipart/form-data".to_string(),
+                ))
+            }
+            BodyState::Buffered(bytes) => {
+                let bytes = bytes.clone();
+                return Ok(Box::pin(futures_util::stream::once(async move {
+                    Ok::<Bytes, Error>(bytes)
+                })));
+            }
+            BodyState::Pending(_) => {}
+        }
+
+        let incoming = match &mut self.body {
+            BodyState::Pending(slot) => slot.take(),
+            _ => {
+                return Err(Error::State(
+                    "request body has already been consumed".to_string(),
+                ))
+            }
+        };
+        let Some(incoming) = incoming else {
+            return Err(Error::State(
+                "request body has already been consumed".to_string(),
+            ));
+        };
+
+        Ok(body::stream_body(incoming, self.body_limit))
+    }
+
+    async fn body_text(&mut self) -> Result<String> {
+        let bytes = self.body_bytes_shared().await?;
+        String::from_utf8(bytes.to_vec())
+            .map_err(|_| Error::Validation("request body is not valid UTF-8".to_string()))
+    }
+
+    async fn multipart(&mut self) -> Result<Arc<MultipartForm>> {
+        if let BodyState::Form(form) = &self.body {
+            return Ok(Arc::clone(form));
+        }
+        if let BodyState::Buffered(_) = &self.body {
+            return Err(Error::UnsupportedMediaType(
+                "request body was already read as a non-multipart body".to_string(),
+            ));
+        }
+
+        let raw_content_type = self
+            .parts
+            .headers
+            .get("content-type")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("");
+        if !body::is_multipart_content_type(Some(raw_content_type)) {
+            return Err(Error::UnsupportedMediaType(
+                "expected Content-Type: multipart/form-data".to_string(),
+            ));
+        }
+        let boundary = body::multipart_boundary(raw_content_type).ok_or_else(|| {
+            Error::Validation(
+                "multipart/form-data request is missing its boundary parameter".to_string(),
+            )
+        })?;
+
+        let incoming = match &mut self.body {
+            BodyState::Pending(slot) => slot.take(),
+            _ => {
+                return Err(Error::State(
+                    "request body has already been consumed".to_string(),
+                ))
+            }
+        };
+        let Some(incoming) = incoming else {
+            return Err(Error::State(
+                "request body has already been consumed".to_string(),
+            ));
+        };
+
+        let form = Arc::new(body::parse_multipart(incoming, &boundary, &self.limits).await?);
+        self.body = BodyState::Form(Arc::clone(&form));
+        Ok(form)
+    }
+}
+
+/// The two query-string views derived from the raw query.
+#[derive(Default)]
+struct QueryViews {
+    /// Last value per key — the compatibility view of `IHttpRequest::query`.
+    flat: HashMap<String, String>,
+    /// Every value per key — what `Vec<T>` fields bind from.
+    multi: HashMap<String, Vec<String>>,
+}
+
+/// Parse a query string like "key1=val1&key2=val2" into both views.
+///
+/// Repeated keys keep their order; the last value wins in the flat view; empty
+/// pairs are ignored.
+fn parse_query_string(query: &str) -> QueryViews {
+    let mut views = QueryViews::default();
+    for pair in query.split('&') {
+        if pair.is_empty() {
+            continue;
+        }
+        let mut parts = pair.splitn(2, '=');
+        if let (Some(key), Some(value)) = (parts.next(), parts.next()) {
+            let key = percent_decode(key);
+            let value = percent_decode(value);
+            views.flat.insert(key.clone(), value.clone());
+            views.multi.entry(key).or_default().push(value);
+        }
+    }
+    views
+}
+
+/// Decode `%XX` escapes and `+` into a UTF-8 string.
+///
+/// Escapes are decoded as bytes and then validated as UTF-8, so multi-byte
+/// characters (`%E4%B8%AD` -> 中) survive.
+fn percent_decode(s: &str) -> String {
+    if !s.contains('%') && !s.contains('+') {
+        return s.to_string();
+    }
+
+    let mut bytes = Vec::with_capacity(s.len());
+    let mut chars = s.bytes();
+    while let Some(byte) = chars.next() {
+        match byte {
+            b'%' => {
+                let hi = chars.next().and_then(|c| (c as char).to_digit(16));
+                let lo = chars.next().and_then(|c| (c as char).to_digit(16));
+                match (hi, lo) {
+                    (Some(hi), Some(lo)) => bytes.push((hi * 16 + lo) as u8),
+                    _ => bytes.push(b'%'),
+                }
+            }
+            b'+' => bytes.push(b' '),
+            other => bytes.push(other),
+        }
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+/// An oversized declared `Content-Length` is recorded, not written eagerly:
+/// writing here used to bypass the middleware pipeline (no CORS, no security
+/// headers, no access log, no metrics). The router handler turns it into a
+/// normal `PayloadTooLarge` error on the way in.
+fn early_error_for(headers: &HeaderMap, limits: &BodyLimits) -> Option<Error> {
+    let content_type = headers.get("content-type").and_then(|v| v.to_str().ok());
+    let declared_limit = if body::is_multipart_content_type(content_type) {
+        limits.multipart_body
+    } else {
+        limits.body as u64
+    };
+    headers
+        .get("content-length")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|declared| *declared > declared_limit)
+        .map(|_| {
+            Error::PayloadTooLarge(format!(
+                "request body exceeds the {declared_limit}-byte limit"
+            ))
+        })
+}
+
+// ---------------------------------------------------------------------------
+// Response
+// ---------------------------------------------------------------------------
+
+/// Concrete implementation of `IHttpResponse`.
+pub struct EngineResponse {
+    status: u16,
+    headers: HeaderMap,
+    body: ResponseBodyState,
+}
+
+impl EngineResponse {
+    fn new(status: u16) -> Self {
+        Self {
+            status,
+            headers: HeaderMap::new(),
+            body: ResponseBodyState::None,
+        }
+    }
+
+    async fn finalize(self, req: &mut dyn IHttpRequest) -> hyper::Response<RespBody> {
+        ResponseParts {
+            status: self.status,
+            headers: self.headers,
+            body: self.body,
+        }
+        .assemble(req)
+        .await
+    }
+}
+
+#[async_trait::async_trait]
+impl IHttpResponse for EngineResponse {
+    fn status(&self) -> u16 {
+        self.status
+    }
+
+    fn has_body(&self) -> bool {
+        !matches!(self.body, ResponseBodyState::None)
+    }
+
+    fn set_status(&mut self, code: u16) {
+        self.status = code;
+    }
+
+    fn set_header(&mut self, key: &str, value: &str) {
+        response::set_header(&mut self.headers, key, value);
+    }
+
+    fn set_header_static(&mut self, key: &'static str, value: &'static str) {
+        response::insert_static_header(&mut self.headers, key, value);
+    }
+
+    fn append_header(&mut self, key: &str, value: &str) {
+        response::append_header(&mut self.headers, key, value);
+    }
+
+    fn remove_header(&mut self, key: &str) {
+        if let Ok(name) = HeaderName::from_bytes(key.as_bytes()) {
+            self.headers.remove(name);
+        }
+    }
+
+    async fn write_bytes(&mut self, data: Vec<u8>) -> Result<()> {
+        self.body = ResponseBodyState::Bytes(Bytes::from(data));
+        Ok(())
+    }
+
+    async fn write_bytes_shared(&mut self, data: Bytes) -> Result<()> {
+        self.body = ResponseBodyState::Bytes(data);
+        Ok(())
+    }
+
+    async fn write_text(&mut self, text: &str) -> Result<()> {
+        self.body = ResponseBodyState::Bytes(Bytes::copy_from_slice(text.as_bytes()));
+        Ok(())
+    }
+
+    async fn write_body(&mut self, body: ResponseBody) -> Result<()> {
+        self.body = match body {
+            ResponseBody::Bytes(bytes) => ResponseBodyState::Bytes(Bytes::from(bytes)),
+            ResponseBody::File(file) => ResponseBodyState::File(file),
+        };
+        Ok(())
+    }
+
+    fn body_bytes(&self) -> Vec<u8> {
+        match &self.body {
+            ResponseBodyState::Bytes(bytes) => bytes.to_vec(),
+            ResponseBodyState::None | ResponseBodyState::File(_) => Vec::new(),
+        }
+    }
+
+    fn header(&self, key: &str) -> Option<&str> {
+        self.headers.get(key).and_then(|value| value.to_str().ok())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use http_body_util::BodyExt;
+
+    fn context(
+        method: &str,
+        uri: &str,
+        headers: &[(&str, &str)],
+        body: &'static [u8],
+    ) -> EngineContext {
+        let mut builder = http::Request::builder().method(method).uri(uri);
+        for (name, value) in headers {
+            builder = builder.header(*name, *value);
+        }
+        let parts = builder
+            .body(())
+            .expect("test request builds")
+            .into_parts()
+            .0;
+        EngineContext::from_parts(
+            parts,
+            Bytes::from_static(body),
+            Arc::new(BodyLimits::default()),
+            None,
+            None,
+        )
+    }
+
+    async fn body_of(response: hyper::Response<RespBody>) -> Bytes {
+        response
+            .into_body()
+            .collect()
+            .await
+            .expect("response body collects")
+            .to_bytes()
+    }
+
+    #[tokio::test]
+    async fn append_header_keeps_every_value() {
+        let mut ctx = context("GET", "/", &[], b"");
+        ctx.response_mut().append_header("set-cookie", "a=1");
+        ctx.response_mut().append_header("set-cookie", "b=2");
+
+        let response = ctx.finalize().await;
+        let values: Vec<_> = response
+            .headers()
+            .get_all("set-cookie")
+            .iter()
+            .map(|value| value.to_str().unwrap())
+            .collect();
+        assert_eq!(values, ["a=1", "b=2"]);
+    }
+
+    #[tokio::test]
+    async fn set_header_replaces_a_previous_value() {
+        let mut ctx = context("GET", "/", &[], b"");
+        ctx.response_mut().append_header("x-test", "one");
+        ctx.response_mut().set_header("x-test", "two");
+
+        let response = ctx.finalize().await;
+        assert_eq!(
+            response
+                .headers()
+                .get_all("x-test")
+                .iter()
+                .filter_map(|value| value.to_str().ok())
+                .collect::<Vec<_>>(),
+            ["two"]
+        );
+    }
+
+    #[tokio::test]
+    async fn head_keeps_content_length_and_drops_the_body() {
+        let mut ctx = context("HEAD", "/report", &[], b"");
+        ctx.response_mut()
+            .set_header("content-type", "application/json");
+        ctx.response_mut()
+            .write_bytes(b"[1,2,3]".to_vec())
+            .await
+            .unwrap();
+
+        let response = ctx.finalize().await;
+        assert_eq!(response.headers()["content-length"], "7");
+        assert_eq!(response.headers()["content-type"], "application/json");
+        assert!(body_of(response).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_keeps_the_body() {
+        let mut ctx = context("GET", "/report", &[], b"");
+        ctx.response_mut()
+            .write_bytes(b"[1,2,3]".to_vec())
+            .await
+            .unwrap();
+
+        let response = ctx.finalize().await;
+        assert_eq!(&body_of(response).await[..], b"[1,2,3]");
+    }
+
+    #[tokio::test]
+    async fn json_endpoint_result_sets_status_and_content_type() {
+        let mut ctx = context("GET", "/", &[], b"");
+        ctx.write_endpoint_result(EndpointResult::Json {
+            status: 201,
+            body: Bytes::from_static(b"{\"id\":1}"),
+        })
+        .await
+        .unwrap();
+
+        let response = ctx.finalize().await;
+        assert_eq!(response.status(), 201);
+        assert_eq!(response.headers()["content-type"], "application/json");
+        assert_eq!(&body_of(response).await[..], b"{\"id\":1}");
+    }
+
+    #[tokio::test]
+    async fn empty_endpoint_result_is_204_without_a_body() {
+        let mut ctx = context("GET", "/", &[], b"");
+        ctx.write_endpoint_result(EndpointResult::Empty)
+            .await
+            .unwrap();
+
+        let response = ctx.finalize().await;
+        assert_eq!(response.status(), 204);
+        assert!(body_of(response).await.is_empty());
+    }
+
+    #[test]
+    fn route_params_and_pattern_are_set_by_the_router() {
+        let mut ctx = context("GET", "/users/7", &[], b"");
+        // A static route has no parameters.
+        assert!(ctx.request().route_params().is_empty());
+        assert_eq!(ctx.request().route_pattern(), None);
+
+        ctx.set_route(Arc::from("/users/{id}"), vec![("id", "7".to_string())]);
+        assert_eq!(ctx.request().route_pattern(), Some("/users/{id}"));
+        assert_eq!(
+            ctx.request().route_params().get("id").map(String::as_str),
+            Some("7")
+        );
+
+        // The mutable compatibility view materializes lazily and then wins.
+        assert_eq!(
+            ctx.request_mut().route_pattern_mut().as_deref(),
+            Some("/users/{id}")
+        );
+        *ctx.request_mut().route_pattern_mut() = Some("/users/{id}/v2".to_string());
+        assert_eq!(ctx.request().route_pattern(), Some("/users/{id}/v2"));
+    }
+
+    #[test]
+    fn query_is_parsed_lazily_and_keeps_every_value() {
+        let ctx = context(
+            "GET",
+            "/search?tag=a&tag=b&q=hello+world&p=%E4%B8%AD",
+            &[],
+            b"",
+        );
+        assert_eq!(
+            ctx.request().query().get("tag").map(String::as_str),
+            Some("b")
+        );
+        assert_eq!(
+            ctx.request().query_all().unwrap().get("tag").unwrap(),
+            &["a".to_string(), "b".to_string()]
+        );
+        assert_eq!(
+            ctx.request().query().get("q").map(String::as_str),
+            Some("hello world")
+        );
+        assert_eq!(
+            ctx.request().query().get("p").map(String::as_str),
+            Some("中")
+        );
+    }
+
+    #[test]
+    fn oversized_declared_content_length_is_recorded_not_written() {
+        let mut ctx = context("POST", "/upload", &[("content-length", "999999999")], b"");
+        // The default limit is 10 MiB, so the declared length is oversized.
+        assert!(matches!(
+            ctx.take_early_error(),
+            Some(Error::PayloadTooLarge(_))
+        ));
+        // The rejection is taken once; the response was never written eagerly.
+        assert_eq!(ctx.response().status(), 200);
+        assert!(ctx.take_early_error().is_none());
+    }
+
+    #[tokio::test]
+    async fn multipart_is_only_parsed_from_a_multipart_request() {
+        let mut ctx = context(
+            "POST",
+            "/upload",
+            &[("content-type", "application/json")],
+            b"",
+        );
+        let error = ctx
+            .request_mut()
+            .multipart()
+            .await
+            .expect_err("JSON is not multipart");
+        assert!(matches!(error, Error::UnsupportedMediaType(_)));
+    }
+}

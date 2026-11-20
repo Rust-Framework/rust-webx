@@ -114,6 +114,18 @@ fn expand_endpoint(
         generate_dispatch_fn(self_ty, &rsp_type, rsp_type_str == "()", is_raw_response);
 
     let dispatch_fn_name = format_ident!("__lrwf_dispatch_{}", req_type_name.replace("::", "_"));
+    let bind_fn_name = format_ident!("__lrwf_bind_{}", req_type_name.replace("::", "_"));
+    let bind_fn = quote! {
+        #[doc(hidden)]
+        fn #bind_fn_name<'a>(
+            ctx: &'a mut dyn ::webx::IHttpContext,
+        ) -> ::webx::BoxedBindFuture<'a> {
+            Box::pin(async move {
+                let request = <#self_ty as ::webx::RequestModel>::bind(ctx).await?;
+                Ok(Box::new(request) as Box<dyn ::std::any::Any + Send>)
+            })
+        }
+    };
 
     // `#[authorize(dynamic)]` flips the endpoint to "static gate = authenticated
     // only, rules delegated to IDynamicAuthorizer". Emitted only for dynamic
@@ -137,6 +149,7 @@ fn expand_endpoint(
             &[#(#params_tokens),*],
             #authorization,
         )
+        .with_response_type_id(::std::any::TypeId::of::<#rsp_type>())
         .with_max_body_size(#max_body_size_tokens)
     };
     let route_entry = if authorization_dynamic {
@@ -149,6 +162,15 @@ fn expand_endpoint(
         #item_impl
 
         #dispatch_fn
+
+        #bind_fn
+
+        ::webx::inventory::submit! {
+            ::webx::RequestBinder {
+                req_type_id: ::std::any::TypeId::of::<#self_ty>(),
+                bind: #bind_fn_name,
+            }
+        }
 
         ::webx::inventory::submit! {
             ::webx::RouteDispatch {

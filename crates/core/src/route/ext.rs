@@ -238,6 +238,9 @@ impl IServiceCollectionExt for ServiceCollection {
         Req: Send + 'static,
         Rsp: Send + 'static,
     {
+        // The fast HTTP path must keep behavior semantics: mark the process as
+        // using typed behaviors so the host does not bypass the chain.
+        TYPED_BEHAVIOR_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // Singleton per (Req, Rsp) pair: the factory (and therefore constructor
         // injection) runs once per provider; behaviors are stateless wrappers.
         self.add(ServiceLifetime::Singleton, factory)
@@ -341,9 +344,19 @@ impl IServiceCollectionExt for ServiceCollection {
 }
 
 // Global flags so HostBuilder knows what to scan at build time.
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 static ENDPOINT_SCAN: AtomicBool = AtomicBool::new(false);
 static MEDIATOR_ACTIVE: AtomicBool = AtomicBool::new(false);
+static TYPED_BEHAVIOR_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+/// Number of typed pipeline behaviors registered in this process.
+///
+/// The HTTP fast path bypasses the typed pipeline only when this is zero. A
+/// non-zero count is process-global and intentionally conservative: any host
+/// that registers a behavior falls back to the mediated path for every host.
+pub fn typed_pipeline_count() -> usize {
+    TYPED_BEHAVIOR_COUNT.load(std::sync::atomic::Ordering::Relaxed)
+}
 
 pub fn should_scan_endpoints() -> bool {
     ENDPOINT_SCAN.load(std::sync::atomic::Ordering::SeqCst)

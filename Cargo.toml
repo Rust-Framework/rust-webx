@@ -4,6 +4,7 @@ resolver = "2"
 members = [
     "crates/core",
     "crates/host",
+    "crates/engine",
     "crates/macros",
     "crates/webx",
     "crates/spa",
@@ -27,7 +28,7 @@ members = [
 unsafe_code = "forbid"
 
 [workspace.package]
-version = "1.5.0"
+version = "2.0.0"
 edition = "2021"
 rust-version = "1.95"
 license = "MIT"
@@ -39,17 +40,18 @@ description = "rust-webx - A Rust WebApi framework inspired by ASP.NET Core, bui
 
 [workspace.dependencies]
 # Internal crates
-rust-webx-core = { version = "1.5.0", path = "crates/core" }
-rust-webx-host = { version = "1.5.0", path = "crates/host" }
-rust-webx-macros = { version = "1.5.0", path = "crates/macros" }
-rust-webx = { version = "1.5.0", path = "crates/webx" }
-rust-webx-spa = { version = "1.5.0", path = "crates/spa" }
-rust-webx-build = { version = "1.5.0", path = "crates/build" }
-rust-webx-openapi = { version = "1.5.0", path = "crates/openapi" }
-rust-webx-ai = { version = "1.5.0", path = "crates/ai" }
-rust-webx-ai-ef = { version = "1.5.0", path = "crates/ai-ef" }
-rust-webx-client = { version = "1.5.0", path = "crates/client" }
-rust-webx-ai-gateway = { version = "1.5.0", path = "crates/gateway" }
+rust-webx-core = { version = "2.0.0", path = "crates/core" }
+rust-webx-host = { version = "2.0.0", path = "crates/host" }
+rust-webx-engine = { version = "2.0.0", path = "crates/engine" }
+rust-webx-macros = { version = "2.0.0", path = "crates/macros" }
+rust-webx = { version = "2.0.0", path = "crates/webx" }
+rust-webx-spa = { version = "2.0.0", path = "crates/spa" }
+rust-webx-build = { version = "2.0.0", path = "crates/build" }
+rust-webx-openapi = { version = "2.0.0", path = "crates/openapi" }
+rust-webx-ai = { version = "2.0.0", path = "crates/ai" }
+rust-webx-ai-ef = { version = "2.0.0", path = "crates/ai-ef" }
+rust-webx-client = { version = "2.0.0", path = "crates/client" }
+rust-webx-ai-gateway = { version = "2.0.0", path = "crates/gateway" }
 
 # Docbit sub-crates
 docbit-contracts = { version = "0.1.0", path = "docbit/contracts" }

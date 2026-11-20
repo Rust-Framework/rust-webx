@@ -4,11 +4,6 @@
 //! are caught and converted to well-formed HTTP error responses using
 //! `Error::status_code()`.
 
-use hyper::body::Incoming;
-use hyper::service::service_fn;
-use hyper::Request;
-use hyper_util::rt::{TokioExecutor, TokioIo};
-use hyper_util::server::conn::auto;
 use rust_dix::{ServiceCollection, ServiceProvider};
 use webx_core::app::IHost;
 use webx_core::auth::IAuthenticationScheme;
@@ -16,7 +11,6 @@ use webx_core::config::{self, AppOptions};
 use webx_core::error::{Error, IErrorResponseWriter, Result};
 use webx_core::handler::IHostedService;
 use webx_core::hosted::{CancellationToken, ShutdownToken};
-use webx_core::http::IHttpContext;
 use webx_core::localization::{IStringLocalizer, LocalizationOptions, StringLocalizer};
 use webx_core::middleware::IMiddleware;
 use webx_core::mode::AppMode;
@@ -26,17 +20,16 @@ use webx_core::security::{ISessionStore, ITokenIssuer};
 
 use crate::auth::{AuthenticationMiddleware, JwtScheme};
 use crate::auth_jwt::{init_jwt_secret, JwtAuth, JwtSecret, JwtTokenIssuer};
-use crate::context::{BodyLimits, HttpContext, RespBody};
+use crate::context::BodyLimits;
 use crate::cors::{CorsConfig, CorsMiddleware};
-use crate::endpoint::{StaticHtmlEndpoint, StaticJsonEndpoint, StubEndpoint};
+use crate::endpoint::{DirectStubEndpoint, StaticHtmlEndpoint, StaticJsonEndpoint, StubEndpoint};
 use crate::health::{
     HealthCheckEndpoint, HealthCheckRegistry, HealthStatus, IHealthCheck,
     DEFAULT_HEALTH_CHECK_TIMEOUT,
 };
 use crate::memory_cache::MemoryCache;
 use crate::metrics::{HttpMetrics, MetricsEndpoint, MetricsMiddleware};
-use crate::pipeline::{HandlerFn, MiddlewarePipeline};
-use crate::problem_response::{build_problem, write_problem_response, write_unauthorized};
+use crate::pipeline::MiddlewarePipeline;
 use crate::rate_limit::RateLimitMiddleware;
 use crate::router::Router;
 use jsonwebtoken::{DecodingKey, Validation};
@@ -45,15 +38,10 @@ use webx_core::DispatchRuntime;
 use webx_openapi::{generate_openapi_spec, APIUI_HTML};
 use webx_spa::{EmbeddedAssets, SpaMiddleware, SpaSource};
 
-use futures_util::FutureExt;
-use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-use rustls::ServerConfig;
-use rustls_pemfile::{certs, pkcs8_private_keys, rsa_private_keys};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::task::JoinSet;
-use tokio_rustls::TlsAcceptor;
 
 /// Returns true when the JWT secret is missing, too short, or a known placeholder.
 fn is_weak_jwt_secret(secret: &str) -> bool {
@@ -123,6 +111,11 @@ fn with_embedded_assets(
 /// the `true` value, so a listener that subscribes later still sees it.
 type ShutdownSignal = Arc<tokio::sync::watch::Sender<bool>>;
 
+/// Bound on `IHostedService::start` during host startup.
+const HOSTED_START_TIMEOUT_SECS: u64 = 30;
+/// Bound on `IHostedService::stop` during graceful shutdown.
+const HOSTED_STOP_TIMEOUT_SECS: u64 = 30;
+
 pub struct Host {
     #[allow(dead_code)]
     provider: Arc<ServiceProvider>,
@@ -132,17 +125,12 @@ pub struct Host {
     endpoints: Arc<dyn IEndpointCatalog>,
     /// Resolves endpoint resource keys for the host's configured culture.
     localizer: Arc<dyn IStringLocalizer>,
-    /// Body and upload limits, derived from `App` + `Form` configuration.
-    body_limits: BodyLimits,
-    pipeline: Arc<MiddlewarePipeline>,
     /// The matchit router (retained for introspection).
     #[allow(dead_code)]
     router: Arc<Router>,
-    /// Pre-built router handler —eliminates per-request Arc::new.
-    router_handler: HandlerFn,
-    /// Ordered error writers; the first match overrides `problem+json`.
-    error_writers: Arc<Vec<Arc<dyn IErrorResponseWriter>>>,
-    mode: AppMode,
+    /// 2.0 execution engine state (workers, router, pipeline). The legacy
+    /// `router_handler`/`pipeline` fields remain until `serve_http` is deleted.
+    engine: Arc<webx_engine::Shared>,
     /// Kept for introspection; the middleware already holds its own copy.
     #[allow(dead_code)]
     spa_source: Option<SpaSource>,
@@ -1137,9 +1125,10 @@ impl HostBuilder {
         // still carries Access-Control-Allow-Origin; Metrics runs before
         // RateLimit so rate-limited requests are counted; user middleware
         // defaults to AfterAuth so it can read the authenticated principal.
-        pipeline.add_middleware(Arc::new(
-            crate::security_headers::SecurityHeadersMiddleware::new(),
-        ));
+        // Security headers are applied by the engine's finalizer (static
+        // HeaderName/HeaderValue, no per-request middleware allocation). The
+        // public `SecurityHeadersMiddleware` remains available for custom
+        // pipelines, but the host does not add it a second time.
         pipeline.add_middleware(Arc::new(crate::request_id::RequestIdMiddleware::new()));
 
         for spec in self
@@ -1170,7 +1159,9 @@ impl HostBuilder {
                     .to_string(),
             ));
         }
-        pipeline.add_middleware(Arc::new(CorsMiddleware::new(cors)));
+        if !cors.origins.is_empty() {
+            pipeline.add_middleware(Arc::new(CorsMiddleware::new(cors)));
+        }
 
         if options.metrics.enabled {
             tracing::info!("[Host] Metrics enabled at GET /metrics");
@@ -1297,6 +1288,7 @@ impl HostBuilder {
         }
 
         let mut router = Router::new();
+        let mut engine_router = webx_engine::Router::new();
         let mut route_count = 0usize;
 
         crate::diagnostics::validate_route_configuration()?;
@@ -1335,6 +1327,28 @@ impl HostBuilder {
             ));
         }
 
+        // Direct dispatch is observationally identical only when no typed
+        // pipeline behavior exists for the process; the global count is a
+        // conservative gate (a behavior registered by another host disables the
+        // fast path here too).
+        let direct_dispatch_enabled = webx_core::route::ext::typed_pipeline_count() == 0;
+        let mut direct_by_pair: std::collections::HashMap<
+            (std::any::TypeId, std::any::TypeId),
+            webx_core::route::scan::HandlerDispatchFn,
+        > = std::collections::HashMap::new();
+        if direct_dispatch_enabled {
+            for dispatch in inventory::iter::<webx_core::route::scan::HandlerDispatch> {
+                let key = (dispatch.req_type_id, dispatch.rsp_type_id);
+                if direct_by_pair.insert(key, dispatch.dispatch).is_some() {
+                    return Err(Error::Di(format!(
+                        "duplicate direct handler registration for request type '{}'; \
+                         each (request, response) pair may have exactly one #[handler]",
+                        dispatch.req_type_name
+                    )));
+                }
+            }
+        }
+
         for entry in inventory::iter::<RouteEntry> {
             route_count += 1;
             let dispatch_fn = dispatch_by_id
@@ -1351,8 +1365,27 @@ impl HostBuilder {
                 authorizers: authorizers.clone(),
                 max_body_size: entry.max_body_size,
             });
-            router.register(entry.method, entry.path, stub);
+            let direct = entry
+                .rsp_type_id
+                .and_then(|rsp| direct_by_pair.get(&(entry.req_type_id, rsp)).copied());
+            let engine_target: Arc<dyn IEndpoint> = match direct {
+                Some(dispatch) => Arc::new(DirectStubEndpoint::new(Arc::clone(&stub), dispatch)),
+                None => Arc::clone(&stub) as Arc<dyn IEndpoint>,
+            };
+            router.register(entry.method, entry.path, stub as Arc<dyn IEndpoint>);
+            engine_router.insert(
+                entry.method,
+                entry.path,
+                Arc::new(webx_engine::EndpointTarget::new(engine_target)),
+            );
         }
+
+        tracing::info!(
+            routes = route_count,
+            direct = direct_by_pair.len(),
+            typed_behaviors = webx_core::route::ext::typed_pipeline_count(),
+            "engine dispatch inventory"
+        );
 
         let openapi_spec = generate_openapi_spec(
             "Rust WebX API",
@@ -1361,15 +1394,28 @@ impl HostBuilder {
         );
         if self.mode == AppMode::Development {
             let openapi_bytes = serde_json::to_vec(&openapi_spec).unwrap_or_default();
+            let openapi_json: Arc<dyn IEndpoint> = Arc::new(StaticJsonEndpoint::new(openapi_bytes));
             router.register(
                 HttpMethod::Get,
                 "/api/openapi.json",
-                Arc::new(StaticJsonEndpoint::new(openapi_bytes)),
+                Arc::clone(&openapi_json),
             );
+            engine_router.insert(
+                HttpMethod::Get,
+                "/api/openapi.json",
+                Arc::new(webx_engine::EndpointTarget::new(openapi_json)),
+            );
+            let openapi_html: Arc<dyn IEndpoint> =
+                Arc::new(StaticHtmlEndpoint { body: APIUI_HTML });
             router.register(
                 HttpMethod::Get,
                 "/api/openapi.html",
-                Arc::new(StaticHtmlEndpoint { body: APIUI_HTML }),
+                Arc::clone(&openapi_html),
+            );
+            engine_router.insert(
+                HttpMethod::Get,
+                "/api/openapi.html",
+                Arc::new(webx_engine::EndpointTarget::new(openapi_html)),
             );
         }
 
@@ -1379,32 +1425,55 @@ impl HostBuilder {
         let health_endpoint: Arc<dyn IEndpoint> =
             Arc::new(HealthCheckEndpoint::new(Arc::clone(&health_registry)));
         router.register(HttpMethod::Get, "/health", Arc::clone(&health_endpoint));
-        router.register(HttpMethod::Get, "/healthz", health_endpoint);
+        engine_router.insert(
+            HttpMethod::Get,
+            "/health",
+            Arc::new(webx_engine::EndpointTarget::new(Arc::clone(
+                &health_endpoint,
+            ))),
+        );
+        router.register(HttpMethod::Get, "/healthz", Arc::clone(&health_endpoint));
+        engine_router.insert(
+            HttpMethod::Get,
+            "/healthz",
+            Arc::new(webx_engine::EndpointTarget::new(health_endpoint)),
+        );
 
         // /health/live: liveness (process alive → pass, no probe queries)
         let live_body =
             serde_json::to_vec(&serde_json::json!({"status":"pass"})).unwrap_or_default();
-        router.register(
+        let live_endpoint: Arc<dyn IEndpoint> = Arc::new(StaticJsonEndpoint {
+            body: live_body,
+            content_type: "application/health+json",
+        });
+        router.register(HttpMethod::Get, "/health/live", Arc::clone(&live_endpoint));
+        engine_router.insert(
             HttpMethod::Get,
             "/health/live",
-            Arc::new(StaticJsonEndpoint {
-                body: live_body,
-                content_type: "application/health+json",
-            }),
+            Arc::new(webx_engine::EndpointTarget::new(live_endpoint)),
         );
 
         // /health/ready: readiness (queries registry, same as /health)
+        let ready_endpoint: Arc<dyn IEndpoint> =
+            Arc::new(HealthCheckEndpoint::new(health_registry));
         router.register(
             HttpMethod::Get,
             "/health/ready",
-            Arc::new(HealthCheckEndpoint::new(health_registry)),
+            Arc::clone(&ready_endpoint),
+        );
+        engine_router.insert(
+            HttpMethod::Get,
+            "/health/ready",
+            Arc::new(webx_engine::EndpointTarget::new(ready_endpoint)),
         );
 
         if options.metrics.enabled {
-            router.register(
+            let metrics_endpoint: Arc<dyn IEndpoint> = Arc::new(MetricsEndpoint::new(http_metrics));
+            router.register(HttpMethod::Get, "/metrics", Arc::clone(&metrics_endpoint));
+            engine_router.insert(
                 HttpMethod::Get,
                 "/metrics",
-                Arc::new(MetricsEndpoint::new(http_metrics)),
+                Arc::new(webx_engine::EndpointTarget::new(metrics_endpoint)),
             );
         }
 
@@ -1459,18 +1528,32 @@ impl HostBuilder {
             tracing::info!("{} route(s) registered", route_count);
         }
 
+        if let Some(spa) = spa_fallback.clone() {
+            let fallback: Arc<dyn IEndpoint> =
+                Arc::new(crate::endpoint::SpaFallbackEndpoint::new(spa));
+            engine_router.set_fallback(Arc::new(webx_engine::EndpointTarget::new(fallback)));
+        }
+
         let router = Arc::new(router);
         let error_writers = Arc::new(self.error_writers);
-        let router_handler = make_router_handler(
-            Arc::clone(&router),
-            spa_fallback,
-            Arc::clone(&error_writers),
-            match options.server.request_timeout_seconds {
-                0 => None,
-                seconds => Some(Duration::from_secs(seconds)),
-            },
-        );
 
+        // Build the 2.0 engine state. TLS is attached per run for HTTPS
+        // listeners; the common assemble path keeps it out of `Shared`.
+        let mut engine_config = webx_engine::EngineConfig::from_options(&options);
+        engine_config.mode = self.mode;
+        let (engine_shutdown, _) = tokio::sync::watch::channel(false);
+        let engine = Arc::new(webx_engine::Shared {
+            config: Arc::new(engine_config),
+            router: Arc::new(engine_router),
+            pipeline: Arc::new(webx_engine::Pipeline::new(pipeline.stages().to_vec())),
+            dispatch: Arc::clone(&dispatch_runtime),
+            body_limits: Arc::new(webx_engine::BodyLimits::from_options(&options)),
+            error_writers: Arc::clone(&error_writers),
+            tls: None,
+            shutdown: engine_shutdown,
+            shutdown_token: CancellationToken::new(),
+            active_streams: Arc::new(AtomicUsize::new(0)),
+        });
         // Resolve all registered hosted services from the DI container.
         // These will be started when `run()` is called and stopped on shutdown.
         //
@@ -1487,12 +1570,8 @@ impl HostBuilder {
             options,
             endpoints,
             localizer,
-            body_limits,
-            pipeline,
             router,
-            router_handler,
-            error_writers,
-            mode: self.mode,
+            engine,
             spa_source,
             shutdown: Arc::new(tokio::sync::watch::channel(false).0),
             hosted_services: Arc::new(hosted_services),
@@ -1689,45 +1768,49 @@ impl Host {
             self.options.app.urls.clone()
         };
 
-        let mut http_addrs: Vec<String> = Vec::new();
-        let mut https_addrs: Vec<String> = Vec::new();
+        let mut parsed = Vec::with_capacity(urls.len());
+        for url in urls {
+            let (scheme, addr) = parse_url(&url)?;
+            parsed.push((scheme.to_string(), addr));
+        }
+        self.run_on(parsed).await
+    }
 
-        for url in &urls {
-            let (scheme, addr) = parse_url(url)?;
-            match scheme {
-                "http" => http_addrs.push(addr),
-                "https" => https_addrs.push(addr),
-                other => {
-                    return Err(webx_core::error::Error::Http(format!(
-                        "Unsupported URL scheme '{}' in '{}'",
-                        other, url
-                    )))
+    /// Bind every configured address first, then run one engine worker pool per
+    /// listener sharing the host's DI, router, pipeline and shutdown signal.
+    async fn run_on(&self, urls: Vec<(String, String)>) -> Result<()> {
+        if urls.is_empty() {
+            return Err(Error::Http("no URLs configured".to_string()));
+        }
+
+        let mut listeners = Vec::with_capacity(urls.len());
+        for (scheme, addr) in urls {
+            if scheme != "http" && scheme != "https" {
+                return Err(Error::Http(format!(
+                    "Unsupported URL scheme '{scheme}'; use http:// or https://"
+                )));
+            }
+            let listener = std::net::TcpListener::bind(&addr)
+                .map_err(|err| Error::Http(format!("failed to bind HTTP on {addr}: {err}")))?;
+            listeners.push((scheme, addr, listener));
+        }
+
+        let mut tls_configs = Vec::with_capacity(listeners.len());
+        for (scheme, _, _) in &listeners {
+            if scheme == "https" {
+                let tls = &self.options.tls;
+                if tls.cert_path.is_empty() || tls.key_path.is_empty() {
+                    return Err(Error::Http(
+                        "HTTPS URLs require Tls.CertPath and Tls.KeyPath".to_string(),
+                    ));
                 }
+                tls_configs.push(Some(webx_engine::tls::build_server_config(
+                    &tls.cert_path,
+                    &tls.key_path,
+                )?));
+            } else {
+                tls_configs.push(None);
             }
-        }
-
-        let acceptor = if !https_addrs.is_empty() {
-            let tls = &self.options.tls;
-            if tls.cert_path.is_empty() || tls.key_path.is_empty() {
-                return Err(webx_core::error::Error::Http(
-                    "HTTPS URLs require Tls.CertPath and Tls.KeyPath".into(),
-                ));
-            }
-            Some(build_tls_acceptor(&tls.cert_path, &tls.key_path)?)
-        } else {
-            None
-        };
-
-        // Bind every listener *before* starting hosted services or spawning
-        // accept loops. A port conflict must fail `run()`, not be logged and
-        // forgotten (which used to leave the process exiting with code 0).
-        let mut http_listeners = Vec::with_capacity(http_addrs.len());
-        for addr in &http_addrs {
-            http_listeners.push(bind_listener(addr, "HTTP").await?);
-        }
-        let mut https_listeners = Vec::with_capacity(https_addrs.len());
-        for addr in &https_addrs {
-            https_listeners.push(bind_listener(addr, "HTTPS").await?);
         }
 
         if let Err(err) = start_hosted_services(&self.hosted_services).await {
@@ -1735,126 +1818,87 @@ impl Host {
             return Err(err);
         }
 
-        // Banner
-        if self.mode == AppMode::Development {
-            tracing::info!("");
-            for url in &urls {
-                let display_url = url.replace("0.0.0.0", "localhost");
-                tracing::info!("  Listening on {}", display_url);
-            }
-        } else {
-            tracing::info!("Listening on {} url(s)", urls.len());
-        }
-
         install_shutdown_handler(Arc::clone(&self.shutdown), self.shutdown_token.clone());
         spawn_async_shutdown_listener(Arc::clone(&self.shutdown), self.shutdown_token.clone());
-        // Stop background work at signal time, before connections drain.
         let hosted_watcher = self.spawn_hosted_shutdown_watcher();
 
-        let mut handles = Vec::new();
-        let pipeline = Arc::clone(&self.pipeline);
-        let router_handler = self.router_handler.clone();
-        let dispatch_runtime = Arc::clone(&self.dispatch_runtime);
-        let mode = self.mode;
-        let body_limits = self.body_limits.clone();
-        let max_connections = self.options.app.max_connections;
-
-        for (addr, listener) in http_addrs.into_iter().zip(http_listeners) {
-            handles.push(tokio::spawn(serve_http(
-                addr,
-                listener,
-                self.shutdown.subscribe(),
-                Arc::clone(&pipeline),
-                router_handler.clone(),
-                Arc::clone(&dispatch_runtime),
-                mode,
-                body_limits.clone(),
-                max_connections,
-                Arc::clone(&self.error_writers),
-                Duration::from_secs(self.options.server.drain_timeout_seconds),
-                Duration::from_secs(self.options.server.stream_drain_timeout_seconds),
-            )));
-        }
-
-        if let Some(ref tls_acceptor) = acceptor {
-            for (addr, listener) in https_addrs.into_iter().zip(https_listeners) {
-                handles.push(tokio::spawn(serve_https(
-                    addr,
-                    tls_acceptor.clone(),
-                    listener,
-                    self.shutdown.subscribe(),
-                    Arc::clone(&pipeline),
-                    router_handler.clone(),
-                    Arc::clone(&dispatch_runtime),
-                    mode,
-                    body_limits.clone(),
-                    max_connections,
-                    Arc::clone(&self.error_writers),
-                    Duration::from_secs(self.options.server.drain_timeout_seconds),
-                    Duration::from_secs(self.options.server.stream_drain_timeout_seconds),
-                )));
+        let engine_for_shutdown = (*self.engine).clone();
+        let mut host_shutdown = self.shutdown.subscribe();
+        let shutdown_bridge = tokio::spawn(async move {
+            if host_shutdown.wait_for(|value| *value).await.is_ok() {
+                engine_for_shutdown.trigger_shutdown();
             }
+        });
+
+        let mut tasks: JoinSet<(String, Result<()>)> = JoinSet::new();
+        for ((scheme, addr, listener), tls) in listeners.into_iter().zip(tls_configs) {
+            let mut shared = (*self.engine).clone();
+            shared.shutdown_token = self.shutdown_token.clone();
+            let mut config = (*shared.config).clone();
+            config.tls = if scheme == "https" {
+                Some(webx_engine::TlsConfig {
+                    cert_path: self.options.tls.cert_path.clone(),
+                    key_path: self.options.tls.key_path.clone(),
+                })
+            } else {
+                None
+            };
+            shared.config = Arc::new(config);
+            shared.tls = tls;
+            let label = format!("{scheme}://{addr}");
+            tasks.spawn(async move {
+                let result = webx_engine::Server::new(Arc::new(shared))
+                    .run(listener)
+                    .await;
+                (label, result)
+            });
         }
 
-        // Wait for all listeners to finish (they exit after the shutdown
-        // signal); a panicked listener is a host failure, not a silent exit.
-        let mut run_error: Option<webx_core::error::Error> = None;
-        for h in handles {
-            if let Err(join_err) = h.await {
-                if run_error.is_none() {
-                    run_error = Some(webx_core::error::Error::Internal(format!(
-                        "a listener task failed: {join_err}"
-                    )));
+        let mut run_error: Option<Error> = None;
+        while let Some(joined) = tasks.join_next().await {
+            match joined {
+                Ok((label, Err(err))) => {
+                    tracing::error!(listener = %label, error = %err, "engine listener failed");
+                    // Stop the remaining listeners instead of leaving them
+                    // serving after a fatal engine error.
+                    self.engine.trigger_shutdown();
+                    if run_error.is_none() {
+                        run_error = Some(err);
+                    }
+                }
+                Ok((_, Ok(()))) => {}
+                Err(join_err) => {
+                    if run_error.is_none() {
+                        run_error = Some(Error::Internal(format!(
+                            "a listener task failed: {join_err}"
+                        )));
+                    }
                 }
             }
         }
 
-        // Hosted services were cancelled when the shutdown signal arrived; this
-        // second call is a no-op unless the listeners ended without a signal.
         self.stop_hosted_services_once().await;
+        shutdown_bridge.abort();
         hosted_watcher.abort();
         self.dispose_di();
-
         match run_error {
             Some(err) => Err(err),
             None => Ok(()),
         }
     }
 
-    /// Start the server at a single explicit address (convenience wrapper).
+    /// Start the server at a single explicit address.
+    ///
+    /// This is the 2.0 engine path: bind once, start hosted services, map the
+    /// host shutdown signal to the engine signal, then let the worker pool
+    /// accept/drain. The legacy `serve_http` path remains only for `run()`'s
+    /// multi-listener code until it is switched in the next milestone.
     pub async fn run_at(&self, addr: &str) -> Result<()> {
-        let listener = bind_listener(addr, "HTTP").await?;
-        if let Err(err) = start_hosted_services(&self.hosted_services).await {
-            self.dispose_di();
-            return Err(err);
-        }
-
-        install_shutdown_handler(Arc::clone(&self.shutdown), self.shutdown_token.clone());
-        spawn_async_shutdown_listener(Arc::clone(&self.shutdown), self.shutdown_token.clone());
-        // Stop background work at signal time, before connections drain.
-        let hosted_watcher = self.spawn_hosted_shutdown_watcher();
-        serve_http(
-            addr.to_string(),
-            listener,
-            self.shutdown.subscribe(),
-            Arc::clone(&self.pipeline),
-            self.router_handler.clone(),
-            Arc::clone(&self.dispatch_runtime),
-            self.mode,
-            self.body_limits.clone(),
-            self.options.app.max_connections,
-            Arc::clone(&self.error_writers),
-            Duration::from_secs(self.options.server.drain_timeout_seconds),
-            Duration::from_secs(self.options.server.stream_drain_timeout_seconds),
-        )
-        .await;
-
-        // Hosted services were cancelled when the shutdown signal arrived; this
-        // second call is a no-op unless the listener ended without a signal.
-        self.stop_hosted_services_once().await;
-        hosted_watcher.abort();
-        self.dispose_di();
-        Ok(())
+        let (scheme, bind_addr) = match parse_url(addr) {
+            Ok((scheme, bind_addr)) => (scheme.to_string(), bind_addr),
+            Err(_) => ("http".to_string(), addr.to_string()),
+        };
+        self.run_on(vec![(scheme, bind_addr)]).await
     }
 
     /// Return a `ServerHandle` that can be used to signal graceful shutdown
@@ -1895,212 +1939,6 @@ impl IHost for Host {
     }
 }
 
-fn make_router_handler(
-    router: Arc<Router>,
-    spa_fallback: Option<Arc<SpaMiddleware>>,
-    error_writers: Arc<Vec<Arc<dyn IErrorResponseWriter>>>,
-    request_timeout: Option<Duration>,
-) -> HandlerFn {
-    Arc::new(move |ctx: &mut dyn IHttpContext| {
-        let router = Arc::clone(&router);
-        let spa_fallback = spa_fallback.clone();
-        let error_writers = Arc::clone(&error_writers);
-        Box::pin(async move {
-            // The context may carry a rejection detected from the request line
-            // (oversized declared Content-Length). Failing here — inside the
-            // pipeline — keeps CORS/security headers/logging/metrics in play.
-            if let Some(err) = ctx.take_early_error() {
-                return Err(err);
-            }
-            match router.match_route(ctx).await? {
-                Some((endpoint, params, pattern)) => {
-                    drop(router);
-                    for (key, value) in params {
-                        ctx.request_mut().route_params_mut().insert(key, value);
-                    }
-                    *ctx.request_mut().route_pattern_mut() = Some(pattern);
-                    let handle = endpoint.handle(ctx);
-                    match request_timeout {
-                        Some(limit) => match tokio::time::timeout(limit, handle).await {
-                            Ok(result) => result,
-                            Err(_) => Err(Error::Status(504, "request timed out".to_string())),
-                        },
-                        None => handle.await,
-                    }
-                }
-                None => {
-                    let path_exists = router.path_exists(ctx.request().path());
-                    let allowed = if path_exists {
-                        router.allowed_methods(ctx.request().path())
-                    } else {
-                        Vec::new()
-                    };
-                    drop(router);
-                    // Don't overwrite if a middleware (e.g. a static file
-                    // response) already wrote a body.
-                    if !ctx.response().has_body() {
-                        // SPA routing: only a genuine router miss gets the app
-                        // shell, and only when the client asked for HTML.
-                        if let Some(spa) = spa_fallback {
-                            if spa.try_index_fallback(ctx).await? {
-                                return Ok(());
-                            }
-                        }
-                        if path_exists {
-                            if ctx.request().method().eq_ignore_ascii_case("OPTIONS") {
-                                // Method discovery (RFC 9110 §9.3.7): CORS
-                                // preflights are answered earlier, so this is a
-                                // plain OPTIONS and must report what the path
-                                // actually allows.
-                                ctx.response_mut().set_status(204);
-                                ctx.response_mut().set_header("allow", &allowed.join(", "));
-                            } else {
-                                // RFC 9110 §15.5.6: a 405 must carry `Allow`.
-                                write_method_not_allowed(ctx, &allowed).await;
-                            }
-                        } else {
-                            let path = ctx.request().path().to_string();
-                            let accept = ctx.request().header("accept").map(str::to_string);
-                            let writer = error_writers
-                                .iter()
-                                .find(|writer| writer.matches(None, &path, accept.as_deref()))
-                                .cloned();
-                            if let Some(writer) = writer {
-                                writer
-                                    .write(ctx, &Error::Routing("Not Found".to_string()))
-                                    .await;
-                            } else {
-                                write_plain_error(ctx, 404, "Not Found").await;
-                            }
-                        }
-                    }
-                    Ok(())
-                }
-            }
-        })
-    })
-}
-
-async fn handle_request(
-    req: Request<Incoming>,
-    pipeline: Arc<MiddlewarePipeline>,
-    router_handler: HandlerFn,
-    dispatch_runtime: Arc<DispatchRuntime>,
-    body_limits: BodyLimits,
-    remote_addr: Option<std::net::SocketAddr>,
-    error_writers: Arc<Vec<Arc<dyn IErrorResponseWriter>>>,
-) -> std::result::Result<hyper::Response<RespBody>, std::convert::Infallible> {
-    let mut ctx = HttpContext::new(req, body_limits, remote_addr, Arc::clone(&dispatch_runtime));
-
-    // Contain panics from middleware/handlers at the request boundary: one
-    // `unwrap()` in business code must produce a 500, not a dropped connection
-    // (and, with `panic = "abort"`, not kill the process).
-    let result = match std::panic::AssertUnwindSafe(pipeline.execute(&mut ctx, router_handler))
-        .catch_unwind()
-        .await
-    {
-        Ok(result) => result,
-        Err(payload) => {
-            let message = panic_message(&payload);
-            tracing::error!(panic = %message, "request panicked");
-            Err(webx_core::error::Error::Internal(
-                "request handler panicked".to_string(),
-            ))
-        }
-    };
-    if let Err(error) = result {
-        let route = ctx.request().route_pattern().map(str::to_string);
-        let accept = ctx.request().header("accept").map(str::to_string);
-        let path = ctx.request().path();
-        let writer = error_writers
-            .iter()
-            .find(|writer| writer.matches(route.as_deref(), path, accept.as_deref()))
-            .cloned();
-
-        if let Some(writer) = writer {
-            writer.write(&mut ctx, &error).await;
-        } else {
-            match error {
-                // A binding/validation failure already carries its full
-                // ProblemDetails (including the `errors` extension); write it
-                // verbatim instead of flattening it into a detail string.
-                webx_core::error::Error::Problem(problem) => {
-                    write_problem_response(&mut ctx, *problem).await
-                }
-                other => {
-                    write_framework_error(&mut ctx, &other).await;
-                }
-            }
-        }
-    }
-
-    Ok(ctx.into_response().await)
-}
-
-/// Best-effort text for a caught panic payload.
-fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
-    if let Some(message) = payload.downcast_ref::<&str>() {
-        (*message).to_string()
-    } else if let Some(message) = payload.downcast_ref::<String>() {
-        message.clone()
-    } else {
-        "non-string panic payload".to_string()
-    }
-}
-
-/// Write an error the framework itself produced (not an `Error::Problem`).
-///
-/// * 401 goes through the single unauthorized writer so every challenge is
-///   identical and carries `WWW-Authenticate`; the variant's own message
-///   ("authentication required" vs "invalid or expired token") is kept so a
-///   client can tell missing credentials from a rejected token.
-/// * 5xx never echoes the internal message: it is logged and replaced with a
-///   stable detail, because database errors and file paths must not reach
-///   clients.
-/// * 4xx keep their (client-facing) detail, taken from the variant without the
-///   operator-facing `Display` prefix.
-async fn write_framework_error(ctx: &mut dyn IHttpContext, error: &webx_core::error::Error) {
-    let status = error.status_code();
-    if status == 401 {
-        write_unauthorized(
-            ctx,
-            error.public_detail().unwrap_or("authentication required"),
-        )
-        .await;
-    } else if status >= 500 {
-        tracing::error!(status, error = %error, "unhandled server error");
-        write_problem_response(ctx, build_problem(status, "an unexpected error occurred")).await;
-    } else {
-        write_problem_response(
-            ctx,
-            build_problem(status, error.public_detail().unwrap_or("request failed")),
-        )
-        .await;
-    }
-}
-
-/// Write a framework-generated 4xx that has no [`Error`] value behind it
-/// (404 from an unmatched route).
-async fn write_plain_error(ctx: &mut dyn IHttpContext, status: u16, message: &str) {
-    write_problem_response(ctx, build_problem(status, message)).await;
-}
-
-/// Write a 405 with the `Allow` header RFC 9110 §15.5.6 requires.
-async fn write_method_not_allowed(ctx: &mut dyn IHttpContext, allowed: &[&str]) {
-    let allow = allowed.join(", ");
-    ctx.response_mut().set_header("allow", &allow);
-    write_plain_error(ctx, 405, "Method Not Allowed").await;
-}
-
-// ---------------------------------------------------------------------------
-// Shutdown helpers
-// ---------------------------------------------------------------------------
-
-/// Raise the shutdown flag.
-///
-/// `watch::Sender::send` stores the value, so a listener that subscribes later
-/// (or a listener between two `select!` iterations) still observes it — unlike
-/// `Notify::notify_waiters`, which drops the wakeup when nobody is parked.
 fn trigger_shutdown(shutdown: &ShutdownSignal, token: &CancellationToken) {
     // `send_replace` stores the value unconditionally. `send` would fail while
     // no receiver exists (e.g. `handle.shutdown()` called before `run()`
@@ -2112,34 +1950,6 @@ fn trigger_shutdown(shutdown: &ShutdownSignal, token: &CancellationToken) {
     token.cancel();
 }
 
-/// Resolve once the host has been asked to shut down.
-///
-/// Returns immediately when the flag is already set; also returns when the
-/// sender disappears (host dropped) so a connection task never hangs forever.
-async fn wait_for_shutdown(shutdown: &mut tokio::sync::watch::Receiver<bool>) {
-    if *shutdown.borrow() {
-        return;
-    }
-    loop {
-        if shutdown.changed().await.is_err() {
-            return;
-        }
-        if *shutdown.borrow() {
-            return;
-        }
-    }
-}
-
-/// Register a process-wide Ctrl+C / SIGINT handler.
-///
-/// On Windows, `cargo run` may exit the parent without stopping the child;
-/// registering here ensures the server process itself receives the signal.
-/// A second Ctrl+C forces immediate exit.
-///
-/// `ctrlc::set_handler` can only be installed once per process, so every host
-/// registers its signal (weakly) here and the single handler raises all of
-/// them. That keeps two hosts in one process — integration tests, embedded
-/// scenarios — individually stoppable by Ctrl+C.
 fn install_shutdown_handler(shutdown: ShutdownSignal, token: CancellationToken) {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Mutex, OnceLock, Weak};
@@ -2189,7 +1999,6 @@ fn install_shutdown_handler(shutdown: ShutdownSignal, token: CancellationToken) 
     }
 }
 
-/// Tokio-based listener for Ctrl+C (all platforms) and SIGTERM (Unix).
 fn spawn_async_shutdown_listener(shutdown: ShutdownSignal, token: CancellationToken) {
     let cancelled = token.clone();
     tokio::spawn(async move {
@@ -2209,33 +2018,6 @@ fn spawn_async_shutdown_listener(shutdown: ShutdownSignal, token: CancellationTo
         }
     });
 }
-
-async fn wait_for_shutdown_signal() {
-    #[cfg(unix)]
-    {
-        use tokio::signal::unix::{signal, SignalKind};
-        let mut sigterm = signal(SignalKind::terminate()).expect("install SIGTERM handler");
-        tokio::select! {
-            res = tokio::signal::ctrl_c() => {
-                if let Err(e) = res {
-                    tracing::warn!("Ctrl+C listener error: {}", e);
-                }
-            }
-            _ = sigterm.recv() => {}
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        if let Err(e) = tokio::signal::ctrl_c().await {
-            tracing::warn!("Ctrl+C listener error: {}", e);
-        }
-    }
-}
-
-/// How long a hosted service may take to start before the host gives up.
-const HOSTED_START_TIMEOUT_SECS: u64 = 30;
-/// How long a hosted service may take to stop before it is skipped.
-const HOSTED_STOP_TIMEOUT_SECS: u64 = 30;
 
 async fn start_hosted_services(services: &[Arc<dyn IHostedService>]) -> Result<()> {
     if services.is_empty() {
@@ -2296,7 +2078,41 @@ async fn stop_hosted_services(services: &[Arc<dyn IHostedService>]) {
     tracing::info!("All hosted services stopped.");
 }
 
-/// Stop one service with a timeout (and a fresh DI scope), logging failures.
+fn parse_url(url: &str) -> Result<(&str, String)> {
+    if let Some(rest) = url.strip_prefix("https://") {
+        Ok(("https", rest.to_string()))
+    } else if let Some(rest) = url.strip_prefix("http://") {
+        Ok(("http", rest.to_string()))
+    } else {
+        Err(webx_core::error::Error::Http(format!(
+            "Invalid URL '{}'. Use http://host:port or https://host:port",
+            url
+        )))
+    }
+}
+
+async fn wait_for_shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        let mut sigterm = signal(SignalKind::terminate()).expect("install SIGTERM handler");
+        tokio::select! {
+            res = tokio::signal::ctrl_c() => {
+                if let Err(e) = res {
+                    tracing::warn!("Ctrl+C listener error: {}", e);
+                }
+            }
+            _ = sigterm.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        if let Err(e) = tokio::signal::ctrl_c().await {
+            tracing::warn!("Ctrl+C listener error: {}", e);
+        }
+    }
+}
+
 async fn stop_hosted_service(index: usize, svc: &Arc<dyn IHostedService>) {
     match tokio::time::timeout(
         std::time::Duration::from_secs(HOSTED_STOP_TIMEOUT_SECS),
@@ -2313,566 +2129,5 @@ async fn stop_hosted_service(index: usize, svc: &Arc<dyn IHostedService>) {
             timeout_secs = HOSTED_STOP_TIMEOUT_SECS,
             "hosted service stop timed out"
         ),
-    }
-}
-
-async fn drain_connections(
-    join_set: &mut JoinSet<()>,
-    label: &str,
-    drain_timeout: Duration,
-    stream_drain_timeout: Duration,
-    active_streams: &AtomicUsize,
-) {
-    let timeout = drain_timeout_for(
-        drain_timeout,
-        stream_drain_timeout,
-        active_streams.load(Ordering::Relaxed),
-    );
-    let drain_future = async {
-        while let Some(result) = join_set.join_next().await {
-            if let Err(e) = result {
-                tracing::error!("Connection task panicked: {:?}", e);
-            }
-        }
-    };
-
-    match tokio::time::timeout(timeout, drain_future).await {
-        Ok(_) => tracing::info!("{}: drained.", label),
-        Err(_) => {
-            tracing::warn!("{}: drain timeout, aborting connections.", label);
-            join_set.abort_all();
-            while join_set.join_next().await.is_some() {}
-        }
-    }
-}
-
-fn drain_timeout_for(normal: Duration, streaming: Duration, active_streams: usize) -> Duration {
-    let chosen = if active_streams > 0 {
-        streaming
-    } else {
-        normal
-    };
-    chosen.max(Duration::from_secs(1))
-}
-
-fn is_sse_response(response: &hyper::Response<RespBody>) -> bool {
-    response
-        .headers()
-        .get(hyper::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value.trim_start().starts_with("text/event-stream"))
-}
-
-// ---------------------------------------------------------------------------
-// URL parsing & binding helpers
-// ---------------------------------------------------------------------------
-
-/// Bind a TCP listener, turning an OS-level failure into a host error.
-///
-/// Binding happens before any accept loop starts, so a port conflict fails
-/// `run()`/`run_at()` with a non-zero exit instead of a log line and a silent
-/// `Ok(())`.
-async fn bind_listener(addr: &str, label: &str) -> Result<tokio::net::TcpListener> {
-    tokio::net::TcpListener::bind(addr).await.map_err(|err| {
-        webx_core::error::Error::Http(format!("failed to bind {label} on {addr}: {err}"))
-    })
-}
-
-/// Parse a URL string into (scheme, addr) pair.
-/// e.g., "https://0.0.0.0:5030" →("https", "0.0.0.0:5030")
-fn parse_url(url: &str) -> Result<(&str, String)> {
-    if let Some(rest) = url.strip_prefix("https://") {
-        Ok(("https", rest.to_string()))
-    } else if let Some(rest) = url.strip_prefix("http://") {
-        Ok(("http", rest.to_string()))
-    } else {
-        Err(webx_core::error::Error::Http(format!(
-            "Invalid URL '{}'. Use http://host:port or https://host:port",
-            url
-        )))
-    }
-}
-
-/// Serve plain HTTP on an already-bound listener.
-#[allow(clippy::too_many_arguments)]
-async fn serve_http(
-    addr: String,
-    listener: tokio::net::TcpListener,
-    mut shutdown: tokio::sync::watch::Receiver<bool>,
-    pipeline: Arc<MiddlewarePipeline>,
-    router_handler: HandlerFn,
-    dispatch_runtime: Arc<DispatchRuntime>,
-    mode: AppMode,
-    body_limits: BodyLimits,
-    max_connections: usize,
-    error_writers: Arc<Vec<Arc<dyn IErrorResponseWriter>>>,
-    drain_timeout: Duration,
-    stream_drain_timeout: Duration,
-) {
-    let sem = Arc::new(tokio::sync::Semaphore::new(max_connections));
-    let active_streams = Arc::new(AtomicUsize::new(0));
-    let mut join_set = JoinSet::new();
-
-    loop {
-        // Check the stored flag first: a shutdown requested before this loop
-        // started (the documented `spawn(run); handle.shutdown()` pattern) must
-        // not be missed.
-        if *shutdown.borrow() {
-            tracing::info!("HTTP {}: stop accepting, draining...", addr);
-            break;
-        }
-        tokio::select! {
-            _ = shutdown.changed() => {
-                tracing::info!("HTTP {}: stop accepting, draining...", addr);
-                break;
-            }
-            accept_result = listener.accept() => {
-                let (stream, peer_addr) = match accept_result {
-                    Ok(v) => v,
-                    Err(e) => {
-                        tracing::error!("Accept error (will retry): {}", e);
-                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                        continue;
-                    }
-                };
-                let remote_addr = Some(peer_addr);
-
-                while join_set.try_join_next().is_some() {}
-
-                // Wait for a connection slot *while still observing shutdown*.
-                // Previously this await sat outside the select, so a saturated
-                // server could not break the accept loop and start draining.
-                let permit = tokio::select! {
-                    _ = shutdown.changed() => {
-                        tracing::info!("HTTP {}: stop accepting while waiting for a connection slot", addr);
-                        break;
-                    }
-                    permit = sem.clone().acquire_owned() => match permit {
-                        Ok(permit) => permit,
-                        Err(_) => continue,
-                    },
-                };
-
-                let io = TokioIo::new(stream);
-                let pipeline = Arc::clone(&pipeline);
-                let router_handler = router_handler.clone();
-                let dispatch_runtime = Arc::clone(&dispatch_runtime);
-                let body_limits = body_limits.clone();
-                let error_writers = Arc::clone(&error_writers);
-                let connection_streaming = Arc::new(AtomicBool::new(false));
-                let active_streams = Arc::clone(&active_streams);
-                let conn_shutdown = shutdown.clone();
-
-                join_set.spawn(async move {
-                    let _permit = permit;
-                    let connection_streaming_probe = Arc::clone(&connection_streaming);
-                    let active_streams_probe = Arc::clone(&active_streams);
-                    let svc_fn = service_fn(move |req: Request<Incoming>| {
-                        let pipeline = Arc::clone(&pipeline);
-                        let router_handler = router_handler.clone();
-                        let dispatch_runtime = Arc::clone(&dispatch_runtime);
-                        let body_limits = body_limits.clone();
-                        let error_writers = Arc::clone(&error_writers);
-                        let connection_streaming = Arc::clone(&connection_streaming_probe);
-                        let active_streams = Arc::clone(&active_streams_probe);
-                        let mode = mode;
-                        // Peer address for rate limiting and audit; captured per
-                        // connection and carried into the request context.
-                        let remote_addr = remote_addr;
-                        async move {
-                            let start = Instant::now();
-                            let method = req.method().to_string();
-                            let path = req.uri().path().to_string();
-                            let result = handle_request(
-                                req,
-                                pipeline,
-                                router_handler,
-                                dispatch_runtime,
-                                body_limits,
-                                remote_addr,
-                                error_writers,
-                            )
-                            .await;
-                            if result.as_ref().is_ok_and(is_sse_response)
-                                && !connection_streaming.swap(true, Ordering::Relaxed)
-                            {
-                                active_streams.fetch_add(1, Ordering::Relaxed);
-                            }
-                            let elapsed = start.elapsed();
-                            if mode == AppMode::Development {
-                                let status =
-                                    result.as_ref().map(|r| r.status().as_u16()).unwrap_or(500);
-                                // Debug-only: at `info` (the default) one
-                                // synchronous line per request dominated local
-                                // throughput (measured ~12x).
-                                tracing::debug!(
-                                    "[{}] {} -> {} ({:.0}ms)",
-                                    method,
-                                    path,
-                                    status,
-                                    elapsed.as_secs_f64() * 1000.0
-                                );
-                            }
-                            result
-                        }
-                    });
-
-                    // Version-adaptive connection: accepts HTTP/1.1 and
-                    // HTTP/2 (cleartext h2c prior-knowledge and TLS ALPN h2).
-                    let mut builder = auto::Builder::new(TokioExecutor::new());
-                    // hyper only enforces its default `header_read_timeout`
-                    // when a timer is installed; without one it warns and
-                    // disables the timeout, leaving the server open to
-                    // slowloris. `max_buf_size` bounds the per-connection
-                    // header buffer (hyper's default is ~400 KiB).
-                    builder
-                        .http1()
-                        .timer(hyper_util::rt::TokioTimer::new())
-                        .header_read_timeout(Duration::from_secs(30))
-                        .max_buf_size(64 * 1024);
-                    builder.http2().timer(hyper_util::rt::TokioTimer::new());
-                    let conn = builder.serve_connection(io, svc_fn);
-                    let mut conn = std::pin::pin!(conn);
-                    let mut conn_shutdown = conn_shutdown;
-                    tokio::select! {
-                        result = conn.as_mut() => {
-                            if let Err(err) = result {
-                                tracing::error!("Connection error: {}", err);
-                            }
-                        }
-                        _ = wait_for_shutdown(&mut conn_shutdown) => {
-                            // Let in-flight requests finish and answer with
-                            // `Connection: close` instead of aborting the socket
-                            // after the drain timeout.
-                            conn.as_mut().graceful_shutdown();
-                            if let Err(err) = conn.await {
-                                tracing::debug!(error = %err, "connection closed during shutdown");
-                            }
-                        }
-                    }
-                    if connection_streaming.load(Ordering::Relaxed) {
-                        active_streams.fetch_sub(1, Ordering::Relaxed);
-                    }
-                });
-            }
-        }
-    }
-
-    drain_connections(
-        &mut join_set,
-        &format!("HTTP {}", addr),
-        drain_timeout,
-        stream_drain_timeout,
-        &active_streams,
-    )
-    .await;
-}
-
-/// Serve HTTPS (TLS) on an already-bound listener.
-#[allow(clippy::too_many_arguments)]
-async fn serve_https(
-    addr: String,
-    acceptor: TlsAcceptor,
-    listener: tokio::net::TcpListener,
-    mut shutdown: tokio::sync::watch::Receiver<bool>,
-    pipeline: Arc<MiddlewarePipeline>,
-    router_handler: HandlerFn,
-    dispatch_runtime: Arc<DispatchRuntime>,
-    mode: AppMode,
-    body_limits: BodyLimits,
-    max_connections: usize,
-    error_writers: Arc<Vec<Arc<dyn IErrorResponseWriter>>>,
-    drain_timeout: Duration,
-    stream_drain_timeout: Duration,
-) {
-    let sem = Arc::new(tokio::sync::Semaphore::new(max_connections));
-    let active_streams = Arc::new(AtomicUsize::new(0));
-    let mut join_set = JoinSet::new();
-
-    loop {
-        if *shutdown.borrow() {
-            tracing::info!("HTTPS {}: stop accepting, draining...", addr);
-            break;
-        }
-        tokio::select! {
-            _ = shutdown.changed() => {
-                tracing::info!("HTTPS {}: stop accepting, draining...", addr);
-                break;
-            }
-            accept_result = listener.accept() => {
-                let (stream, peer_addr) = match accept_result {
-                    Ok(v) => v,
-                    Err(e) => {
-                        tracing::error!("Accept error (will retry): {}", e);
-                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                        continue;
-                    }
-                };
-                let remote_addr = Some(peer_addr);
-
-                while join_set.try_join_next().is_some() {}
-
-                // Wait for a connection slot *while still observing shutdown*.
-                // Previously this await sat outside the select, so a saturated
-                // server could not break the accept loop and start draining.
-                let permit = tokio::select! {
-                    _ = shutdown.changed() => {
-                        tracing::info!("HTTP {}: stop accepting while waiting for a connection slot", addr);
-                        break;
-                    }
-                    permit = sem.clone().acquire_owned() => match permit {
-                        Ok(permit) => permit,
-                        Err(_) => continue,
-                    },
-                };
-
-                let acceptor = acceptor.clone();
-                let pipeline = Arc::clone(&pipeline);
-                let router_handler = router_handler.clone();
-                let dispatch_runtime = Arc::clone(&dispatch_runtime);
-                let body_limits = body_limits.clone();
-                let error_writers = Arc::clone(&error_writers);
-                let connection_streaming = Arc::new(AtomicBool::new(false));
-                let active_streams = Arc::clone(&active_streams);
-                let conn_shutdown = shutdown.clone();
-
-                join_set.spawn(async move {
-                    let _permit = permit;
-                    let connection_streaming_probe = Arc::clone(&connection_streaming);
-                    let active_streams_probe = Arc::clone(&active_streams);
-                    match acceptor.accept(stream).await {
-                        Ok(tls_stream) => {
-                            let io = TokioIo::new(tls_stream);
-                            let svc_fn = service_fn(move |req: Request<Incoming>| {
-                                let pipeline = Arc::clone(&pipeline);
-                                let router_handler = router_handler.clone();
-                                let dispatch_runtime = Arc::clone(&dispatch_runtime);
-                                let body_limits = body_limits.clone();
-                                let error_writers = Arc::clone(&error_writers);
-                                let connection_streaming = Arc::clone(&connection_streaming_probe);
-                                let active_streams = Arc::clone(&active_streams_probe);
-                                let mode = mode;
-                                // Peer address for rate limiting and audit.
-                                let remote_addr = remote_addr;
-                                async move {
-                                    let start = Instant::now();
-                                    let method = req.method().to_string();
-                                    let path = req.uri().path().to_string();
-                                    let result = handle_request(
-                                        req,
-                                        pipeline,
-                                        router_handler,
-                                        dispatch_runtime,
-                                        body_limits,
-                                        remote_addr,
-                                        error_writers,
-                                    )
-                                    .await;
-                                    if result.as_ref().is_ok_and(is_sse_response)
-                                        && !connection_streaming.swap(true, Ordering::Relaxed)
-                                    {
-                                        active_streams.fetch_add(1, Ordering::Relaxed);
-                                    }
-                                    let elapsed = start.elapsed();
-                                    if mode == AppMode::Development {
-                                        let status =
-                                            result.as_ref().map(|r| r.status().as_u16()).unwrap_or(500);
-                                        // Access logging is debug-only: at
-                                        // `info` (the default) one synchronous
-                                        // line per request dominated local
-                                        // throughput (measured ~12x).
-                                        tracing::debug!(
-                                            "[{}] {} -> {} ({:.0}ms)",
-                                            method,
-                                            path,
-                                            status,
-                                            elapsed.as_secs_f64() * 1000.0
-                                        );
-                                    }
-                                    result
-                                }
-                            });
-
-                            // TLS connection with ALPN h2/http1.1; the version
-                            // is picked from the negotiated ALPN protocol.
-                            let mut builder = auto::Builder::new(TokioExecutor::new());
-                            builder
-                                .http1()
-                                .timer(hyper_util::rt::TokioTimer::new())
-                                .header_read_timeout(Duration::from_secs(30))
-                                .max_buf_size(64 * 1024);
-                            builder.http2().timer(hyper_util::rt::TokioTimer::new());
-                            let conn = builder.serve_connection(io, svc_fn);
-                            let mut conn = std::pin::pin!(conn);
-                            let mut conn_shutdown = conn_shutdown;
-                            tokio::select! {
-                                result = conn.as_mut() => {
-                                    if let Err(err) = result {
-                                        tracing::error!("TLS connection error: {}", err);
-                                    }
-                                }
-                                _ = wait_for_shutdown(&mut conn_shutdown) => {
-                                    conn.as_mut().graceful_shutdown();
-                                    if let Err(err) = conn.await {
-                                        tracing::debug!(error = %err, "TLS connection closed during shutdown");
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            tracing::error!("TLS handshake error: {}", e);
-                        }
-                    }
-                    if connection_streaming.load(Ordering::Relaxed) {
-                        active_streams.fetch_sub(1, Ordering::Relaxed);
-                    }
-                });
-            }
-        }
-    }
-
-    drain_connections(
-        &mut join_set,
-        &format!("HTTPS {}", addr),
-        drain_timeout,
-        stream_drain_timeout,
-        &active_streams,
-    )
-    .await;
-}
-
-// ---------------------------------------------------------------------------
-// TLS helpers
-// ---------------------------------------------------------------------------
-
-/// Build a TLS acceptor from PEM certificate and key files.
-fn build_tls_acceptor(cert_path: &str, key_path: &str) -> Result<TlsAcceptor> {
-    use std::fs::File;
-    use std::io::BufReader;
-
-    if cert_path.is_empty() || key_path.is_empty() {
-        return Err(webx_core::error::Error::Http(
-            "TLS certificate or key path not configured.".into(),
-        ));
-    }
-
-    let cert_file = File::open(cert_path).map_err(|e| {
-        webx_core::error::Error::Http(format!("Cannot open cert '{}': {}", cert_path, e))
-    })?;
-    let mut cert_reader = BufReader::new(cert_file);
-    let certs: Vec<CertificateDer> = certs(&mut cert_reader).filter_map(|r| r.ok()).collect();
-    if certs.is_empty() {
-        return Err(webx_core::error::Error::Http(format!(
-            "No valid certs in '{}'",
-            cert_path
-        )));
-    }
-
-    let key_file = File::open(key_path).map_err(|e| {
-        webx_core::error::Error::Http(format!("Cannot open key '{}': {}", key_path, e))
-    })?;
-    let mut key_reader = BufReader::new(key_file);
-    let key = pkcs8_private_keys(&mut key_reader)
-        .filter_map(|r| r.ok())
-        .map(PrivateKeyDer::from)
-        .next()
-        .or_else(|| {
-            let key_file2 = File::open(key_path).map(BufReader::new).ok()?;
-            let mut kr2 = key_file2;
-            let rsa_keys: Vec<PrivateKeyDer> = rsa_private_keys(&mut kr2)
-                .filter_map(|r| r.ok())
-                .map(PrivateKeyDer::from)
-                .collect();
-            rsa_keys.into_iter().next()
-        })
-        .ok_or_else(|| {
-            webx_core::error::Error::Http(format!("No valid private key in '{}'", key_path))
-        })?;
-
-    let mut config = ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(certs, key)
-        .map_err(|e| webx_core::error::Error::Http(format!("TLS config error: {}", e)))?;
-    // Advertise h2 first so capable clients negotiate HTTP/2, while keeping
-    // http/1.1 as a fallback for older clients.
-    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-
-    Ok(TlsAcceptor::from(std::sync::Arc::new(config)))
-}
-
-#[cfg(test)]
-mod embedded_attach_tests {
-    use super::with_embedded_assets;
-    use webx_spa::{ContentEncoding, EmbeddedAsset, EmbeddedAssets, SpaSource};
-
-    const FILES: &[EmbeddedAsset] = &[EmbeddedAsset {
-        path: "index.html",
-        bytes: b"hi",
-        raw_len: 2,
-        encoding: ContentEncoding::Identity,
-        content_type: "text/html",
-        etag: "\"x\"",
-    }];
-
-    #[test]
-    fn no_table_leaves_disk_source() {
-        let source = Some(SpaSource::Disk("wwwroot".into()));
-        let merged = with_embedded_assets(source, None);
-        assert!(matches!(merged, Some(SpaSource::Disk(ref r)) if r == "wwwroot"));
-    }
-
-    #[test]
-    fn table_layers_under_use_spa_overlay() {
-        let assets = EmbeddedAssets::new("../wwwroot", FILES);
-        let merged = with_embedded_assets(Some(SpaSource::Disk("wwwroot".into())), Some(assets));
-        match merged {
-            Some(SpaSource::Embedded {
-                overlay_root,
-                assets,
-            }) => {
-                assert_eq!(overlay_root, "wwwroot");
-                assert_eq!(assets.root(), "../wwwroot");
-            }
-            other => panic!("expected embedded, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn table_alone_uses_build_root_as_overlay() {
-        let assets = EmbeddedAssets::new("../wwwroot", FILES);
-        let merged = with_embedded_assets(None, Some(assets));
-        match merged {
-            Some(SpaSource::Embedded { overlay_root, .. }) => {
-                assert_eq!(overlay_root, "../wwwroot");
-            }
-            other => panic!("expected embedded, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn host_crate_registers_no_asset_table() {
-        assert!(EmbeddedAssets::registered().is_none());
-    }
-}
-
-#[cfg(test)]
-mod drain_tests {
-    use super::drain_timeout_for;
-    use std::time::Duration;
-
-    #[test]
-    fn streaming_connections_get_the_stream_budget() {
-        let normal = Duration::from_secs(30);
-        let stream = Duration::from_secs(300);
-        assert_eq!(drain_timeout_for(normal, stream, 0), normal);
-        assert_eq!(drain_timeout_for(normal, stream, 1), stream);
-    }
-
-    #[test]
-    fn zero_budget_is_clamped_to_one_second() {
-        assert_eq!(
-            drain_timeout_for(Duration::ZERO, Duration::ZERO, 0),
-            Duration::from_secs(1)
-        );
     }
 }

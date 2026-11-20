@@ -51,6 +51,25 @@ pub trait IActionResult: Send {
 /// ASP.NET Core's `IActionResult` return type.
 pub type Response = Box<dyn IActionResult>;
 
+/// Result of one HTTP handler dispatch, before it is written to the response.
+///
+/// This is the internal fast-path counterpart of [`Response`]: a JSON DTO does
+/// not need a `JsonResult` box, and `()` does not need a `NoContentResult` box.
+/// `Action` keeps the self-controlled `IRequest<Response>` path unchanged.
+pub enum EndpointResult {
+    /// No body; the engine writes `204 No Content`.
+    Empty,
+    /// A serialized JSON body with an explicit status (normally 200).
+    Json {
+        /// HTTP status code.
+        status: u16,
+        /// Already-serialized JSON bytes.
+        body: bytes::Bytes,
+    },
+    /// The handler controls status, headers and body.
+    Action(Response),
+}
+
 /// `200 OK` + a JSON body — the result the framework uses for ordinary
 /// `Serialize` DTO responses.
 pub struct JsonResult<T> {

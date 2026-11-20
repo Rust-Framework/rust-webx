@@ -29,6 +29,19 @@ hosted services **先于连接排空**停止：后台 worker 不会在进程已�
 
 超时后仍未完成的连接会被中止；`stop()` 只执行一次：信号到达时的 watcher 与排空后的收尾共用同一个 `OnceCell`。
 
+### Worker 池（2.0）
+
+2.0 的执行引擎是“单 acceptor + N 个 `current_thread` worker runtime”：每个 worker 独占一个
+Tokio runtime 和 hyper `auto::Builder`，连接通过有界 channel 交接，不会跨核迁移。默认
+`Workers = available_parallelism()`（`Development` 下限到 8，避免测试同时起大量主机时线程膨胀），范围 `1..=64`：
+
+```json
+{ "Server": { "Workers": 8 } }
+```
+
+也可用环境变量 `APP__Server__Workers` 覆盖；`1` 适合调试/单核容器，`0` 表示自动。
+`App.MaxConnections` 仍是**全局**连接上限，引擎内部按 worker 分摊预算。
+
 ### 入站请求超时
 
 `Server.RequestTimeoutSeconds`（默认 `0` = 关闭）给单个请求一个截止时间：从路由命中后开始，

@@ -2129,9 +2129,10 @@ dependencies = [
 
 [[package]]
 name = "rust-webx"
-version = "1.5.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
+ "bytes",
  "futures-util",
  "hyper",
  "inventory",
@@ -2152,7 +2153,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-ai"
-version = "1.5.0"
+version = "2.0.0"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -2171,7 +2172,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-ai-ef"
-version = "1.5.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "rust-ef",
@@ -2186,7 +2187,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-ai-gateway"
-version = "1.5.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -2204,7 +2205,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-build"
-version = "1.5.0"
+version = "2.0.0"
 dependencies = [
  "brotli",
  "mime_guess",
@@ -2214,7 +2215,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-client"
-version = "1.5.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2239,7 +2240,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-core"
-version = "1.5.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2258,8 +2259,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust-webx-engine"
+version = "2.0.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures-util",
+ "http",
+ "http-body-util",
+ "httpdate",
+ "hyper",
+ "hyper-util",
+ "matchit",
+ "mime_guess",
+ "multer",
+ "rust-webx-core",
+ "rustls",
+ "rustls-pemfile",
+ "serde_json",
+ "socket2",
+ "tempfile",
+ "tokio",
+ "tokio-rustls",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "rust-webx-host"
-version = "1.5.0"
+version = "2.0.0"
 dependencies = [
  "argon2",
  "async-trait",
@@ -2285,6 +2313,7 @@ dependencies = [
  "rust-dix",
  "rust-webx-client",
  "rust-webx-core",
+ "rust-webx-engine",
  "rust-webx-macros",
  "rust-webx-openapi",
  "rust-webx-spa",
@@ -2304,7 +2333,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-macros"
-version = "1.5.0"
+version = "2.0.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2313,7 +2342,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-openapi"
-version = "1.5.0"
+version = "2.0.0"
 dependencies = [
  "inventory",
  "rust-webx-core",
@@ -2322,7 +2351,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-spa"
-version = "1.5.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "brotli",

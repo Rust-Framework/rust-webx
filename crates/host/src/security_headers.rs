@@ -29,22 +29,22 @@ impl IMiddleware for SecurityHeadersMiddleware {
         let resp = ctx.response_mut();
 
         // Prevent MIME type sniffing
-        resp.set_header("x-content-type-options", "nosniff");
+        resp.set_header_static("x-content-type-options", "nosniff");
 
         // Prevent clickjacking
-        resp.set_header("x-frame-options", "DENY");
+        resp.set_header_static("x-frame-options", "DENY");
 
         // Force HTTPS for 1 year (HSTS)
-        resp.set_header(
+        resp.set_header_static(
             "strict-transport-security",
             "max-age=31536000; includeSubDomains",
         );
 
         // Referrer policy
-        resp.set_header("referrer-policy", "strict-origin-when-cross-origin");
+        resp.set_header_static("referrer-policy", "strict-origin-when-cross-origin");
 
         // Permissions policy (disable sensitive features)
-        resp.set_header(
+        resp.set_header_static(
             "permissions-policy",
             "camera=(), microphone=(), geolocation=()",
         );

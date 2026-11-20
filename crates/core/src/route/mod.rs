@@ -9,5 +9,7 @@ pub mod scan;
 pub use binding::{BindInput, Binder, RequestModel, Source};
 pub use catalog::*;
 pub use diagnostics::*;
-pub use ext::{is_mediator_active, should_scan_endpoints, IServiceCollectionExt};
+pub use ext::{
+    is_mediator_active, should_scan_endpoints, typed_pipeline_count, IServiceCollectionExt,
+};
 pub use scan::*;

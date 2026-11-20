@@ -1,0 +1,43 @@
+[package]
+name = "rust-webx-engine"
+version.workspace = true
+edition = "2021"
+rust-version = "1.95"
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+documentation.workspace = true
+description = "rust-webx 2.0 execution engine: per-worker runtimes, zero-copy request context, direct dispatch"
+readme = "README.md"
+keywords = ["web", "http", "server", "hyper", "engine"]
+categories = ["web-programming", "asynchronous"]
+
+[lib]
+name = "webx_engine"
+
+[dependencies]
+rust-webx-core.workspace = true
+async-trait.workspace = true
+bytes.workspace = true
+futures-util.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util = { workspace = true, features = ["tokio", "server-auto"] }
+http.workspace = true
+matchit = "0.9.2"
+rustls.workspace = true
+tokio = { workspace = true, features = ["net", "rt", "rt-multi-thread", "macros", "fs", "signal", "sync", "time"] }
+tokio-util.workspace = true
+tokio-rustls.workspace = true
+rustls-pemfile.workspace = true
+tracing.workspace = true
+multer.workspace = true
+tempfile.workspace = true
+mime_guess.workspace = true
+httpdate.workspace = true
+socket2 = "0.6"
+serde_json.workspace = true
+
+[lints]
+workspace = true

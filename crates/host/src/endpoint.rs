@@ -9,6 +9,7 @@ use webx_core::routing::IEndpoint;
 use crate::authz::AuthorizerSet;
 use crate::problem_response::{write_forbidden, write_problem};
 use std::collections::HashMap;
+use webx_spa::SpaMiddleware;
 
 /// Endpoint that wraps a boxed async handler.
 #[allow(clippy::type_complexity)]
@@ -79,79 +80,71 @@ pub struct StubEndpoint {
     pub max_body_size: Option<usize>,
 }
 
-#[async_trait::async_trait]
-impl IEndpoint for StubEndpoint {
-    async fn handle(&self, ctx: &mut dyn IHttpContext) -> Result<()> {
+impl StubEndpoint {
+    /// Apply the route's body limit and declarative/dynamic authorization.
+    ///
+    /// Kept separate so the direct-dispatch target can enforce exactly the same
+    /// guard without routing through the legacy dispatch closure.
+    pub(crate) async fn authorize(&self, ctx: &mut dyn IHttpContext) -> Result<bool> {
         if let Some(limit) = self.max_body_size {
             ctx.request_mut().set_max_body_size(limit);
         }
-        if let Some(dispatch) = self.dispatch_fn {
-            // ── Declarative authorization from `#[authorize]` ──
-            // `authorization_dynamic` alone (hand-written metadata) also makes
-            // the route protected: dynamic means "authenticated, then delegated".
-            if !self.authorization.is_empty() || self.authorization_dynamic {
-                if ctx.claims().is_none() {
-                    // Single 401 write path: bubble the error up to the host
-                    // so every unauthenticated response (declarative
-                    // `#[authorize]`, binding layer, middleware) is written
-                    // by one place — including the `WWW-Authenticate`
-                    // challenge header.
-                    return Err(webx_core::error::Error::Unauthorized(
-                        "authentication required".to_string(),
-                    ));
+        if !self.authorization.is_empty() || self.authorization_dynamic {
+            if ctx.claims().is_none() {
+                return Err(webx_core::error::Error::Unauthorized(
+                    "authentication required".to_string(),
+                ));
+            }
+
+            if !self.authorization_dynamic {
+                let denied = {
+                    let claims = ctx.claims().expect("claims presence is checked above");
+                    self.authorization
+                        .iter()
+                        .find(|rule| !rule.matches(claims.roles(), claims.permissions()))
+                        .map(|rule| (rule.roles, rule.permissions))
+                };
+
+                if let Some((roles, permissions)) = denied {
+                    let mut ext = HashMap::new();
+                    ext.insert("required_roles".into(), serde_json::json!(roles));
+                    ext.insert(
+                        "required_permissions".into(),
+                        serde_json::json!(permissions),
+                    );
+                    write_forbidden(ctx, "Forbidden: insufficient permissions", ext).await;
+                    return Ok(false);
                 }
+            }
 
-                // Static mode: the claim snapshot must satisfy every rule.
-                // `#[authorize(dynamic)]` skips this gate — the declaration is
-                // the dynamic authorizer's input, not a claim check.
-                if !self.authorization_dynamic {
-                    let denied = {
-                        let claims = ctx.claims().expect("claims presence is checked above");
-                        self.authorization
-                            .iter()
-                            .find(|rule| !rule.matches(claims.roles(), claims.permissions()))
-                            .map(|rule| (rule.roles, rule.permissions))
-                    };
-
-                    if let Some((roles, permissions)) = denied {
-                        let mut ext = HashMap::new();
-                        ext.insert("required_roles".into(), serde_json::json!(roles));
-                        ext.insert(
-                            "required_permissions".into(),
-                            serde_json::json!(permissions),
-                        );
-                        write_forbidden(ctx, "Forbidden: insufficient permissions", ext).await;
-                        return Ok(());
-                    }
+            if self.authorization_dynamic {
+                let authorizers = self
+                    .authorizers
+                    .as_ref()
+                    .filter(|set| !set.is_empty())
+                    .ok_or_else(|| {
+                        webx_core::error::Error::Internal(
+                            "dynamic authorization requires a registered IDynamicAuthorizer"
+                                .to_string(),
+                        )
+                    })?;
+                if let Some(claims) = ctx.claims() {
+                    let resource_key = ctx.request().route_pattern().unwrap_or(self.path);
+                    let method = ctx.request().method();
+                    authorizers
+                        .authorize_with_declared_rules(
+                            claims,
+                            resource_key,
+                            method,
+                            self.authorization,
+                        )
+                        .await?;
                 }
-
-                // ── Dynamic authorization via IDynamicAuthorizer ──
-                //
-                // A dynamic endpoint *requires* an authorizer: without one,
-                // falling through would silently reduce a permission
-                // declaration to "any authenticated user". Host::build already
-                // rejects that configuration; this is the fail-closed guard for
-                // hand-built endpoints.
-                if self.authorization_dynamic {
-                    let authorizers = self
-                        .authorizers
-                        .as_ref()
-                        .filter(|set| !set.is_empty())
-                        .ok_or_else(|| {
-                            webx_core::error::Error::Internal(
-                                "dynamic authorization requires a registered IDynamicAuthorizer"
-                                    .to_string(),
-                            )
-                        })?;
+            } else if let Some(authorizers) = self.authorizers.as_ref() {
+                if !authorizers.is_empty() {
                     if let Some(claims) = ctx.claims() {
                         let resource_key = ctx.request().route_pattern().unwrap_or(self.path);
                         let method = ctx.request().method();
-                        // Hand the endpoint's `#[authorize]` rules to the
-                        // backend as the `&'static [AuthorizeRule]` slice
-                        // itself (no per-request flattening or wrapper), so
-                        // multiple rules keep their AND structure and a
-                        // dynamic endpoint's whole declaration reaches the
-                        // authorizer.
                         authorizers
                             .authorize_with_declared_rules(
                                 claims,
@@ -161,32 +154,26 @@ impl IEndpoint for StubEndpoint {
                             )
                             .await?;
                     }
-                } else if let Some(authorizers) = self.authorizers.as_ref() {
-                    // Hybrid mode: a static endpoint may still register
-                    // dynamic authorizers as an additional gate.
-                    if !authorizers.is_empty() {
-                        if let Some(claims) = ctx.claims() {
-                            let resource_key = ctx.request().route_pattern().unwrap_or(self.path);
-                            let method = ctx.request().method();
-                            authorizers
-                                .authorize_with_declared_rules(
-                                    claims,
-                                    resource_key,
-                                    method,
-                                    self.authorization,
-                                )
-                                .await?;
-                        }
-                    }
                 }
             }
+        }
+        Ok(true)
+    }
+}
 
+#[async_trait::async_trait]
+impl IEndpoint for StubEndpoint {
+    async fn handle(&self, ctx: &mut dyn IHttpContext) -> Result<()> {
+        if !self.authorize(ctx).await? {
+            return Ok(());
+        }
+
+        if let Some(dispatch) = self.dispatch_fn {
             let response = dispatch(&mut *ctx).await?;
             response.execute(&mut *ctx).await?;
             return Ok(());
         }
 
-        // Missing dispatch — route registered but handler bridge not linked.
         write_problem(
             ctx,
             501,
@@ -197,6 +184,52 @@ impl IEndpoint for StubEndpoint {
         )
         .await;
         Ok(())
+    }
+}
+
+/// Engine target that runs the same guard as [`StubEndpoint`], then the
+/// macro-generated direct dispatch (no mediator, no `Box<dyn Any>` request).
+pub struct DirectStubEndpoint {
+    auth: Arc<StubEndpoint>,
+    dispatch: webx_core::route::scan::HandlerDispatchFn,
+}
+
+impl DirectStubEndpoint {
+    pub fn new(
+        auth: Arc<StubEndpoint>,
+        dispatch: webx_core::route::scan::HandlerDispatchFn,
+    ) -> Self {
+        Self { auth, dispatch }
+    }
+}
+
+#[async_trait::async_trait]
+impl IEndpoint for DirectStubEndpoint {
+    async fn handle(&self, ctx: &mut dyn IHttpContext) -> Result<()> {
+        if !self.auth.authorize(ctx).await? {
+            return Ok(());
+        }
+        let result = (self.dispatch)(ctx).await?;
+        write_direct_result(ctx, result).await
+    }
+}
+
+async fn write_direct_result(
+    ctx: &mut dyn IHttpContext,
+    result: webx_core::action::EndpointResult,
+) -> Result<()> {
+    match result {
+        webx_core::action::EndpointResult::Empty => {
+            ctx.response_mut().set_status(204);
+            Ok(())
+        }
+        webx_core::action::EndpointResult::Json { status, body } => {
+            ctx.response_mut().set_status(status);
+            ctx.response_mut()
+                .set_header_static("content-type", "application/json");
+            ctx.response_mut().write_bytes_shared(body).await
+        }
+        webx_core::action::EndpointResult::Action(action) => action.execute(ctx).await,
     }
 }
 
@@ -264,6 +297,38 @@ impl IEndpoint for StaticJsonEndpoint {
         ctx.response_mut()
             .set_header("content-type", self.content_type);
         ctx.response_mut().write_bytes(self.body.clone()).await
+    }
+}
+
+/// Engine fallback for a genuine router miss.
+///
+/// Serves the SPA index shell when the request is an HTML navigation and a SPA
+/// is configured; otherwise returns a routing error so the engine's normal
+/// 404/error-writer path runs.
+pub struct SpaFallbackEndpoint {
+    spa: Arc<SpaMiddleware>,
+}
+
+impl SpaFallbackEndpoint {
+    pub fn new(spa: Arc<SpaMiddleware>) -> Self {
+        Self { spa }
+    }
+}
+
+#[async_trait::async_trait]
+impl IEndpoint for SpaFallbackEndpoint {
+    async fn handle(&self, ctx: &mut dyn IHttpContext) -> Result<()> {
+        // A middleware may already have answered (static file from SpaMiddleware
+        // sets the body and lets routing continue). Keep that response instead
+        // of turning it into the SPA shell or a 404.
+        if ctx.response().has_body() {
+            return Ok(());
+        }
+        if self.spa.try_index_fallback(ctx).await? {
+            Ok(())
+        } else {
+            Err(webx_core::error::Error::Routing("Not Found".to_string()))
+        }
     }
 }
 

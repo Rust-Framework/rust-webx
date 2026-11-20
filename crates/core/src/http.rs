@@ -607,6 +607,16 @@ pub trait IHttpResponse: Send {
     /// casing replaces the previous value instead of emitting a duplicate.
     fn set_header(&mut self, key: &str, value: &str);
 
+    /// Set a header whose name and value are compile-time constants.
+    ///
+    /// The engine overrides this with `HeaderName::from_static` /
+    /// `HeaderValue::from_static`, avoiding a parse and allocation for the
+    /// framework's own headers. Implementations that cannot exploit the
+    /// constants keep the default and delegate to [`Self::set_header`].
+    fn set_header_static(&mut self, key: &'static str, value: &'static str) {
+        self.set_header(key, value);
+    }
+
     /// Add a header without removing an existing value with the same name.
     ///
     /// The default falls back to [`IHttpResponse::set_header`] so simple
@@ -627,6 +637,14 @@ pub trait IHttpResponse: Send {
 
     /// Write raw bytes as the response body.
     async fn write_bytes(&mut self, data: Vec<u8>) -> Result<()>;
+
+    /// Write already-owned shared bytes without copying.
+    ///
+    /// The HTTP engine stores the `Bytes` directly; the default implementation
+    /// preserves compatibility by copying into the `Vec`-based method.
+    async fn write_bytes_shared(&mut self, data: bytes::Bytes) -> Result<()> {
+        self.write_bytes(data.to_vec()).await
+    }
 
     /// Replace the response body with a structured [`ResponseBody`].
     ///

@@ -3,6 +3,106 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [2.0.0] — 2026-11-20
+
+The execution engine is rewritten from first principles on the new
+`rust-webx-engine` crate. The application-facing API (macros, `Host`,
+`IRequest`/`IRequestHandler`, `IMiddleware`, results, auth/config/DI) is kept;
+the old single-runtime hyper loop is gone.
+
+> **English** · **简体中文**
+
+### English
+
+#### Execution engine
+
+- **One acceptor, N current-thread worker runtimes.** `rust-webx-engine` binds a
+  listener, accepts on the caller runtime, and hands each `std::net::TcpStream`
+  to a worker thread through a bounded channel (`into_std`/`from_std`, no
+  `unsafe`). Each worker owns a `current_thread` tokio runtime and one hyper
+  `auto::Builder`; connections never migrate cores. `Server.Workers`
+  (or `APP__Server__Workers`) selects the count; `0` = available parallelism,
+  clamped to 1..=64.
+- **Compile-time direct dispatch.** `#[handler]` now emits a `HandlerDispatch`
+  bridge keyed by `(Req, Rsp)`; the host joins it with the route at build time
+  and bypasses the mediator, `Box<dyn Any>` request/response and DI scope when no
+  typed pipeline behavior is registered. `#[handler(inject)]` still creates one
+  request scope; authorization from `#[authorize]` runs before the direct call.
+- **Zero-copy request context.** hyper's request `Parts` are moved, method/URI
+  borrowed, query parsed lazily, body kept as `Incoming` with a single-frame
+  `Bytes` fast path, and JSON results stored as `Bytes`. The response uses one
+  `HeaderMap`; static framework headers use `HeaderName::from_static` /
+  `HeaderValue::from_static`.
+- **Onion pipeline preserved.** `IMiddleware::invoke`/`after` order,
+  short-circuiting, slot ordering and first-error-wins semantics are unchanged;
+  the loop no longer allocates a per-request `Vec<Arc>`.
+- **Graceful lifecycle.** Accept stop → SSE token cancel → connection
+  `graceful_shutdown` → drain budget (`stream_drain_timeout` while streams are
+  active) → worker join → hosted-service stop → DI dispose. TLS termination and
+  HTTP/2 (ALPN) run inside the worker; a stalled TLS handshake is bounded.
+- **Security headers and `cache-control` defaults** are applied by the engine
+  finalizer with static header values, so they stay correct on 4xx/5xx and cost
+  no per-request parse/allocation.
+
+#### Performance (same host, 22 logical cores, 1 KiB JSON, 32 keep-alive conns)
+
+| Version | RPS | Allocations/request |
+|---|---:|---:|
+| 1.5.0 (single multi-thread runtime) | ~88k | ~50.1 |
+| 2.0.0 (worker pool + direct dispatch) | **~220–238k** burst / ~140k sustained under co-tenant load | **~23.1** |
+
+The worker model alone reached ~219k in the hyper-only prototype; 2.0 keeps the
+same architecture while preserving middleware/auth/DI semantics. Benchmarks are
+sensitive to co-tenant CPU load, so the CI performance gate uses relative
+thresholds against a pinned baseline rather than a single absolute number.
+
+#### Compatibility / migration
+
+- All existing route/handler macros, request binding attributes,
+  `WebxRequestMeta`, `HostBuilder`, `IRequest`, `IRequestHandler`,
+  `IMiddleware`, `IPipelineBehavior`, `IHttpContext`, result types,
+  auth/session/password ports, paging, `OperationResult`, health, SPA, OpenAPI
+  and config keys remain source-compatible.
+- `EndpointResult` is a new additive internal type (re-exported by `webx`) used
+  by direct dispatch; custom `IRequest<Response>` endpoints are unchanged.
+- `RouteEntry` gained an additive `rsp_type_id` field (constructors default it
+  to `None`). Hand-written struct literals should use `RouteEntry::new` /
+  `with_response_type_id`.
+- `#![forbid(unsafe_code)]` is preserved; the engine contains no `unsafe`.
+- The old host-internal `serve_http`/`serve_https`, `HttpContext` runtime loop
+  and name-keyed dispatch are no longer used by `Host`. The public
+  `webx_host::HttpContext` type remains for downstream test/extension code.
+- `rust-webx-engine` is a new published crate, published before
+  `rust-webx-host`; the workspace is 2.0.0.
+
+#### Verification
+
+- `cargo test --workspace`: 999+ tests, 0 failures (1.5 host/webx/core suites +
+  docbit/dmbit e2e), including routing, binding, auth, CORS, security headers,
+  SSE, TLS/HTTP2, shutdown/drain, files/Range and request timeouts.
+- `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check`.
+- `cargo doc --workspace --no-deps` with `-D warnings`.
+
+### 简体中文
+
+- 执行引擎全面重写到新 crate `rust-webx-engine`：单 acceptor + N 个
+  `current_thread` worker 运行时、安全连接交接（无 `unsafe`）、每 worker 一个
+  hyper `auto::Builder`，连接不再跨核迁移。
+- `#[handler]` 生成按 `(Req, Rsp)` 键控的 `HandlerDispatch`，无 typed
+  pipeline 时绕过 mediator / `Box<dyn Any>` / 请求级 DI scope；`inject` 仍按需
+  开一个 scope，`#[authorize]` 鉴权在直达调用前执行。
+- 请求上下文零拷贝：移动 hyper `Parts`，方法/URI 借用，query 惰性解析，body
+  保持 `Incoming`，JSON 结果直接存 `Bytes`；框架静态响应头零分配。
+- 中间件洋葱语义、槽位顺序、短路、错误传播完全保留，但去掉了每请求
+  `Vec<Arc>` 分配。
+- 生命周期：停止 accept → 取消 SSE token → `graceful_shutdown` → 按预算
+  drain → join worker → 停 hosted → dispose DI；TLS/HTTP2 在 worker 内完成。
+- 同机 32 连接 1 KiB JSON 基准：1.5 约 88k RPS / 50.1 allocs，2.0 约
+  **220–238k** 峰值、~140k 持续（受同机负载影响）/ **23.1** allocs。
+- 应用侧公共 API 保持兼容；新增 `EndpointResult` 与
+  `RouteEntry::rsp_type_id`（增量），`rust-webx-engine` 为新发布 crate。
+- `cargo test --workspace` 999+ 通过、0 失败；clippy/fmt/doc 全绿。
+
 ## [1.5.0] — 2026-11-20
 
 Security/correctness hardening plus the 1.5 capability line (SSE, outbound client,

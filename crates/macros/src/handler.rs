@@ -30,8 +30,23 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     let item_impl = parse_macro_input!(item as ItemImpl);
     let handler_ty = &item_impl.self_ty;
 
-    // Check for #[handler(inject)] — signals DI-based construction via #[derive(Inject)]
-    let use_inject = !attr.is_empty();
+    // Event handlers are resolved through DI fan-out (`IMediator::publish`);
+    // they do not have an HTTP request dispatch. Do not emit a bogus `()`
+    // request registration for them.
+    let is_request_handler = item_impl
+        .trait_
+        .as_ref()
+        .and_then(|(_, path, _)| path.segments.last())
+        .is_some_and(|segment| segment.ident == "IRequestHandler");
+    if !is_request_handler {
+        return quote!(#item_impl).into();
+    }
+
+    // Check for #[handler(inject)] — signals DI-based construction via #[derive(Inject)].
+    let use_inject = match parse_mode(attr) {
+        Ok(mode) => mode,
+        Err(error) => return error.to_compile_error().into(),
+    };
 
     // Extract T (request type) and R (response type) from IRequestHandler<T, R>
     let (req_ty_opt, rsp_ty_opt) = extract_handler_types(&item_impl);
@@ -43,6 +58,69 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     let rsp_ty = rsp_ty_opt.unwrap_or(&default_type);
 
     let req_ty_name = type_to_string(req_ty);
+    let rsp_tokens = quote!(#rsp_ty).to_string();
+    let is_action_response = rsp_tokens.contains("IActionResult")
+        || matches!(
+            rsp_ty,
+            Type::Path(path) if path.path.segments.last().is_some_and(|segment| segment.ident == "Response")
+        );
+    let is_unit_response = rsp_tokens.trim() == "()";
+
+    let response_expr = if is_action_response {
+        quote! { ::webx::EndpointResult::Action(__result) }
+    } else if is_unit_response {
+        quote! { ::webx::EndpointResult::Empty }
+    } else {
+        quote! {
+            match ::webx::serde_json::to_vec(&__result) {
+                ::core::result::Result::Ok(__body) => ::webx::EndpointResult::Json {
+                    status: 200,
+                    body: ::webx::bytes::Bytes::from(__body),
+                },
+                ::core::result::Result::Err(__error) => {
+                    return ::core::result::Result::Err(
+                        ::webx::Error::ResponseSerialization(__error)
+                    );
+                }
+            }
+        }
+    };
+
+    let construct_handler = if use_inject {
+        let try_constructor_fn =
+            format_ident!("__rdi_try_construct_{}", handler_ty_name.replace("::", "_"));
+        quote! {
+            let __runtime = ctx.dispatch_runtime().ok_or_else(|| {
+                ::webx::Error::Internal(
+                    "direct dispatch requires a request context built by webx::Host".to_string()
+                )
+            })?;
+            let __scope = __runtime.scope();
+            let __arc = match #try_constructor_fn(&__scope) {
+                ::core::result::Result::Ok(arc) => arc,
+                ::core::result::Result::Err(error) => {
+                    return ::core::result::Result::Err(::webx::Error::Di(
+                        format!("cannot construct handler {}: {error}", #handler_ty_name)
+                    ));
+                }
+            };
+            let mut __handler: #handler_ty = match ::std::sync::Arc::try_unwrap(__arc) {
+                ::core::result::Result::Ok(handler) => handler,
+                ::core::result::Result::Err(_) => {
+                    return ::core::result::Result::Err(::webx::Error::Internal(
+                        format!(
+                            "handler Arc must be uniquely owned after fresh construction: {}",
+                            #handler_ty_name
+                        )
+                    ));
+                }
+            };
+        }
+    } else {
+        quote! {
+            let mut __handler: #handler_ty = ::std::default::Default::default();
+        }
+    };
 
     // Generate factory function
     let factory_fn = format_ident!("__lrwf_factory_{}", handler_ty_name.replace("::", "_"));
@@ -51,6 +129,10 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     // Generate type-erased dispatch used by `IMediator::send_boxed`
     let boxed_fn = format_ident!(
         "__lrwf_boxed_dispatch_{}",
+        handler_ty_name.replace("::", "_")
+    );
+    let direct_fn = format_ident!(
+        "__lrwf_direct_dispatch_{}",
         handler_ty_name.replace("::", "_")
     );
 
@@ -90,6 +172,47 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let expanded = quote! {
         #item_impl
+
+        #[doc(hidden)]
+        fn #direct_fn<'__webx_direct>(
+            ctx: &'__webx_direct mut dyn ::webx::IHttpContext,
+        ) -> ::std::pin::Pin<
+            Box<
+                dyn ::std::future::Future<
+                        Output = ::webx::Result<::webx::EndpointResult>,
+                    > + Send
+                    + '__webx_direct,
+            >,
+        > {
+            Box::pin(async move {
+                let __identity = ctx.claims().map(|claims| {
+                    ::std::sync::Arc::new(::webx::IdentityUser::from_claims(claims))
+                });
+                let __trace = ctx.trace_id().map(|id| ::std::sync::Arc::<str>::from(id));
+                ::webx::RequestContext::run_with_trace(__identity, __trace, async move {
+                    let __request: #req_ty =
+                        ::webx::bind_request::<#req_ty>(&mut *ctx).await?;
+                    #construct_handler
+                    let __result: #rsp_ty = <#handler_ty as ::webx::IRequestHandler<
+                        #req_ty,
+                        #rsp_ty,
+                    >>::handle(&mut __handler, __request)
+                    .await?;
+                    ::core::result::Result::Ok(#response_expr)
+                })
+                .await
+            })
+        }
+
+        ::webx::inventory::submit! {
+            ::webx::HandlerDispatch {
+                req_type_id: ::std::any::TypeId::of::<#req_ty>(),
+                rsp_type_id: ::std::any::TypeId::of::<#rsp_ty>(),
+                req_type_name: #req_ty_name,
+                needs_scope: #use_inject,
+                dispatch: #direct_fn,
+            }
+        }
 
         #[doc(hidden)]
         fn #factory_fn(
@@ -193,6 +316,19 @@ fn extract_type_name(ty: &Type) -> String {
             .collect::<Vec<_>>()
             .join("_"),
         _ => "UnknownType".to_string(),
+    }
+}
+
+fn parse_mode(attr: TokenStream) -> syn::Result<bool> {
+    if attr.is_empty() {
+        return Ok(false);
+    }
+    match syn::parse::<syn::Meta>(attr)? {
+        syn::Meta::Path(path) if path.is_ident("inject") => Ok(true),
+        other => Err(syn::Error::new_spanned(
+            other,
+            "unsupported `#[handler]` option; expected `#[handler]` or `#[handler(inject)]`",
+        )),
     }
 }
 

@@ -40,7 +40,7 @@ jobs:
           . scripts/crates-index.sh
 
           # Publish order: dependencies must appear before their dependents.
-          CRATES="rust-webx-macros rust-webx-core rust-webx-client rust-webx-ai rust-webx-ai-ef rust-webx-build rust-webx-spa rust-webx-openapi rust-webx-host rust-webx rust-webx-ai-gateway"
+          CRATES="rust-webx-macros rust-webx-core rust-webx-engine rust-webx-client rust-webx-ai rust-webx-ai-ef rust-webx-build rust-webx-spa rust-webx-openapi rust-webx-host rust-webx rust-webx-ai-gateway"
           metadata="$(cargo metadata --no-deps --format-version 1)"
 
           # The tag must match every crate version. Skipping mismatches would

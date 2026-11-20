@@ -35,6 +35,11 @@ impl MiddlewarePipeline {
         self.middlewares.push(middleware);
     }
 
+    /// The ordered stages, for the 2.0 engine adapter.
+    pub fn stages(&self) -> &[Arc<dyn IMiddleware>] {
+        &self.middlewares
+    }
+
     /// Execute middleware onion: invoke forward, final handler, after hooks reverse.
     ///
     /// Supports short-circuit: if a middleware's `invoke` returns

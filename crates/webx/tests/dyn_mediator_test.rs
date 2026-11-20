@@ -10,7 +10,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use webx::*;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, Deserialize, WebxRequestMeta)]
 struct DynRequest {
     n: u32,
 }

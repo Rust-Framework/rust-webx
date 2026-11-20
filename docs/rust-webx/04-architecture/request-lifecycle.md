@@ -37,7 +37,9 @@ sequenceDiagram
 
 ### 1. 连接与请求读取
 
-`Host::run()` 启动 hyper 监听器。每个连接由 Tokio 异步处理。`HttpContext::new()` 不读取 body；body 由 `IHttpRequest::body_bytes()` 按需读取，并强制 `App.MaxBodySize` 限制（默认 10MB）。
+2.0 起 `Host::run()` 启动的是 `rust-webx-engine` 的 worker pool：一个 acceptor 在调用方 runtime 上 accept，把连接通过有界 channel 交给 N 个各自拥有 `current_thread` runtime 的 worker（安全 `into_std`/`from_std`，无 `unsafe`），每个 worker 用一个 hyper `auto::Builder` 服务连接。连接不会跨核迁移。
+
+`EngineContext::new()` 不读取 body；body 由 `IHttpRequest::body_bytes()` 按需读取，并强制 `App.MaxBodySize` 限制（默认 10MB）。请求头、method、URI 直接移动/借用 hyper 的 `Parts`，query 只在被访问时解析。
 
 ### 2. 中间件管道
 
@@ -56,17 +58,18 @@ sequenceDiagram
 - 静态段精确匹配
 - `{param}` 动态段提取到 `route_params`
 - 匹配成功后设置 `route_pattern()`（如 `/api/users/{id}`），供授权使用
+- 405/OPTIONS 由 engine 直接写 `Allow`，SPA 只接管真正的 miss（不会把 POST-only 路径伪装成 200）
 
 ### 4. 端点处理
 
-`#[get]` / `#[post]` 等宏生成的 `RouteDispatch` 负责：
+`#[handler]` 生成的 `HandlerDispatch` 按 `(请求类型, 响应类型)` 的 `TypeId` 注册；`Host` 启动时把它和 `#[get]` 等路由 join：
 
-1. 先执行静态 `#[authorize]` 规则，再运行已注册的 `IDynamicAuthorizer`（仅限有 `#[authorize]`
-   的路由）；全部通过才继续
-2. 从 `route_params`、query、body 构建 Request struct
+1. 先执行静态 `#[authorize]` 规则，再运行已注册的 `IDynamicAuthorizer`（仅限有 `#[authorize]` 的路由）；全部通过才继续
+2. 从 route params、query、body 绑定 Request struct
 3. 注入 claims，进入 `RequestContext`
-4. 调用 `Mediator::send(request)`（与进程内调用同一路径）
-5. 将响应序列化为 JSON 写入 `HttpResponse`
+4. 若没有注册任何 `IPipelineBehavior`：直接构造 handler 并 `handle(request)`（不经过 `Mediator`、`Box<dyn Any>`、`JsonResult` 装箱）；有 behavior 时回退到 mediated 路径
+5. `#[handler(inject)]` 按请求开一个 DI scope；普通 handler 不创建 scope
+6. 响应转为 `EndpointResult::{Empty, Json(Bytes), Action(Response)}`，由 engine 写入状态/头/body
 
 ### 5. 错误处理
 

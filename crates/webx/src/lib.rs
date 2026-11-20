@@ -19,8 +19,8 @@
 
 // --- Core traits ---
 pub use webx_core::action::{
-    ContentResult, FileResult, IActionResult, JsonResult, NoContentResult, Response,
-    StatusCodeResult,
+    ContentResult, EndpointResult, FileResult, IActionResult, JsonResult, NoContentResult,
+    Response, StatusCodeResult,
 };
 pub use webx_core::app::IHost;
 pub use webx_core::auth::{
@@ -92,11 +92,14 @@ pub use webx_core::stream::{SseEvent, SseResult, StreamEnd};
 // --- DI extensions ---
 pub use webx_core::route::binding;
 pub use webx_core::route::binding::RequestModel;
-pub use webx_core::route::ext::{is_mediator_active, should_scan_endpoints, IServiceCollectionExt};
+pub use webx_core::route::ext::{
+    is_mediator_active, should_scan_endpoints, typed_pipeline_count, IServiceCollectionExt,
+};
 pub use webx_core::route::scan::{
-    AuthorizeRule, BoxedDispatch, BoxedDispatchFn, BoxedDispatchFuture, HandlerCache, HandlerEntry,
-    HandlerRegistration, HandlerRegistry, ParamMeta, RequestParamEntry, RouteDispatch,
-    RouteDispatchById, RouteDispatchFn, RouteEntry,
+    bind_request, AuthorizeRule, BoxedBindFuture, BoxedBindFutureFn, BoxedDispatch,
+    BoxedDispatchFn, BoxedDispatchFuture, HandlerCache, HandlerDispatch, HandlerDispatchFn,
+    HandlerEntry, HandlerRegistration, HandlerRegistry, ParamMeta, RequestBinder,
+    RequestParamEntry, RouteDispatch, RouteDispatchById, RouteDispatchFn, RouteEntry,
 };
 
 // --- HTTP layer ---
@@ -193,6 +196,7 @@ pub use rust_dix_macros::{module, Inject};
 
 // --- Re-export common dependencies ---
 pub use async_trait::async_trait;
+pub use bytes;
 pub use hyper;
 /// Compile-time registration used by the derive macros.
 pub use inventory;

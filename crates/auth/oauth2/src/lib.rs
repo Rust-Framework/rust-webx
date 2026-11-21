@@ -2,7 +2,7 @@
 //!
 //! This crate is deliberately **not** an OIDC client: providers such as GitHub
 //! issue an access token and expose a REST profile, not an `id_token`. Use
-//! [`rust-webx-oidc`] when the provider supports OpenID Connect.
+//! `rust-webx-oidc` when the provider supports OpenID Connect.
 //!
 //! The request-side primitives are:
 //!

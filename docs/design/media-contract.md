@@ -1,8 +1,8 @@
-# 媒体控制面与适配契约（v2.4）
+# 媒体控制面与适配契约
 
 > 原则（宪法 D2/D11）：**媒体面不进 core**。框架只提供控制面原语（信令消息类型、
 > 房间控制、TURN 凭据签发、QoS 指标摄入端口与契约），SFU/媒体服务器作为适配器存在。
-> 本文定义 v2.4-1 已交付的部分与 v2.4-3 的适配契约。
+> 本文定义媒体控制面与适配器契约。
 
 ## 1. 控制面与媒体面的边界
 
@@ -10,7 +10,7 @@
 |---|---|---|
 | 控制面（core/host） | 框架 | 信令消息、房间成员/权限、TURN REST 凭据、QoS 指标标签规范 |
 | 业务控制面（参考应用） | `imbit/` | 房间创建/加入、成员校验、把信令路由给目标连接 |
-| 媒体面（适配器） | 外部/SFU | SDP 协商、ICE、RTP/RTCP、转码、录制、SFU 转发（2.4-3 契约 + `crates/media-*`） |
+| 媒体面（适配器） | 外部/SFU | SDP 协商、ICE、RTP/RTCP、转码、录制、SFU 转发（适配器契约） |
 
 框架不依赖任何编解码器、RTP 栈或 SFU 实现；换 SFU（LiveKit/mediasoup/Janus/自研）
 不需要改 core。
@@ -101,7 +101,7 @@ credential = base64(HMAC-SHA1(TURN_SECRET, username))
 `static-auth-secret=` 一致；username 绑定到认证 user id；TTL 受限（最长 24h）；不得把静态
 TURN 密码下发到客户端。参考应用的 `TURN_SECRET`/`TURN_URLS` 只是开发环境到该配置节的便捷映射。
 
-## 4. 媒体面适配契约（2.4-3 已交付）
+## 4. 媒体面适配契约
 
 SFU/媒体服务器实现 `webx::IMediaPlaneAdapter`（core 只定义契约，不含任何媒体栈）：
 
@@ -138,7 +138,7 @@ pub trait IMediaPlaneAdapter: Send + Sync {
 | `media_frames_dropped_total` | counter | 丢帧累计（仅 >0 时记） |
 
 应用把 `IMeter` 注册进 host（`use_meter`）即可与 HTTP/WebSocket 指标一起导出；录制
-切片时长/大小走 2.4-2 的 `RecordingMeta`。
+切片时长/大小走 `RecordingMeta`。
 
 ### 参考适配器与契约测试
 
@@ -146,11 +146,11 @@ pub trait IMediaPlaneAdapter: Send + Sync {
 `join/leave/publish/subscribe/stats/close_room` 与 `set_stats` 注入采样；契约测试
 `contract_suite` 对任意 `IMediaPlaneAdapter` 断言会话生命周期、轨迹替换、404 语义、
 QoS 指标写入（含丢包钳制）与房间关闭清理。真实 SFU 适配器在各自 crate 里复用同一
-契约测试（2.4-7 starter 家族）。
+契约测试（`rust-webx-contract-tests`）。
 
 **验收**：`cargo test -p rust-webx-core --lib media::`（2 项契约测试通过）。
 
-## 6. 录制与对象存储（2.4-2）
+## 6. 录制与对象存储
 
 框架只提供**存储端口**与录制元数据模型，不绑定云 SDK：
 
@@ -172,7 +172,7 @@ pub trait IObjectStore: Send + Sync {
 
 - 两个实现随 core 发布：`InMemoryObjectStore`（fake，测试/演示）与
   `FileSystemObjectStore`（真实本地持久化，含路径穿越校验、分片合并、SHA1 etag）。
-  S3 适配器归入 2.4-7 starter（实现同一端口，可返回预签名 URL 让客户端直传）。
+  S3 适配器实现同一端口，可返回预签名 URL 让客户端直传。
 - **录制元数据**：`RecordingMeta { id, room_id, owner_id, status, content_type,
   segments[part,key,size,duration_ms,started_at_unix], total_size, total_duration_ms,
   created_at_unix, completed_at_unix }`；`RecordingStatus::{Recording,Completed,Failed}`。
@@ -195,7 +195,7 @@ GET  /api/recordings/{id}/parts/{part}            -> 原始字节（ContentResul
 实现：`imbit/src/recording.rs`；验收：`imbit/tests/recording_e2e_test.rs`（分片上传、
 重试不重复计入、完成、按 content-type 回放、非成员 403、缺分片 404、空录制 400）。
 
-## 7. 验收总览（v2.4-1 / 2.4-2 / 2.4-3）
+## 7. 验收总览
 
 - 单测：[signaling.rs](../../crates/core/src/realtime/signaling.rs)（TURN REST 已知向量、
   配置校验、信令消息往返）、[storage.rs](../../crates/core/src/storage.rs)（内存/文件系统

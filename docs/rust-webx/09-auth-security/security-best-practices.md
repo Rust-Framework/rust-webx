@@ -9,9 +9,9 @@
 | 开发/生产分离 | `appsettings.Development.json` vs 生产配置 |
 | 密钥可放文件 | `Jwt.SecretFile` 指向 `0600` 文件，启动期校验长度 ≥32 字节与权限（1.3.0 起） |
 
-### 签发令牌：用 `ITokenIssuer`（2.5）
+### 签发令牌：用 `ITokenIssuer`
 
-`jwt_secret()` 进程级 shim 仅保留兼容，**2.5 起弃用**。登录 Handler 注入 `Arc<dyn ITokenIssuer>`，由 host 用最终解析的密钥（env / `Jwt.Secret` / `Jwt.SecretFile`）以及配置的 `iss`/`aud` 签发：
+`jwt_secret()` 进程级 shim 仅保留兼容，**当前弃用**。登录 Handler 注入 `Arc<dyn ITokenIssuer>`，由 host 用最终解析的密钥（env / `Jwt.Secret` / `Jwt.SecretFile`）以及配置的 `iss`/`aud` 签发：
 
 ```rust
 let issued = tokens
@@ -117,7 +117,7 @@ if !setup.consume(candidate) {
 
 生产环境**必须**启用 TLS。
 
-## 认证安全（2.5 清单）
+## 认证安全
 
 - **令牌**：配置 `Jwt.Issuer`/`Jwt.Audience`；资源服务器用 `InvalidTokenBehavior = Reject`；`sub` 空、算法不符、超长令牌一律拒绝。
 - **口令**：Argon2id（`IPasswordHasher`），不要 bcrypt/自写哈希；`PasswordPolicy` 只做长度+黑名单；登录失败用 `verify_password_or_dummy` 防枚举。

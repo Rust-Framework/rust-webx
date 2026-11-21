@@ -3,7 +3,7 @@
 //! Alipay is not a plain OAuth 2.0 token endpoint: `alipay.system.oauth.token`
 //! and `alipay.user.info.share` are RSA2-signed gateway requests. This module
 //! keeps that protocol isolated from [`OAuth2Client`](crate::OAuth2Client),
-//! while exposing the same normalized [`OAuth2User`](crate::OAuth2User).
+//! while exposing the same normalized [`OAuth2User`].
 //!
 //! Required app configuration:
 //! - `app_id`
@@ -18,10 +18,10 @@ use base64::Engine as _;
 use rsa::pkcs1::{DecodeRsaPrivateKey, DecodeRsaPublicKey};
 use rsa::pkcs1v15::{SigningKey, VerifyingKey};
 use rsa::pkcs8::{DecodePrivateKey, DecodePublicKey};
+use rsa::sha2::Sha256;
 use rsa::signature::{SignatureEncoding, Signer, Verifier};
-use rsa::{RsaPrivateKey, RsaPublicKey};
+use rsa::{PrivateKey, PublicKey};
 use serde_json::{Map, Value};
-use sha2::Sha256;
 use url::Url;
 use webx_client::{HttpClient, HttpClientOptions, IHttpClient, OutboundRequest};
 use webx_core::auth::IdentityUser;
@@ -355,17 +355,17 @@ fn string_field(object: &Map<String, Value>, key: &str) -> Option<String> {
     }
 }
 
-fn parse_private_key(pem: &str) -> Result<RsaPrivateKey> {
+fn parse_private_key(pem: &str) -> Result<PrivateKey> {
     let pem = normalize_pem(pem, "PRIVATE KEY");
-    RsaPrivateKey::from_pkcs8_pem(&pem)
-        .or_else(|_| RsaPrivateKey::from_pkcs1_pem(&pem))
+    PrivateKey::from_pkcs8_pem(&pem)
+        .or_else(|_| PrivateKey::from_pkcs1_pem(&pem))
         .map_err(|error| Error::Di(format!("Alipay private key: {error}")))
 }
 
-fn parse_public_key(pem: &str) -> Result<RsaPublicKey> {
+fn parse_public_key(pem: &str) -> Result<PublicKey> {
     let pem = normalize_pem(pem, "PUBLIC KEY");
-    RsaPublicKey::from_public_key_pem(&pem)
-        .or_else(|_| RsaPublicKey::from_pkcs1_pem(&pem))
+    PublicKey::from_public_key_pem(&pem)
+        .or_else(|_| PublicKey::from_pkcs1_pem(&pem))
         .map_err(|error| Error::Di(format!("Alipay public key: {error}")))
 }
 
@@ -401,10 +401,10 @@ fn alipay_timestamp() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::rngs::OsRng;
     use rsa::pkcs1v15::Signature;
     use rsa::pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding};
     use rsa::signature::Verifier;
+    use rsa::Generate;
 
     #[test]
     fn raw_base64_key_is_armored() {
@@ -423,8 +423,8 @@ mod tests {
 
     #[test]
     fn rsa2_sign_and_verify_roundtrip() {
-        let private = RsaPrivateKey::new(&mut OsRng, 2048).expect("key");
-        let public = RsaPublicKey::from(&private);
+        let private = PrivateKey::generate();
+        let public = PublicKey::from(&private);
         let client = AlipayClient::new(AlipayConfig::new(
             "app",
             private

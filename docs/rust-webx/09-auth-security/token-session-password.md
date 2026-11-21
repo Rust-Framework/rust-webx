@@ -98,7 +98,7 @@ session_store.revoke(&issued.jti).await?;
 - `revoke_all_for_subject` 默认返回 **501**（trait 默认实现，表示不支持该能力，不是服务器故障）；DB 型 store 有 subject 索引时覆盖它。
 - **注册必须落到 `dyn ISessionStore`**：用 `use_session_store(...)`，或 `svc.try_add_singleton::<dyn ISessionStore>(...)`；注册具体类型（`svc.instance(Arc::new(...))`）不会启用吊销。Host 启动时 debug 日志会打印吊销开/关。
 
-### 2.1 让吊销记录随 token 过期（2.5）
+### 2.1 让吊销记录随 token 过期
 
 ```rust
 // 知道 token 的 exp 时用 revoke_until，而不是永久 revoke
@@ -111,7 +111,7 @@ session_store
   `purge_expired(now)` 清理再也不会被读取的记录。`revoke` 仍是无限期（兼容旧 store）。
 - 自定义 store 覆盖 `revoke_until` 即可表达 TTL（DB 列 `expires_at` + 清理任务）。
 
-### 2.2 吊销查询负缓存（2.5）
+### 2.2 吊销查询负缓存
 
 ```rust
 Host::builder()
@@ -142,7 +142,7 @@ if ok && hasher.needs_rehash(&stored_phc) {
 - 调参：`Host::builder().use_password_hasher(Arc::new(Argon2PasswordHasher::with_params(Argon2Params::new(65536, 3, 1))))`。
 - 不需要口令哈希的服务可关默认依赖：`rust-webx = { version = "1.2", default-features = false }`（trait 仍在，按需自行实现）。
 
-## 4. 刷新令牌轮换（2.5）
+## 4. 刷新令牌轮换
 
 长会话不要把 access token 寿命拉到 24 小时；用短 access token + 可轮换的 refresh token：
 
@@ -175,7 +175,7 @@ let rotated = refresh.rotate(&presented).await?; // 旧 token 立即失效
 
 ## 5. 登录防护：策略、防枚举、限流与并发闸门
 
-登录端点除了校验口令，还承担四件安全职责。2.5 起框架提供原语，业务不再各写一套：
+登录端点除了校验口令，还承担四件安全职责。当前框架提供原语，业务不再各写一套：
 
 ### 5.1 口令策略（NIST 800-63B）
 
@@ -278,7 +278,7 @@ async fn authorize_with_rules(
 | 签发 / 哈希 / 吊销存储 | `ITokenIssuer` / `IPasswordHasher` / `ISessionStore` | 业务只做「替换/配置」，不引 `jsonwebtoken`/`argon2` 直用 |
 | 登录防护 | `PasswordPolicy` / `verify_password_or_dummy` / `ILoginThrottle` / `BoundedPasswordHasher` | 策略、防枚举、限流、并发闸门各一个入口 |
 
-### 7.1 认证指标（2.5）
+### 7.1 认证指标
 
 ```rust
 Host::builder()

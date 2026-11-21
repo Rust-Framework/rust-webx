@@ -66,9 +66,9 @@
 
 | 风险 | 状态 |
 |---|---|
-| 外部 IdP 厂商差异（`at_hash`、非标准 claims） | 本地 HTTPS IdP 已过；厂商 interop 待补 |
-| WebAuthn 真实浏览器/认证器差异 | 仅 ES256 + `none` attestation；浏览器 e2e 待补 |
-| 整请求分配税 17.86 | 非认证层；单独性能目标 |
+| 外部 IdP 厂商差异（`at_hash`、非标准 claims） | Duende/GitHub/Google/Microsoft 已验证；其他厂商需 client 注册后复测 |
+| WebAuthn 真实浏览器/认证器差异 | Chromium CTAP2 虚拟认证器已验证；物理认证器未纳入门禁 |
+| 整请求框架税 10.42 | 非认证层；见 `alloc-budget.md` |
 | 共享主机侧信道 | 未做 CPU/缓存侧信道评估；Argon2 并发已限 |
 | 密钥托管 | `SecretFile`（0600）由运维保证；无 HSM/KMS 集成 |
 | 分布式 DPoP/吊销存储 | 接口已留；生产需 Redis/DB 适配器 |

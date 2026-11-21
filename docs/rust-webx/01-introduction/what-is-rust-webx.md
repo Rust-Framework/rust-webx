@@ -42,7 +42,7 @@ graph TB
         Host[Host 宿主]
         Pipeline[中间件管道]
         Router[matchit Router]
-        Engine[2.0 worker pool]
+        Engine[worker pool]
         Direct[direct dispatch]
         Mediator[IMediator fallback]
         DI[rust-dix 容器]
@@ -145,20 +145,20 @@ let user = req.require_user()?;
 标准身份包含用户标识、名称、邮箱、租户、角色与权限；匿名接口用 `#[fromclaim(optional)] viewer: Option<IdentityUser>`。
 详见[用户身份与多租户](../05-request-pattern/user-identity.md)。
 
-## 2.1 框架优势
+## 框架优势
 
-2.1 不是功能堆叠，而是把长期运行所需的准入、生命周期、错误语义和性能基础收口：
+框架不是功能堆叠，而是把长期运行所需的准入、生命周期、错误语义和性能基础收口：
 
 | 优势 | 对开发者的直接价值 |
 |---|---|
 | **请求即端点，编译期分派** | `#[get]`/`#[post]` + `#[handler]` 自动 join；无手写路由表。direct JSON 路径不经过 mediator，也不装箱 request/response。 |
-| **低分配热路径** | 参考 `/hello` 基准实测 **22.06 allocs/request**（2.0 约 23.1）；同机吞吐/延迟在 co-tenant 噪声内持平。见 [2.1.0 性能报告](https://github.com/Rust-Framework/rust-webx/blob/main/docs/design/performance-2.1.0.md)。 |
+| **低分配热路径** | 参考 `/hello` 基准的框架税为 **10.42 allocs/request**（hyper 地板 6.00），CI 门禁 ≤12。见[分配预算](../../design/alloc-budget.md)。 |
 | **HTTP 能力由路由决定** | 无路由的 `#[handler]` 自动作为 `IMediator` handler，响应不要求 `Serialize`；没有 `in_process` 标注负担，也不会误暴露 command handler。 |
 | **生产级准入** | 所有 listener 共享一个全局 `MaxConnections` governor；首请求超时关闭静默连接；HTTP/2 keepalive；per-worker SSE drain。 |
 | **可取消的生命周期** | Host 单次运行状态机、run drop guard、优雅/立即关闭、join 超时保护 DI dispose；重复/并发 run 返回 typed error。 |
 | **可信错误语义** | 错误在逆序 after hooks 前写入；metrics/tracing/compression 看到真实 4xx/5xx；失败成功路径的表示头被清理，416 `Content-Range` 保留。 |
 | **原生优先的集成** | rust-dix 1.0 DI scope、rust-ef 2.5 ORM、JWT/session/password 端口、rust-webx-client；应用层不重复造轮子。 |
-| **可验证的质量** | 995 个 workspace 测试、TLS/h2/admission wire-level 测试、clippy / rustdoc / MSRV 1.95 / audit / bench smoke 全部纳入发布门禁。 |
+| **可验证的质量** | workspace 测试、TLS/h2/admission wire-level 测试、clippy / rustdoc / MSRV 1.95 / audit / bench smoke 全部纳入发布门禁。 |
 
 ## 框架边界：它不是什么
 

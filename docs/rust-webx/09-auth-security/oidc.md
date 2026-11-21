@@ -1,6 +1,6 @@
 # OpenID Connect 登录（`rust-webx-oidc`）
 
-> 2.5 M2。独立 crate：只做 **RP（relying party）**，不做 IdP、不做社交登录按钮目录。
+> 。独立 crate：只做 **RP（relying party）**，不做 IdP、不做社交登录按钮目录。
 
 ## 1. 流程
 

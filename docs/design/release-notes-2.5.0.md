@@ -1,58 +1,59 @@
-﻿# rust-webx 2.5.0 发布说明（认证）
+# rust-webx 2.5.0 发布说明
 
-> 状态：**GA（2.5.0）**。认证域 M1–M4 已完成并通过核心 GA 门禁；外部 IdP/真实认证器
-> interop 与 ≥1h 浸泡列为 post-GA 部署验证（见 `docs/design/auth-conformance.md`）。
+> 发布日期：2026-11-21。2.5.0 是 2.x 线上的**加性发布**：在 2.1 的公开 API 之上
+> 增加运行信任、实时执行模型、认证体系、消息/缓存适配器与 AI 网关能力。
+> 只使用 2.1 API 的应用升级依赖即可，无需改代码（N-2 门禁覆盖）。
 
 ## 1. 亮点
 
 | 领域 | 交付 |
 |---|---|
-| JWT | 算法白名单、iss/aud、空 sub、leeway、MaxTokenBytes、Anonymous/Reject |
-| 浏览器 | Cookie 会话（`__Host-`/HttpOnly/Secure/SameSite）+ 双提交 CSRF |
-| 登录 | NIST 口令策略、登录限流、dummy hash、Argon2id + 有界并发 |
-| 吊销 | `revoke_until` TTL、负缓存、EF 会话/刷新令牌持久化 |
-| 联合身份 | JWKS + RS256/ES256/PS256 + `kid` 轮换；OIDC discovery/PKCE/id_token |
-| 多因子 | TOTP（RFC 6238）+ 恢复码 + `amr`/`acr` |
-| 强认证 | WebAuthn/Passkey 验签、mTLS、DPoP（RFC 9449）、HTTP Basic |
-| 协议 | RFC 7662 introspection、RFC 7009 revocation |
-| 可观测 | `auth.requests`、`auth.duration`、refresh 指标、`JwksHealthCheck` |
+| 运行信任 | 严格配置绑定（未知键/类型错误启动失败）、默认 30s 入站 deadline、准入超时 503 + `Retry-After`、按路由 RED 指标、RFC 9457 `code`/`retryable`/`traceId`、分片限流端口 |
+| 实时 | WebSocket 升级、连接级作用域、消息即请求、连接注册表/Hub、跨节点 fan-out（复用 `IEventPublisher`）、每连接背压与限流、realtime 指标 |
+| 事件 | `IMediator::publish` 异步 fire-and-forget、有界内存传输、`#[handler]` 事件处理器自动注册、死信与重投上限 |
+| 认证 | JWT 校验硬化、Cookie+CSRF、登录硬化、刷新令牌轮换、JWKS/非对称、OIDC、OAuth2 社交登录、TOTP、WebAuthn、mTLS、DPoP、introspection/revocation |
+| 适配器 | Redis（缓存 + Streams 事件）、NATS、RabbitMQ（quorum/DLX）、Kafka（纯 Rust follower） |
+| AI | `rust-webx-ai` 领域包、EF 用量账本、OpenAI 兼容 `/v1` 表面、配额/韧性/观测 |
+| 测试基座 | `TestHost` 进程内分发、`IClock`/`TestClock`、chaos 钩子、契约测试 crate |
+| 工具链 | 分配预算、soak/chaos/fuzz-lite/wire p99、三平台 CI、crate 归属与发布顺序门禁 |
 
-## 2. 新 crate
+## 2. 新增 crate
 
-- `rust-webx-auth-ef`：`EfRefreshTokenStore`、`EfSessionRepository`
-- `rust-webx-oauth2`：OAuth2 社交登录（GitHub/Google/Microsoft/GitLab/Gitee/DingTalk/Feishu/WeChat/Weibo/QQ/Douyin/Alipay/Facebook）
-- `rust-webx-oidc`：RP 侧 OIDC（含私有 CA HTTPS）
-- `rust-webx-mfa`：TOTP/恢复码/assurance
-- `rust-webx-webauthn`：ES256 注册/断言验签
+`rust-webx-auth-ef`、`rust-webx-oidc`、`rust-webx-oauth2`、`rust-webx-mfa`、
+`rust-webx-webauthn`、`rust-webx-redis`、`rust-webx-nats`、`rust-webx-rabbitmq`、
+`rust-webx-kafka`。
 
-## 3. 兼容性（N-2）
+所有适配器均为 opt-in：`core`/`host`/umbrella 不依赖任何 broker/缓存/AI/认证协议 crate。
 
-- 旧 `Jwt.Secret` + HS256 配置继续工作；
-- 旧 token（无 jti）继续验证；
-- `init_jwt_secret`/`jwt_secret()` 仍可用但**已 deprecated**，下一 major 删除；
-- bcrypt 哈希需渐进迁移到 `IPasswordHasher`/Argon2id；
-- 新能力全部 opt-in；详见 `auth-migration-2.5.md`。
+## 3. 兼容性
+
+- 旧 `Jwt.Secret` + HS256 配置、无 `jti` 的旧 token 继续可用；
+- `init_jwt_secret` / `jwt_secret()` 仍可用但已 deprecated，下一个 major 删除；
+- bcrypt 哈希不直接被 Argon2 hasher 接受：在下次成功校验后重哈希，或保留自定义 legacy hasher；
+- 事件发布改为异步：事件 DTO 需要 `Serialize`/`Deserialize`，事件处理器需要 `#[handler]` 或显式 DI；
+- 详情见 `auth-migration-2.5.md` 与 `compatibility.md`。
 
 ## 4. 验证
 
-- 全 workspace `fmt`/`clippy -D warnings`/`test` 绿；
-- HS256 p50 2.3µs / p99 **3.9µs**（release，20k）；
-- 认证层匿名 **0 分配增量**（auth == no-op middleware）；
-- OIDC 私有 CA 真实 HTTPS e2e（含 at_hash/PKCE 10 例）、mTLS 握手 e2e、30min/1h soak 0 失败（Linux 1h/3600.15s，RSS 稳定 17.7MB）、chaos 3/3；
-- 对抗用例：JWT 22、Cookie 8、CSRF 9、登录 10、JWKS 7、Refresh 8、TOTP 13、WebAuthn 5、DPoP 5、introspection 6、mTLS 4。
-- 方法/数字详见 `auth-performance-2.5.md`。
+- 全 workspace `fmt` / `clippy -D warnings` / `test` 绿（三平台 CI）；
+- HS256 p50 **2.3µs** / p99 **3.9µs**（release，20k）；
+- 认证层增量分配 **0**；
+- 框架税 **10.42 allocs/request**（hyper 地板 6.00，CI 上限 12）；
+- `cargo audit` 0 漏洞、0 拒绝告警；
+- 30min / 1h Linux soak 0 失败（RSS 稳定 ~17.7MB）；chaos 3/3；fuzz-lite 零 panic；
+- 认证一致性矩阵见 `auth-conformance.md`。
 
-## 5. 已知限制（正式版前）
+## 5. 已知边界
 
-- 外部 IdP 已完成 Duende 完整授权码+PKCE+id_token、`rust-webx-oauth2` GitHub OAuth2 完整授权码+token+/user 真实联网，以及 Google/Microsoft discovery+JWKS；其他厂商待各自 client 注册；WebAuthn 已用 Chromium 虚拟认证器完成真实 create/get 验证；`at_hash` 已实现并有负例；
-- WebAuthn 仅 ES256 + `none` attestation，真实浏览器/认证器 e2e 未做；
-- 整请求分配税 17.86 allocs/request（与认证无关，独立性能目标）；
-- ≥1h soak 尚未在干净环境记录；
+- 外部 IdP：Duende（授权码+PKCE）、GitHub OAuth2、Google/Microsoft discovery/JWKS 已联网验证，
+  其他厂商需 client 注册后复测；
+- WebAuthn 仅 ES256 + `none` attestation；物理认证器与更多 attestation 未纳入门禁；
+- Kafka starter 为单分区 follower，不做 consumer-group offset 提交，仅明文连接；
 - DPoP 对象型 `cnf` 需自定义 issuer；mTLS 仅 WebPKI 链。
 
-## 6. 升级
+## 6. 升级步骤
 
-1. 阅读 `auth-migration-2.5.md`；
-2. 保留旧 secret 一个回滚窗口；
-3. 按需启用 Cookie/CSRF、刷新令牌、OIDC/MFA/WebAuthn/mTLS；
-4. 运行 `cargo fmt --all --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`。
+1. 依赖改为 `rust-webx = "2.5.0"`（子 crate 同版本，精确钉 `=2.5.0`）；
+2. 如需认证/适配器，按需引入对应 opt-in crate 并调用 `add_*`；
+3. 运行 `cargo fmt --all --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`；
+4. 生产环境检查 `APP_ENV`、CORS 白名单、`Jwt.Secret`/`Jwt.SecretFile` 与健康探针。

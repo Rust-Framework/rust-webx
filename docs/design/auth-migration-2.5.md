@@ -1,15 +1,15 @@
 # 认证体系 2.5 迁移指南（N-2 兼容）
 
-> 目标：2.1/2.2 部署可**原地升级到 2.5**，旧配置与旧 token 继续工作；新能力按需启用。
-> 回滚：2.5 认证改动没有删除旧配置/旧 API；回滚到 2.2 时只需移除新配置项与新表。
+> 目标：2.1 部署可**原地升级到 2.5**，旧配置与旧 token 继续工作；新能力按需启用。
+> 回滚：2.5 认证改动没有删除旧配置/旧 API；回滚到 2.1 时只需移除新配置项与新表。
 
 ## 1. 兼容矩阵
 
-| 2.1/2.2 用法 | 2.5 行为 | 动作 |
+| 2.1 用法 | 2.5 行为 | 动作 |
 |---|---|---|
 | `Jwt.Secret` + HS256 | 继续工作（默认算法不变） | 无 |
 | `Jwt.Issuer`/`Audience` | 继续校验；新配置可省略 | 无 |
-| `init_jwt_secret()` / `jwt_secret()` | **deprecated 但仍可用**（下一 major 删除） | 迁移到 `ITokenIssuer` |
+| `init_jwt_secret()` / `jwt_secret()` | **文档标注 deprecated，仍可用**（下一 major 删除） | 迁移到 `ITokenIssuer` |
 | 手写 `jsonwebtoken` 签发 | 继续编译 | 改为注入 `Arc<dyn ITokenIssuer>` |
 | bcrypt 密码哈希 | Argon2 hasher 不识别 bcrypt | 见 §3 |
 | 默认匿名请求 | 不变 | 无 |
@@ -21,7 +21,7 @@
 
 ```jsonc
 "Jwt": {
-  "Algorithms": ["HS256"],              // 2.5 可配；JWKS 用 RS256/ES256/PS256
+  "Algorithms": ["HS256"],              // 可配；JWKS 用 RS256/ES256/PS256
   "ClockSkewSeconds": 30,
   "MaxTokenBytes": 1048576,
   "InvalidTokenBehavior": "Anonymous",  // 或 "Reject"

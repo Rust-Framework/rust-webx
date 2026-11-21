@@ -1,4 +1,4 @@
-# 中间件统一 `Next` 语义（D11，v2.4-4）
+# 中间件统一 `Next` 语义
 
 ## 为什么
 
@@ -16,14 +16,14 @@ pub trait IMiddleware: Send + Sync {
     // 旧式：后置（默认 no-op）
     async fn after(&self, _ctx: &mut dyn IHttpContext) -> Result<()> { Ok(()) }
 
-    // 新式（2.4-4）：声明后引擎走 continuation 执行器
+    // 新式：声明后引擎走 continuation 执行器
     fn continuation(&self) -> bool { false }
     // 默认实现 = 旧语义桥接：Break 短路；Continue 执行 next 再跑 after
     async fn invoke_next(&self, ctx: &mut dyn IHttpContext, next: NextStage) -> Result<()> { ... }
 }
 ```
 
-- **旧式中间件零改动**：默认 `invoke_next` 桥接 `invoke`/`after`，语义与 2.3 完全一致
+- **旧式中间件零改动**：默认 `invoke_next` 桥接 `invoke`/`after`，语义与旧式完全一致
   （含 `Break` 短路、错误时反向 `after` 仍然执行、首个错误优先）。
 - **新式中间件**：`continuation() -> true` 并实现 `invoke_next`；`next.run(ctx).await`
   推进剩余链路，不调用即短路；`NextStage` 只能被推进一次（`run` 消费句柄）。
@@ -58,7 +58,7 @@ let host = Host::builder()
 熔断 = 在调用 `next` 前检查失败计数，拒绝时直接写 `503` 并返回。
 
 按路由组合：把 continuation 中间件注册在目标路由组之前（管道顺序 = 中间件顺序），
-或用路径判断在 `invoke_next` 里决定是否推进 `next`。路由级独立管道不在 2.4 范围内。
+或用路径判断在 `invoke_next` 里决定是否推进 `next`。路由级独立管道不在当前范围内。
 
 ## 迁移指南
 
@@ -75,7 +75,7 @@ let host = Host::builder()
 - 引擎：`crates/engine/src/pipeline.rs`（`has_continuation` 分派、`run_chain`）
 - 契约测试：`crates/webx/tests/middleware_next_test.rs`（4 项：onion 顺序、短路、
   504 超时取消、错误响应先于 `after` 钩子）
-- 默认管道分配预算不变（`alloc-probe compare 500 18`，见 `docs/design/alloc-budget.md`）
+- 默认管道分配预算不变（`alloc-probe compare 500 12`，见 `docs/design/alloc-budget.md`）
 
 ## 边界
 

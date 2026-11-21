@@ -113,7 +113,7 @@ Host::builder()
 
 超限返回 RFC 9457 `429` + `application/problem+json`，并携带 `Retry-After`（按 `RequestsPerSecond` 推出的整秒等待时间）。
 
-### 分布式限流（2.2）
+### 分布式限流
 
 多实例部署时，内存桶各自计数会让实际限额翻倍。框架把计数存储抽成端口 `IRateLimiter`：
 

@@ -50,7 +50,7 @@ let executor = GatewayExecutor::new(catalog, router)
 ## 边界
 
 - 已实现：精确 key、租户隔离、温度/流式过滤、内存缓存、命中指标、执行器接线、单飞。
-- 未实现：Redis 分布式缓存、按租户/模型策略开关、SSE 帧重放、单飞超时/取消指标。
+- 未实现：基于 `IDistributedCache` 的分布式网关缓存、按租户/模型策略开关、SSE 帧重放、单飞超时/取消指标。
 - 不要缓存含随机性（temperature > 0）或依赖外部状态的请求；不要把 API key/tenant 明文放进
   缓存键（已哈希，tenant 只参与哈希）。
 - prompt caching 是 provider 能力，透传即可，不要和网关缓存混用。

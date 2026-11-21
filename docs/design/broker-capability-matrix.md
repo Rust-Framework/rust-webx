@@ -47,14 +47,11 @@
 
 ## 4. 当前验证状态
 
-- Redis：真实端点 **7/7** 用例（cache TTL/sliding/clear、发布/消费、`start_id` 重放、
-  未注册 no-op、`max_deliveries` → DLQ、`replay_dead_letter`）通过。
-- NATS：**独立 `nats-server` 二进制**（非 Docker）真实 **2/2** 通过（roundtrip +
-  `EventTransportContract`）。
-- RabbitMQ / Kafka：编译、单元、注册、共享 `EventTransportContract` 通过；
-  真实 broker 由 `.github/workflows/stability.yml` 的 `broker-integration` nightly 覆盖。
-- 本地 Docker：`docker-compose.brokers.yml` 已通过 `docker compose config` 解析校验；
-  当前工作站 Docker Desktop 引擎受 Windows 虚拟化功能影响，修复前不阻塞其他验证路径。
+- 四个适配器在 PR CI 跑编译、单元、注册与共享契约（无 broker 时 env-gated 用例提前返回）。
+- 真实 broker 由 nightly `broker-integration`（service containers）覆盖：发布/消费、
+  `EventTransportContract`、Redis 缓存 TTL/DLQ/replay、Rabbit quorum/DLX。
+- 本地 `docker-compose.brokers.yml` 与 `scripts/test-brokers.*` 可复现同一拓扑；
+  无容器环境可用远端 Redis 或独立 `nats-server` 跑真实用例。
 
 ## 5. 无需 Docker 的验证路径
 

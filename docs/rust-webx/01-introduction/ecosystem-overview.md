@@ -81,7 +81,7 @@ graph BT
 - `Host` / `HostBuilder` — 应用宿主与构建器
 - `Router` — 基于 Trie 的路由匹配
 - `MiddlewarePipeline` — 中间件顺序执行
-- `EngineContext` — 2.1 起引擎的 HTTP 上下文具体实现（应用只依赖 `IHttpContext`）
+- `EngineContext` — 当前引擎的 HTTP 上下文具体实现（应用只依赖 `IHttpContext`）
 - `JwtAuth` / `ResourceAuthorization` — 认证授权实现
 - `MemoryCache`, `RateLimiter`, `CorsMiddleware` 等内置中间件
 

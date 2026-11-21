@@ -13,7 +13,7 @@ Host::builder().add_authentication().build().run().await?;
 
 `add_authentication()` 只负责 JWT 认证；`#[authorize]` 规则由端点自己执行，未满足时返回 401/403（见 [authorize 宏](authorize-macro.md)）。需要与 `sk-` API Key 共存时见 [API Key 认证](api-key-auth.md)。
 
-## 配置（2.5 起）
+## 配置
 
 ```json
 {
@@ -66,7 +66,7 @@ Host::builder()
     .build();
 ```
 
-## 非对称验签与 JWKS（2.5 M2）
+## 非对称验签与 JWKS
 
 ```json
 {
@@ -160,9 +160,9 @@ let issued = self.tokens.issue(
 
 ## 小结
 
-> 2.5 弃用：`init_jwt_secret` / `jwt_secret()` 仅为 N-2 兼容保留（`.add_authentication()` 仍会填充全局），**下一 major 删除**。新代码必须注入 `Arc<dyn ITokenIssuer>` 并调用 `issue(TokenClaims)`；不要读取/保存全局 secret。
+> 兼容 shim：`init_jwt_secret` / `jwt_secret()` 仅为 N-2 兼容保留（`.add_authentication()` 仍会填充全局），**下一 major 删除**。新代码必须注入 `Arc<dyn ITokenIssuer>` 并调用 `issue(TokenClaims)`；不要读取/保存全局 secret。
 
-`add_authentication()` + `Jwt` 配置即可启用 JWT 认证；2.5 起 `iss`/`aud`/算法/时钟偏移/令牌上限/严格模式全部可配且 fail-closed。业务代码优先通过 Request 的 `IdentityUser` 字段拿身份，登录/登出通过 `ITokenIssuer`/`ISessionStore` 端口。
+`add_authentication()` + `Jwt` 配置即可启用 JWT 认证；当前 `iss`/`aud`/算法/时钟偏移/令牌上限/严格模式全部可配且 fail-closed。业务代码优先通过 Request 的 `IdentityUser` 字段拿身份，登录/登出通过 `ITokenIssuer`/`ISessionStore` 端口。
 
 ### 按路径限定 scheme（可选）
 

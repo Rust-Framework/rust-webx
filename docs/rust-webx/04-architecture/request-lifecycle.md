@@ -5,7 +5,7 @@
 ```mermaid
 sequenceDiagram
     participant Client
-    participant Engine as 2.0 Engine worker
+    participant Engine as Engine worker
     participant Pipeline as 中间件管道
     participant Router as matchit Router
     participant Target as RouteTarget
@@ -40,7 +40,7 @@ sequenceDiagram
 
 ### 1. 连接与请求读取
 
-2.0 起 `Host::run()` 启动的是 `rust-webx-engine` 的 worker pool：一个 acceptor 在调用方 runtime 上 accept，把连接通过有界 channel 交给 N 个各自拥有 `current_thread` runtime 的 worker（安全 `into_std`/`from_std`，无 `unsafe`），每个 worker 用一个 hyper `auto::Builder` 服务连接。连接不会跨核迁移。
+当前 `Host::run()` 启动的是 `rust-webx-engine` 的 worker pool：一个 acceptor 在调用方 runtime 上 accept，把连接通过有界 channel 交给 N 个各自拥有 `current_thread` runtime 的 worker（安全 `into_std`/`from_std`，无 `unsafe`），每个 worker 用一个 hyper `auto::Builder` 服务连接。连接不会跨核迁移。
 
 `EngineContext::new()` 不读取 body；body 由 `IHttpRequest::body_bytes()` 按需读取，并强制 `App.MaxBodySize` 限制（默认 10MB）。请求头、method、URI 直接移动/借用 hyper 的 `Parts`，query 只在被访问时解析。
 

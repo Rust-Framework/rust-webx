@@ -68,7 +68,7 @@ pub struct AuthorizeRule {
 
 元数据在编译期写入 `RouteEntry`；`StubEndpoint` 在 dispatch 前检查：
 
-### 静态模式（默认，与 1.2.0 完全一致）
+### 静态模式（默认）
 
 - 没有规则（`authorization` 为空）→ 公开端点；
 - 有规则但无 claims → `401 Unauthorized`（统一由 host 写出，带 `WWW-Authenticate: Bearer` 挑战）；
@@ -132,7 +132,7 @@ pub trait IDynamicAuthorizer: Send + Sync {
         method: &str,        // 大写方法，如 POST
     ) -> Result<()>;
 
-    // 1.2.0 起：额外拿到端点声明的角色/权限（DeclaredRules 视图，legacy）
+    // 兼容视图：额外拿到端点声明的角色/权限（DeclaredRules，legacy）
     async fn authorize_with_rules(
         &self,
         claims: &dyn IClaims,
@@ -141,7 +141,7 @@ pub trait IDynamicAuthorizer: Send + Sync {
         declared: &DeclaredRules<'_>,
     ) -> Result<()>;
 
-    // 1.3.0 起的零分配主路径：直接传 RouteEntry.authorization 切片
+    // 零分配主路径：直接传 RouteEntry.authorization 切片
     async fn authorize_with_declared_rules(
         &self,
         claims: &dyn IClaims,
@@ -153,9 +153,8 @@ pub trait IDynamicAuthorizer: Send + Sync {
 ```
 
 只覆写**任意一个**即可：`authorize_with_declared_rules` 的默认实现转调
-`authorize_with_rules`（再默认转调 `authorize`），旧的 1.1 / 1.2 实现无需改代码。框架调用的是
-`authorize_with_declared_rules`；`DeclaredRules` 与 `authorize_with_rules` 标记为 legacy，
-计划在 2.0 移除。
+`authorize_with_rules`（再默认转调 `authorize`），旧实现无需改代码。框架调用的是
+`authorize_with_declared_rules`；`DeclaredRules` 与 `authorize_with_rules` 为兼容路径。
 
 - `route_pattern` 与 `IEndpointCatalog` 的 `path`、运行时 `route_pattern()` 是同一个字符串；
   它**不是**具体请求路径，参数变化不会改变键，适合做授权资源键。

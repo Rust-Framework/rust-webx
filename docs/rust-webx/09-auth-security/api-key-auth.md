@@ -172,7 +172,7 @@ if !verify_secret(pepper, parsed.secret, &record.secret_hash) {
 - 撤销：写 DB + 使缓存版本失效；TTL 决定最坏生效时间（可配 0）。
 - 精确的 key 格式、轮换与配额由存储层决定；scheme 只要求"前缀 + 交给 validator"。
 
-## 其他 scheme：HTTP Basic（2.5）
+## 其他 scheme：HTTP Basic
 
 `BasicScheme` 走同一 scheme 链，只做 base64 解码并委托给业务校验器：
 

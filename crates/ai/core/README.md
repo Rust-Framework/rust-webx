@@ -25,4 +25,5 @@ independent 0.x line.
 Scope: no HTTP engine, no provider SDKs, no database code. Provider-specific
 fields stay in adapters, never in the shared types.
 
-See `docs/design/ai-gateway.md` in the `rust-webx` repository for the full plan.
+See `docs/rust-webx/11-production/` (quota, usage metering, model routing) and
+the `rust-webx-ai-gateway` crate for the HTTP surface.

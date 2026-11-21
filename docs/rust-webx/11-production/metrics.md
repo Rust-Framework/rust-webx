@@ -8,7 +8,7 @@
 
 | 指标 | 类型 | 标签 | 含义 |
 |---|---|---|---|
-| `http_requests_total` / `http_responses_2xx_total` / `http_responses_4xx_total` / `http_responses_5xx_total` | counter | — | 进程级计数（2.1 兼容，保持不变） |
+| `http_requests_total` / `http_responses_2xx_total` / `http_responses_4xx_total` / `http_responses_5xx_total` | counter | — | 进程级计数 |
 | `http_requests_inflight` | gauge | — | 当前在管道内的请求数（含本次 scrape） |
 | `http_request_timeouts_total` | counter | — | 被入站 deadline 取消（504）的请求 |
 | `http_route_requests_total` | counter | route, status | 按匹配路由模板的状态类计数 |
@@ -60,7 +60,7 @@ assert_eq!(
 );
 ```
 
-## OpenTelemetry 桥接（2.2-1b）
+## OpenTelemetry 桥接
 
 框架**不**引入 OTel 依赖（`opentelemetry` 的版本节奏与 MSRV 需单独评审）。两条零依赖桥接路径：
 
@@ -88,10 +88,10 @@ assert_eq!(
 
 2. **进程内自定义指标**：实现 `webx::IMeter`（counter/histogram/gauge）并通过
    `HostBuilder::use_meter` 注册，AI 执行器等组件会写入；生产实现把三类指标映射到
-   `opentelemetry::metrics::Meter`。内置的 RED/直方图/连接 gauge 目前只走 `/metrics`，
-   进程内 OTel exporter 属于 2.4 的 starter 家族（`otel` crate），单独立项。
+   `opentelemetry::metrics::Meter`。内置的 RED/直方图/连接 gauge 走 `/metrics`；
+   进程内 OTel exporter 未内置，需要时注册自定义 `IMeter` 实现。
 
-## 实时（WebSocket）指标（2.3-6）
+## 实时（WebSocket）指标
 
 存在 WebSocket 路由时，`/metrics` 额外输出 `realtime_*` 系列（进程级聚合，
 `IConnection::stats()` 的聚合版）：

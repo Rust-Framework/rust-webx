@@ -63,6 +63,8 @@ usage，直接返回 503 类错误。
 
 ## 边界
 
-- 已实现：重试/退避/jitter/`Retry-After`、熔断、舱壁、执行器接线与 6 个测试。
-- 未实现：入站请求 deadline 的框架级取消、对冲（hedging）、熔断状态进 `/health/ready`。
+- 已实现：重试/退避/jitter/`Retry-After`、熔断、舱壁、执行器接线；入站请求 deadline 由
+  `Server.RequestTimeoutSeconds` 提供（超时 504），熔断状态经 `GatewayHealth` 汇总到
+  `/health/ready`。
+- 未实现：对冲（hedging）。
 - 不要在执行器外再写一套重试循环；否则会绕过首字节规则与配额结算。

@@ -1,10 +1,10 @@
-# Starter 家族与端口契约测试（2.4-7）
+# Starter 家族与端口契约测试
 
 > 原则：**框架拥有端口，starter 只做适配与装配**。跨进程只有一条传输通道——
 > `IEventPublisher`/`EventDispatcher`（见 [架构 ADR](mediator-handler-architecture.md)）；
 > starter 不引入第二套 pub/sub 或 dispatch 机制。
 
-## 1. 已交付：可复用契约测试（2.4-7）
+## 1. 已交付：可复用契约测试
 
 新增 crate **`crates/contract-tests`**（`rust-webx-contract-tests`，不发布）：为纯端口提供
 行为级契约套件，任何适配器（内存实现/S3/SFU）都跑同一套断言。
@@ -18,7 +18,7 @@
 （`cargo test -p rust-webx-contract-tests`）。
 
 **事件传输契约**：`crates/webx/tests/event_bus_test.rs` 覆盖发布语义、Handler 隔离与
-consumer 路由；适配器级契约由本 crate 的 **`EventTransportContract`**（2.5）提供，
+consumer 路由；适配器级契约由本 crate 的 **`EventTransportContract`** 提供，
 四个 broker 适配器的 `tests/integration.rs` 都已接入同一入口（见 §4）。契约本身在 PR CI
 用 loopback 传输自测（`cargo test -p rust-webx-contract-tests`）。
 
@@ -42,13 +42,13 @@ async fn s3_store_satisfies_the_contract() {
 
 | Starter | 端口/依赖 | 配置（starter 自持，`AppOptions` 之外） | 契约测试 | 状态 |
 |---|---|---|---|---|
-| **postgres** | rust-ef `DbContext` + 迁移（`bootstrap`/`migrate`） | `Database:ConnectionString`、`Database:Pool` | 迁移/bootstrap 烟测 + 就绪探针 | rust-ef 2.5 已提供；参考应用 docbit 在用；独立 starter crate 排入 2.5 |
+| **postgres** | rust-ef `DbContext` + 迁移（`bootstrap`/`migrate`） | `Database:ConnectionString`、`Database:Pool` | 迁移/bootstrap 烟测 + 就绪探针 | rust-ef 提供，参考应用 docbit 接入；不单独发布 starter crate |
 | **redis** | `IDistributedCache` + 事件传输 `IEventPublisher`（+ consumer 后台服务） | `RedisOptions`（url/prefix/TTL/stream） | `event_bus_test` 语义 + env-gated `tests/integration.rs` | 已落地 `crates/cache/redis`（`add_redis`） |
 | **nats** | 事件传输 `IEventPublisher` | `NatsOptions`（url/subject/queue group） | 同上 | 已落地 `crates/queue/nats`（`add_nats`） |
 | **rabbitmq** | 事件传输 `IEventPublisher`（durable topic/queue） | `RabbitMqOptions`（url/exchange/routing key/queue） | env-gated `tests/integration.rs` | 已落地 `crates/queue/rabbitmq`（`add_rabbitmq`） |
 | **kafka** | 事件传输 `IEventPublisher`（单分区 follower） | `KafkaOptions`（brokers/topic/partition/start offset） | env-gated `tests/integration.rs` | 已落地 `crates/queue/kafka`（`add_kafka`）；无 consumer-group offset 提交 |
-| **s3** | `IObjectStore`（可选 `presign_put`） | `Storage:Endpoint/Bucket/Region/AccessKey/SecretKey` | `object_store_contract` | 契约套件已就绪；真实适配器（2.5，MinIO nightly） |
-| **otel** | `IMeter` + `/metrics` 镜像 | `Otel:Endpoint`、`Otel:ServiceName`、采样 | 指标名/标签契约 + `MemoryMeter` 断言（含 `RealtimeMetrics::export_to`（scrape 时导出增量）） | 契约方向已定；OTLP exporter（2.5，可选 feature） |
+| **s3** | `IObjectStore`（可选 `presign_put`） | `Storage:Endpoint/Bucket/Region/AccessKey/SecretKey` | `object_store_contract` | 契约套件就绪；真实适配器为后续工作 |
+| **otel** | `IMeter` + `/metrics` 镜像 | `Otel:Endpoint`、`Otel:ServiceName`、采样 | 指标名/标签契约 + `MemoryMeter` 断言（含 `RealtimeMetrics::export_to`（scrape 时导出增量）） | 契约方向已定；OTLP exporter 为后续工作 |
 
 > 为什么真实 SDK 适配器不在 PR CI：Redis/NATS/S3/OTLP 需要外部服务或容器；PR 用内存实现
 > 与契约测试保证语义，真实服务在 `stability.yml` 的 nightly job 用 `services:` 跑同一契约。
@@ -136,7 +136,7 @@ docker compose -f docker-compose.brokers.yml down -v
 - 后续：nightly `broker-integration` 首次真实运行确认服务健康参数；S3/OTel starter 的示例与契约；
   postgres starter 提供 `Database` 配置与迁移辅助。
 
-## 6. Crate 归属：有界分类法（2.6）
+## 6. Crate 归属：有界分类法
 
 `crates/` 不再按厂商平铺，而是**固定框架集 + 四个领域组**；新增适配器只能进已有组，
 crate 归属数量不随第三方产品数量线性增长：

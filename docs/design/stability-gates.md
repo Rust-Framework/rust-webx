@@ -2,7 +2,6 @@
 
 > 快速门禁在 PR CI；本页描述的慢测试默认 `#[ignore]`，由
 > `.github/workflows/stability.yml` 每天 03:00 UTC 运行，也可手动触发。
-> 2.4-8 收官时本页所有门禁均已落地并有本地/CI 证据。
 
 ## 1. Soak（`crates/webx/tests/stability_soak_test.rs`）
 
@@ -21,8 +20,7 @@ SOAK_SECONDS=86400 SOAK_MAX_RSS_GROWTH_MB=512 \
 ```
 
 RSS 仅在 Linux 断言（读 `/proc/self/statm`）；其他平台跳过该项。
-**2.4-8 证据**：本地 `SOAK_SECONDS=20` 通过（22s，含 RSS 断言）；24h 由 nightly
-`workflow_dispatch` 的 `soak_seconds=86400` 触发。
+nightly 默认 `SOAK_SECONDS=300`；30min/1h/24h 通过 `workflow_dispatch` 指定。
 
 ## 2. Chaos（`crates/webx/tests/stability_chaos_test.rs`，5 场景）
 
@@ -50,8 +48,7 @@ cargo test -p rust-webx --test stability_chaos_test -- --ignored --nocapture --t
 - 不允许挂起、不允许畸形状态行；
 - 扫描结束后 `/echo` 仍返回 200。
 
-`cargo-fuzz` 完整语料库（`fuzz/` target，长时间运行）为 2.5 计划项；CI 以 fuzz-lite +
-proptest 作为可重复的零 panic 门禁。
+CI 以 fuzz-lite + proptest 作为可重复的零 panic 门禁；完整 `cargo-fuzz` 语料库属于后续增强。
 
 ## 4. 线路延迟 p99（`crates/webx/tests/wire_p99_test.rs`）
 
@@ -70,16 +67,13 @@ WIRE_P99_BUDGET_MS=5 cargo test --release -p rust-webx --test wire_p99_test -- -
 ## 5. 分配门禁（PR CI）
 
 `cargo run -p alloc-probe --release --locked -- compare 500 12`：同机比较 framework
-与 hyper 地板，只对**框架税**设限。2.4-9 后实测 tax **10.42**（2.2 基线 17.42），
-门禁从 18 收紧到 12；细节与 ≤8 拉伸路径见 [`alloc-budget.md`](alloc-budget.md)。
+与 hyper 地板，只对**框架税**设限；当前实测 tax **10.42**，门禁 12。细节与 ≤8 路径见
+[`alloc-budget.md`](alloc-budget.md)。
 
 ## 6. 安全审计
 
-- PR CI `audit` job：`cargo install cargo-audit --locked && cargo audit`（RustSec 漏洞库）；
-  - 2.4-8 本地复测（2026-11-21，`cargo audit --no-fetch`）：**0 vulnerabilities / 0 warnings**。
-    复测中发现并修复 RUSTSEC-2026-0387（crypto-bigint 0.5 常量时间缺陷）：WebAuthn 加密栈
-    升级 `p256 0.13 → 0.14`（ecdsa 0.17 / elliptic-curve 0.14 / crypto-bigint 0.7.11），
-    `cargo audit` 清零；
+- PR CI `audit` job：`cargo install cargo-audit --locked && cargo audit`（RustSec 漏洞库），
+  当前 0 vulnerabilities / 0 warnings；
 - 依赖来源：仅 crates.io + 锁定 `Cargo.lock`；`unsafe_code = "forbid"` 覆盖全部框架 crate
   （`alloc-probe` 为独立开发工具，显式说明其 `GlobalAlloc` 用途）；
 - 安全相关回归门禁：`session_revocation_test`、`csrf`/`cookie` 测试、`constant_time_eq`

@@ -3,9 +3,8 @@
 //!
 //! # Why threads
 //!
-//! The measured prototype in `docs/design/engine-2.0.md` reaches ~219k RPS with
-//! 22 current-thread workers versus ~114k for one multi-thread runtime at the
-//! same 32-connection load. Each worker therefore owns:
+//! A per-worker `current_thread` runtime avoids cross-core migration and keeps
+//! per-connection state local. Each worker therefore owns:
 //!
 //! * a `current_thread` runtime (`enable_all` for the IO/time drivers);
 //! * one hyper `auto::Builder` — configured once, cloned per connection because

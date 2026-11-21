@@ -368,7 +368,7 @@ struct GetUserRequest { id: String }
 impl IRequest<UserDto> for GetUserRequest {}
 ```
 
-## 依赖库路由与白名单（2.2）
+## 依赖库路由与白名单
 
 路由宏在编译期向 `inventory` 提交两类条目：`RouteEntry`（路由元数据）和
 `RouteSource`（调用点 `module_path!()`）。`Host::build()` 默认注册**所有**编译期路由，

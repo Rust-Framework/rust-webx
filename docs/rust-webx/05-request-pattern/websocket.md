@@ -1,4 +1,4 @@
-# WebSocket（2.3 实时执行模型）
+# WebSocket
 
 框架在**同一容器、两种生命周期**下提供 WebSocket：HTTP 请求仍是短生命周期，WebSocket
 会话是连接级长生命周期，二者共享准入、指标与优雅排空。
@@ -33,7 +33,7 @@ let host = Host::builder()
 
 - 路径匹配是**精确匹配**（不含路径参数）；同一路径的普通 HTTP 请求返回 `426 Upgrade Required`。
 - 浏览器无法在升级请求上设置 `Authorization`，认证应走 Cookie 或查询参数（认证中间件在
-  2.3-3 接入同一管线；本页只描述当前能力）。
+   接入同一管线；本页只描述当前能力）。
 
 ## 协议与生命周期
 
@@ -52,9 +52,9 @@ WebSocket 会话；优雅停机时引擎按排空预算等待会话结束。
 
 `IConnection::recv` 返回 `RealtimeMessage::{Text, Binary, Close}`，ping/pong 由帧层自动
 处理、不暴露给业务。`send_*` 在发送失败时返回 `Error::Internal`；背压与连接级限流
-（有界发送队列、msg/s、帧上限）属于 2.3-5，业务侧应把发送视为可能等待的异步操作。
+（有界发送队列、msg/s、帧上限）属于 ，业务侧应把发送视为可能等待的异步操作。
 
-## 连接作用域（2.3-2）
+## 连接作用域
 
 每条 WebSocket 连接由宿主创建一个 **connection DI scope**：`Scoped` 服务在该连接内
 共享同一实例，会话结束时随作用域一起释放（逆序 cleanup）。业务代码通过
@@ -92,12 +92,12 @@ Host::builder()
 
 - 连接作用域的生命周期 = 会话生命周期；**不要**把它缓存到 Singleton（captive dependency）。
 - `ConnectionContext::resolve` 在作用域 dispose 后返回 `None`（不 panic）。
-- 身份来自升级请求：当前版本（2.3-2a）在 WS 中间件阶段捕获，cookie/查询参数认证在
-  2.3-3 接入同一管线后生效；`identity()` 未认证时为 `None`。
-- 每条消息的**子作用域**（message scope）属于"消息即请求"（2.3-3）：消息进入
+- 身份来自升级请求：当前版本在 WS 中间件阶段捕获，cookie/查询参数认证在
+   接入同一管线后生效；`identity()` 未认证时为 `None`。
+- 每条消息的**子作用域**（message scope）属于"消息即请求"：消息进入
   `IRequest<T>` 管线时创建并释放；届时 `#[inject]` 可直接用于消息 Handler。
 
-## 消息即请求（2.3-3a）
+## 消息即请求
 
 `use_websocket_request::<Req, Rsp>("/rpc")` 把每个文本帧当作**一个请求**：JSON 解码为
 `Req` → Mediator 按 TypeId 分发到与 HTTP **同一个** `#[handler] IRequestHandler` →
@@ -150,7 +150,7 @@ Host::builder()
 需要 `add_mediator()`。当前绑定是 **JSON 解码**（帧没有 HTTP path/query）；
 升级请求的身份由下方「升级鉴权」接入。
 
-## 升级鉴权（2.3-3b）
+## 升级鉴权
 
 WebSocket 端点注册在认证中间件**之后**（管道顺序：
 `... → auth → user(AfterAuth) → WebSocket → SPA → Router`），因此升级请求与普通 HTTP
@@ -174,7 +174,7 @@ impl IWebSocketHandler for PresenceHandler {
 }
 ```
 
-## 帧绑定错误（2.3-3b）
+## 帧绑定错误
 
 `use_websocket_request` 用 `serde_path_to_error` 解码帧，错误分为两类：
 
@@ -187,7 +187,7 @@ impl IWebSocketHandler for PresenceHandler {
 缺失字段（serde 在 struct 根报错）没有路径段，`message` 中会写明
 `missing field \`text\``；这两类错误都不会关闭连接。
 
-## 连接注册表与扇出（2.3-4a）
+## 连接注册表与扇出
 
 存在 WebSocket 路由时，host 会默认注册以下实时服务（`try_add_*`，应用可覆盖）：
 
@@ -248,12 +248,12 @@ mediator.publish(RealtimeFanoutEvent::to_room("room-1", "hello")).await?;
 
 注意：
 
-- 扇出直接 `await` 每个连接；慢客户端由每连接有界队列/丢弃策略隔离（2.3-5）；
+- 扇出直接 `await` 每个连接；慢客户端由每连接有界队列/丢弃策略隔离；
 - 进程内注册表只覆盖单实例；跨节点扇出复用事件传输（`RealtimeFanoutEvent`，at-most-once，
   Handler 失败由传输层记录）——详见 [架构 ADR](../../design/mediator-handler-architecture.md)；
 - 不要在 Singleton 里长期持有 `Arc<dyn IConnection>` 之外的连接状态，会话销毁由 `unregister` 决定。
 
-## 连接级限流与背压（2.3-5）
+## 连接级限流与背压
 
 `HostBuilder::use_websocket_limits(WebSocketLimits)` 对**所有** WebSocket 路由生效：
 
@@ -284,9 +284,9 @@ Host::builder()
 
 - **出站有序队列**：每次连接一条有界 `mpsc` + 独立 writer task；`send_*` 只入队（`try_send`），慢客户端永远不会阻塞调用方（扇出安全）；
 - **入站限速**：1 秒滑窗（消息数 + 字节数），违规先错误帧再关闭，`Recv` 返回 `None`；
-- **统计**：`IConnection::stats()` 返回 `ConnectionStats`（in/out、字节、`dropped_outbound`、`rate_limited`），2.3-6 会把它接到 `/metrics`。
+- **统计**：`IConnection::stats()` 返回 `ConnectionStats`（in/out、字节、`dropped_outbound`、`rate_limited`）， 会把它接到 `/metrics`。
 
-## 实时观测（2.3-6）
+## 实时观测
 
 存在 WebSocket 路由时，host 注册进程级 `RealtimeMetrics`（`IConnection::stats()` 的聚合版），
 `/metrics`（`Metrics.Enabled=true`）额外输出：
@@ -305,7 +305,7 @@ Host::builder()
 定位顺序：连接异常先看 `closes{code}`（1008=限流、1001=空闲），吞吐问题看
 `dropped_total`/`rate_limited_total`，延迟看 dispatch 直方图。
 
-## 当前边界（2.3-5）
+## 当前边界
 
 - 已支持自定义会话 Handler、连接作用域、消息即请求、升级鉴权与帧绑定错误、进程内注册表/房间扇出/presence、跨节点扇出（事件传输上的 `RealtimeFanoutEvent`）、连接级背压与限流、`realtime_*` 指标；
 - 跨节点存在性/在线状态同步（presence）由应用通过事件或共享存储实现（框架只提供单实例 presence）；

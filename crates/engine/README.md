@@ -16,4 +16,5 @@ published before `rust-webx-host` because the host adapter builds on it.
 cargo add rust-webx
 ```
 
-See the workspace README and `docs/design/engine-2.0.md` for the architecture.
+See the workspace README and `docs/design/framework-constitution.md` for the
+architecture.

@@ -3,529 +3,157 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
-## [2.5.0] — 2026-11-21 (authentication)
+## [2.5.0] — 2026-11-21
 
-> 认证范围：M1–M4 已落地，2.5.0 GA。Duende 完整授权码、WebAuthn 浏览器虚拟认证器、
-> 1h Linux 浸泡均已验证；剩余 post-GA 项（其他 IdP 厂商、物理认证器、整请求分配税）
-> 见 `docs/design/auth-conformance.md`。
+> 2.5.0 是 2.x 的加性发布，汇总运行信任、实时执行模型、认证体系、事件/消息适配器、
+> AI 网关与测试基座。详细说明见 [`docs/design/release-notes-2.5.0.md`](docs/design/release-notes-2.5.0.md)。
 
 ### Added
 
-- **JWT validation hardening:** configurable `iss`/`aud`/algorithm allow-list,
-  clock skew, max token size, empty-`sub` rejection, and `Reject` mode
-  (`InvalidTokenBehavior`). JWKS-only deployments no longer need an HMAC secret.
-- **Cookie sessions + CSRF:** opaque 256-bit session ids, `ISessionRepository`,
-  `__Host-` cookies, double-submit CSRF, `Sec-Fetch-Site` checks.
-- **Login hardening:** NIST password policy, login throttle with backoff,
-  dummy-hash verification for unknown accounts, bounded Argon2 concurrency
-  (saturation → 503), `IPasswordHasher` port with Argon2id default.
-- **Revocation:** TTL-aware `ISessionStore::revoke_until`, negative cache
-  (`use_session_store_cached`), Redis/DB adapter friendly.
-- **Auth observability:** `auth.requests`, `auth.duration`, refresh-token and
-  JWKS readiness metrics; `JwksHealthCheck` for `/health/ready`.
-- **Basic authentication scheme** (`Authorization: Basic`).
+#### 运行信任
+
+- **Strict configuration.** `try_load_appsettings`, `try_bind_root` and
+  `try_bind_config` reject wrong value types, unknown keys inside framework
+  sections and unreadable files at startup (`ConfigError` / `ConfigSources`);
+  the host logs the effective sources with values redacted. Live option reload
+  keeps the last known good snapshot on a bad file.
+- **Inbound deadline.** `Server.RequestTimeoutSeconds` defaults to **30s**;
+  Production refuses `0` (a hung handler would pin a connection and permit).
+- **Bounded admission.** A connection that cannot get an admission slot within
+  `Server.AdmissionTimeoutMs` (default 1000ms) receives `503` + `Retry-After`
+  instead of waiting unbounded. New counters expose admitted/rejected/waiting.
+- **RED observability.** `/metrics` exposes per-route request/status counters,
+  a fixed-bucket latency histogram, inflight gauge, timeout counter and bounded
+  label overflow; cancelled requests are counted.
+- **Machine-readable errors.** `problem+json` (RFC 9457) carries `code`,
+  `retryable`, `instance` and `traceId` (same value as `x-trace-id`);
+  `Error::code()` / `Error::retryable()` expose the same mapping in Rust.
+- **Rate-limit port.** `IRateLimiter` / `RateLimitDecision` plus a sharded
+  in-memory implementation; `RateLimitMiddleware::with_limiter` accepts any
+  store (e.g. Redis-backed).
+- **Compile-time route diagnostics.** Route macros require
+  `impl IRequest<Response>` and fail at compile time; startup sorts routes
+  deterministically and rejects conflicts; compile-fail snapshots live in
+  `crates/webx/tests/ui/`.
+- **Allocation budget.** `crates/alloc-probe` compares the framework against a
+  bare-hyper floor in the same window; CI gates the framework tax (≤12).
+
+#### 实时执行模型
+
+- **WebSocket.** Engine upgrade support, `IConnection` message abstraction,
+  host `use_websocket`, connection scope shared by session state, and
+  message-as-request dispatch through the same handler pipeline.
+- **Fan-out and presence.** In-process connection registry/Hub with rooms and
+  presence TTL; cross-node fan-out reuses `IEventPublisher` via
+  `RealtimeFanoutEvent` (no second pub/sub port).
+- **Backpressure.** Bounded per-connection outbound queue, inbound sliding-window
+  limits, frame size cap, idle timeout and connection statistics.
+- **Realtime metrics.** Connection gauges, message in/out counters, drops,
+  rate limits, close codes and dispatch latency, mirrored into `IMeter`.
+- **Media/object-store ports.** `IMediaPlaneAdapter` and `IObjectStore` with
+  in-memory implementations and reusable contract suites.
+
+#### 认证
+
+- **JWT hardening:** configurable `iss`/`aud`/algorithm allow-list, clock skew,
+  max token size, empty-`sub` rejection and `InvalidTokenBehavior::Reject`.
 - **JWKS + asymmetric JWT:** RS256/ES256/PS256, `kid` rotation, cached
-  single-flight fetch, SSRF guard, JWKS-only startup. A token without `kid` is
-  accepted only when the cached set has exactly one key for its algorithm;
-  multiple candidates fail closed.
-- **Quality hardening:** session cookies require a non-empty subject and refuse `HttpOnly = false`, the
-  revocation negative-cache TTL is clamped to 300s, and OIDC rejects
-  unbounded leeway/JWKS-TTL/max-key values at startup.
+  single-flight fetch, SSRF guard, JWKS-only startup.
+- **Cookie sessions + CSRF:** opaque 256-bit session ids, `ISessionRepository`,
+  `__Host-` cookies, double-submit CSRF and `Sec-Fetch-Site` checks.
+- **Login hardening:** NIST password policy, locked throttle/backoff, dummy-hash
+  verification for unknown accounts, bounded Argon2 concurrency (503 on
+  saturation) and the `IPasswordHasher` port with Argon2id default.
+- **Revocation:** TTL-aware `ISessionStore::revoke_until`, negative cache and
+  fail-closed backend errors.
 - **Refresh tokens:** SHA-256 hashed storage, atomic rotation, reuse detection
-  with family revocation, `rust-webx-auth-ef` durable store.
-- **Durable browser sessions:** `rust-webx-auth-ef::EfSessionRepository`
-  (`auth_sessions` table, upsert/touch/delete/delete-all/purge_expired) for
-  multi-instance cookie deployments.
-- **`rust-webx-oauth2` (new):** OAuth 2.0 authorization-code social login with
-  PKCE, normalized `IdentityUser`, and presets for GitHub, Facebook, Google,
-  Microsoft, GitLab, Gitee, DingTalk, Feishu, WeChat, Weibo, QQ and Douyin; Alipay uses its RSA2-signed gateway client. GitHub live flow
-  (code → token → `/user`, including `/user/emails` fallback) verified; OIDC
-  remains in `rust-webx-oidc`.
-- **`rust-webx-oidc`:** discovery, authorization code + PKCE S256 (public
-  clients must send a verifier), id_token
-  `iss`/`aud`/`nonce`/`exp`/`alg`/`kid`/`at_hash` validation, session bridge to
-  `ITokenIssuer`; private-CA HTTPS (`HttpOidcHttp::with_root_certificates`)
-  covered by a local HTTPS test IdP. Live discovery/JWKS verified against
-  Google, Duende and Microsoft tenants; `require_pkce_advertised=false` is the
-  explicit opt-in for providers that support PKCE without advertising it.
-  Token-endpoint 4xx (`invalid_grant`/`invalid_client`) maps to 401 instead of
-  a misleading 502. Workspace builds that enable both rustls providers pin the
-  ring provider in client/server TLS setup instead of panicking.
-- **`rust-webx-mfa`:** RFC 6238 TOTP (SHA-1/256/512), replay protection,
-  recovery codes (hashed, single-use), `amr`/`acr` step-up.
-- **`rust-webx-webauthn`:** registration/assertion verification for ES256
-  passkeys (`none` attestation), RP ID/origin/challenge/UV/sign-counter checks;
-  browser-level e2e with a Chromium CTAP2 virtual authenticator verifies the
-  exact `create/get` wire bytes.
-- **DPoP (RFC 9449):** `DPoP` scheme with proof validation, `cnf.jkt` binding,
-  `htm`/`htu`/`iat`/`jti`/`ath`, replay store.
-- **mTLS:** `Tls.ClientCaPath`/`Tls.ClientAuth` (Off/Optional/Required), client
-  certificate chain verification, leaf SHA-256 fingerprint injection,
-  `MtlsScheme` + `IMtlsIdentityResolver`.
-- **Per-path scheme policy (opt-in):** `HostBuilder::use_auth_scheme_for`
-  restricts a path prefix to named schemes (`/mtls` → mTLS); matching is
-  segment-boundary aware (does not capture `/mtlsx`); unmatched paths keep the
-  global chain.
-- **RFC 7662/7009:** `TokenIntrospector`, `TokenRevoker`, Basic client auth,
-  `active:false` semantics, JWT + refresh-token revocation.
+  with family revocation and the `rust-webx-auth-ef` durable store.
+- **Federated identity:** OIDC (discovery, PKCE, id_token validation, private-CA
+  HTTPS) and OAuth2 social login with provider presets.
+- **MFA and strong auth:** RFC 6238 TOTP, recovery codes, `amr`/`acr`, WebAuthn
+  passkey verification, mTLS, DPoP (RFC 9449) and HTTP Basic.
+- **Protocols:** RFC 7662 introspection, RFC 7009 revocation, per-path scheme
+  policy, auth metrics and the `JwksHealthCheck` readiness probe.
+
+#### 事件与适配器
+
+- **Asynchronous events.** `IMediator::publish` encodes an `EventMessage` and
+  hands it to `IEventPublisher`; the default in-memory transport is a bounded
+  queue drained by a background service, and a full queue returns retryable 503.
+  `#[handler]` / `#[handler(inject)]` on `impl IEventHandler<T>` emit event
+  registrations, so no explicit DI registration is needed.
+- **Wire envelope.** `EventMessage::to_wire` / `from_wire` (version byte + name +
+  payload) is the single broker-neutral framing.
+- **Delivery semantics.** Per-adapter reconnect/backoff, bounded retries,
+  dead-letter outlets (Redis stream, Rabbit DLX), manual ack and readiness probes.
+- **`rust-webx-redis`:** Redis Streams consumer-group transport (at-least-once,
+  `XAUTOCLAIM` before delivery, trimmed-PEL cleanup, `max_deliveries` →
+  dead-letter, `MAXLEN ~` bound) plus a Redis `IDistributedCache`.
+- **`rust-webx-nats`:** core NATS publisher/subscriber with optional queue group.
+- **`rust-webx-rabbitmq`:** quorum topic queue, `x-delivery-limit`, optional DLX,
+  publisher confirms and requeue-on-failure.
+- **`rust-webx-kafka`:** pure-Rust single-partition follower (no librdkafka;
+  plaintext brokers, no consumer-group offset commits).
+- **Event metrics:** published/failed/dispatch-failed/dropped/dead-lettered and
+  reconnect counters. Adapters run the shared `EventTransportContract`.
+
+#### AI 网关与测试基座
+
+- **`rust-webx-ai`:** model catalog/routing, chat IR + provider port, OpenAI
+  adapter, quota pre-charge/settlement, usage metering, resilience (retry,
+  circuit breaker, bulkhead), caching/single-flight, secrets and gateway cache.
+- **`rust-webx-ai-ef`:** durable usage ledger, outbox and rollup workers.
+- **`rust-webx-ai-gateway`:** OpenAI-compatible `/v1/chat/completions`
+  (JSON + SSE) and `/v1/models`.
+- **`TestHost` + `IClock`/`TestClock` + chaos hooks:** in-process dispatch
+  without binding a port, deterministic time and failure injection.
+- **Reference apps:** `docbit`, `dmbit` and the new `imbit` real-time reference.
 
 ### Changed
 
-- `init_jwt_secret` / `jwt_secret()` are **deprecated** (still functional for
-  N-2 compatibility; removal in the next major). Inject `Arc<dyn ITokenIssuer>`
-  and call `issue(TokenClaims)` instead.
-- Login handlers should use `IPasswordHasher`; the default Argon2id registration
-  is wrapped in a bounded hasher.
-- Existing bcrypt password hashes are **not** accepted by the Argon2 hasher:
-  re-hash on next successful bcrypt verification (or once at startup for the
-  sample admin), or keep a custom legacy hasher.
+- `IMediator::publish` is now fire-and-forget and transport-agnostic; it no
+  longer awaits handlers or returns their errors.
+- The direct HTTP fast path is decided per host from a DI marker instead of a
+  process-global counter, so unrelated registrations cannot downgrade a host.
+- Options reload keeps the last known good snapshot on invalid input.
+- The in-memory rate limiter shards token buckets and removes the global mutex.
+- Internal `rust-webx*` crates are pinned with exact `=x.y.z` versions.
+- Optional capabilities are grouped under `crates/ai`, `crates/auth`,
+  `crates/cache` and `crates/queue`; package names and import paths are unchanged.
 
 ### Fixed
 
-- **HTTP client:** the inner `HttpConnector` now runs with `enforce_http(false)`,
-  so HTTPS requests through the rustls connector no longer fail with
-  `invalid URL, scheme is not http`. Covered by a real HTTPS OIDC round trip.
-- `validate_token` is reusable by non-Bearer schemes (DPoP).
-- JWKS-only hosts no longer fail the Production weak-secret guard.
-- Unknown `kid`, empty `sub`, oversized tokens and resolver 503 fail closed.
+- HTTPS through the rustls connector no longer fails with
+  `invalid URL, scheme is not http`.
+- Config binding failures, disabled deadlines and unbounded admission no longer
+  degrade silently.
+- Problem details now carry stable codes; cancelled requests are counted.
+- Route macros no longer fall back to a response type of `()` on a wrong impl.
+- Redis PEL growth and poison-message requeue loops are bounded; RabbitMQ
+  quorum queue arguments are consistent between publisher and consumer; NATS
+  connect errors redact credentials.
+
+### Removed
+
+- The duplicate `IPubSub` port: cross-node real-time fan-out now uses
+  `IEventPublisher` / `RealtimeFanoutEvent`.
+- The process-global direct-dispatch switch and the legacy name-keyed dispatch
+  fallback for macro-produced routes.
+
+### Security
+
+- Upgraded `rsa` to 0.10, clearing RUSTSEC-2023-0071 (Marvin timing side
+  channel). `cargo audit` now reports **0 vulnerabilities**.
 
 ### Performance & verification
 
-- HS256 validation: **p50 2.3µs / p99 3.9µs** (20k, release).
-- Authentication layer: **0 allocation delta** (`auth` +2.00 == no-op middleware
-  +2.00; +2 is the generic `async_trait` middleware future).
-- Full workspace `fmt --check` / `clippy -D warnings` / `test` green.
-- 300-second soak: 4 concurrent keep-alive clients, 0 failures, clean shutdown.
-- Conformance ledger: `docs/design/auth-conformance.md`; threat model:
-  `docs/design/auth-threat-model.md`; N-2 migration:
-  `docs/design/auth-migration-2.5.md`; 10-minute quickstart:
-  `crates/webx/examples/auth_quickstart.rs`; release notes:
-  `docs/design/release-notes-2.5.0.md`.
-
-## [Unreleased] — 2.6.0
-
-### Added
-
-- **Broker and cache adapters.** Four opt-in crates, each with an ASP.NET
-  Core-style `add_*` entry point, an options type bindable from configuration,
-  a lazy connection (host startup does not fail when the broker is down), a
-  reconnect/backoff consumer worker and an async readiness probe:
-  - `rust-webx-redis` (`add_redis`): Redis Streams consumer-group event
-    transport (at-least-once; `XACK` only after handlers, ordered
-    `XAUTOCLAIM` claim **between** reads so a canceled read cannot strand a
-    pending entry, trimmed-entry PEL cleanup, `XPENDING`-counted
-    `max_deliveries` → dead-letter stream, malformed-entry ack, `MAXLEN ~`
-    bound) plus a Redis `IDistributedCache` with absolute/sliding TTL, key
-    prefix, `command_timeout_seconds` and a 13-byte value envelope. Live
-    Redis verification covers TTL/sliding/size/clear/replay/DLQ.
-  - `rust-webx-nats` (`add_nats`): core NATS publisher/subscriber with an
-    optional queue group (at-most-once).
-  - `rust-webx-rabbitmq` (`add_rabbitmq`): quorum topic queue
-    (`x-delivery-limit`, optional dead-letter exchange), publisher confirms,
-    manual ack and requeue-on-failure (at-least-once, bounded retries).
-  - `rust-webx-kafka` (`add_kafka`): pure-Rust `rskafka` single-partition
-    follower starter (no librdkafka/C toolchain; **no consumer-group offset
-    commits** — a restart resumes from `start_offset`; plaintext brokers only).
-  The core/host crates have **no dependency** on any adapter and the umbrella
-  crate does not link them. `EventMessage::to_wire`/`from_wire` is the shared
-  transport-neutral envelope (version byte + u32 name length + UTF-8 name +
-  payload). Adapter
-  integration tests are env-gated (`WEBX_REDIS_URL`, `WEBX_NATS_URL`,
-  `WEBX_RABBITMQ_URL`, `WEBX_KAFKA_BROKERS`) so CI without brokers still runs
-  the unit and registration suites.
-
-- **Event transport metrics.** `add_mediator()` registers process-level
-  `EventMetrics`; `/metrics` now includes `events_published_total`,
-  `events_publish_failed_total`, `events_dispatch_failed_total`,
-  `events_dropped_no_handler_total`, `events_dead_lettered_total` and
-  `events_consumer_reconnects_total`. No user configuration or new modes.
-- **Broker verification loop.** PR CI validates `docker-compose.brokers.yml`
-  with `docker compose config`; `scripts/test-brokers.ps1` / `.sh` start the
-  local stack, wait for all four ports, run every adapter suite and clean up.
-  The nightly service job now has RabbitMQ/Kafka health checks and bounded
-  start periods; first-run timing is captured via `docker ps`. Non-Docker
-  verification is documented too: remote Redis and a standalone `nats-server`
-  binary run the real adapter suites without a container engine.
-
-- **Redis dead-letter replay.** `RedisEventConsumer::replay_dead_letter(count)`
-  re-adds `event`/`payload` to the source stream and removes the DLQ entry only
-  after the `XADD` succeeds (at-least-once; malformed entries are left in
-  place). Covered by the live Redis DLQ test.
-
-- **Event handlers use the request-handler construction model.** `#[handler]`
-  (Default) and `#[handler(inject)]` (`#[derive(Inject)]`) now also emit an
-  `EventHandlerRegistration`, so an event handler needs **no explicit
-  `dyn IEventHandler<T>` DI registration**. This deliberately adds **no new
-  modes**: the same two construction rules as request handlers apply, and each
-  event constructs a fresh handler (shared state belongs in injected
-  dependencies). Construction/dispatch panics are isolated like handler
-  panics. Manual DI remains only as a fallback for framework/manual routing
-  that has no inventory constructor; it is not a second user-facing mode and
-  cannot double-run with an auto handler. `IEventHandler<T>` itself is
-  unchanged (no `Any` supertrait / semver break). Tests: default (no DI),
-  inject (dependency), multiple handlers for one event.
-
-### Changed
-
-- **Crate ownership is a closed taxonomy.** `crates/` now keeps the fixed
-  framework set at `crates/<name>` and groups opt-in capabilities by domain:
-  `crates/ai/{core,ef,gateway}`, `crates/auth/{ef,oidc,oauth2,mfa,webauthn}`,
-  `crates/cache/redis` and `crates/queue/{nats,rabbitmq,kafka}`. Package names
-  and import paths (`rust-webx-*` / `webx_*`) are unchanged; only workspace
-  layout moved, so no consumer code changes. Adding a vendor adapter no longer
-  adds a top-level `crates/<vendor>` entry. The direction is enforced in CI by
-  `scripts/check-crate-layout.py` (wired through `scripts/check-crate-layout.sh`):
-  framework crates and the umbrella may not depend on a domain group, and the
-  umbrella does not link adapters. See `docs/design/starters.md` §6.
-- **Events are asynchronous and transport-agnostic.** `IMediator::publish` is
-  now fire-and-forget: it encodes the event into an `EventMessage` and hands it
-  to the registered `IEventPublisher`. It no longer resolves or awaits
-  `IEventHandler<T>` implementations and never returns their errors, so a slow
-  or failing subscriber cannot delay or fail the publishing request. The
-  default `InMemoryEventPublisher` (wired by `add_mediator()`) is a bounded
-  queue drained by a `BackgroundService`; a full queue returns a retryable 503
-  instead of blocking, and handler errors/panics are isolated per handler and
-  logged. `HostBuilder::use_event_publisher(...)` replaces the transport with a
-  Redis/NATS/... adapter. For broker consumers, `#[handler]` on an
-  `impl IEventHandler<T>` emits an `EventRegistration`; the adapter
-  reconstructs an `EventMessage` and calls `EventDispatcher::dispatch`, which
-  routes by `event_name` to the handlers emitted by `#[handler]` /
-  `#[handler(inject)]`. Those two modes are the **same construction modes as
-  request handlers** and also emit an `EventHandlerRegistration`, so **no
-  explicit `dyn IEventHandler<T>` DI registration is needed**; each event
-  constructs a fresh handler and shared state belongs in injected dependencies.
-  Legacy framework/manual routing without an inventory constructor still falls
-  back to DI, but only when the event has **no** inventory handlers, so auto and
-  manual registrations cannot double-run. A missing local registration or an
-  event with no subscriber is a **logged no-op**, not a handler failure, so
-  at-least-once transports do not requeue it forever.
-  `IEventRequest` stays `Clone + Send + 'static` (source-compatible);
-  `IMediator::publish` requires `T: serde::Serialize` and
-  `EventMessage::decode` requires `DeserializeOwned`, so event DTOs carry serde
-  derives. Migration: add `Serialize`/`Deserialize` derives to event types and
-  `#[handler]` to event-handler impls (the latter is required for broker
-  consumption; the default in-memory transport validates it at publish time and
-  fails closed when missing). Event handlers that previously relied on a
-  manual DI instance with non-`Default` fields should move that state into
-  `#[inject]` dependencies and use `#[handler(inject)]`; `#[handler]` now
-  constructs via `Default` like a request handler. Regression tests:
-  `crates/core/src/mediator/event.rs`, `crates/webx/tests/event_bus_test.rs`.
-
-### Fixed
-
-- **Dispatch:** the direct HTTP fast path is now decided **per host** from a DI
-  marker (`TypedPipelineRegistered`) instead of a process-global counter. A
-  typed pipeline behavior registered by another host (or a test) no longer
-  downgrades every host in the process, so the fast path is independent of
-  test order and unrelated registrations. Regression test:
-  `crates/host/tests/direct_dispatch_per_host_test.rs`.
-- **Config:** new strict loaders `try_load_appsettings`, `try_bind_root` and
-  `try_bind_config` (with `ConfigError` / `ConfigSources`). A wrong value type,
-  an unknown key inside a framework-owned section, or an unreadable/malformed
-  `appsettings*.json` is now a startup error that names the file/section/key —
-  instead of silently falling back to defaults. The host logs the effective
-  configuration sources (files and env **key names**, values redacted).
-  Regression test: `crates/host/tests/config_fail_closed_test.rs`.
-- **Options reload:** `OptionsFileWatcher` rejects a snapshot that does not
-  bind and keeps the last known good value; a typo no longer resets a live
-  section to `Default`.
-- **Deadline:** `Server.RequestTimeoutSeconds` now defaults to **30s** instead
-  of `0` (disabled), so an inbound request is bounded out of the box. `0` is
-  still accepted in `Development` (debugging/soak), but `Production` refuses it
-  at startup — a hung handler otherwise pins a connection and an admission
-  permit forever. Raise the budget for legitimate slow uploads instead of
-  disabling it. Regression test:
-  `crates/host/tests/request_timeout_defaults_test.rs`.
-- **Metrics:** `/metrics` now exposes per-route RED signals in addition to the
-  2.1 counters: `http_route_requests_total{route,status}`,
-  `http_request_duration_seconds{route}` (fixed µs buckets, cumulative),
-  `http_requests_inflight`, `http_request_timeouts_total` (504s from the inbound
-  deadline) and a bounded-label overflow counter. Labels are the matched route
-  **pattern** (`/users/{id}`) or `unmatched`, so random paths cannot explode
-  cardinality. Cancelled requests are counted in the histogram. The previous
-  `http_requests_total` / `http_responses_*_total` metrics are unchanged.
-  End-to-end coverage: `crates/webx/tests/metrics_status_test.rs`.
-- **Errors:** `problem+json` (RFC 9457) now carries stable machine-readable
-  members: `code` (e.g. `validation_failed`, `not_found`, `service_unavailable`,
-  `internal_error`), `retryable` (true only for 429/502/503/504), `instance`
-  (request path) and the `traceId` extension (same value as `x-trace-id`).
-  `Error::code()` / `Error::retryable()` expose the same mapping to Rust code;
-  endpoints can override the code with `ProblemDetails::with_code`. Existing
-  status/title/detail fields and the `errors` extension are unchanged.
-  End-to-end coverage: `crates/webx/tests/problem_details_test.rs`.
-- **Overload:** connection admission is now bounded. A socket that cannot get a
-  slot within `Server.AdmissionTimeoutMs` (default **1000 ms**) receives
-  `503 Service Unavailable` with `Retry-After: 1` and is closed, instead of
-  waiting unbounded in the kernel backlog. `0` keeps the old unbounded wait and
-  is rejected in `Production`. New `/metrics` counters:
-  `engine_connections_admitted_total`, `engine_connections_rejected_total`,
-  `engine_admission_waiting`. End-to-end coverage:
-  `crates/host/tests/admission_overload_test.rs`.
-- **Rate limiting:** the counter store is now a port. `IRateLimiter` /
-  `RateLimitDecision` live in `webx_core::rate_limit` and the middleware accepts
-  any store via `RateLimitMiddleware::with_limiter` (a multi-instance deployment
-  can back it with Redis). The default `InMemoryRateLimiter` shards the token
-  buckets (1–32 shards) and removes the single global `Mutex` from the hot
-  path; `RateLimit.MaxTrackedIps` remains a global bound, and per-shard eviction
-  is approximate under adversarial key skew. The pre-2.2 `RateLimiter` API keeps
-  working as a compatibility wrapper.
-- **Diagnostics:** route macros (`#[get]`/`#[post]`/.../`#[endpoint]`) now
-  require `impl IRequest<Response>` and fail at **compile time** when placed on
-  another trait or an inherent impl (previously the response type silently
-  defaulted to `()` and the mistake surfaced at startup). `#[handler]` rejects
-  unknown traits instead of silently skipping registration (`IEventHandler`
-  still passes through for DI fan-out). Startup now sorts routes
-  deterministically, and macro-produced routes never fall back to the legacy
-  name-keyed dispatch map (only hand-written fixtures may), so two request types
-  sharing a bare name cannot be misrouted. Compile-fail snapshots:
-  `crates/webx/tests/ui/`.
-- **Performance:** added `crates/alloc-probe` (dev-only binary, never published)
-  which counts allocations in a server process and compares the framework with
-  a **bare-hyper baseline** on the same window. Measured on this machine:
-  hyper floor **6.00** allocs/request, framework **24.42 → 23.42** after the
-  first optimizations, i.e. a framework tax of **17.42**. The original "≤12
-  total" budget implicitly assumed a zero-cost transport; the budget is now
-  defined as *floor + framework tax* (v2.2 ≤18 tax, v2.4 ≤8) and documented in
-  `docs/design/alloc-budget.md`. Two hot-path wins: the request id header is
-  handed to `HeaderValue` without a second copy
-  (`IHttpResponse::set_header_owned`), and JSON responses encode through
-  `webx_core::json::encode_json` (256-byte preallocation).
-- **CI:** new `alloc` job runs the probe as a gate
-  (`compare 500 18`: framework tax must stay ≤18; the hyper floor is measured in
-  the same window). New `api_stability_test` pins the documented 2.x surface
-  (struct literal for `ProblemDetails`, error variants/accessors, pagination,
-  rate-limit constructors). `code`/`retryable` are RFC 9457 extension members
-  again, keeping `ProblemDetails`'s struct layout identical to 2.1.
-- **Compatibility:** new CI gates — `semver` (cargo-semver-checks against
-  `v2.1.0` for core/engine/host/umbrella), `upgrade` (the same 2.0-era source
-  compiled against `rust-webx = "=2.0.0"` and against the current workspace),
-  and an internal-version-pin check. Internal `rust-webx*` crates are now pinned
-  with **exact** `=x.y.z` versions so consumers cannot resolve a mixed set.
-  Compatibility fixes found by the gate: `IEventRequest` no longer requires
-  `Serialize + DeserializeOwned` (bounds moved to `EventMessage::from_event` /
-  `decode` and `IMediator::publish`), `JwtAuth` restores `UnwindSafe` /
-  `RefUnwindSafe`, and `init_jwt_secret` / `jwt_secret` are no longer marked
-  `#[deprecated]` in 2.x. Policy: `docs/design/compatibility.md`.
-- **Stability gates:** new `#[ignore]`d suites run by the nightly
-  `stability.yml` workflow. `stability_soak_test`: four keep-alive load loops
-  with zero failed requests, throughput sanity, in-flight gauge back to
-  baseline, Linux RSS growth bound (`SOAK_MAX_RSS_GROWTH_MB`) and the port
-  closed after shutdown (`SOAK_SECONDS=86400` for a full day).
-  `stability_chaos_test`: a connection storm is shed with `503` and the server
-  recovers; graceful shutdown under load produces **zero 5xx**; a silent
-  upstream yields a typed timeout instead of hanging. See
-  `docs/design/stability-gates.md`.
-- **Property tests:** `crates/webx/tests/property_test.rs` (proptest, 128 cases
-  each) fuzzes the router (`match_route`/`path_exists`/`allowed_methods` never
-  panic on arbitrary input), static/dynamic route matching, pagination clamping
-  and `ProblemDetails` RFC 9457 round-trips. They run in the normal PR test job;
-  the nightly soak/chaos suites stay separate.
-- **Security (RustSec):** upgraded the WebAuthn crypto stack (`p256` 0.13 →
-  0.14, `ecdsa` 0.17, `elliptic-curve` 0.14, `crypto-bigint` 0.7.11) clearing
-  RUSTSEC-2026-0387 (secret-dependent timing branches in crypto-bigint 0.5).
-  `cargo audit` is clean again (0 vulnerabilities, 0 warnings). Test-only RNG
-  moved to `rand::rng()` to match the new `rand_core` 0.10 crypto traits.
-- **Port contract suites (2.4-7):** new `crates/contract-tests` crate
-  (`rust-webx-contract-tests`) with reusable behavioural suites —
-  `object_store_contract`, `media_plane_contract` — that any adapter (in-memory,
-  S3, SFU) runs to prove port conformance; the in-memory implementations pass
-  them in PR CI. Event-transport conformance reuses `event_bus_test` (publish
-  semantics, handler isolation, broker replacement, consumer routing).
-  `docs/design/starters.md` documents the starter family
-  (postgres/redis/nats/s3/otel) and the single-transport adapter recipe.
-- **Config closure (TURN, 2.4-1):** the TURN/STUN (coturn REST) credentials now
-  come from the framework `Turn` configuration section (`AppOptions.turn`:
-  `Turn.Secret`, `Turn.Urls`, `Turn.TtlSeconds`, `Turn.Realm` / `APP__Turn__*`).
-  The host validates it at startup (partial/invalid config is a startup error,
-  never a silently disabled feature) and registers `TurnRestConfig` for
-  injection; `HostBuilder::use_turn_config` is the explicit override. The IM
-  reference app now configures TURN through the section (`TURN_*` env vars are
-  only development convenience mappings). Covered by `turn_config_test`.
-- **Direct-dispatch guard closure (2.4-9):** the direct fast path is now pinned
-  to unguarded routes: declarative/dynamic authorization and per-route body
-  caps force the guarded route target, and the engine direct path still
-  validates the declared body limit. Covered by host `endpoint` unit tests and
-  `direct_dispatch_guard_test` (401/403/200 matrix).
-- **Event transport contract (2.5):** `rust-webx-contract-tests` now exposes
-  `EventTransportContract`: one behavioural suite (publish → broker → framework
-  `EventDispatcher`, event name + JSON payload intact, at-most-once/at-least-once
-  tolerated) that the Redis, NATS, RabbitMQ and Kafka adapters all run in their
-  env-gated integration tests. PR CI self-tests the suite with a loopback
-  transport; `docker-compose.brokers.yml` provides the same broker topology for
-  local runs, and the nightly `broker-integration` job runs the real services.
-- **Broker adapters nightly integration (2.4-7):** Redis, NATS, RabbitMQ and
-  Kafka adapters now run their env-gated event-transport/cache integration
-  tests in the nightly `stability.yml` `broker-integration` job with service
-  containers; all consumers reuse `EventDispatcher` and the framework wire
-  framing.
-- **Architecture consolidation (mediator/event system):** documented the
-  handler dispatch paths (HTTP direct fast path vs Mediator, with build-time
-  typed-behavior parity) and the event transport in
-  `docs/design/mediator-handler-architecture.md`. Removed the duplicate
-  `IPubSub` port: cross-node real-time fan-out now publishes
-  `RealtimeFanoutEvent` over `IEventPublisher` and is delivered per node by a
-  framework `IEventHandler` (Redis/NATS starters already implement
-  `IEventPublisher`). `RealtimeMetrics::export_to(&dyn IMeter)` mirrors
-  the hot-path real-time counters into the framework meter on `/metrics` scrape as
-  deltas (repeated/overlapping scrapes cannot double-count),
-  and `TestHost`/ephemeral-port helpers now live in a single `testing` module.
-- **Stability gates (2.4-8):** chaos suite extended to five scenarios
-  (connection storm shedding, graceful drain, silent upstream, handler-panic
-  containment, oversized-body 413 with a surviving connection); new wire-level
-  fuzz-lite (240 malformed requests, no panic/hang, server still healthy) and a
-  wire p99 budget (`wire_p99_test`, release p99 165µs ≤ 5ms, nightly job); soak
-  harness re-verified with the RSS assertion; security audit stays in the PR
-  `audit` job (RustSec); allocation gate now 10.42 ≤ 12. Documented in
-  `docs/design/stability-gates.md`.
-- **Allocation tax reduction (2.4-9):** default-pipeline framework tax cut
-  from 17.42 to **10.42** allocs/request (CI alloc gate tightened 18 → 12).
-  Built-in stages use a synchronous `fast_invoke` path (no `async_trait` box)
-  and skip empty `after` hooks; CORS has a no-`Origin` fast path;
-  `RouteTarget::direct` bypasses the boxed target future for routes without
-  authorization/body caps; `RequestModel::bind_inline` (RPITIT) removes one
-  boxed request-binder future. Remaining ≤8 stretch items (concrete `RespBody`,
-  poll-based dispatch ABI, by-value request handoff) are recorded in
-  `docs/design/alloc-budget.md` §6 for 2.5/3.0.
-- **Compatibility & LTS (2.4-6):** semantic-stability surface documented (HTTP
-  errors / binding & routing / middleware / WS frame protocol & close codes /
-  metric names / config keys / port semantics), 2.x keeps the "no new
-  `#[deprecated]`" rule for `-D warnings` users, 3.x deprecation window is ≥2
-  minors with a central registry (`docs/design/deprecations.md`), plus LTS
-  branch/backport/patch policy and a release checklist; new
-  `upgrade-to-2.4.md` migration guide; cargo-semver-checks exception process
-  documented. N-2 upgrade smoke re-verified locally (2.0.0 stable + current
-  workspace).
-- **TestHost + clock (2.4-5):** `webx::TestHost` builds a real host without
-  binding a port and dispatches typed requests through the mediator (`dispatch` /
-  `dispatch_as`), so handlers, DI scope lifetime, typed pipeline behavior and
-  identity context are testable in-process; `webx::IClock` + `SystemClock` are
-  registered by default (`HostBuilder::use_clock` overrides) and `TestClock`
-  makes "now" deterministic; `ChaosControl` injects deterministic failures
-  (`fail_next`) and latency (`delay_next`). Covered by five in-process tests and
-  `docs/design/test-host.md`.
-- **Unified middleware `Next` (2.4-4):** continuation-style middleware —
-  `IMiddleware::continuation()` + `invoke_next(ctx, NextStage)` — composes
-  timeout/retry/circuit-breaker-shaped stages around the rest of the chain while
-  existing `invoke`/`after` middleware keeps working through the default bridge
-  (zero migration). The engine picks the continuation executor only when a
-  continuation stage is registered, so default pipelines keep the
-  zero-allocation fast loop; errors are converted into responses where they
-  surface so outer `after` hooks observe the real status. Ships
-  `TimeoutMiddleware` (cancels the handler, answers 504) as the reference
-  composition; covered by four end-to-end tests and
-  `docs/design/middleware-next.md`.
-- **Media adapter contract (2.4-3):** `webx::IMediaPlaneAdapter` (join/leave/
-  publish/subscribe/stats/close_room) with `MediaSession`/`MediaTrackInfo`/
-  `MediaStats`; the default `record_qos` writes `media_rtt_ms`,
-  `media_jitter_ms`, `media_packet_loss_ratio` (clamped to 0..=1),
-  `media_bitrate_kbps` and `media_frames_dropped_total` through `IMeter`, tagged
-  by room/user. `InMemoryMediaPlaneAdapter` is the reference implementation and
-  passes the shared `contract_suite` (session lifecycle, track replacement,
-  404 semantics, QoS ingestion, room close) that real SFU adapters reuse.
-- **Storage & recordings (2.4-2):** new `webx::IObjectStore` port
-  (put/get/head/delete + resumable `begin_upload`/`put_part`/`list_parts`/
-  `complete_upload`/`abort_upload` + optional `presign_put`) with two
-  implementations — `InMemoryObjectStore` (fake) and `FileSystemObjectStore`
-  (real persistence, key-traversal validation, part merge, SHA1 etags). Plus
-  `RecordingMeta`/`RecordingSegment` playback index (`replace_segment`
-  recomputes totals so retries cannot inflate a recording). The IM reference app
-  exposes recording start/segment-upload/complete/replay endpoints on top of the
-  store; a real HTTP end-to-end test covers upload, idempotent resume, replay
-  with media type, and membership checks.
-- **Media control plane (2.4-1):** `webx::SignalingMessage` / `SignalingKind`
-  (SDP offer/answer, trickle ICE; server stamps `from`, authorization is the
-  app's room membership check) and `TurnRestConfig`/`TurnCredentials` issuing
-  coturn REST credentials (`username = expiry:user_id`, HMAC-SHA1, TTL 1..=24h,
-  validated configuration). The IM reference app gains `signal` messages over
-  the same WebSocket pipeline (1:1 targeting, room broadcast excluding sender)
-  and `GET /api/turn`; covered by an end-to-end signaling + TURN test and
-  `docs/design/media-contract.md` (control plane vs media adapter boundary).
-- **Reference app (IM, 2.3-7):** new `imbit/` workspace crate — a runnable IM
-  service built only on public framework capabilities: JWT login through
-  `ITokenIssuer`/`IPasswordHasher`, room create/join over HTTP, message-as-request
-  over WebSocket (`use_websocket_request`), room fan-out via
-  `IConnectionRegistry`, idempotent sends (`client_msg_id` dedupe: same seq, no
-  duplicate broadcast), reconnect with offline catch-up (WS `history after_seq`
-  == HTTP history), and presence. End-to-end test drives real HTTP + WebSocket
-  clients. See `docs/design/im-reference.md`.
-- **Real-time (2.3-6):** `RealtimeMetrics` aggregates sessions/messages/bytes,
-  backpressure drops, rate-limit hits, close codes and message-dispatch latency;
-  `/metrics` renders `realtime_connections_active` (registry-linked gauge),
-  `realtime_connections_{opened,closed}_total`, `realtime_messages_{in,out}_total`,
-  byte counters, `realtime_messages_dropped_total`,
-  `realtime_rate_limited_total`, `realtime_connection_closes_total{code}` and a
-  `realtime_message_dispatch_seconds` histogram.
-- **Real-time (2.3-5):** per-connection limits via
-  `HostBuilder::use_websocket_limits`: inbound frame size cap
-  (`frame_too_large` error frame, session survives), 1-second sliding-window
-  message/byte rate limits (`rate_limited` frame + close `1008`), bounded
-  outbound queue with `Drop`/`Disconnect` backpressure policies (a slow client
-  can no longer block a sender), and idle timeout (close `1001`).
-  `IConnection::stats()` exposes in/out counters, drops and rate-limit hits.
-- **Real-time (2.3-4a):** `IConnectionRegistry` (process-local indexes by
-  connection id, authenticated user and room; presence with Away TTL). Hosts
-  with WebSocket routes register it by default (`use_connection_registry`
-  override), sessions register on connect and unregister on teardown, so
-  handlers can fan out to a room (`room_connections`) and answer presence
-  (`presence`, `user_connections`) without owning sockets. Cross-node fan-out
-  reuses the event transport (`RealtimeFanoutEvent`); the duplicate `IPubSub`
-  port was removed in the architecture consolidation (below).
-- **Real-time (2.3-3b):** WebSocket endpoints now register after the
-  authentication and user-middleware stages, so upgrade requests are
-  authenticated by the same pipeline as HTTP (cookies/bearer/API keys); the
-  identity is fixed for the connection and visible from
-  `IConnection::context()` and `RequestContext` inside message handlers. Frame
-  decoding uses `serde_path_to_error`: syntax errors are `invalid_message`,
-  data errors are `validation_failed` with the JSON field path (missing fields
-  are named in the message). Neither closes the session.
-- **Real-time (2.3-3a):** message-as-request. `HostBuilder::use_websocket_request::<Req, Rsp>(path)`
-  decodes each JSON text frame into `Req`, dispatches it through the mediator
-  (the same `#[handler] IRequestHandler` HTTP uses, in a per-message DI scope),
-  and sends `Rsp` back as a JSON frame; failures become
-  `{"error":{"code","message","retryable"}}` frames without killing the
-  session. Message handlers reach the connection (metadata, trace id,
-  connection-scoped services) via `RequestContext::connection()`. Requires
-  `add_mediator()`.
-- **Real-time (2.3-2a):** per-connection DI scope. Each WebSocket session gets a
-  `ConnectionScope`; `IConnection::context()` exposes `ConnectionContext`
-  (`meta`, upgrade-request `trace_id`, `identity` when authenticated, and
-  `resolve::<T>()`). Scoped services are shared across the messages of one
-  connection, isolated between connections, and disposed on session teardown.
-- **Real-time (2.3-1b):** `HostBuilder::use_websocket(path, handler)` serves a
-  WebSocket endpoint end-to-end: RFC 6455 handshake, `tokio-tungstenite` frame
-  layer, and a transport-neutral `IConnection` (`recv`, `send_text`,
-  `send_binary`, `close`) for `IWebSocketHandler`. Plain HTTP to a WS path gets
-  `426 Upgrade Required`; upgrading an unregistered path keeps normal routing.
-  Upgraded sessions stay under admission/metrics/drain. See
-  `docs/rust-webx/05-request-pattern/websocket.md`.
-- **Real-time (2.3-1a):** new `webx_core::realtime` module (`ConnectionId`,
-  `ConnectionMeta`, `TransportKind`, `RealtimeMessage`, `IConnection`,
-  `IUpgradeSession`, `UpgradedTransport`) and a neutral
-  `IHttpContext::set_upgrade_session`. The engine now serves connections through
-  `serve_connection_with_upgrades`: a WebSocket upgrade request can install a
-  session + write `101`, and the session receives the raw upgraded byte stream
-  after the response is committed. The hyper connection future stays pending
-  until the upgraded IO closes, so live sessions remain covered by admission,
-  metrics (`engine_connections_active`) and graceful drain.
-- **Observability:** `/metrics` now reports `engine_connections_active` (open
-  connections, one admission permit each, kept in sync by a `ConnectionPermit`
-  RAII guard) and `engine_connections_capacity` (`App.MaxConnections`), next to
-  the existing admitted/rejected/waiting counters. OTel bridging documented as
-  Collector scraping `/metrics` (no new dependency; in-process exporter is a 2.4
-  starter).
-- **Routing:** `HostBuilder::routes_from(&[...])` allow-lists compiled routes by
-  call-site module path (the route macro now also submits a `RouteSource` with
-  `module_path!()`), and `HostBuilder::use_inventory_routes(false)` disables the
-  compile-time route scan entirely. Default behavior is unchanged (all compiled
-  routes are registered).
-- **Reference apps:** docbit/dmbit authentication uses the native
-  `ITokenIssuer`/`IPasswordHasher` ports; CI now fails if reference apps import
-  `jsonwebtoken`/`bcrypt` again. Their small `map_ef()` adapter stays on purpose:
-  `rust-ef 2.5.1`'s optional `webx` feature depends on `rust-webx-core ^1.2`
-  and cannot convert into 2.x's `Error` type (upstream gap documented in
-  `docs/design/compatibility.md` §5).
-- **Host:** added `Host::uses_direct_dispatch()` (diagnostic/test hook).
-
+- Allocation tax: **10.42 allocs/request** (hyper floor 6.00; CI upper bound 12).
+- HS256 validation: p50 **2.3µs** / p99 **3.9µs** (release, 20k).
+- Authentication layer allocation delta: **0**.
+- Wire p99: **165µs** in the nightly budget test.
+- Soak: 30min and 1h Linux runs with zero failures, RSS stable (~17.7MB).
+- Chaos 3/3, fuzz-lite zero panics, broker contract tests in nightly CI.
+- Full workspace `fmt` / `clippy -D warnings` / `test` green on three platforms.
 
 ## [2.1.0] — 2026-11-20
 
@@ -540,7 +168,7 @@ is admission, lifecycle, error semantics and wire-level verification.
   `/allocs` measurement is **22.06** allocs/request vs **23.06–23.07** in 2.0
   (about 4.4% fewer allocations). Median throughput is within co-tenant noise
   (152k vs 158k RPS in the 5-round 4-worker run; 2.0/2.1 latency effectively
-  unchanged). Full methodology and tables: [performance-2.1.0.md](docs/design/performance-2.1.0.md).
+  unchanged). Allocation counts are now tracked by the allocation gate (see `docs/design/alloc-budget.md`).
 - **Global connection admission.** One `Semaphore(App.MaxConnections)` per
   `Server`, shared by every http/https listener and worker. Removes the
   per-worker floor that could exceed the documented global cap and the

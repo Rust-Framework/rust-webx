@@ -29,9 +29,9 @@ hosted services **先于连接排空**停止：后台 worker 不会在进程已�
 
 超时后仍未完成的连接会被中止；`stop()` 只执行一次：信号到达时的 watcher 与排空后的收尾共用同一个 `OnceCell`。
 
-### Worker 池（2.0）
+### Worker 池
 
-2.0 的执行引擎是“单 acceptor + N 个 `current_thread` worker runtime”：每个 worker 独占一个
+执行引擎是“单 acceptor + N 个 `current_thread` worker runtime”：每个 worker 独占一个
 Tokio runtime 和 hyper `auto::Builder`，连接通过有界 channel 交接，不会跨核迁移。默认
 `Workers = available_parallelism()`（`Development` 下限到 8，避免测试同时起大量主机时线程膨胀），范围 `1..=64`：
 
@@ -64,7 +64,7 @@ Tokio runtime 和 hyper `auto::Builder`，连接通过有界 channel 交接，�
 
 ### 过载卸载（准入超时）
 
-`App.MaxConnections` 是全局准入上限。2.2 起，已 accept 但拿不到准入槽的连接不再无限等待内核
+`App.MaxConnections` 是全局准入上限。已 accept 但拿不到准入槽的连接不再无限等待内核
 backlog，而是等待 `Server.AdmissionTimeoutMs`（默认 `1000`）后收到：
 
 ```http

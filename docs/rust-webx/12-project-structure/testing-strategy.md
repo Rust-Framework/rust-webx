@@ -62,7 +62,7 @@ Handler 的纯函数式设计使单元测试天然友好；框架集成测试可
 
 下一章：[扩展与自定义封装](../13-extensibility/INDEX.md)
 
-## 进程内测试基座（2.4-5）
+## 进程内测试基座
 
 `webx::TestHost` 在**不绑定端口**的情况下构建真实 host（同一 DI 容器、HandlerCache、
 Mediator 分发路径），直接分发 typed 请求；时钟用 `webx::TestClock` 控制，故障用

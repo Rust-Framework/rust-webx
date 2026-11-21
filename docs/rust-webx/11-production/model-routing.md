@@ -72,7 +72,7 @@ catalog.add_provider(Arc::new(provider));
 **注意**：`OpenAiProvider` 使用 `request.model` 作为上游模型名；执行器在调用前把路由
 `Attempt.model.model` 写进去，别名不会直接透传给上游。
 
-Anthropic/Gemini 等非 OpenAI 协议需要实现 `ChatProvider` 做转译（待补）。
+Anthropic/Gemini 等非 OpenAI 协议需要实现 `ChatProvider` 做转译。
 
 ## 目录与别名
 
@@ -172,6 +172,7 @@ let stream = executor.stream(&ctx, canonical_request.stream()).await?;
 ## 边界
 
 - 已实现：IR、`ChatProvider` 端口、OpenAI 兼容适配器、目录/别名、五种策略的过滤与排序、健康/冷却、
-  `IRoutePlanner`、`GatewayExecutor`（首字节规则、重试、配额/计量接线）。
-- 未实现：OpenAI 兼容 HTTP 端点、非 OpenAI 适配器、租户级路由、热替换、熔断细粒度策略。
+  `IRoutePlanner`、`GatewayExecutor`（首字节规则、重试、配额/计量接线）；HTTP 表面见
+  `rust-webx-ai-gateway`（`/v1/chat/completions`、`/v1/models`），目录热替换见 `hot-config.md`。
+- 未实现：非 OpenAI 适配器、租户级路由。
 - 路由只读目录快照；不要在 plan 里查数据库。

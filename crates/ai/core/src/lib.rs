@@ -1,7 +1,7 @@
 //! AI gateway domain kit for rust-webx.
 //!
-//! This crate is the AI-specific half of the gateway plan in
-//! `docs/design/ai-gateway.md`. It covers the canonical request/stream IR, the
+//! This crate is the AI-specific half of the gateway; the HTTP surface is
+//! `rust-webx-ai-gateway`. It covers the canonical request/stream IR, the
 //! `ChatProvider` port and OpenAI-compatible adapter, the model catalog/router
 //! with `CatalogHandle` hot reload, the request executor (first-byte rules,
 //! retry, quota/usage wiring), exact response cache with single-flight, resilience

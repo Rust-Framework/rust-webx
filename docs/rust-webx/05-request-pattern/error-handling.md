@@ -46,7 +46,7 @@ pub enum Error {
 | `UnsupportedMediaType` | 415 | 请求内容类型不受支持 |
 | `Problem(details)` | `details.status` | 字段级校验/绑定失败，携带 `errors` |
 
-## 机器可读错误码（2.2）
+## 机器可读错误码
 
 `problem+json` 在 RFC 9457 标准字段之外，固定携带：
 

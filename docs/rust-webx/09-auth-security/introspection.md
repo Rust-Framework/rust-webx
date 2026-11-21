@@ -1,6 +1,6 @@
 # Token Introspection（RFC 7662）与 Revocation（RFC 7009）
 
-> 2.5 M4。框架提供协议语义与端口，端点由应用用普通 Handler 暴露。
+> 。框架提供协议语义与端口，端点由应用用普通 Handler 暴露。
 
 ## 1. Introspection（RFC 7662）
 

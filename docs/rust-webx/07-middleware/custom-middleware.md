@@ -106,7 +106,7 @@ pub fn jwt_middleware(handler: Arc<dyn IAuthenticationHandler>) -> impl IMiddlew
 
 下一节：[中间件编排策略](ordering-strategy.md)
 
-## 统一 `Next` 语义（2.4-4，可选）
+## 统一 `Next` 语义
 
 旧式 `invoke`/`after` 中间件**无需改动**（默认桥接）。需要包裹剩余链路时——超时、重试、
 熔断、耗时统计——改成 continuation 风格，并声明 `continuation() -> true`：

@@ -21,7 +21,7 @@
 
 - [什么是 rust-webx](#什么是-rust-webx)
 - [核心特性](#核心特性)
-- [为什么选择 2.1](#为什么选择-21)
+- [为什么选择 rust-webx](#为什么选择-rust-webx)
 - [架构](#架构)
 - [请求即端点：Hello World](#请求即端点hello-world)
 - [核心概念](#核心概念)
@@ -73,20 +73,20 @@ rust-webx **不是** 全栈 UI 框架（可搭配任意前端）、**不是** OR
 - **ORM 无关** — 框架不依赖 `rust-ef`；`docbit` 参考应用用极少量胶水代码接入。
 - **Mediator 不增加认知负担** — `#[handler]` 对应的 Request 没有 HTTP 路由时，自动作为 `IMediator` handler；响应不要求 `Serialize`。HTTP 能力属于路由，而不是 handler 上的模式开关。
 
-## 为什么选择 2.1
+## 为什么选择 rust-webx
 
 | 优势 | 实际意义 |
 |---|---|
 | **对齐 ASP.NET Core 的开发模型** | 请求即端点：`impl IRequest<R>` 上写 `#[get]`/`#[post]`，实现上写 `#[handler]`，DI 与中间件在 `Host` 一次配置。 |
 | **编译期分派，没有字符串路由表** | 路由元数据和直接 Handler bridge 由 `inventory` 收集，`Host::build()` 负责 join，配置不一致启动即失败。 |
-| **低分配热路径** | direct JSON 路径不经过 mediator，也不装箱 request/response；2.1 在 `/hello` 参考基准上实测 **22.06 allocs/request**（2.0 约 23.1）。 |
-| **性能不以正确性为代价** | 2.1 与 2.0 同机对比无可证明的吞吐回退，延迟在 co-tenant 噪声内持平；route-owned encoder 同时保持非 `Serialize` mediator handler 的源码兼容。见 [2.1.0 性能报告](docs/design/performance-2.1.0.md)。 |
+| **低分配热路径** | direct JSON 路径不经过 mediator，也不装箱 request/response；`/hello` 参考基准的框架税为 **10.42 allocs/request**（hyper 地板 6.00），CI 门禁 ≤12。 |
+| **性能不以正确性为代价** | allocation 计数、wire-level 正确性和稳定性套件都是发布门禁。见[分配预算](docs/design/alloc-budget.md)与[稳定性门禁](docs/design/stability-gates.md)。 |
 | **生产级准入与生命周期** | 所有 listener 共享一个全局连接 governor、首请求超时、HTTP/2 keepalive、优雅/立即关闭 guard、Host 单次运行状态、per-worker SSE drain。 |
 | **错误语义可信** | 错误响应在逆序 after hooks 之前写入，metrics/tracing/compression 看到真实状态；失败的成功路径不会残留 `cache-control`/`etag`/`content-encoding` 等表示头。 |
 | **原生优先的集成** | `rust-dix` 1.0 DI scope、`rust-ef` 2.5 ORM、JWT/session/password 端口、`rust-webx-client` 都是框架能力，而非应用层临时胶水。 |
 | **HTTP 与进程内能力边界清晰** | 无路由的 `#[handler]` 自动是 mediator-only；有路由才增加响应 encoder。没有 `#[handler(in_process)]` 模式开关，也不会把 command handler 意外暴露成 HTTP 端点。 |
 
-以上性能数字是同一台共享主机上的本地对比，不构成绝对容量承诺；allocation 计数和 wire-level 正确性测试才是发布回归信号。完整矩阵见 [2.1.0 性能报告](docs/design/performance-2.1.0.md)。
+以上性能数字是同一台主机同窗口的本地对比，不构成绝对容量承诺；allocation 计数和 wire-level 正确性测试才是发布回归信号。方法与预算见[分配预算](docs/design/alloc-budget.md)。
 
 ## 架构
 
@@ -163,7 +163,6 @@ rust-webx/
 > `rust-webx-mfa` → `webx_mfa`、`rust-webx-webauthn` → `webx_webauthn`、
 > `rust-webx-redis` → `webx_redis`、`rust-webx-nats` → `webx_nats`、
 > `rust-webx-rabbitmq` → `webx_rabbitmq`、`rust-webx-kafka` → `webx_kafka`。
-> 从 0.4 及更早版本升级见 [0.5 升级指南](docs/rust-webx/16-migration/upgrade-to-0.5.md)。
 
 ## 请求即端点：Hello World
 
@@ -377,7 +376,7 @@ docker compose -f docbit/docker-compose.yml --env-file docbit/.env up --build
 
 - **在线手册** — 全书发布在 <https://rust-framework.github.io/rust-webx/>（mdBook，中文；由 `.github/workflows/docs.yml` 从 `docs/rust-webx/` 构建）。
 - **rust-webx 开发者手册** — 位于 [`docs/rust-webx/`](docs/rust-webx/INDEX.md) 的渐进式披露书籍（16 章，中文）：入门、快速上手、架构、DI 与生命周期、中间件、中介者与事件、认证与安全、配置、生产、项目结构、扩展、最佳实践、案例研究与迁移指南。
-- **从 1.0.x 升级** — 1.1.0 用 `IActionResult` 族替换了 `ResponseData`，请按 [1.0.2 → 1.1.0 迁移指南](docs/rust-webx/16-migration/upgrade-to-1.1.md) 改写。
+- **升级** — 2.5.0 相对 2.1 为加性演进，见 [2.5 升级指南](docs/rust-webx/16-migration/upgrade-to-2.5.md)。
 - **rust-ef 参考** — ORM 手册随 [`rust-ef`](https://crates.io/crates/rust-ef) crate 维护（见其 [docs.rs](https://docs.rs/rust-ef) 文档），`docbit` 示例使用。
 - `docbit` 参考应用也把这些文档作为实时网站提供（`GET /api/docs/rust-webx/...`）。Monorepo 开发时 `DocService` 按 slug 实时解析 sibling 仓库文档，无需将 sibling 文档复制到 `rust-webx/docs/`；standalone 发布时 `docbit/publish.*` 在打包时从源仓库复制文档进 bundle。可通过 `RUST_FRAMEWORK_ROOT` 显式指定 monorepo 根目录。
 

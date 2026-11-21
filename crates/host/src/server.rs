@@ -434,8 +434,8 @@ impl HostBuilder {
     /// [`webx::Error::Di`](webx_core::error::Error::Di) instead of silently caching it on the
     /// root. Existing code that resolves Scoped services from
     /// `host.provider()` can opt back in here while it migrates to explicit
-    /// scopes (`provider.scope()` / `get_owned`) — see
-    /// `docs/rust-webx/16-migration/upgrade-to-1.0.md`.
+    /// scopes (`provider.scope()` / `get_owned`) — see the migration notes in
+    /// `CHANGELOG.md`.
     pub fn lenient_scope_validation(mut self) -> Self {
         self.lenient_scope_validation = true;
         self

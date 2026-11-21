@@ -1,6 +1,6 @@
 # DPoP 发送方约束令牌（RFC 9449）
 
-> 2.5 M3。DPoP 让 access token 与客户端私钥绑定：token 被窃后无法单独使用。
+> 。DPoP 让 access token 与客户端私钥绑定：token 被窃后无法单独使用。
 
 ## 1. 协议形态
 

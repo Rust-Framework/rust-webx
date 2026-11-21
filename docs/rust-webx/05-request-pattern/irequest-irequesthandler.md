@@ -22,7 +22,7 @@ where
 }
 ```
 
-### 编译期校验（2.2）
+### 编译期校验
 
 路由宏（`#[get]`/`#[post]`/…）只接受 `impl IRequest<Response> for Type`：
 

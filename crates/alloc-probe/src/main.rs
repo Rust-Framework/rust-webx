@@ -139,6 +139,12 @@ fn serve(port: u16) {
                 // real hot path.
                 options.server.workers = 1;
                 options.metrics.enabled = false;
+                // The probe measures the unthrottled hot path. Keep any
+                // environment/config-provided rate limit from shaping the
+                // measurement window (CI runs may carry a Production overlay).
+                options.rate_limit.enabled = false;
+                options.rate_limit.requests_per_second = 1_000_000.0;
+                options.rate_limit.burst_size = 1_000_000;
                 // A stable strong secret is required only when the auth
                 // middleware is enabled; the default issuer never runs here.
                 options.jwt.secret = "alloc-probe-jwt-secret-at-least-32-bytes-long".to_string();

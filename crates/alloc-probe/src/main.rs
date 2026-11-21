@@ -323,6 +323,16 @@ fn measure_once(port: u16, requests: u64, baseline: bool) -> (f64, u64) {
         send(&mut connection, "/hello");
     }
 
+    // Fail loudly with the actual body when route registration is missing
+    // (LTO/linker differences can otherwise surface as a confusing stats
+    // deserialization error much later).
+    let hello = send(&mut connection, "/hello");
+    assert!(
+        hello.windows(13).any(|window| window == b"Hello, World!"),
+        "framework /hello route did not return the expected body: {}",
+        String::from_utf8_lossy(&hello)
+    );
+
     let before = stats(&mut connection);
     for _ in 0..requests {
         send(&mut connection, "/hello");
@@ -352,7 +362,12 @@ fn wait_until_ready(port: u16) {
 
 fn stats(connection: &mut TcpStream) -> StatsView {
     let body = send(connection, "/__stats");
-    serde_json::from_slice(&body).expect("stats body")
+    serde_json::from_slice(&body).unwrap_or_else(|error| {
+        panic!(
+            "stats body: {error}; raw response body: {}",
+            String::from_utf8_lossy(&body)
+        )
+    })
 }
 
 fn send(connection: &mut TcpStream, path: &str) -> Vec<u8> {

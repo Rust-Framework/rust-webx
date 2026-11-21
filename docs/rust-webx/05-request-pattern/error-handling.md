@@ -135,6 +135,26 @@ return Err(ProblemDetails::validation(vec![
 参数绑定失败产生的也是 `Error::Problem`，因此客户端拿到的 `errors` 结构与手动校验完全一致
 （见[参数绑定](parameter-binding.md#错误响应)）。
 
+## 持久层错误（rust-ef）
+
+`rust-ef` 是 Web 无关的 ORM（2.6 起没有 `webx` feature），`EFError` 到
+`webx::Error` 的翻译属于**应用边界**：在 handlers 的 `db.rs` / `common_mapper.rs`
+实现一次 `map_ef_error` 与 `EfResultExt::map_ef()`，调用点写 `.map_ef()?`；
+`rust-webx-core` / umbrella 不提供 `ef` feature（避免把 ORM 带进核心依赖图）。
+
+```rust
+// handlers/src/db.rs（应用侧，每个应用一份）
+pub fn map_ef_error(error: EFError) -> webx::Error { /* 404/400/409/503/500 + 脱敏 */ }
+
+// Handler
+let blogs = self.ctx.set::<Blog>().query().to_list().await.map_ef()?;
+```
+
+`NotFound`/`ModelValidation`/`ConcurrencyConflict` 保留业务文案；驱动与查询错误使用
+固定文案脱敏（`UniqueViolation` 不回显 constraint/table，`Database` 只进日志）。
+完整映射表、方向约定与参考实现见
+[兼容性政策 §4](../../design/compatibility.md#4-边界约定rust-ef-错误映射)。
+
 ## 错误处理最佳实践
 
 | 实践 | 说明 |

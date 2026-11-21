@@ -126,7 +126,7 @@ The framework is split into a small set of focused crates, re-exported through t
 
 ```
 rust-webx/
-├── Cargo.toml                 # workspace root (v2.5.0)
+├── Cargo.toml                 # workspace root (v2.6.0)
 ├── crates/
 │   ├── core/                  # rust-webx-core  — traits, configuration
 │   ├── engine/                # rust-webx-engine — worker pool, direct dispatch

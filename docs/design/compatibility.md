@@ -1,6 +1,6 @@
 # 兼容性政策（SemVer、N-2 升级、锁步版本）
 
-> 基线：rust-webx 2.5.0。门禁在 `.github/workflows/ci.yml` 的 `semver`、`upgrade`、
+> 基线：rust-webx 2.6.0。门禁在 `.github/workflows/ci.yml` 的 `semver`、`upgrade`、
 > `lint`（内部版本钉）三个 job。
 
 ## 1. 三条承诺
@@ -49,12 +49,48 @@ compat/upgrade-smoke/current/Cargo.toml  → rust-webx = { path = "../../../crat
 该例外。需要保持字面量构造的结构体（如 `ProblemDetails`）由
 `crates/webx/tests/api_stability_test.rs` 锁定字段集合。
 
-## 4. 当前限制：rust-ef 的 `webx` feature
+## 4. 边界约定：rust-ef 错误映射
 
-`rust-ef 2.5.1` 的 `webx` feature 依赖 `rust-webx-core 1.2`。在本 2.x 工作区启用会解析出
-第二份 1.x core，其 `impl From<EFError> for Error` 对 2.x 的 `webx::Error` 不生效，
-因此参考应用暂时保留 `db.rs` 中的 `EfResultExt::map_ef()` 适配器（文件头注明原因）。
-待 rust-ef 发布依赖 core 2.x 的版本后删除适配器并改回裸 `?`。
+`rust-ef` 是 Web 无关的 ORM：2.6 起它不再提供 `webx` feature，也不依赖
+`rust-webx`。持久层错误到 HTTP 的翻译属于**应用边界**，本仓不提供、也不依赖任何
+ef 错误桥接版本：
+
+- 不在 `rust-webx-core` / umbrella 增加 `ef` feature 或可选 `rust-ef` 依赖。即使
+  默认关闭，也会把 ORM 概念带进 core 的 feature 图与发布清单，破坏“小核心”边界。
+- 不启用 `rust-ef` 的 `features = ["webx"]`，不恢复 `compat/webx-core-shim` 或
+  `[patch.crates-io]`。
+- 应用侧不写 `impl From<EFError> for webx::Error`（孤儿规则）；在
+  `handlers/src/db.rs`（或 `common_mapper.rs`）实现一次 `map_ef_error` +
+  `EfResultExt::map_ef()`，调用点写 `.map_ef()?`。
+
+```rust
+// handlers/src/db.rs —— 每个应用一份
+pub fn map_ef_error(error: EFError) -> webx::Error { /* 见下表 */ }
+pub trait EfResultExt<T> { fn map_ef(self) -> webx::Result<T>; }
+
+// Handler
+let blogs = ctx.set::<Blog>().query().to_list().await.map_ef()?;
+```
+
+映射契约（与 rust-ef 2.6 迁移指南一致）：
+
+| `EFError` | HTTP | `webx::Error` | 客户端可见 detail |
+|---|---|---|---|
+| `NotFound` | 404 | `NotFound` | 业务文案（原样） |
+| `ModelValidation` | 400 | `Validation` | 业务文案（原样） |
+| `ConcurrencyConflict` | 409 | `Conflict` | 业务文案（原样） |
+| `Query`、`TypeConversion` | 400 | `Validation` | 固定文案（不回显 SQL/列名） |
+| `UniqueViolation` | 409 | `Conflict` | 固定文案（不回显 constraint/table） |
+| `Connection`、`Transaction` | 503 | `Status(503, _)` | 固定文案、可重试 |
+| `Database`、`Migration`、`Configuration`、`Provider`、`ChangeTracking`、`Other` | 500 | `Internal` | 无（`public_detail() = None`，原文与 source 链只进日志） |
+
+5xx 的原文与 `source` 链拼进 `Error::Internal`，`public_detail()` 为 `None`，由
+host 写入日志。新增 rust-ef 变体走同一隐藏 500 分支，升级依赖不会扩大客户端可见
+信息。参考实现见 docbit/dmbit 的 `handlers/src/db.rs`。
+
+若未来确需框架级桥接，只能另立**独立集成 crate**（依赖方向
+rust-webx → rust-ef），单独评审；本仓 core/umbrella 始终零 ef 依赖，也不允许
+ORM → Web 框架。
 
 ## 5. 弃用政策
 

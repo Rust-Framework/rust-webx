@@ -3,6 +3,49 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [2.6.0] — 2026-11-21
+
+> **English** · **简体中文**
+
+### English
+
+Dependency-alignment release. The workspace `rust-ef` dependency moves to 2.6 (the
+ORM removed its `webx` feature and no longer depends on a web framework). There is
+no public API change and no source migration: the `EFError -> webx::Error`
+translation stays at the application boundary, and the reference apps now
+implement the full sanitized contract.
+
+#### Changed
+
+- **rust-ef 2.6**: workspace dependency `2.5` -> `2.6`. rust-ef 2.6 removed its
+  `webx` feature; this repository keeps **no** EF bridge at all (no core/umbrella
+  feature, no shim, no `[patch.crates-io]`).
+
+#### Fixed
+
+- **Reference app mapping (docbit/dmbit `handlers/src/db.rs`)**: `UniqueViolation`
+  maps to sanitized 409 (no constraint/table), `Connection`/`Transaction` to
+  retryable 503 with fixed text, `Query`/`TypeConversion` to 400 with fixed text,
+  and 5xx keeps the EF message plus its source chain for the operator log only.
+
+### 简体中文
+
+> 依赖对齐发布：workspace `rust-ef` 升到 2.6（ORM 移除了 `webx` feature，不再依赖
+> Web 框架）。**无公开 API 变更、无源码迁移**：`EFError -> webx::Error` 映射仍在
+> 应用边界，参考应用补齐完整脱敏契约。
+
+#### 变更
+
+- **rust-ef 2.6**：workspace 依赖 `2.5` → `2.6`。rust-ef 2.6 移除了 `webx`
+  feature；本仓保持**零 ef 桥接**（core/umbrella 不加 feature、不恢复 shim 或
+  `[patch.crates-io]`）。
+
+#### 修复
+
+- **参考应用映射（docbit/dmbit `handlers/src/db.rs`）**：`UniqueViolation` → 409
+  （脱敏，不回显 constraint/table）；`Connection`/`Transaction` → 可重试 503 固定
+  文案；`Query`/`TypeConversion` → 400 固定文案；5xx 原文与 source 链只进日志。
+
 ## [2.5.0] — 2026-11-21
 
 > 2.5.0 是 2.x 的加性发布，汇总运行信任、实时执行模型、认证体系、事件/消息适配器、

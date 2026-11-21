@@ -26,20 +26,51 @@ use syn::{parse_macro_input, GenericArgument, ItemImpl, PathArguments, Type};
 /// resolves bare owned fields (e.g. `ctx: DbContext`) via `resolver.get_owned`.
 /// The resulting `Arc<Handler>` is `try_unwrap`-ed to obtain an owned `Handler`,
 /// enabling `handle(&mut self, ...)` without `Arc<Mutex>`.
+///
+/// # Event handlers
+///
+/// On `impl IEventHandler<T>`, `#[handler]` constructs with `Default` and
+/// `#[handler(inject)]` uses the `#[derive(Inject)]` constructor, exactly like
+/// request handlers. Both are auto-discovered; no DI registration is needed.
 pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     let item_impl = parse_macro_input!(item as ItemImpl);
     let handler_ty = &item_impl.self_ty;
 
-    // Event handlers are resolved through DI fan-out (`IMediator::publish`);
-    // they do not have an HTTP request dispatch. Do not emit a bogus `()`
-    // request registration for them.
-    let is_request_handler = item_impl
-        .trait_
-        .as_ref()
-        .and_then(|(_, path, _)| path.segments.last())
-        .is_some_and(|segment| segment.ident == "IRequestHandler");
-    if !is_request_handler {
-        return quote!(#item_impl).into();
+    // The attribute is only meaningful on a trait impl. `IRequestHandler` is
+    // the HTTP/mediator dispatch bridge; `IEventHandler` handlers are resolved
+    // through DI fan-out (`IMediator::publish`) and pass through untouched.
+    // Anything else is a mistake that used to be silently accepted.
+    let Some((_, trait_path, _)) = &item_impl.trait_ else {
+        let error = syn::Error::new_spanned(
+            handler_ty,
+            "#[handler] must be applied to a trait impl \
+             (`impl IRequestHandler<Req, Rsp> for Handler`), not an inherent impl",
+        )
+        .to_compile_error();
+        return quote!(#error #item_impl).into();
+    };
+    let Some(trait_segment) = trait_path.segments.last() else {
+        return syn::Error::new_spanned(
+            trait_path,
+            "#[handler] requires `impl IRequestHandler<Req, Rsp> for Handler`",
+        )
+        .to_compile_error()
+        .into();
+    };
+    match trait_segment.ident.to_string().as_str() {
+        "IRequestHandler" => {}
+        "IEventHandler" => return event_handler_impl(attr, item_impl),
+        other => {
+            let error = syn::Error::new_spanned(
+                trait_path,
+                format!(
+                    "#[handler] expects `impl IRequestHandler<Req, Rsp> for Handler` \
+                     (or `IEventHandler`); found trait `{other}`"
+                ),
+            )
+            .to_compile_error();
+            return quote!(#error #item_impl).into();
+        }
     }
 
     // Check for `#[handler(inject)]`.
@@ -49,13 +80,16 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     // Extract T (request type) and R (response type) from IRequestHandler<T, R>
-    let (req_ty_opt, rsp_ty_opt) = extract_handler_types(&item_impl);
+    let (Some(req_ty), Some(rsp_ty)) = extract_handler_types(&item_impl) else {
+        return syn::Error::new_spanned(
+            trait_path,
+            "`IRequestHandler` needs both types: `IRequestHandler<Req, Rsp>`",
+        )
+        .to_compile_error()
+        .into();
+    };
 
     let handler_ty_name = extract_type_name(handler_ty);
-
-    let default_type = syn::parse_str::<Type>("()").unwrap();
-    let req_ty = req_ty_opt.unwrap_or(&default_type);
-    let rsp_ty = rsp_ty_opt.unwrap_or(&default_type);
 
     let req_ty_name = type_to_string(req_ty);
     let rsp_tokens = quote!(#rsp_ty).to_string();
@@ -278,6 +312,152 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
+/// `#[handler]` on `impl IEventHandler<T> for Handler`.
+///
+/// Always emits an `EventRegistration` routing entry **and** an
+/// `EventHandlerRegistration` that constructs the handler per event, using the
+/// same two modes as request handlers:
+///
+/// - `#[handler]`: `Default::default()`;
+/// - `#[handler(inject)]`: the handler's `#[derive(Inject)]` constructor.
+///
+/// Event handlers are not registered as DI services; state belongs in injected
+/// dependencies.
+fn event_handler_impl(attr: TokenStream, item_impl: ItemImpl) -> TokenStream {
+    let handler_ty = &item_impl.self_ty;
+    let Some((_, trait_path, _)) = &item_impl.trait_ else {
+        return quote!(#item_impl).into();
+    };
+
+    let mode = match parse_event_mode(attr) {
+        Ok(mode) => mode,
+        Err(error) => return error.to_compile_error().into(),
+    };
+
+    let Some(event_ty) = extract_handler_types(&item_impl).0 else {
+        return syn::Error::new_spanned(
+            trait_path,
+            "`IEventHandler` needs its event type: `IEventHandler<Event>`",
+        )
+        .to_compile_error()
+        .into();
+    };
+
+    let handler_ty_name = extract_type_name(handler_ty).replace("::", "_");
+    let event_ty_name = type_to_string(event_ty).replace("::", "_");
+    let dispatch_fn = format_ident!(
+        "__webx_event_dispatch_{}_{}",
+        handler_ty_name,
+        event_ty_name
+    );
+    let factory_fn = format_ident!("__webx_event_factory_{}_{}", handler_ty_name, event_ty_name);
+    let call_fn = format_ident!("__webx_event_call_{}_{}", handler_ty_name, event_ty_name);
+
+    let factory_body = match mode {
+        EventMode::Default => quote! {
+            ::core::result::Result::Ok(::std::sync::Arc::new(
+                <#handler_ty as ::std::default::Default>::default(),
+            ))
+        },
+        EventMode::Inject => {
+            let try_constructor_fn =
+                format_ident!("__rdi_try_construct_{}", handler_ty_name.replace("::", "_"));
+            quote! {
+                let arc = match #try_constructor_fn(resolver) {
+                    ::core::result::Result::Ok(arc) => arc,
+                    ::core::result::Result::Err(error) => {
+                        return ::core::result::Result::Err(::webx::Error::Di(format!(
+                            "cannot construct event handler {}: {error}",
+                            ::std::stringify!(#handler_ty)
+                        )));
+                    }
+                };
+                ::core::result::Result::Ok(arc)
+            }
+        }
+    };
+    let auto_registration = quote! {
+        #[doc(hidden)]
+        fn #factory_fn(
+            resolver: &dyn ::webx::rust_dix::IServiceResolver,
+        ) -> ::webx::Result<
+            ::std::sync::Arc<
+                dyn ::std::any::Any + ::std::marker::Send + ::std::marker::Sync,
+            >,
+        > {
+            #factory_body
+        }
+
+        #[doc(hidden)]
+        fn #call_fn(
+            handler: ::std::sync::Arc<
+                dyn ::std::any::Any + ::std::marker::Send + ::std::marker::Sync,
+            >,
+            event: ::std::boxed::Box<dyn ::std::any::Any + ::std::marker::Send>,
+        ) -> ::webx::BoxedEventHandlerCall {
+            ::std::boxed::Box::pin(async move {
+                let handler = handler
+                    .downcast::<#handler_ty>()
+                    .map_err(|_| ::webx::Error::Internal(format!(
+                        "event handler type mismatch for {}",
+                        ::std::stringify!(#handler_ty)
+                    )))?;
+                let event = event
+                    .downcast::<#event_ty>()
+                    .map_err(|_| ::webx::Error::Internal(format!(
+                        "event type mismatch for {}",
+                        ::std::stringify!(#event_ty)
+                    )))?;
+                handler.handle(*event).await
+            })
+        }
+
+        ::webx::inventory::submit! {
+            ::webx::EventHandlerRegistration {
+                event_name: <#event_ty as ::webx::IEventRequest>::event_name,
+                event_type_id: ::std::any::TypeId::of::<#event_ty>(),
+                handler_name: ::std::stringify!(#handler_ty),
+                factory: #factory_fn,
+                call: #call_fn,
+            }
+        }
+    };
+
+    let expanded = quote! {
+        #item_impl
+
+        #[doc(hidden)]
+        fn #dispatch_fn(
+            provider: ::std::sync::Arc<::webx::rust_dix::ServiceProvider>,
+            payload: ::std::vec::Vec<u8>,
+        ) -> ::webx::BoxedEventDispatch {
+            ::std::boxed::Box::pin(async move {
+                let event: #event_ty = ::webx::serde_json::from_slice(&payload)
+                    .map_err(|error| ::webx::Error::Internal(format!(
+                        "event payload for '{}' is not valid JSON: {error}",
+                        <#event_ty as ::webx::IEventRequest>::event_name()
+                    )))?;
+                let scope = <::webx::rust_dix::ServiceProvider as ::webx::rust_dix::ScopeFactory>::create_scope(
+                    provider.as_ref(),
+                );
+                ::webx::dispatch_event_handlers(&scope, event).await
+            })
+        }
+
+        ::webx::inventory::submit! {
+            ::webx::EventRegistration {
+                event_name: <#event_ty as ::webx::IEventRequest>::event_name,
+                event_type_id: ::std::any::TypeId::of::<#event_ty>(),
+                dispatch: #dispatch_fn,
+            }
+        }
+
+        #auto_registration
+    };
+
+    expanded.into()
+}
+
 /// Extract `(req_type, rsp_type)` from `impl IRequestHandler<T, R> for Handler`.
 fn extract_handler_types(item_impl: &ItemImpl) -> (Option<&Type>, Option<&Type>) {
     let (_, path, _) = match &item_impl.trait_ {
@@ -315,6 +495,33 @@ fn extract_type_name(ty: &Type) -> String {
             .join("_"),
         _ => "UnknownType".to_string(),
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EventMode {
+    Default,
+    Inject,
+}
+
+fn parse_event_mode(attr: TokenStream) -> syn::Result<EventMode> {
+    if attr.is_empty() {
+        return Ok(EventMode::Default);
+    }
+    use syn::parse::Parser;
+    let flags =
+        syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated.parse(attr)?;
+    let mut mode = EventMode::Default;
+    for flag in flags {
+        if flag.is_ident("inject") {
+            mode = EventMode::Inject;
+        } else {
+            return Err(syn::Error::new_spanned(
+                flag,
+                "unsupported `#[handler]` event option; expected `#[handler]` or `#[handler(inject)]`",
+            ));
+        }
+    }
+    Ok(mode)
 }
 
 fn parse_mode(attr: TokenStream) -> syn::Result<bool> {

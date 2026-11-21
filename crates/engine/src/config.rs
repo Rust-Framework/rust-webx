@@ -30,7 +30,7 @@
 
 use std::time::Duration;
 
-use webx_core::config::AppOptions;
+use webx_core::config::{AppOptions, TlsClientAuth};
 use webx_core::mode::AppMode;
 
 /// Upper bound for the worker count, including an explicit `Server.Workers`.
@@ -65,6 +65,10 @@ pub const DEFAULT_MAX_HEADER_BUF: usize = 64 * 1024;
 pub struct TlsConfig {
     pub cert_path: String,
     pub key_path: String,
+    /// Client CA bundle; required when `client_auth` is not `Off`.
+    pub client_ca_path: String,
+    /// Client-certificate policy.
+    pub client_auth: TlsClientAuth,
 }
 
 /// Everything one [`Server`](crate::Server) run needs from configuration.
@@ -90,6 +94,12 @@ pub struct EngineConfig {
     pub first_request_timeout: Duration,
     /// Per-request deadline from `Server.RequestTimeoutSeconds`; `None` disables.
     pub request_timeout: Option<Duration>,
+    /// How long an accepted socket may wait for an admission slot.
+    ///
+    /// `None` waits forever (legacy behaviour); the default is
+    /// [`DEFAULT_ADMISSION_TIMEOUT_MS`] so a saturated server sheds load with a
+    /// `503` instead of letting the kernel backlog hide the queue.
+    pub admission_timeout: Option<Duration>,
     /// TLS material when the listener terminates TLS.
     pub tls: Option<TlsConfig>,
     /// Runtime mode, forwarded from `APP_ENV` (spelled `mode` in core).
@@ -114,6 +124,8 @@ impl EngineConfig {
             (false, false) => Some(TlsConfig {
                 cert_path: options.tls.cert_path.clone(),
                 key_path: options.tls.key_path.clone(),
+                client_ca_path: options.tls.client_ca_path.clone(),
+                client_auth: options.tls.client_auth,
             }),
             _ => {
                 tracing::warn!(
@@ -137,6 +149,8 @@ impl EngineConfig {
             ),
             request_timeout: (options.server.request_timeout_seconds > 0)
                 .then(|| Duration::from_secs(options.server.request_timeout_seconds)),
+            admission_timeout: (options.server.admission_timeout_ms > 0)
+                .then(|| Duration::from_millis(options.server.admission_timeout_ms)),
             tls,
             mode,
         }
@@ -174,7 +188,8 @@ impl Default for EngineConfig {
             drain_timeout: Duration::from_secs(30),
             stream_drain_timeout: Duration::from_secs(300),
             first_request_timeout: Duration::from_secs(10),
-            request_timeout: None,
+            request_timeout: Some(Duration::from_secs(DEFAULT_REQUEST_TIMEOUT_SECS)),
+            admission_timeout: Some(Duration::from_millis(DEFAULT_ADMISSION_TIMEOUT_MS)),
             tls: None,
             mode: AppMode::Production,
         }
@@ -184,6 +199,40 @@ impl Default for EngineConfig {
 /// Upper bound accepted by Tokio's `Semaphore`; used to turn an invalid
 /// `MaxConnections` into a typed startup error instead of a panic.
 pub const MAX_SEMAPHORE_PERMITS: usize = tokio::sync::Semaphore::MAX_PERMITS;
+
+/// Default inbound deadline, mirroring `Server.RequestTimeoutSeconds`.
+pub const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 30;
+
+/// Default admission queue deadline, mirroring `Server.AdmissionTimeoutMs`.
+pub const DEFAULT_ADMISSION_TIMEOUT_MS: u64 = 1_000;
+
+/// Reject an unbounded admission queue in Production.
+pub fn validate_admission_timeout(mode: AppMode, millis: u64) -> webx_core::error::Result<()> {
+    if mode == AppMode::Production && millis == 0 {
+        return Err(webx_core::error::Error::Di(
+            "Server.AdmissionTimeoutMs=0 waits forever for an admission slot; Production \
+             requires a bounded queue (default 1000 ms). Set a value or remove the key."
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Reject a disabled inbound deadline in Production.
+///
+/// Development may explicitly disable it (debugging/soak tests); Production
+/// must keep a bound, otherwise a hung handler pins a connection and an
+/// admission permit forever.
+pub fn validate_request_timeout(mode: AppMode, seconds: u64) -> webx_core::error::Result<()> {
+    if mode == AppMode::Production && seconds == 0 {
+        return Err(webx_core::error::Error::Di(
+            "Server.RequestTimeoutSeconds=0 disables the inbound deadline; Production requires a \
+             non-zero budget (default 30s). Set a value or remove the key."
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
 
 /// Validate configuration values that feed allocation/admission primitives.
 pub fn validate_max_connections(max_connections: usize) -> webx_core::error::Result<()> {
@@ -276,5 +325,35 @@ mod tests {
         }))
         .expect("options parse");
         assert_eq!(EngineConfig::from_options(&options).max_connections, 1);
+    }
+
+    #[test]
+    fn default_inbound_deadline_is_30s() {
+        let options: AppOptions =
+            serde_json::from_value(serde_json::json!({})).expect("options parse");
+        assert_eq!(
+            EngineConfig::from_options(&options).request_timeout,
+            Some(Duration::from_secs(DEFAULT_REQUEST_TIMEOUT_SECS))
+        );
+        assert_eq!(
+            EngineConfig::default().request_timeout,
+            Some(Duration::from_secs(DEFAULT_REQUEST_TIMEOUT_SECS))
+        );
+    }
+
+    #[test]
+    fn explicit_zero_request_timeout_maps_to_none() {
+        let options: AppOptions = serde_json::from_value(serde_json::json!({
+            "Server": { "RequestTimeoutSeconds": 0 }
+        }))
+        .expect("options parse");
+        assert_eq!(EngineConfig::from_options(&options).request_timeout, None);
+    }
+
+    #[test]
+    fn request_timeout_validation_is_production_fail_closed() {
+        assert!(validate_request_timeout(AppMode::Production, 0).is_err());
+        assert!(validate_request_timeout(AppMode::Production, 30).is_ok());
+        assert!(validate_request_timeout(AppMode::Development, 0).is_ok());
     }
 }

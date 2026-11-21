@@ -269,8 +269,8 @@ fn host_build_resolves_the_secret_from_the_file() {
         .try_build()
         .expect("a valid secret file must let the host build");
 
-    // Every later consumer — issuer, verifier, `jwt_secret()`, the Production
-    // guard — reads `options.jwt.secret`, so this is the value they see.
+    // Every later consumer — issuer, verifier, the Production guard — reads
+    // `options.jwt.secret`, so this is the value they see.
     assert_eq!(host.options().jwt.secret, GOOD_SECRET);
 }
 

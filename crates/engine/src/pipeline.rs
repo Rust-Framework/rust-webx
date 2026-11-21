@@ -30,7 +30,7 @@ use std::sync::Arc;
 
 use webx_core::error::{Error, Result};
 use webx_core::http::IHttpContext;
-use webx_core::middleware::IMiddleware;
+use webx_core::middleware::{BoxedNextFuture, IMiddleware, NextStage};
 
 use crate::context::EngineContext;
 
@@ -51,16 +51,133 @@ pub type ErrorHandler = Arc<
         + Sync,
 >;
 
+/// Recover the engine context from the dynamic pipeline context.
+fn engine_context(ctx: &mut dyn IHttpContext) -> Result<&mut EngineContext> {
+    ctx.as_any_mut()
+        .and_then(|any| any.downcast_mut::<EngineContext>())
+        .ok_or_else(|| {
+            Error::Internal("continuation middleware requires the engine HTTP context".to_string())
+        })
+}
+
+/// Recursive continuation executor (2.4-4).
+///
+/// Legacy stages are driven exactly like the fast loop (`invoke` forward, and on
+/// unwind `after` for every stage whose `invoke` returned `Continue`);
+/// continuation-style stages receive [`Next`] and own their pre/post ordering.
+/// Errors are converted through `on_error` where they surface, so outer `after`
+/// hooks observe the real error response.
+///
+/// The chain state is `Arc`-owned so the `Next` closure can be `'static`; this
+/// is the documented cost of opting into continuation middleware (one boxed
+/// future per stage). Pipelines without continuation stages keep the
+/// zero-allocation legacy loop.
+fn run_chain(
+    ctx: &mut dyn IHttpContext,
+    stages: Arc<Vec<Arc<dyn IMiddleware>>>,
+    index: usize,
+    terminal: FinalHandler,
+    on_error: Option<ErrorHandler>,
+) -> BoxedNextFuture<'_> {
+    Box::pin(async move {
+        let Some(stage) = stages.get(index).cloned() else {
+            let engine = engine_context(&mut *ctx)?;
+            return match terminal(engine).await {
+                Ok(()) => Ok(()),
+                Err(error) => convert_error(&mut *ctx, error, on_error.as_ref()).await,
+            };
+        };
+        if stage.continuation() {
+            let continuation_stages = Arc::clone(&stages);
+            let continuation_terminal = Arc::clone(&terminal);
+            let continuation_on_error = on_error.clone();
+            let next = NextStage::new(move |ctx: &mut dyn IHttpContext| {
+                run_chain(
+                    ctx,
+                    Arc::clone(&continuation_stages),
+                    index + 1,
+                    Arc::clone(&continuation_terminal),
+                    continuation_on_error.clone(),
+                )
+            });
+            match stage.invoke_next(&mut *ctx, next).await {
+                Ok(()) => Ok(()),
+                Err(error) => convert_error(&mut *ctx, error, on_error.as_ref()).await,
+            }
+        } else {
+            let outcome = match stage.fast_invoke(&mut *ctx) {
+                Some(outcome) => outcome,
+                None => stage.invoke(&mut *ctx).await,
+            };
+            match outcome {
+                Ok(ControlFlow::Break(())) => Ok(()),
+                Err(error) => convert_error(&mut *ctx, error, on_error.as_ref()).await,
+                Ok(ControlFlow::Continue(())) => {
+                    let result = run_chain(
+                        &mut *ctx,
+                        Arc::clone(&stages),
+                        index + 1,
+                        Arc::clone(&terminal),
+                        on_error.clone(),
+                    )
+                    .await;
+                    if !stage.has_after() {
+                        return result;
+                    }
+                    match stage.after(&mut *ctx).await {
+                        Ok(()) => result,
+                        Err(after_error) => {
+                            if result.is_ok() {
+                                convert_error(&mut *ctx, after_error, on_error.as_ref()).await
+                            } else {
+                                tracing::error!(error = %after_error, "middleware after hook failed");
+                                result
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    })
+}
+
+async fn convert_error(
+    ctx: &mut dyn IHttpContext,
+    error: Error,
+    on_error: Option<&ErrorHandler>,
+) -> Result<()> {
+    match on_error {
+        Some(handler) => {
+            let engine = engine_context(ctx)?;
+            handler(engine, error).await;
+            Ok(())
+        }
+        None => Err(error),
+    }
+}
+
 /// The ordered middleware stages plus the optimized execution loop.
 pub struct Pipeline {
     /// Stages in registration order (the host owns slot placement).
     pub stages: Vec<Arc<dyn IMiddleware>>,
+    /// Whether any stage uses the continuation style (2.4-4).
+    ///
+    /// Computed by [`Self::new`]. Default pipelines contain only legacy
+    /// `invoke`/`after` stages, so the zero-allocation loop below stays on the
+    /// hot path. Declaring a continuation stage selects the continuation
+    /// executor for the whole pipeline (it boxes one future per stage by
+    /// design).
+    pub has_continuation: bool,
 }
 
 impl Pipeline {
     /// Build a pipeline from the host's ordered stages.
     pub fn new(stages: Vec<Arc<dyn IMiddleware>>) -> Self {
-        Self { stages }
+        let has_continuation = stages.iter().any(|stage| stage.continuation());
+        Self {
+            stages,
+            has_continuation,
+        }
     }
 
     /// Run the onion for one request.
@@ -72,6 +189,9 @@ impl Pipeline {
         ctx: &mut EngineContext,
         final_handler: FinalHandler,
     ) -> Result<()> {
+        if self.has_continuation {
+            return self.run_continuation(ctx, final_handler).await;
+        }
         self.run(ctx, move |ctx: &mut EngineContext| final_handler(ctx))
             .await
     }
@@ -92,7 +212,38 @@ impl Pipeline {
         final_handler: FinalHandler,
         on_error: ErrorHandler,
     ) -> Result<()> {
+        if self.has_continuation {
+            return self
+                .run_continuation_with_error(ctx, final_handler, on_error)
+                .await;
+        }
         self.run_with_error(ctx, final_handler, on_error).await
+    }
+
+    /// Continuation executor without an error-to-response hook (`execute`).
+    ///
+    /// The chain state is Arc-owned so the `NextStage` continuation can be
+    /// `'static`; this is part of the documented opt-in cost (the legacy loop
+    /// keeps zero allocations).
+    async fn run_continuation(
+        &self,
+        ctx: &mut EngineContext,
+        final_handler: FinalHandler,
+    ) -> Result<()> {
+        let stages = Arc::new(self.stages.clone());
+        run_chain(ctx, stages, 0, final_handler, None).await
+    }
+
+    /// Continuation executor with error conversion *before* the reverse `after`
+    /// pass (production path, same contract as [`Self::run_with_error`]).
+    async fn run_continuation_with_error(
+        &self,
+        ctx: &mut EngineContext,
+        final_handler: FinalHandler,
+        on_error: ErrorHandler,
+    ) -> Result<()> {
+        let stages = Arc::new(self.stages.clone());
+        run_chain(ctx, stages, 0, final_handler, Some(on_error)).await
     }
 
     async fn run_with_error(
@@ -106,7 +257,11 @@ impl Pipeline {
         let mut failure: Option<Error> = None;
 
         for stage in &self.stages {
-            match stage.invoke(ctx).await {
+            let outcome = match stage.fast_invoke(ctx) {
+                Some(outcome) => outcome,
+                None => stage.invoke(ctx).await,
+            };
+            match outcome {
                 Ok(ControlFlow::Continue(())) => executed += 1,
                 Ok(ControlFlow::Break(())) => {
                     short_circuited = true;
@@ -135,6 +290,9 @@ impl Pipeline {
         }
 
         for index in (0..executed).rev() {
+            if !self.stages[index].has_after() {
+                continue;
+            }
             if let Err(error) = self.stages[index].after(ctx).await {
                 if written {
                     tracing::error!(error = %error, "middleware after hook failed");
@@ -167,7 +325,11 @@ impl Pipeline {
         // returned `Continue`; the stage that broke or failed is deliberately
         // not included, matching the 1.5 behavior.
         for stage in &self.stages {
-            match stage.invoke(ctx).await {
+            let outcome = match stage.fast_invoke(ctx) {
+                Some(outcome) => outcome,
+                None => stage.invoke(ctx).await,
+            };
+            match outcome {
                 Ok(ControlFlow::Continue(())) => executed += 1,
                 Ok(ControlFlow::Break(())) => {
                     short_circuited = true;
@@ -191,6 +353,9 @@ impl Pipeline {
         // slice avoids the per-request `Vec<Arc<dyn IMiddleware>>` clone the
         // 1.5 loop builds.
         for index in (0..executed).rev() {
+            if !self.stages[index].has_after() {
+                continue;
+            }
             if let Err(error) = self.stages[index].after(ctx).await {
                 if failure.is_none() {
                     failure = Some(error);

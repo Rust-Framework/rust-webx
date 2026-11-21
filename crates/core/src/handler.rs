@@ -53,11 +53,18 @@ where
 /// Handles a single `IEventRequest`, performing side effects.
 ///
 /// ```ignore
+/// #[derive(Default)]
+/// struct SendWelcomeEmailHandler;
+///
+/// #[handler] // or #[handler(inject)] with #[derive(Inject)]
 /// #[async_trait]
 /// impl IEventHandler<UserCreatedEvent> for SendWelcomeEmailHandler {
 ///     async fn handle(&self, event: UserCreatedEvent) -> Result<()> { ... }
 /// }
 /// ```
+///
+/// Event handlers are constructed per event, exactly like request handlers;
+/// put shared state in injected dependencies.
 #[async_trait::async_trait]
 pub trait IEventHandler<T: IEventRequest>: Send + Sync {
     async fn handle(&self, event: T) -> Result<()>;

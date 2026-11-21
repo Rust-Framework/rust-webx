@@ -1,0 +1,22 @@
+[package]
+name = "rust-webx-contract-tests"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Reusable contract suites for rust-webx ports (IObjectStore, IMediaPlaneAdapter, IEventPublisher) — adapters run these to prove conformance"
+
+[lib]
+name = "webx_contract_tests"
+path = "src/lib.rs"
+
+[dependencies]
+async-trait.workspace = true
+rust-dix.workspace = true
+rust-webx-core = { path = "../core" }
+tokio.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true

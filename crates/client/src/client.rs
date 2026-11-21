@@ -538,6 +538,9 @@ impl HttpClient {
         let mut http = HttpConnector::new_with_resolver(GuardedResolver::new(guard_dns));
         http.set_connect_timeout(Some(options.connect_timeout));
         http.set_nodelay(options.tcp_nodelay);
+        // The HTTPS connector handles TLS and then hands the plain TCP stream
+        // to this inner connector; it must not reject the original https URI.
+        http.enforce_http(false);
 
         let tls = build_tls_config(&options)?;
         let builder = HttpsConnectorBuilder::new()
@@ -713,10 +716,17 @@ where
         None => client.request(request).await,
     };
     response.map_err(|error| {
+        let mut message = error.to_string();
+        let mut source = std::error::Error::source(&error);
+        while let Some(cause) = source {
+            message.push_str(": ");
+            message.push_str(&cause.to_string());
+            source = std::error::Error::source(cause);
+        }
         if error.is_connect() {
-            HttpClientError::Connect(error.to_string())
+            HttpClientError::Connect(message)
         } else {
-            HttpClientError::Protocol(error.to_string())
+            HttpClientError::Protocol(message)
         }
     })
 }
@@ -846,6 +856,10 @@ fn is_blocked_ipv4(ip: std::net::Ipv4Addr) -> bool {
 /// Build the rustls client config: webpki roots, or a PEM bundle that replaces
 /// them (enterprise CA).
 fn build_tls_config(options: &HttpClientOptions) -> Result<rustls::ClientConfig, HttpClientError> {
+    // A workspace can enable both `ring` and `aws-lc-rs`; rustls then refuses
+    // to pick a process provider automatically. The framework pins `ring`;
+    // an application that installed its own provider first keeps it.
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let mut roots = RootCertStore::empty();
     match &options.root_certificates {
         Some(path) => {

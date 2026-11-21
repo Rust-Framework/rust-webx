@@ -10,6 +10,8 @@ tokio::task_local! {
     static IDENTITY: Option<Arc<IdentityUser>>;
     /// The trace id of the current request, if the host assigned one.
     static TRACE_ID: Option<Arc<str>>;
+    /// The real-time connection a message is being processed for.
+    static CONNECTION: Arc<crate::realtime::ConnectionContext>;
 }
 
 /// Scoped identity **and trace id** of the current request, shared by every
@@ -75,7 +77,65 @@ impl RequestContext {
     where
         F: Future<Output = R>,
     {
-        IDENTITY.scope(identity, TRACE_ID.scope(trace_id, f)).await
+        let connection = Self::connection();
+        Self::scope_with_connection(identity, trace_id, connection, f).await
+    }
+
+    /// Run an async block for a real-time **message**, with the connection that
+    /// carries it in scope.
+    ///
+    /// The WebSocket request dispatcher uses this: within `f`,
+    /// [`Self::connection`] returns the connection (metadata, trace id,
+    /// identity and the connection-scoped resolver), [`Self::identity`] and
+    /// [`Self::trace_id`] reflect the connection's authentication, and the
+    /// handler runs in the per-message DI scope created by the mediator.
+    pub async fn run_in_connection<F, R>(
+        identity: Option<Arc<IdentityUser>>,
+        trace_id: Option<Arc<str>>,
+        connection: Arc<crate::realtime::ConnectionContext>,
+        f: F,
+    ) -> R
+    where
+        F: Future<Output = R>,
+    {
+        CONNECTION
+            .scope(
+                connection,
+                IDENTITY.scope(identity, TRACE_ID.scope(trace_id, f)),
+            )
+            .await
+    }
+
+    async fn scope_with_connection<F, R>(
+        identity: Option<Arc<IdentityUser>>,
+        trace_id: Option<Arc<str>>,
+        connection: Option<Arc<crate::realtime::ConnectionContext>>,
+        f: F,
+    ) -> R
+    where
+        F: Future<Output = R>,
+    {
+        match connection {
+            Some(connection) => {
+                CONNECTION
+                    .scope(
+                        connection,
+                        IDENTITY.scope(identity, TRACE_ID.scope(trace_id, f)),
+                    )
+                    .await
+            }
+            None => IDENTITY.scope(identity, TRACE_ID.scope(trace_id, f)).await,
+        }
+    }
+
+    /// The real-time connection the current message belongs to, if any.
+    ///
+    /// Message handlers use this to reach connection-scoped services
+    /// (`RequestContext::connection()?.resolve::<T>()`) even though the handler
+    /// itself runs in the per-message DI scope. `None` for HTTP requests and
+    /// background work.
+    pub fn connection() -> Option<Arc<crate::realtime::ConnectionContext>> {
+        CONNECTION.try_with(Arc::clone).ok()
     }
 
     /// The authenticated identity of the current request, if any.

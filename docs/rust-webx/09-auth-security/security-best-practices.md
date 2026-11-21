@@ -9,12 +9,19 @@
 | 开发/生产分离 | `appsettings.Development.json` vs 生产配置 |
 | 密钥可放文件 | `Jwt.SecretFile` 指向 `0600` 文件，启动期校验长度 ≥32 字节与权限（1.3.0 起） |
 
-### `jwt_secret()` 进程级 shim
+### 签发令牌：用 `ITokenIssuer`（2.5）
 
-`HostBuilder::add_authentication()` 在 build 时调用 `init_jwt_secret()`，登录 Handler 通过 `jwt_secret()` 读取签名密钥。这是**独立于 DI `ServiceProvider` 的配置单例**（`OnceLock`）：JWT 密钥不是 per-request 依赖，且需在 middleware 与 Handler 间共享。
+`jwt_secret()` 进程级 shim 仅保留兼容，**2.5 起弃用**。登录 Handler 注入 `Arc<dyn ITokenIssuer>`，由 host 用最终解析的密钥（env / `Jwt.Secret` / `Jwt.SecretFile`）以及配置的 `iss`/`aud` 签发：
 
-- **推荐**：保持 `add_authentication()` + `Jwt.Secret` / `JWT_SECRET` 环境变量；Handler 内继续用 `jwt_secret()` 签发 token。
-- **不推荐**：在 Handler 中硬编码密钥或绕过 `init_jwt_secret`。
+```rust
+let issued = tokens
+    .issue(TokenClaims::new(&user.id).with_roles(user.roles.clone()))
+    .await?;
+issued.token // 返回给客户端；issued.jti 存吊销表
+```
+
+- **不要**在 Handler 里读 `jwt_secret()`、自己 `jsonwebtoken::encode` 或硬编码密钥。
+- 自定义 issuer 用 `register_with_options` 读 `options.jwt.secret`（已解析最终值）或 DI 里的 `JwtSecret`。
 
 ### 从文件加载 JWT 密钥（1.3.0 起）
 
@@ -35,7 +42,7 @@ $ head -c 48 /dev/urandom | base64 > data/jwt.key && chmod 600 data/jwt.key
 - 启动期 fail-fast：文件缺失/不可读/空/<32 字节/（Unix）group-or-other 权限 → **启动失败**，
   错误信息包含路径与修复建议，不会用坏密钥继续签发 token。
 - `Jwt.SecretFile` 由 host 在装配认证前解析（`apply_jwt_secret_file`），因此 `JwtTokenIssuer`、
-  `JwtAuth`、`jwt_secret()` 与 Production 弱密钥守卫看到的都是解析后的值。
+  `JwtAuth`、`JwtSecret` 与 Production 弱密钥守卫看到的都是解析后的值。
 - **Windows**：不校验 ACL（无 POSIX mode），需要部署脚本把文件 ACL 限定为服务账号 +
   `Administrators`；DPAPI 包装属于后续能力，1.3.0 未提供。
 - 框架**不生成**密钥文件（避免悄悄写入低熵密钥）：首次部署由安装器/运维生成。
@@ -110,11 +117,16 @@ if !setup.consume(candidate) {
 
 生产环境**必须**启用 TLS。
 
-## 认证安全
+## 认证安全（2.5 清单）
 
-- Token 过期时间合理（Docbit 默认 24 小时）
-- 密码使用 bcrypt 哈希存储
-- 登录失败不泄露用户是否存在
+- **令牌**：配置 `Jwt.Issuer`/`Jwt.Audience`；资源服务器用 `InvalidTokenBehavior = Reject`；`sub` 空、算法不符、超长令牌一律拒绝。
+- **口令**：Argon2id（`IPasswordHasher`），不要 bcrypt/自写哈希；`PasswordPolicy` 只做长度+黑名单；登录失败用 `verify_password_or_dummy` 防枚举。
+- **登录限流**：`ILoginThrottle`（账号+客户端双维度、指数退避、不永久锁）；`BoundedPasswordHasher` 限制 Argon2 并发。
+- **会话/吊销**：JWT `revoke_until(jti, exp)` + `use_session_store_cached` 负缓存；Cookie 会话用 `ISessionRepository`，删除即失效。
+- **浏览器**：Cookie 用 `HttpOnly`/`Secure`/`SameSite`；Cookie scheme 必须配 `use_csrf`，否则启动失败。
+- **Basic**：只在 TLS 后使用；校验器用 `constant_time_eq`，未知用户返回 `None`。
+- **可观测**：`use_meter` 接 `auth.requests`/`auth.duration`；启动日志确认 schemes/CSRF/session store。
+- **令牌寿命**：access token 短寿命（分钟级）；长会话走 refresh rotation（M2）而不是 24 小时的 access token。
 
 ## 授权安全
 

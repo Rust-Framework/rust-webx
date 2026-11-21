@@ -1,4 +1,12 @@
-//! Per-IP token-bucket rate-limiting middleware.
+//! Token-bucket rate-limiting middleware with a pluggable counter store.
+//!
+//! The default store is an in-process, **sharded** token bucket keyed by client
+//! IP: sharding removes the single global mutex from the hot path while
+//! `RateLimit.MaxTrackedIps` remains an exact global bound.
+//!
+//! A distributed deployment implements [`IRateLimiter`] over a shared store
+//! (for example Redis) and injects it with [`RateLimitMiddleware::with_limiter`];
+//! the middleware contract (`429` + `Retry-After` + `problem+json`) is unchanged.
 //!
 //! Configure via `appsettings.json` `RateLimit` section or manually:
 //!
@@ -9,16 +17,19 @@
 //! ```
 
 use crate::problem_response::write_problem;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, VecDeque};
+use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
 use std::ops::ControlFlow;
 use std::str::FromStr;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use tokio::sync::Mutex;
 use webx_core::config::RateLimitSection;
 use webx_core::error::Result;
 use webx_core::http::IHttpContext;
 use webx_core::middleware::IMiddleware;
+use webx_core::rate_limit::{IRateLimiter, RateLimitDecision};
 
 struct TokenBucket {
     tokens: f64,
@@ -52,35 +63,156 @@ impl TokenBucket {
     }
 }
 
-/// Inner rate-limiting state shared behind a [`Mutex`].
-struct Buckets {
-    map: HashMap<IpAddr, TokenBucket>,
-    /// FIFO of (ip, generation). Eviction pops the front instead of scanning
-    /// every tracked address (the previous `min_by_key` made an IP-cycling
-    /// client O(max_ips) per request).
-    order: VecDeque<(IpAddr, u64)>,
+/// One shard of the in-process store: its own map, FIFO and exact capacity.
+struct Shard {
+    map: HashMap<String, TokenBucket>,
+    /// FIFO of (key, generation). Eviction pops the front instead of scanning
+    /// every tracked key (which made a key-cycling client O(max_keys) per
+    /// request).
+    order: VecDeque<(String, u64)>,
     next_generation: u64,
+    capacity: usize,
 }
 
-pub struct RateLimiter {
-    buckets: Mutex<Buckets>,
+impl Shard {
+    fn consume(&mut self, key: &str, rate: f64, burst: f64) -> bool {
+        if !self.map.contains_key(key) {
+            while self.map.len() >= self.capacity {
+                let Some((candidate, generation)) = self.order.pop_front() else {
+                    break;
+                };
+                // Only remove the exact bucket that entered the FIFO here; the
+                // key may have been evicted and re-inserted since.
+                if self
+                    .map
+                    .get(&candidate)
+                    .is_some_and(|bucket| bucket.generation == generation)
+                {
+                    self.map.remove(&candidate);
+                    break;
+                }
+            }
+            let generation = self.next_generation;
+            self.next_generation = self.next_generation.wrapping_add(1);
+            self.order.push_back((key.to_string(), generation));
+            self.map
+                .insert(key.to_string(), TokenBucket::new(burst, generation));
+        }
+        self.map
+            .get_mut(key)
+            .expect("bucket was just inserted")
+            .try_consume(rate, burst)
+    }
+}
+
+/// In-process, sharded token buckets implementing [`IRateLimiter`].
+///
+/// Shard count follows the available parallelism (clamped to `1..=32`) and is
+/// never larger than `MaxTrackedIps`; capacities are distributed across shards
+/// without remainder loss, so the tracked-key count never exceeds
+/// `max_tracked_ips`.
+///
+/// Eviction is **per shard**: under adversarial key skew one shard can evict
+/// before the global budget is reached, so a healthy key may lose its bucket.
+/// That is the price of removing the global lock; deployments that need strict
+/// per-key retention must provide an [`IRateLimiter`] backed by a shared store
+/// with its own eviction policy.
+pub struct InMemoryRateLimiter {
+    shards: Vec<Mutex<Shard>>,
     rate: f64,
     burst: f64,
-    max_ips: usize,
+    retry_after_secs: u64,
+}
+
+impl InMemoryRateLimiter {
+    pub fn new(requests_per_second: f64, burst_size: u32, max_tracked_ips: usize) -> Self {
+        let max = max_tracked_ips.max(1);
+        let desired = std::thread::available_parallelism()
+            .map(|parallelism| parallelism.get() * 2)
+            .unwrap_or(8)
+            .clamp(1, 32);
+        let shard_count = desired.min(max).max(1);
+        let base = max / shard_count;
+        let remainder = max % shard_count;
+        let shards = (0..shard_count)
+            .map(|index| {
+                let capacity = base + usize::from(index < remainder);
+                Mutex::new(Shard {
+                    map: HashMap::new(),
+                    order: VecDeque::new(),
+                    next_generation: 0,
+                    capacity: capacity.max(1),
+                })
+            })
+            .collect();
+        Self {
+            shards,
+            rate: requests_per_second,
+            burst: burst_size as f64,
+            retry_after_secs: retry_after_seconds(requests_per_second),
+        }
+    }
+
+    fn shard_index(&self, key: &str) -> usize {
+        let mut hasher = DefaultHasher::new();
+        key.hash(&mut hasher);
+        (hasher.finish() as usize) % self.shards.len()
+    }
+
+    /// Tracked keys across all shards (diagnostics/tests).
+    pub fn tracked_keys(&self) -> usize {
+        let mut total = 0;
+        for shard in &self.shards {
+            total += shard
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .map
+                .len();
+        }
+        total
+    }
+
+    /// Seconds a client should wait before retrying (RFC 6585 `Retry-After`).
+    pub fn retry_after_secs(&self) -> u64 {
+        self.retry_after_secs
+    }
+}
+
+#[async_trait::async_trait]
+impl IRateLimiter for InMemoryRateLimiter {
+    async fn check(&self, key: &str) -> RateLimitDecision {
+        let index = self.shard_index(key);
+        let mut shard = self.shards[index]
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if shard.consume(key, self.rate, self.burst) {
+            RateLimitDecision::allow()
+        } else {
+            RateLimitDecision::deny(self.retry_after_secs)
+        }
+    }
+}
+
+/// Whole-second refill hint; never `0` (that would invite a retry storm).
+fn retry_after_seconds(rate: f64) -> u64 {
+    if rate <= 0.0 {
+        return 1;
+    }
+    ((1.0 / rate).ceil() as u64).max(1)
+}
+
+/// Compatibility wrapper for the pre-2.2 single-bucket API.
+///
+/// New code should depend on [`IRateLimiter`] / [`InMemoryRateLimiter`].
+pub struct RateLimiter {
+    inner: InMemoryRateLimiter,
     trust_proxy: bool,
 }
 
 impl RateLimiter {
     pub fn new(requests_per_second: f64, burst_size: u32, max_tracked_ips: usize) -> Self {
         Self {
-            buckets: Mutex::new(Buckets {
-                map: HashMap::new(),
-                order: VecDeque::new(),
-                next_generation: 0,
-            }),
-            rate: requests_per_second,
-            burst: burst_size as f64,
-            max_ips: max_tracked_ips.max(1),
+            inner: InMemoryRateLimiter::new(requests_per_second, burst_size, max_tracked_ips),
             trust_proxy: false,
         }
     }
@@ -90,54 +222,22 @@ impl RateLimiter {
         self
     }
 
-    async fn allow(&self, ip: IpAddr) -> bool {
-        let mut buckets = self.buckets.lock().await;
-        if !buckets.map.contains_key(&ip) {
-            while buckets.map.len() >= self.max_ips {
-                let Some((candidate, generation)) = buckets.order.pop_front() else {
-                    break;
-                };
-                // Only remove the exact bucket that entered the FIFO here; the
-                // IP may have been evicted and re-inserted since.
-                if buckets
-                    .map
-                    .get(&candidate)
-                    .is_some_and(|bucket| bucket.generation == generation)
-                {
-                    buckets.map.remove(&candidate);
-                    break;
-                }
-            }
-            let generation = buckets.next_generation;
-            buckets.next_generation = buckets.next_generation.wrapping_add(1);
-            buckets.order.push_back((ip, generation));
-            buckets
-                .map
-                .insert(ip, TokenBucket::new(self.burst, generation));
-        }
-        let bucket = buckets.map.get_mut(&ip).expect("bucket was just inserted");
-        bucket.try_consume(self.rate, self.burst)
+    pub async fn allow(&self, ip: IpAddr) -> bool {
+        self.inner.check(&ip.to_string()).await.allowed
     }
 
-    /// Current number of tracked client IPs (for tests).
+    /// Current number of tracked client keys (for tests).
     pub async fn tracked_ip_count(&self) -> usize {
-        self.buckets.lock().await.map.len()
+        self.inner.tracked_keys()
     }
 
-    /// Seconds a client should wait before retrying (RFC 6585 `Retry-After`).
-    ///
-    /// A bucket refills one token every `1 / rate` seconds; a whole second is
-    /// the smallest useful hint, and 1s is used when the rate is unset.
     pub fn retry_after_secs(&self) -> u64 {
-        if self.rate <= 0.0 {
-            return 1;
-        }
-        ((1.0 / self.rate).ceil() as u64).max(1)
+        self.inner.retry_after_secs()
     }
 }
 
 pub struct RateLimitMiddleware {
-    limiter: RateLimiter,
+    limiter: Arc<dyn IRateLimiter>,
     trust_proxy: bool,
     /// CIDR ranges whose peer addresses may supply `X-Forwarded-For`.
     trusted_proxies: Vec<IpCidr>,
@@ -153,8 +253,17 @@ impl RateLimitMiddleware {
         burst_size: u32,
         max_tracked_ips: usize,
     ) -> Self {
+        Self::with_limiter(Arc::new(InMemoryRateLimiter::new(
+            requests_per_second,
+            burst_size,
+            max_tracked_ips,
+        )))
+    }
+
+    /// Use a custom store (for example a Redis-backed distributed limiter).
+    pub fn with_limiter(limiter: Arc<dyn IRateLimiter>) -> Self {
         Self {
-            limiter: RateLimiter::new(requests_per_second, burst_size, max_tracked_ips),
+            limiter,
             trust_proxy: false,
             trusted_proxies: Vec::new(),
         }
@@ -182,7 +291,11 @@ impl RateLimitMiddleware {
             );
         }
         Self {
-            limiter: RateLimiter::new(cfg.requests_per_second, cfg.burst_size, cfg.max_tracked_ips),
+            limiter: Arc::new(InMemoryRateLimiter::new(
+                cfg.requests_per_second,
+                cfg.burst_size,
+                cfg.max_tracked_ips,
+            )),
             trust_proxy: cfg.trust_proxy,
             trusted_proxies,
         }
@@ -243,9 +356,10 @@ impl IMiddleware for RateLimitMiddleware {
             return Ok(ControlFlow::Continue(()));
         };
 
-        if !self.limiter.allow(ip).await {
-            let retry_after = self.limiter.retry_after_secs().to_string();
-            ctx.response_mut().set_header("retry-after", &retry_after);
+        let decision = self.limiter.check(&ip.to_string()).await;
+        if !decision.allowed {
+            ctx.response_mut()
+                .set_header("retry-after", &decision.retry_after_secs.to_string());
             write_problem(ctx, 429, "Too Many Requests").await;
             return Ok(ControlFlow::Break(()));
         }
@@ -334,6 +448,61 @@ mod tests {
         // Never report 0 (that would invite an immediate retry storm).
         let unset = RateLimiter::new(0.0, 1, 10);
         assert_eq!(unset.retry_after_secs(), 1);
+    }
+
+    #[tokio::test]
+    async fn burst_is_enforced_per_key() {
+        let limiter = InMemoryRateLimiter::new(0.0, 2, 16);
+        assert!(limiter.check("ip-a").await.allowed);
+        assert!(limiter.check("ip-a").await.allowed);
+        let denied = limiter.check("ip-a").await;
+        assert!(!denied.allowed);
+        assert_eq!(denied.retry_after_secs, 1);
+        // Another key has its own bucket.
+        assert!(limiter.check("ip-b").await.allowed);
+    }
+
+    #[tokio::test]
+    async fn sharded_store_never_exceeds_the_global_key_budget() {
+        let limiter = InMemoryRateLimiter::new(100.0, 10, 2);
+        for index in 0..16 {
+            assert!(limiter.check(&format!("10.0.0.{index}")).await.allowed);
+            assert!(
+                limiter.tracked_keys() <= 2,
+                "the sharded store must stay within the configured budget"
+            );
+        }
+        assert!(limiter.tracked_keys() >= 1);
+    }
+
+    #[tokio::test]
+    async fn single_shard_eviction_is_exact() {
+        // Tiny budgets collapse to one shard, so the bound is exact and the
+        // oldest key is evicted first.
+        let limiter = InMemoryRateLimiter::new(100.0, 10, 1);
+        assert!(limiter.check("a").await.allowed);
+        assert!(limiter.check("b").await.allowed);
+        assert_eq!(limiter.tracked_keys(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_custom_port_replaces_the_default_store() {
+        struct DenyAll;
+
+        #[async_trait::async_trait]
+        impl IRateLimiter for DenyAll {
+            async fn check(&self, _key: &str) -> RateLimitDecision {
+                RateLimitDecision::deny(7)
+            }
+        }
+
+        let limiter: Arc<dyn IRateLimiter> = Arc::new(DenyAll);
+        let decision = limiter.check("ip:203.0.113.7").await;
+        assert!(!decision.allowed);
+        assert_eq!(decision.retry_after_secs, 7);
+
+        // The middleware accepts any store through the port.
+        let _middleware = RateLimitMiddleware::with_limiter(limiter);
     }
 
     #[test]

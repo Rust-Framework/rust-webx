@@ -145,7 +145,15 @@ where
                 self.path.display()
             ))
         })?;
-        let bound: T = config::bind_config(&json, &self.section);
+        // Strict rebind: a bad snapshot is rejected and the previous snapshot
+        // stays active. The lossy binder used to install `T::default()` here,
+        // which silently reset a section after a typo.
+        let bound: T = config::try_bind_config(&json, &self.section).map_err(|error| {
+            Error::Validation(format!(
+                "rejected reload of {}: {error}",
+                self.path.display()
+            ))
+        })?;
         self.monitor.set(bound);
         tracing::info!(
             path = %self.path.display(),

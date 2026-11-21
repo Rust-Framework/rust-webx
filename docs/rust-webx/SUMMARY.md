@@ -71,7 +71,17 @@
 # 第四部分 · 安全、配置与生产
 
 - [第九章 认证与授权](./09-auth-security/INDEX.md)
+  - [认证快速上手](./09-auth-security/quickstart.md)
   - [JWT Bearer 认证](./09-auth-security/jwt-authentication.md)
+  - [Cookie 会话与 CSRF](./09-auth-security/cookie-session.md)
+  - [OpenID Connect 登录](./09-auth-security/oidc.md)
+  - [OAuth 2.0 社交登录](./09-auth-security/oauth2-social.md)
+  - [TOTP 与恢复码](./09-auth-security/mfa.md)
+  - [密钥轮换与应急 Runbook](./09-auth-security/key-rotation-runbook.md)
+  - [DPoP 发送方约束令牌](./09-auth-security/dpop.md)
+  - [WebAuthn/Passkey](./09-auth-security/webauthn.md)
+  - [Token Introspection/Revocation](./09-auth-security/introspection.md)
+  - [mTLS 客户端证书](./09-auth-security/mtls.md)
   - [API Key 认证](./09-auth-security/api-key-auth.md)
   - [基于资源的授权](./09-auth-security/resource-authorization.md)
   - [authorize 宏与声明式授权](./09-auth-security/authorize-macro.md)

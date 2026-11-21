@@ -3,18 +3,18 @@
 //! `Mediator::send` delegates to the shared [`dispatch`](super::dispatch::dispatch)
 //! function — the same path used by HTTP endpoint adapters after request construction.
 //!
-//! `Mediator::publish` resolves `IEventHandler<T>` from the DI container and
-//! invokes all registered handlers.
+//! `Mediator::publish` encodes the event and hands it to the registered
+//! [`IEventPublisher`]. Handler execution is owned by the transport (the default
+//! in-memory queue), so publishing never waits for subscribers and never returns
+//! their errors.
 
 use std::any::Any;
 use std::sync::Arc;
 
-use rust_dix::ScopeFactory;
-
 use super::dispatch;
+use super::event::{EventMessage, EventMetrics, IEventPublisher};
 use super::{IEventRequest, IMediator, IRequest};
-use crate::error::Result;
-use crate::handler::IEventHandler;
+use crate::error::{Error, Result};
 use crate::route::scan::HandlerCache;
 
 /// Default implementation of IMediator.
@@ -25,6 +25,7 @@ use crate::route::scan::HandlerCache;
 pub struct Mediator {
     provider: Arc<rust_dix::ServiceProvider>,
     handler_cache: Arc<HandlerCache>,
+    event_metrics: Arc<EventMetrics>,
 }
 
 impl Mediator {
@@ -36,9 +37,13 @@ impl Mediator {
     /// code can inject `Arc<dyn IMediator>` / `Mediator` and use the same path
     /// as in-process calls.
     pub fn new(provider: Arc<rust_dix::ServiceProvider>, handler_cache: Arc<HandlerCache>) -> Self {
+        let event_metrics = provider
+            .get::<EventMetrics>()
+            .unwrap_or_else(|_| Arc::new(EventMetrics::new()));
         Self {
             provider,
             handler_cache,
+            event_metrics,
         }
     }
 }
@@ -69,22 +74,37 @@ impl IMediator for Mediator {
         .await
     }
 
-    async fn publish<T: IEventRequest>(&self, event: T) -> Result<()> {
-        let scope = self.provider.create_scope();
-        let handlers: Vec<Arc<dyn IEventHandler<T>>> = scope.get_all::<dyn IEventHandler<T>>();
-
-        let mut first_err: Option<crate::error::Error> = None;
-        for handler in handlers {
-            if let Err(e) = handler.handle(event.clone()).await {
-                if first_err.is_none() {
-                    first_err = Some(e);
-                }
+    async fn publish<T: IEventRequest + serde::Serialize>(&self, event: T) -> Result<()> {
+        // Resolve before encoding: an unconfigured publisher should fail fast
+        // instead of doing serialization work it will throw away.
+        let publisher: Arc<dyn IEventPublisher> = match self.provider.get::<dyn IEventPublisher>() {
+            Ok(publisher) => publisher,
+            Err(_) => {
+                self.event_metrics.record_publish_failed();
+                return Err(Error::Di(
+                    "No IEventPublisher is registered. Use `add_mediator()` (default \
+                     in-memory queue) or `HostBuilder::use_event_publisher(...)`."
+                        .to_string(),
+                ));
             }
-        }
+        };
 
-        match first_err {
-            Some(e) => Err(e),
-            None => Ok(()),
+        let message = match EventMessage::from_event(&event) {
+            Ok(message) => message,
+            Err(error) => {
+                self.event_metrics.record_publish_failed();
+                return Err(error);
+            }
+        };
+        match publisher.publish(message).await {
+            Ok(()) => {
+                self.event_metrics.record_published();
+                Ok(())
+            }
+            Err(error) => {
+                self.event_metrics.record_publish_failed();
+                Err(error)
+            }
         }
     }
 }

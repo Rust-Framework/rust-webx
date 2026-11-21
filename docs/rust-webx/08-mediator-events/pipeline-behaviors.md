@@ -63,7 +63,11 @@ svc.add_typed_pipeline_with::<_, CreateOrderRequest, OrderView>(|resolver| {
 
 Behavior 以 singleton 进入 DI，**只对注册的 `<Req, Rsp>` 对生效**；每请求作用域内
 `get_all::<dyn IPipelineBehavior<Req, Rsp>>()` 按注册顺序构造嵌套链（第一个注册的最外层）。
-`Mediator::send()` 与 HTTP endpoint 分发走同一条链。
+
+**HTTP 语义保证**：默认直连快路径不经过 Mediator 链；只要本 Host 注册了任意 typed
+behavior，Host 构建期会关闭直连快路径，所有 HTTP 请求改走 Mediator 路径——因此 behavior
+对 HTTP 与进程内调用一致（按 Host 隔离，测试可验证）。细节见
+[架构 ADR](../../design/mediator-handler-architecture.md) §2.2。
 
 ## 小结
 

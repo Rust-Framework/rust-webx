@@ -20,8 +20,12 @@
 #   7. rust-webx-spa      (depends on rust-webx-core)
 #   8. rust-webx-openapi  (depends on rust-webx-core)
 #   9. rust-webx-host     (depends on rust-webx-core, rust-webx-spa, rust-webx-openapi)
-#  10. rust-webx          (depends on all above, umbrella crate)
-#  11. rust-webx-ai-gateway (OpenAI-compatible surface; depends on webx + webx-ai)
+#  10. rust-webx-redis    (event transport + distributed cache; depends on core/host)
+#  11. rust-webx-nats     (event transport; depends on core/host)
+#  12. rust-webx-rabbitmq (event transport; depends on core/host)
+#  13. rust-webx-kafka    (event transport; depends on core/host)
+#  14. rust-webx          (depends on all above, umbrella crate)
+#  15. rust-webx-ai-gateway (OpenAI-compatible surface; depends on webx + webx-ai)
 # ─────────────────────────────────────────────────────────────────
 
 # `pipefail` is required: the gate commands below pipe into `tail`, and without
@@ -81,6 +85,7 @@ internal_deps() {
         rust-webx-ai-gateway) echo "rust-webx rust-webx-ai" ;;
         rust-webx-spa|rust-webx-openapi) echo "rust-webx-core" ;;
         rust-webx-host) echo "rust-webx-core rust-webx-client rust-webx-spa rust-webx-openapi" ;;
+        rust-webx-redis|rust-webx-nats|rust-webx-rabbitmq|rust-webx-kafka) echo "rust-webx-core rust-webx-host" ;;
         rust-webx) echo "rust-webx-core rust-webx-host rust-webx-client rust-webx-macros rust-webx-spa rust-webx-openapi" ;;
     esac
 }
@@ -179,6 +184,10 @@ publish_crate "rust-webx-build"
 publish_crate "rust-webx-spa"
 publish_crate "rust-webx-openapi"
 publish_crate "rust-webx-host"
+publish_crate "rust-webx-redis"
+publish_crate "rust-webx-nats"
+publish_crate "rust-webx-rabbitmq"
+publish_crate "rust-webx-kafka"
 publish_crate "rust-webx"
 publish_crate "rust-webx-ai-gateway"
 

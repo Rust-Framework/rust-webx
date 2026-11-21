@@ -1,4 +1,4 @@
-[English](README.md) | **简体中文**
+﻿[English](README.md) | **简体中文**
 
 <div align="center">
 
@@ -25,6 +25,7 @@
 - [架构](#架构)
 - [请求即端点：Hello World](#请求即端点hello-world)
 - [核心概念](#核心概念)
+- [消息与缓存适配器](#消息与缓存适配器)
 - [示例应用](#示例应用)
 - [快速开始](#快速开始)
 - [生产就绪能力](#生产就绪能力)
@@ -63,7 +64,7 @@ rust-webx **不是** 全栈 UI 框架（可搭配任意前端）、**不是** OR
 - **编译时路由快捷键** — `#[get("/path")]`、`#[post("/path")]`、`#[put("/path")]`、`#[delete("/path")]` 一行定义完整端点。
 - **编译时自动扫描** — 通过 `inventory` 在编译时收集路由元数据，在 `Host::build()` 时自动注册。
 - **零配置 Handler 注册** — `#[handler]` 属性宏自动向 DI 容器注册 Handler。
-- **认证与授权** — JWT Bearer 认证 + 声明式规则组授权（`#[authorize]`）。
+- **认证与授权** — JWT Bearer（HS256/RS256/ES256 + JWKS/kid）、OIDC、Cookie 会话 + CSRF、刷新令牌轮换、TOTP/WebAuthn、mTLS、DPoP、HTTP Basic、RFC 7662/7009、OAuth 2.0 社交登录（GitHub/Google/Microsoft/GitLab/Gitee/钉钉/飞书/微信/微博/QQ/抖音/支付宝/Facebook），以及声明式 `#[authorize]`。见 [10 分钟认证快速上手](docs/rust-webx/09-auth-security/quickstart.md)。
 - **身份即请求字段** — `#[fromclaim] user: IdentityUser` 把认证身份（id、名称、邮箱、租户、角色）绑定为普通字段；Handler 不再解析 token。`#[fromclaim(optional)] viewer: Option<IdentityUser>` 覆盖匿名端点（匿名访问必须显式声明）。
 - **端点元数据服务** — `IEndpointCatalog` 在运行时暴露全部端点（`all()` / `localized()`），权限同步、管理导航与 OpenAPI 共用一份元数据。
 - **本地化** — `#[display]` / `#[description]` / `#[category]` 存资源键，全局 `Culture.Default` 决定语言；支持 JSON 资源文件或 `include_str!` 嵌入。
@@ -120,7 +121,7 @@ rust-webx **不是** 全栈 UI 框架（可搭配任意前端）、**不是** OR
 
 ```
 rust-webx/
-├── Cargo.toml                 # workspace 根 (v1.5.0)
+├── Cargo.toml                 # workspace 根 (v2.5.0)
 ├── crates/
 │   ├── core/                  # rust-webx-core  — trait 与配置
 │   ├── host/                  # rust-webx-host  — Host 构建器、中间件管道
@@ -189,10 +190,10 @@ async fn main() {
 | `IRequestHandler<T, R>` | 双类型参数 Handler；`T` 为请求类型，`R` 为响应类型。 |
 | `#[get("/path")]` | 路由快捷键，标注在 `impl IRequest<T>` 块上，编译时注册。 |
 | `#[post("/path")]` / `#[put("/path")]` / `#[delete("/path")]` | HTTP 方法路由快捷键。 |
-| `IMediator` | 中介者；`send()` 分发请求，`publish()` 发布事件。 |
+| `IMediator` | 中介者；`send()` 分发请求，`publish()` 把事件交给事件传输层（非阻塞、不返回处理器结果）。 |
 | `IMiddleware` | 中间件；顺序管道，可短路请求。 |
 | `IPipelineBehavior` | Mediator 管道拦截器，可包装请求处理链。 |
-| `IEventHandler<T>` | 事件处理器；通过 `publish()` 广播到所有已注册的 handler。 |
+| `IEventHandler<T>` | 事件处理器；`publish()` 通过 `IEventPublisher`（默认内存队列）异步投递。 |
 | `Error` | 统一错误类型，自动映射到 HTTP 状态码。 |
 | `IClaims` / `IAuthenticationHandler` | JWT 认证接口，从 Bearer Token 提取身份。 |
 | `IAuthorizationPolicy` | 旧式自定义策略接口；按路由模式检查角色/权限。 |
@@ -224,6 +225,23 @@ HttpResponse → hyper::Response         ← 出错时，内置异常中间件�
     ▼
 JSON: RFC 7807 application/problem+json (4xx / 5xx)
 ```
+
+## 消息与缓存适配器
+
+事件传输与分布式缓存都是可选适配器 crate：一次 `add_*` 注册即接入 `IEventPublisher` 与后台消费者，
+`publish()` 调用与 `#[handler]` 事件处理器写法不变。
+
+| crate | 入口 | 投递语义 |
+|-------|------|----------|
+| [`rust-webx-redis`](https://crates.io/crates/rust-webx-redis) | `add_redis(RedisOptions::new(url))`，同时注册 `IDistributedCache` | 至少一次（Redis Streams consumer group；处理器后 `XACK`，pending 可认领，重试有上限→死信流） |
+| [`rust-webx-nats`](https://crates.io/crates/rust-webx-nats) | `add_nats(NatsOptions::new(url))` | 至多一次（core NATS；可选 queue group） |
+| [`rust-webx-rabbitmq`](https://crates.io/crates/rust-webx-rabbitmq) | `add_rabbitmq(RabbitMqOptions::new(url))` | 至少一次（quorum topic queue、publisher confirm、手动 ack + 失败重入队、`x-delivery-limit` + 可选 DLX） |
+| [`rust-webx-kafka`](https://crates.io/crates/rust-webx-kafka) | `add_kafka(KafkaOptions::new(brokers, topic))` | 单分区 follower；分区内有序；不做 consumer-group offset 提交（重启按配置的 start_offset）；参考/起步实现 |
+
+只缓存：`RedisOptions::cache_only()`。只发布：NATS/RabbitMQ/Kafka 用 `.publisher_only()`；Redis 用
+`.without_cache()` + `RedisEventsOptions { consumer_enabled: false, .. }`。详见
+[事件发布与订阅](docs/rust-webx/08-mediator-events/event-pub-sub.md) 与
+[缓存与速率限制](docs/rust-webx/11-production/caching-rate-limit.md)。
 
 ## 示例应用
 

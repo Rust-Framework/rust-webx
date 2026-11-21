@@ -34,16 +34,30 @@ pub(crate) fn is_valid_request_id(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
 }
 
-#[async_trait::async_trait]
-impl IMiddleware for RequestIdMiddleware {
-    async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
+impl RequestIdMiddleware {
+    fn apply(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
         let id = ctx
             .request()
             .header("x-request-id")
             .filter(|value| is_valid_request_id(value))
             .map(str::to_string)
             .unwrap_or_else(|| Uuid::new_v4().to_string());
-        ctx.response_mut().set_header("x-request-id", &id);
+        ctx.response_mut().set_header_owned("x-request-id", id);
         Ok(ControlFlow::Continue(()))
+    }
+}
+
+#[async_trait::async_trait]
+impl IMiddleware for RequestIdMiddleware {
+    async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
+        self.apply(ctx)
+    }
+
+    fn fast_invoke(&self, ctx: &mut dyn IHttpContext) -> Option<Result<ControlFlow<()>>> {
+        Some(self.apply(ctx))
+    }
+
+    fn has_after(&self) -> bool {
+        false
     }
 }

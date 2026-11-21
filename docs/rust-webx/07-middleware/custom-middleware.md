@@ -105,3 +105,33 @@ pub fn jwt_middleware(handler: Arc<dyn IAuthenticationHandler>) -> impl IMiddlew
 自定义中间件只需 `impl IMiddleware` + 注册。复杂场景用工厂函数或 Builder 扩展方法封装。
 
 下一节：[中间件编排策略](ordering-strategy.md)
+
+## 统一 `Next` 语义（2.4-4，可选）
+
+旧式 `invoke`/`after` 中间件**无需改动**（默认桥接）。需要包裹剩余链路时——超时、重试、
+熔断、耗时统计——改成 continuation 风格，并声明 `continuation() -> true`：
+
+```rust
+#[async_trait]
+impl IMiddleware for ExecutionTimeout {
+    async fn invoke(&self, _ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
+        Ok(ControlFlow::Continue(())) // continuation 风格下由 invoke_next 驱动
+    }
+
+    fn continuation(&self) -> bool { true }
+
+    async fn invoke_next(&self, ctx: &mut dyn IHttpContext, next: NextStage) -> Result<()> {
+        match tokio::time::timeout(self.timeout, next.run(ctx)).await {
+            Ok(result) => result,
+            Err(_) => { ctx.response_mut().set_status(504); Ok(()) }
+        }
+    }
+}
+```
+
+- `next.run(ctx).await` 推进剩余中间件与 Handler；不调用即短路（等价旧式 `Break`）。
+- 内置 `TimeoutMiddleware::new(Duration)` 即此实现，可直接注册。
+- 默认管道（无 continuation 阶段）仍走零分配旧循环；注册新式中间件后整条管道切换到
+  continuation 执行器（每阶段一个 boxed future，配置期一次性取舍）。
+- 详细语义、错误/`after` 顺序、迁移表与验收：见
+  [中间件统一 Next 语义](../../design/middleware-next.md)。

@@ -4,7 +4,7 @@
 //! are caught and converted to well-formed HTTP error responses using
 //! `Error::status_code()`.
 
-use rust_dix::{ServiceCollection, ServiceProvider};
+use rust_dix::{IServiceResolverExt, ServiceCollection, ServiceProvider};
 use webx_core::app::IHost;
 use webx_core::auth::IAuthenticationScheme;
 use webx_core::config::{self, AppOptions};
@@ -12,6 +12,8 @@ use webx_core::error::{Error, IErrorResponseWriter, Result};
 use webx_core::handler::IHostedService;
 use webx_core::hosted::{CancellationToken, ShutdownToken};
 use webx_core::localization::{IStringLocalizer, LocalizationOptions, StringLocalizer};
+use webx_core::mediator::IEventPublisher;
+use webx_core::metrics::IMeter;
 use webx_core::middleware::IMiddleware;
 use webx_core::mode::AppMode;
 use webx_core::route::catalog::{EndpointCatalog, IEndpointCatalog};
@@ -19,8 +21,11 @@ use webx_core::routing::{HttpMethod, IEndpoint};
 use webx_core::security::{ISessionStore, ITokenIssuer};
 
 use crate::auth::{AuthenticationMiddleware, JwtScheme};
-use crate::auth_jwt::{init_jwt_secret, JwtAuth, JwtSecret, JwtTokenIssuer};
+use crate::auth_cookie::SESSION_COOKIE_SCHEME_NAME;
+#[allow(deprecated)]
+use crate::auth_jwt::{init_jwt_secret, JwtAuth, JwtSecret, JwtTokenIssuer, JwtValidation};
 use crate::cors::{CorsConfig, CorsMiddleware};
+use crate::csrf::{CsrfConfig, CsrfMiddleware};
 use crate::endpoint::{StaticHtmlEndpoint, StaticJsonEndpoint, StubEndpoint};
 use crate::health::{
     HealthCheckEndpoint, HealthCheckRegistry, HealthStatus, IHealthCheck,
@@ -30,7 +35,7 @@ use crate::memory_cache::MemoryCache;
 use crate::metrics::{HttpMetrics, MetricsEndpoint, MetricsMiddleware};
 use crate::pipeline::MiddlewarePipeline;
 use crate::rate_limit::RateLimitMiddleware;
-use jsonwebtoken::{DecodingKey, Validation};
+use jsonwebtoken::DecodingKey;
 use webx_core::route::scan::RouteEntry;
 use webx_core::DispatchRuntime;
 use webx_openapi::{generate_openapi_spec, APIUI_HTML};
@@ -140,6 +145,9 @@ pub struct Host {
     shutdown_token: CancellationToken,
     /// Single-use lifecycle state; see [`HostState`].
     state: std::sync::atomic::AtomicU8,
+    /// Whether this host serves the direct (non-mediated) dispatch path.
+    /// Decided per host from its own DI registrations, never from global state.
+    direct_dispatch_enabled: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -210,6 +218,16 @@ pub struct HostBuilder {
     auth_enabled: bool,
     /// Additional authentication schemes, tried before the JWT scheme.
     auth_schemes: Vec<Arc<dyn IAuthenticationScheme>>,
+    /// Clock override (2.4-5); `None` registers [`webx_core::time::SystemClock`].
+    clock: Option<Arc<dyn webx_core::time::IClock>>,
+    /// TURN/STUN override; `None` derives it from the `Turn` config section.
+    turn_config: Option<webx_core::realtime::TurnRestConfig>,
+    /// Optional per-path scheme allow-lists; first matching prefix wins.
+    auth_route_policies: Vec<(String, Vec<&'static str>)>,
+    /// Explicit JWT verification settings; `None` derives them from `Jwt`.
+    jwt_validation: Option<JwtValidation>,
+    /// Double-submit CSRF protection for cookie-authenticated requests.
+    csrf: Option<CsrfConfig>,
     localization: Option<LocalizationOptions>,
     health_registry: Arc<HealthCheckRegistry>,
     /// Middlewares registered through the builder, kept with their slot so
@@ -219,6 +237,21 @@ pub struct HostBuilder {
     error_writers: Vec<Arc<dyn IErrorResponseWriter>>,
     /// Named outbound clients registered through `add_http_client`.
     http_clients: Vec<(String, Arc<dyn webx_client::IHttpClient>)>,
+    /// Event transport registered through `use_event_publisher`; `None` keeps
+    /// the default in-memory queue that `add_mediator()` wires.
+    event_publisher: Option<Arc<dyn IEventPublisher>>,
+    /// Route allow-list by call-site module path; `None` registers every
+    /// compiled route (the pre-2.2 behavior).
+    route_sources: Option<Vec<&'static str>>,
+    /// Whether `Host::build` scans the route inventory at all (default `true`).
+    inventory_routes: bool,
+    /// WebSocket routes registered through `use_websocket`.
+    websockets: Vec<(
+        &'static str,
+        Arc<dyn webx_core::realtime::IWebSocketHandler>,
+    )>,
+    /// Per-connection WebSocket limits (backpressure, rates, frame size, idle).
+    websocket_limits: webx_core::realtime::WebSocketLimits,
     /// Opt back into the pre-1.0 lenient root-scope behavior (rust-dix 0.7).
     /// Migration-only: 1.0 defaults to strict scope validation.
     lenient_scope_validation: bool,
@@ -284,11 +317,21 @@ impl HostBuilder {
             cors_config: None,
             auth_enabled: false,
             auth_schemes: Vec::new(),
+            clock: None,
+            turn_config: None,
+            auth_route_policies: Vec::new(),
+            jwt_validation: None,
+            csrf: None,
             localization: None,
             health_registry: HealthCheckRegistry::new(),
             middleware_specs: Vec::new(),
             error_writers: Vec::new(),
             http_clients: Vec::new(),
+            event_publisher: None,
+            route_sources: None,
+            inventory_routes: true,
+            websockets: Vec::new(),
+            websocket_limits: webx_core::realtime::WebSocketLimits::default(),
             lenient_scope_validation: false,
         }
     }
@@ -341,6 +384,30 @@ impl HostBuilder {
         F: FnOnce(ServiceCollection, &AppOptions) -> ServiceCollection + Send + 'static,
     {
         self.service_configs.push(Box::new(f));
+        self
+    }
+
+    /// Replace the default in-memory event transport.
+    ///
+    /// `IMediator::publish` only hands an encoded
+    /// [`EventMessage`](webx_core::mediator::EventMessage) to this
+    /// port; it never waits for handlers. A Redis / NATS / RabbitMQ adapter
+    /// implements [`IEventPublisher`] and forwards `event_name` + `payload` to
+    /// the broker, then runs its consumer loop against
+    /// [`EventDispatcher`](webx_core::mediator::EventDispatcher) to route
+    /// messages back to the same `#[handler]` event handlers.
+    ///
+    /// ```ignore
+    /// Host::builder()
+    ///     .use_event_publisher(Arc::new(RedisEventPublisher::new(redis)))
+    ///     .register(|svc| svc.add_mediator())
+    ///     .build()
+    /// ```
+    ///
+    /// When set, the default in-memory publisher is not registered (and its
+    /// worker, if `add_mediator()` already queued it, has no producer).
+    pub fn use_event_publisher(mut self, publisher: Arc<dyn IEventPublisher>) -> Self {
+        self.event_publisher = Some(publisher);
         self
     }
 
@@ -561,6 +628,146 @@ impl HostBuilder {
         self
     }
 
+    /// Only register compiled routes whose call-site module path starts with one
+    /// of `prefixes` (for example `&["my_app", "my_shared_web"]`).
+    ///
+    /// By default every compiled route is registered, including routes that a
+    /// dependency crate ships in its own `#[get]`/`#[endpoint]` blocks. Use this
+    /// when a dependency exposes endpoints you do not want to serve: while a
+    /// whitelist is active the default is **fail-closed**, so routes without a
+    /// recorded [`RouteSource`](webx_core::route::scan::RouteSource) (hand-written
+    /// `RouteEntry` fixtures) are filtered out too.
+    ///
+    /// The match is a plain `module_path!()` string prefix:
+    /// `routes_from(&["my_app::api"])` accepts `my_app::api::users`. Because it
+    /// is a *string* prefix, `my_app::apiv2` also matches; include the trailing
+    /// `::` when you need a module boundary.
+    pub fn routes_from(mut self, prefixes: &'static [&'static str]) -> Self {
+        self.route_sources = Some(prefixes.to_vec());
+        self
+    }
+
+    /// Whether `Host::build` scans the compile-time route inventory (default
+    /// `true`).
+    ///
+    /// Turn it off when the application mounts every route manually (or mounts
+    /// the framework as a library inside a larger router) so no `#[get]` block
+    /// is auto-registered. `/metrics`, `/health*` and the OpenAPI/SPA endpoints
+    /// are host-owned and are not affected.
+    pub fn use_inventory_routes(mut self, enabled: bool) -> Self {
+        self.inventory_routes = enabled;
+        self
+    }
+
+    /// Serve a WebSocket endpoint at `path`.
+    ///
+    /// Upgrade requests (`Connection: Upgrade` + `Upgrade: websocket`) are
+    /// answered with the RFC 6455 handshake and then handed to `handler` as an
+    /// [`IConnection`](webx_core::realtime::IConnection); plain HTTP requests to
+    /// the same path receive `426 Upgrade Required`. The engine keeps the
+    /// upgraded connection counted by admission, metrics and graceful drain for
+    /// the whole session.
+    ///
+    /// Route matching is exact (no path parameters); WebSocket authentication
+    /// via the normal pipeline (cookies/query token) is the host's job and is
+    /// configured separately, since browsers cannot set `Authorization` on the
+    /// upgrade request.
+    pub fn use_websocket(
+        mut self,
+        path: &'static str,
+        handler: Arc<dyn webx_core::realtime::IWebSocketHandler>,
+    ) -> Self {
+        self.websockets.push((path, handler));
+        self.register_default_realtime_services()
+    }
+
+    /// Register the process-local realtime defaults once per builder.
+    ///
+    /// `try_add_*` keeps an application-provided registry (via
+    /// [`Self::use_connection_registry`] or a manual DI registration)
+    /// authoritative.
+    fn register_default_realtime_services(mut self) -> Self {
+        self.service_configs.push(Box::new(|svc, _options| {
+            svc.try_add_singleton::<dyn webx_core::realtime::IConnectionRegistry>(|_| {
+                Arc::new(webx_core::realtime::InMemoryConnectionRegistry::new())
+            })
+            .try_add_singleton::<webx_core::realtime::RealtimeMetrics>(|_| {
+                Arc::new(webx_core::realtime::RealtimeMetrics::new())
+            })
+            // Cross-node fan-out is an event handler (2.3-4b converged onto the
+            // event transport): the broker consumer routes RealtimeFanoutEvent
+            // back to this node, and this handler writes it to local rooms.
+            .try_add_singleton::<
+                dyn webx_core::handler::IEventHandler<webx_core::realtime::RealtimeFanoutEvent>,
+            >(|resolver| {
+                let registry = resolver
+                    .resolve_arc::<dyn webx_core::realtime::IConnectionRegistry>()
+                    .expect(
+                        "the realtime registry is registered before the fan-out handler",
+                    );
+                Arc::new(crate::realtime_fanout::RealtimeFanoutHandler::new(registry))
+                    as Arc<
+                        dyn webx_core::handler::IEventHandler<
+                            webx_core::realtime::RealtimeFanoutEvent,
+                        >,
+                    >
+            })
+        }));
+        self
+    }
+
+    /// Replace the process-local connection registry (tests, shared registry,
+    /// adapter-backed presence).
+    pub fn use_connection_registry(
+        mut self,
+        registry: Arc<dyn webx_core::realtime::IConnectionRegistry>,
+    ) -> Self {
+        self.service_configs.push(Box::new(move |svc, _options| {
+            svc.try_add_singleton::<dyn webx_core::realtime::IConnectionRegistry>(move |_| {
+                Arc::clone(&registry)
+            })
+        }));
+        self
+    }
+
+    /// Configure per-connection WebSocket limits (2.3-5).
+    ///
+    /// Applies to every WebSocket route: inbound frame size cap, message/byte
+    /// rate limits, bounded outbound queue and backpressure policy, idle
+    /// timeout. Defaults are permissive (no rate limit, no idle timeout,
+    /// 1 MiB frames, 64-deep outbound queue, drop on overflow).
+    pub fn use_websocket_limits(mut self, limits: webx_core::realtime::WebSocketLimits) -> Self {
+        self.websocket_limits = limits;
+        self
+    }
+
+    /// Serve a WebSocket endpoint whose frames are **requests** (2.3-3).
+    ///
+    /// Each text frame is decoded from JSON into `Req`, dispatched through the
+    /// mediator — the same `#[handler] IRequestHandler<Req, Rsp>` HTTP endpoints
+    /// use, running in a per-message DI scope — and the `Rsp` is sent back as a
+    /// JSON text frame. Failures become
+    /// `{"error":{"code","message","retryable"}}` frames.
+    ///
+    /// Message handlers can reach the connection through
+    /// `RequestContext::connection()` (metadata, trace id, identity and
+    /// connection-scoped services) while their own `#[inject]` dependencies are
+    /// resolved per message.
+    ///
+    /// Requires `add_mediator()` (register it in the host's `register` block);
+    /// the handler fails the connection with a diagnostic when the mediator is
+    /// missing.
+    pub fn use_websocket_request<Req, Rsp>(self, path: &'static str) -> Self
+    where
+        Req: webx_core::mediator::IRequest<Rsp> + serde::de::DeserializeOwned + Send + 'static,
+        Rsp: serde::Serialize + Send + 'static,
+    {
+        self.use_websocket(
+            path,
+            Arc::new(crate::websocket::WebSocketRequestHandler::<Req, Rsp>::new()),
+        )
+    }
+
     pub fn use_cors(mut self, config: CorsConfig) -> Self {
         self.cors_config = Some(config);
         self
@@ -616,6 +823,63 @@ impl HostBuilder {
         self
     }
 
+    /// Restrict authentication on paths under `path_prefix` to `schemes`.
+    ///
+    /// The first matching prefix wins; unmatched paths keep the full chain.
+    /// This is opt-in (M3-04): most deployments use the global chain plus
+    /// `#[authorize]`. A request that presents no allowed credential continues
+    /// anonymously; protected endpoints still return 401.
+    pub fn use_auth_scheme_for<I>(mut self, path_prefix: impl Into<String>, schemes: I) -> Self
+    where
+        I: IntoIterator<Item = &'static str>,
+    {
+        self.auth_route_policies
+            .push((path_prefix.into(), schemes.into_iter().collect()));
+        self
+    }
+
+    /// Override the JWT verification settings that are otherwise derived from
+    /// the `Jwt` configuration section.
+    ///
+    /// The host validates the configuration fail-closed when it builds:
+    /// an empty algorithm list, an algorithm it cannot verify, an empty
+    /// issuer/audience, a clock skew above 300s, or a zero/oversized token
+    /// budget aborts startup with a typed error.
+    ///
+    /// ```ignore
+    /// Host::builder()
+    ///     .add_authentication()
+    ///     .use_jwt_validation(
+    ///         JwtValidation::builder()
+    ///             .require_issuer("https://id.example.com")
+    ///             .require_audience("travel-api")
+    ///             .build()?,
+    ///     )
+    ///     .build();
+    /// ```
+    pub fn use_jwt_validation(mut self, validation: JwtValidation) -> Self {
+        self.jwt_validation = Some(validation);
+        self
+    }
+
+    /// Enable double-submit CSRF protection for cookie-authenticated requests.
+    ///
+    /// Required whenever a [`SessionCookieScheme`](crate::auth_cookie::SessionCookieScheme)
+    /// is registered: the host refuses to build a cookie login without it.
+    /// Requests without the session cookie (Bearer/API-key clients) are not
+    /// checked, so this is safe to enable on a mixed host.
+    ///
+    /// ```ignore
+    /// Host::builder()
+    ///     .add_authentication_scheme(Arc::new(SessionCookieScheme::new(repo, CookieOptions::default())?))
+    ///     .use_csrf(CsrfConfig::double_submit())
+    ///     .build();
+    /// ```
+    pub fn use_csrf(mut self, config: CsrfConfig) -> Self {
+        self.csrf = Some(config);
+        self
+    }
+
     /// Register an error-response writer.
     ///
     /// Writers are tried in registration order before the default RFC 7807
@@ -667,6 +931,48 @@ impl HostBuilder {
         self.service_configs.push(Box::new(move |svc, _options| {
             let store = Arc::clone(&store);
             svc.try_add_singleton::<dyn ISessionStore>(move |_| Arc::clone(&store))
+        }));
+        self
+    }
+
+    /// Register a session store behind a short-TTL negative cache.
+    ///
+    /// Every authenticated request asks the store whether the token was
+    /// revoked. With a database-backed store that is one round-trip per
+    /// request; this wrapper caches the "not revoked" answer for `ttl` and
+    /// invalidates it immediately on a local `revoke`.
+    ///
+    /// Another instance's revocation becomes visible after at most `ttl`; keep
+    /// it small (1–5s) in a multi-instance deployment.
+    ///
+    /// ```ignore
+    /// Host::builder()
+    ///     .add_authentication()
+    ///     .use_session_store_cached(store, Duration::from_secs(5))
+    ///     .build();
+    /// ```
+    pub fn use_session_store_cached(self, store: Arc<dyn ISessionStore>, ttl: Duration) -> Self {
+        self.use_session_store(Arc::new(crate::session_cache::CachedSessionStore::new(
+            store, ttl,
+        )))
+    }
+
+    /// Register the metrics factory used by built-in components.
+    ///
+    /// Authentication emits `auth.requests{scheme,outcome}` and
+    /// `auth.duration{scheme}` through this meter. Without one the framework
+    /// uses [`NoopMeter`](webx_core::metrics::NoopMeter), so instrumentation is
+    /// opt-in and has no cost until a meter is registered.
+    ///
+    /// ```ignore
+    /// Host::builder()
+    ///     .use_meter(Arc::new(MemoryMeter::new()))
+    ///     .build();
+    /// ```
+    pub fn use_meter(mut self, meter: Arc<dyn IMeter>) -> Self {
+        self.service_configs.push(Box::new(move |svc, _options| {
+            let meter = Arc::clone(&meter);
+            svc.try_add_singleton::<dyn IMeter>(move |_| Arc::clone(&meter))
         }));
         self
     }
@@ -772,6 +1078,34 @@ impl HostBuilder {
     /// The default slot runs **after** authentication, so middleware that reads
     /// `ctx.claims()` actually sees the principal. Use
     /// [`Self::use_middleware_at`] to choose a different slot.
+    ///
+    /// ```ignore
+    /// Host::builder()
+    ///     .use_middleware::<TimingMiddleware>()
+    ///     .build()
+    /// ```
+    /// Override the framework clock (2.4-5).
+    ///
+    /// Business code injects `Arc<dyn IClock>` instead of calling
+    /// `SystemTime::now()`; tests register a
+    /// [`webx_core::time::TestClock`] here (or use `TestHost`) and move time
+    /// deterministically. Default: [`webx_core::time::SystemClock`].
+    pub fn use_clock(mut self, clock: Arc<dyn webx_core::time::IClock>) -> Self {
+        self.clock = Some(clock);
+        self
+    }
+
+    /// Override the TURN/STUN credential configuration (2.4 config closure).
+    ///
+    /// Without an override the host derives it from the `Turn` configuration
+    /// section (`Turn.Secret`, `Turn.Urls`, `Turn.TtlSeconds`, `Turn.Realm` /
+    /// `APP__Turn__*`). A configured but invalid section fails host startup.
+    pub fn use_turn_config(mut self, config: webx_core::realtime::TurnRestConfig) -> Self {
+        self.turn_config = Some(config);
+        self
+    }
+
+    /// Register a middleware by type in the default pipeline slot.
     ///
     /// ```ignore
     /// Host::builder()
@@ -997,15 +1331,59 @@ impl HostBuilder {
 
         // Load configuration first: the localizer and endpoint catalog need the
         // host-wide culture, and both are registered in DI.
-        let appsettings =
-            config::load_appsettings(self.mode).unwrap_or_else(|| serde_json::json!({}));
-        let mut options: AppOptions = config::bind_root(&appsettings);
+        //
+        // Strict binding: a wrong type or a typo inside a framework section is a
+        // startup error. Silently falling back to defaults used to switch off
+        // rate limiting / CORS after a single misspelled key.
+        let (appsettings, config_sources) = config::try_load_appsettings(self.mode)
+            .map_err(|error| Error::Di(format!("Invalid configuration: {error}")))?;
+        if config_sources.is_default_only() {
+            if self.mode == AppMode::Production {
+                tracing::warn!(
+                    "[Config] no appsettings file and no APP__ overrides: running on built-in defaults"
+                );
+            }
+        } else {
+            tracing::info!("[Config] effective sources: {}", config_sources.summary());
+        }
+        let appsettings = appsettings.unwrap_or_else(|| serde_json::json!({}));
+        let mut options: AppOptions = config::try_bind_root(&appsettings)
+            .map_err(|error| Error::Di(format!("Invalid configuration: {error}")))?;
         for modifier in std::mem::take(&mut self.options_modifiers) {
             modifier(&mut options);
         }
+        validate_tls_client_auth(&options)?;
+
+        // Fail closed: Production must keep a bounded inbound request. A hung
+        // handler otherwise pins a connection and an admission permit forever.
+        webx_engine::config::validate_request_timeout(
+            self.mode,
+            options.server.request_timeout_seconds,
+        )?;
+        webx_engine::config::validate_admission_timeout(
+            self.mode,
+            options.server.admission_timeout_ms,
+        )?;
 
         // XR-2: resolve Jwt.SecretFile into Jwt.Secret (env/code secret wins; fail fast).
         crate::auth_jwt::apply_jwt_secret_file(&mut options)?;
+
+        // TURN/STUN: explicit builder override wins, otherwise the `Turn`
+        // section. Partial/invalid configuration fails startup (no silent
+        // half-configured TURN endpoint).
+        let turn_config = match self.turn_config.take() {
+            Some(config) => {
+                config
+                    .validate()
+                    .map_err(|error| Error::Di(format!("Invalid Turn configuration: {error}")))?;
+                Some(config)
+            }
+            None if options.turn.is_configured() => Some(
+                webx_core::realtime::TurnRestConfig::from_section(&options.turn)
+                    .map_err(|error| Error::Di(format!("Invalid Turn configuration: {error}")))?,
+            ),
+            None => None,
+        };
 
         let default_culture = if options.culture.default.trim().is_empty() {
             "en".to_string()
@@ -1029,6 +1407,21 @@ impl HostBuilder {
         // `""`, which is the failure mode this registration exists to prevent.
         if !options.jwt.secret.trim().is_empty() {
             svc = svc.instance(Arc::new(JwtSecret::new(options.jwt.secret.clone())));
+        }
+        // The explicit event transport is registered before application
+        // registrations run, so `add_mediator()` sees it and does not replace
+        // it with the default in-memory publisher.
+        if let Some(publisher) = self.event_publisher.take() {
+            svc = svc.instance::<dyn IEventPublisher>(publisher);
+        }
+        // 2.4-5: every host has a clock; tests replace it with a TestClock.
+        let clock: Arc<dyn webx_core::time::IClock> = self
+            .clock
+            .take()
+            .unwrap_or_else(|| Arc::new(webx_core::time::SystemClock));
+        svc = svc.instance::<dyn webx_core::time::IClock>(clock);
+        if let Some(turn) = turn_config {
+            svc = svc.instance(Arc::new(turn));
         }
         for cfg in std::mem::take(&mut self.service_configs) {
             svc = cfg(svc, &options);
@@ -1069,19 +1462,39 @@ impl HostBuilder {
                 minutes => minutes,
             };
             let lifetime = Duration::from_secs(lifetime_minutes.saturating_mul(60));
+            // The default issuer must mint the same `iss`/`aud` the verifier
+            // requires; otherwise enabling either check would reject every
+            // token this host itself issues.
+            let issuer_claim = options.jwt.issuer.clone();
+            let audience_claim = options.jwt.audience.clone();
             svc = svc.try_add_singleton::<dyn ITokenIssuer>(move |_| {
-                Arc::new(JwtTokenIssuer::from_secret(secret.as_bytes(), lifetime))
+                let mut issuer = JwtTokenIssuer::from_secret(secret.as_bytes(), lifetime);
+                if let Some(issuer_claim) = issuer_claim.clone() {
+                    issuer = issuer.with_issuer(issuer_claim);
+                }
+                if let Some(audience_claim) = audience_claim.clone() {
+                    issuer = issuer.with_audience(audience_claim);
+                }
+                Arc::new(issuer)
             });
         }
 
         // WEBX-3: the default password hasher is a host service as well, so a
         // login handler injects `Arc<dyn IPasswordHasher>` and keeps no crypto
         // code. `try_add*`: an application registration (e.g. custom cost
-        // parameters via `HostBuilder::use_password_hasher`) wins.
+        // parameters via `HostBuilder::use_password_hasher`) wins. The default
+        // is wrapped in `BoundedPasswordHasher` so a login burst cannot spawn
+        // unbounded CPU-bound hashing work.
         #[cfg(feature = "password-argon2")]
         {
             svc = svc.try_add_singleton::<dyn webx_core::security::IPasswordHasher>(|_| {
-                Arc::new(crate::password_argon2::Argon2PasswordHasher::default())
+                let inner: Arc<dyn webx_core::security::IPasswordHasher> =
+                    Arc::new(crate::password_argon2::Argon2PasswordHasher::default());
+                Arc::new(crate::login::BoundedPasswordHasher::new(
+                    inner,
+                    crate::login::default_password_concurrency(),
+                    Duration::from_millis(100),
+                ))
             });
         }
 
@@ -1152,10 +1565,16 @@ impl HostBuilder {
 
         let mut pipeline = MiddlewarePipeline::new();
 
+        // WebSocket upgrades short-circuit before the HTTP middleware chain: the
+        // `101` response must go out unchanged and the session takes over the
+        // connection.
+        // (WebSocket endpoints are registered after authentication — see below.)
+
         // Pipeline order (see docs/rust-webx/07-middleware/ordering-strategy.md):
         //
         //   SecurityHeaders → RequestId → user(BeforeCors) → CORS → Metrics →
-        //   RateLimit → auth → user(AfterAuth, default) → SPA → user(AfterSpa) → Router
+        //   RateLimit → auth → user(AfterAuth, default) → WebSocket → SPA →
+        //   user(AfterSpa) → Router
         //
         // CORS runs before the short-circuiting middlewares so a 429/413/401
         // still carries Access-Control-Allow-Origin; Metrics runs before
@@ -1219,14 +1638,62 @@ impl HostBuilder {
             )));
         }
 
+        // CSRF sits before authentication: a cross-site request must be
+        // rejected before the session repository is queried. It only applies
+        // when the request carries the session cookie, so Bearer/API-key
+        // traffic is untouched.
+        let has_cookie_scheme = self
+            .auth_schemes
+            .iter()
+            .any(|scheme| scheme.name() == SESSION_COOKIE_SCHEME_NAME);
+        if has_cookie_scheme && self.csrf.is_none() {
+            return Err(Error::Di(
+                "SessionCookieScheme is registered without CSRF protection. \
+                 Call HostBuilder::use_csrf(CsrfConfig::double_submit())."
+                    .to_string(),
+            ));
+        }
+        if let Some(csrf) = self.csrf.clone() {
+            pipeline.add_middleware(Arc::new(CsrfMiddleware::new(csrf)?));
+        }
+
         let mut auth_schemes = self.auth_schemes;
         if self.auth_enabled {
             let secret = options.jwt.secret.clone();
-            if !secret.is_empty() {
-                let jwt_auth = Arc::new(JwtAuth::new(
-                    DecodingKey::from_secret(secret.as_bytes()),
-                    Validation::default(),
-                ));
+            // Fail-closed: invalid `Jwt` settings (unsupported algorithm,
+            // missing JWKS, empty issuer/audience, oversized skew/token
+            // budget) abort startup instead of silently falling back.
+            let validation = match self.jwt_validation {
+                Some(validation) => validation,
+                None => JwtValidation::from_section(&options.jwt)?,
+            };
+            let has_jwks = validation.jwks().is_some();
+            if !secret.is_empty() || has_jwks {
+                let decoding_key =
+                    (!secret.is_empty()).then(|| DecodingKey::from_secret(secret.as_bytes()));
+                let jwt_auth = if let Some(jwks) = validation.jwks() {
+                    let resolver = Arc::new(crate::auth_jwks::JwksResolver::from_section(jwks)?);
+                    Arc::new(JwtAuth::from_validation_with_resolver(
+                        decoding_key,
+                        &validation,
+                        resolver,
+                    ))
+                } else {
+                    Arc::new(JwtAuth::from_validation(
+                        decoding_key.expect("secret is non-empty in this branch"),
+                        &validation,
+                    ))
+                };
+                tracing::debug!(
+                    algorithms = ?validation.algorithms(),
+                    issuer = ?validation.issuer(),
+                    audience = ?validation.audience(),
+                    leeway_seconds = validation.leeway().as_secs(),
+                    max_token_bytes = validation.max_token_bytes(),
+                    invalid_token_behavior = ?validation.invalid_token_behavior(),
+                    jwks = has_jwks,
+                    "[Host] JWT validation configured"
+                );
                 // WEBX-2: when the application registered an `ISessionStore`,
                 // verified tokens are additionally checked for revocation.
                 // Without one this stays the 1.1 verify-only behaviour.
@@ -1241,19 +1708,28 @@ impl HostBuilder {
                     ),
                 }
                 auth_schemes.push(Arc::new(JwtScheme::new(jwt_auth, session_store)));
-                init_jwt_secret(&secret);
+                if !secret.is_empty() {
+                    #[allow(deprecated)]
+                    init_jwt_secret(&secret);
+                }
             } else {
                 tracing::warn!(
-                    "add_authentication() enabled but no JWT secret configured. Set Jwt.Secret in appsettings.json, JWT_SECRET, or APP__Jwt__Secret env var."
+                    "add_authentication() enabled but neither Jwt.Secret nor Jwt.Jwks is configured. Set Jwt.Secret/JWT_SECRET or Jwt.Jwks.Url."
                 );
             }
         }
 
         if !auth_schemes.is_empty() {
-            let middleware = AuthenticationMiddleware::new(auth_schemes);
-            tracing::debug!(
+            let mut middleware = AuthenticationMiddleware::new(auth_schemes)
+                .with_route_policies(self.auth_route_policies.clone());
+            if let Some(meter) = provider.get_all::<dyn IMeter>().into_iter().next() {
+                middleware = middleware.with_metrics(meter.as_ref());
+            }
+            tracing::info!(
                 schemes = ?middleware.names(),
-                "[Host] authentication schemes enabled"
+                csrf = self.csrf.is_some(),
+                session_stores = provider.get_all::<dyn ISessionStore>().len(),
+                "authentication schemes enabled"
             );
             pipeline.add_middleware(Arc::new(middleware));
         }
@@ -1270,6 +1746,26 @@ impl HostBuilder {
         }
         for mw in provider.get_all::<dyn IMiddleware>() {
             pipeline.add_middleware(mw);
+        }
+
+        // WebSocket endpoints run **after** authentication and user middlewares:
+        // the upgrade request is authenticated by the same pipeline as HTTP
+        // (cookies/bearer/API key), then the endpoint short-circuits with the
+        // `101` handshake and the session takes over the connection.
+        if !self.websockets.is_empty() {
+            let routes = self
+                .websockets
+                .iter()
+                .map(|(path, handler)| crate::websocket::WebSocketRoute {
+                    path,
+                    handler: Arc::clone(handler),
+                })
+                .collect();
+            pipeline.add_middleware(Arc::new(crate::websocket::WebSocketMiddleware::new(
+                routes,
+                Arc::clone(&provider),
+                self.websocket_limits.clone(),
+            )));
         }
 
         // SPA 自动启用：若应用显式调用 `use_spa`，使用指定的文件源；
@@ -1315,9 +1811,16 @@ impl HostBuilder {
 
         let pipeline = Arc::new(pipeline);
 
-        // Security: fail fast in production when auth is enabled but JWT secret is missing or weak
+        // Security: fail fast in production when auth is enabled, HS256 is in
+        // use, and the shared secret is missing or weak. JWKS-only deployments
+        // (asymmetric algorithms) do not need a local HMAC secret.
+        let uses_hs256 = options
+            .jwt
+            .algorithms
+            .contains(&webx_core::config::JwtAlgorithm::Hs256);
         if self.mode == AppMode::Production
             && self.auth_enabled
+            && uses_hs256
             && is_weak_jwt_secret(&options.jwt.secret)
         {
             return Err(Error::Di(
@@ -1365,11 +1868,13 @@ impl HostBuilder {
             ));
         }
 
-        // Direct dispatch is observationally identical only when no typed
-        // pipeline behavior exists for the process; the global count is a
-        // conservative gate (a behavior registered by another host disables the
-        // fast path here too).
-        let direct_dispatch_enabled = webx_core::route::ext::typed_pipeline_count() == 0;
+        // Direct dispatch is observationally identical only when **this host**
+        // did not register a typed pipeline behavior. The marker lives in this
+        // host's own service collection, so another host (or a test) building
+        // in the same process can never downgrade this host's fast path.
+        let direct_dispatch_enabled = provider
+            .get_optional::<webx_core::route::ext::TypedPipelineRegistered>()
+            .is_none();
         let mut direct_by_pair: std::collections::HashMap<
             (std::any::TypeId, std::any::TypeId),
             webx_core::route::scan::HandlerDispatchFn,
@@ -1394,12 +1899,64 @@ impl HostBuilder {
             }
         }
 
-        for entry in inventory::iter::<RouteEntry> {
+        // Deterministic route order: `inventory` iteration order is not
+        // specified, so sorting here makes startup diagnostics (duplicate
+        // method+path, conflicting fallbacks) and logs reproducible.
+        let mut route_entries: Vec<&RouteEntry> = if self.inventory_routes {
+            inventory::iter::<RouteEntry>().collect()
+        } else {
+            tracing::info!(
+                "[Host] route inventory scan disabled; no compiled routes are registered"
+            );
+            Vec::new()
+        };
+        if let Some(prefixes) = self.route_sources.as_deref() {
+            let sources: Vec<&webx_core::route::scan::RouteSource> =
+                inventory::iter::<webx_core::route::scan::RouteSource>().collect();
+            let before = route_entries.len();
+            route_entries.retain(|entry| {
+                sources.iter().any(|source| {
+                    source.method == entry.method
+                        && source.path == entry.path
+                        && prefixes
+                            .iter()
+                            .any(|prefix| source.module_path.starts_with(prefix))
+                })
+            });
+            tracing::info!(
+                before,
+                after = route_entries.len(),
+                prefixes = ?prefixes,
+                "[Host] compiled route allow-list applied"
+            );
+        }
+        route_entries.sort_by(|left, right| {
+            (left.path, left.method.as_str(), left.handler_type).cmp(&(
+                right.path,
+                right.method.as_str(),
+                right.handler_type,
+            ))
+        });
+
+        for entry in route_entries {
             route_count += 1;
-            let dispatch_fn = dispatch_by_id
-                .get(&entry.req_type_id)
-                .copied()
-                .or_else(|| dispatch_map.get(entry.handler_type).copied());
+            // Macro-produced routes are always keyed by TypeId. The legacy name
+            // map exists only for hand-written `RouteEntry::new` fixtures; using
+            // it for a macro route would silently pick the wrong dispatch
+            // function when two request types share a bare name.
+            let dispatch_fn = match dispatch_by_id.get(&entry.req_type_id).copied() {
+                Some(dispatch) => Some(dispatch),
+                None if entry.rsp_type_id.is_some() => {
+                    return Err(Error::Di(format!(
+                        "route `{} {}` ({}) has no TypeId dispatch; the route macro metadata is \
+                         incomplete (mixed macro versions?)",
+                        entry.method.as_str(),
+                        entry.path,
+                        entry.handler_type
+                    )));
+                }
+                None => dispatch_map.get(entry.handler_type).copied(),
+            };
             let stub = Arc::new(StubEndpoint {
                 method: entry.method.as_str(),
                 path: entry.path,
@@ -1433,7 +1990,7 @@ impl HostBuilder {
         tracing::info!(
             routes = route_count,
             direct = direct_by_pair.len(),
-            typed_behaviors = webx_core::route::ext::typed_pipeline_count(),
+            typed_behaviors = !direct_dispatch_enabled,
             "engine dispatch inventory"
         );
 
@@ -1499,8 +2056,33 @@ impl HostBuilder {
             Arc::new(webx_engine::EndpointTarget::new(ready_endpoint)),
         )?;
 
+        // Admission counters: updated by the engine's accept loop, rendered by
+        // `/metrics` when enabled.
+        let admission_stats = Arc::new(webx_engine::shared::AdmissionStats::default());
+        admission_stats.set_capacity(options.app.max_connections);
+
         if options.metrics.enabled {
-            let metrics_endpoint: Arc<dyn IEndpoint> = Arc::new(MetricsEndpoint::new(http_metrics));
+            // Share the admission counters with `/metrics` (the engine updates
+            // them; the host only renders the snapshot).
+            let mut metrics_endpoint =
+                MetricsEndpoint::new(http_metrics).with_admission(Arc::clone(&admission_stats));
+            // Real-time counters are registered only when WebSocket routes exist.
+            if let Ok(realtime_metrics) = provider.get::<webx_core::realtime::RealtimeMetrics>() {
+                if let Some(registry) = provider
+                    .get_all::<dyn webx_core::realtime::IConnectionRegistry>()
+                    .into_iter()
+                    .next()
+                {
+                    metrics_endpoint = metrics_endpoint.with_realtime(realtime_metrics, registry);
+                }
+            }
+            if let Ok(events) = provider.get::<webx_core::mediator::EventMetrics>() {
+                metrics_endpoint = metrics_endpoint.with_events(events);
+            }
+            if let Ok(meter) = provider.get::<dyn webx_core::metrics::IMeter>() {
+                metrics_endpoint = metrics_endpoint.with_meter(meter);
+            }
+            let metrics_endpoint: Arc<dyn IEndpoint> = Arc::new(metrics_endpoint);
             engine_router.try_insert(
                 HttpMethod::Get,
                 "/metrics",
@@ -1585,6 +2167,7 @@ impl HostBuilder {
             immediate_shutdown: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             immediate_watch: tokio::sync::watch::channel(false).0,
             started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            admission: Arc::clone(&admission_stats),
         });
         // Resolve all registered hosted services from the DI container.
         // These will be started when `run()` is called and stopped on shutdown.
@@ -1609,6 +2192,7 @@ impl HostBuilder {
             hosted_stopped: Arc::new(tokio::sync::OnceCell::new()),
             shutdown_token,
             state: AtomicU8::new(HostState::Built.load()),
+            direct_dispatch_enabled,
         })
     }
 
@@ -1634,6 +2218,46 @@ fn build_provider_error(error: rust_dix::RdiError) -> Error {
         "Failed to build ServiceProvider: {}. Check your DI registrations.",
         error
     ))
+}
+
+/// Fail closed at **build** time when mTLS is half-configured.
+///
+/// Without this, `ClientAuth=Required` with an HTTP-only listener would build a
+/// host that silently serves plaintext; the engine would only reject it when
+/// `run()` starts a listener.
+fn validate_tls_client_auth(options: &AppOptions) -> Result<()> {
+    let tls = &options.tls;
+    let enabled = tls.client_auth != webx_core::config::TlsClientAuth::Off;
+    if !enabled {
+        if !tls.client_ca_path.trim().is_empty() {
+            return Err(Error::Di(
+                "Tls.ClientCaPath is set but Tls.ClientAuth is Off".to_string(),
+            ));
+        }
+        return Ok(());
+    }
+    if tls.client_ca_path.trim().is_empty() {
+        return Err(Error::Di(
+            "Tls.ClientAuth requires Tls.ClientCaPath".to_string(),
+        ));
+    }
+    if !std::path::Path::new(&tls.client_ca_path).is_file() {
+        return Err(Error::Di(format!(
+            "Tls.ClientCaPath '{}' does not exist",
+            tls.client_ca_path
+        )));
+    }
+    if !options
+        .app
+        .urls
+        .iter()
+        .any(|url| url.starts_with("https://"))
+    {
+        return Err(Error::Di(
+            "Tls.ClientAuth requires at least one https:// App.Urls listener".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 /// Operator-facing text of a `try_build` failure, without the `Error` variant
@@ -1714,6 +2338,16 @@ impl Host {
     /// Root DI container for this host instance.
     pub fn provider(&self) -> &Arc<ServiceProvider> {
         &self.provider
+    }
+
+    /// Whether this host serves the direct (non-mediated) HTTP dispatch path.
+    ///
+    /// Diagnostic/test hook: the decision is per host and depends only on
+    /// whether this host's own service collection registered a typed pipeline
+    /// behavior. Other hosts built in the same process do not affect it.
+    #[doc(hidden)]
+    pub fn uses_direct_dispatch(&self) -> bool {
+        self.direct_dispatch_enabled
     }
 
     /// Dispose the DI provider after the server and hosted services stopped.
@@ -1835,6 +2469,13 @@ impl Host {
         }
 
         let mut tls_configs = Vec::with_capacity(listeners.len());
+        if self.options.tls.client_auth != webx_core::config::TlsClientAuth::Off
+            && !listeners.iter().any(|(scheme, _, _)| scheme == "https")
+        {
+            return Err(Error::Http(
+                "Tls.ClientAuth requires at least one https:// listener".to_string(),
+            ));
+        }
         for (scheme, _, _) in &listeners {
             if scheme == "https" {
                 let tls = &self.options.tls;
@@ -1843,10 +2484,14 @@ impl Host {
                         "HTTPS URLs require Tls.CertPath and Tls.KeyPath".to_string(),
                     ));
                 }
-                tls_configs.push(Some(webx_engine::tls::build_server_config(
-                    &tls.cert_path,
-                    &tls.key_path,
-                )?));
+                tls_configs.push(Some(
+                    webx_engine::tls::build_server_config_with_client_auth(
+                        &tls.cert_path,
+                        &tls.key_path,
+                        &tls.client_ca_path,
+                        tls.client_auth,
+                    )?,
+                ));
             } else {
                 tls_configs.push(None);
             }
@@ -1969,6 +2614,17 @@ impl Host {
     /// // ... later:
     /// handle.shutdown();
     /// ```
+    /// The host's clock (2.4-5).
+    ///
+    /// Resolves the registered [`webx_core::time::IClock`]; hosts built through
+    /// [`HostBuilder`] always have one (system clock by default, test clock when
+    /// [`HostBuilder::use_clock`] was used).
+    pub fn clock(&self) -> Arc<dyn webx_core::time::IClock> {
+        self.provider
+            .get::<dyn webx_core::time::IClock>()
+            .unwrap_or_else(|_| Arc::new(webx_core::time::SystemClock))
+    }
+
     pub fn server_handle(&self) -> ServerHandle {
         ServerHandle {
             shutdown: Arc::clone(&self.shutdown),

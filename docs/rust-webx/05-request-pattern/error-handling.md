@@ -46,6 +46,23 @@ pub enum Error {
 | `UnsupportedMediaType` | 415 | 请求内容类型不受支持 |
 | `Problem(details)` | `details.status` | 字段级校验/绑定失败，携带 `errors` |
 
+## 机器可读错误码（2.2）
+
+`problem+json` 在 RFC 9457 标准字段之外，固定携带：
+
+| 成员 | 类型 | 含义 |
+|---|---|---|
+| `code` | string | 稳定机器码，客户端按它分支，不要解析 `detail` |
+| `retryable` | bool | 同一请求重试是否可能成功（仅 429/502/503/504 为 true） |
+| `instance` | string | 请求路径（`problem.instance` 为空时自动填充） |
+| `traceId` | string | 与响应头 `x-trace-id` 同一个值（扩展成员） |
+
+主要错误码：`bad_request`、`unauthorized`、`forbidden`、`not_found`、`method_not_allowed`、
+`conflict`、`payload_too_large`、`unsupported_media_type`、`unprocessable_entity`、
+`too_many_requests`、`validation_failed`、`invalid_json`、`internal_error`、
+`service_unavailable`、`bad_gateway`、`gateway_timeout`。端点可通过
+`ProblemDetails::new(..).with_code("...")` 自定义。
+
 ## 默认错误响应格式
 
 ```json
@@ -53,12 +70,17 @@ pub enum Error {
   "type": "https://httpstatuses.com/404",
   "title": "Not Found",
   "status": 404,
-  "detail": "User abc not found"
+  "detail": "User abc not found",
+  "instance": "/users/abc",
+  "code": "not_found",
+  "retryable": false,
+  "traceId": "4f9c2a1e8b7d4c60"
 }
 ```
 
-错误响应统一为 RFC 7807 `application/problem+json`。Handler 返回 `Err` 后，由 host 的请求处理循环
-捕获并写出 ProblemDetails，无需在 Handler 中手动设置状态码。
+错误响应统一为 RFC 9457 `application/problem+json`（取代 RFC 7807）。Handler 返回 `Err` 后，
+由 host 的请求处理循环捕获并写出 ProblemDetails，无需在 Handler 中手动设置状态码。
+5xx 的 `detail` 固定为通用文案，原始错误只进日志（不向客户端泄漏内部信息）。
 
 ## Handler 中的错误处理
 

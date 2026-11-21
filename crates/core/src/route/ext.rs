@@ -12,13 +12,25 @@ use std::sync::Arc;
 pub trait IServiceCollectionExt: Sized {
     /// Register the mediator in the DI container.
     ///
-    /// The actual `IRequestHandler` and `IEventHandler` implementations
-    /// are registered via `#[rust_dix::module]` blocks (re-exported as `webx::module`).
+    /// Also registers the **default event transport**: an
+    /// `InMemoryEventPublisher` (bounded queue), its `BackgroundService` worker,
+    /// and an `EventDispatcher` for broker consumers. Replace the transport with
+    /// `HostBuilder::use_event_publisher(...)` or an application
+    /// `IEventPublisher` registration.
+    ///
+    /// `IRequestHandler` and `IEventHandler` implementations are discovered
+    /// from inventory; event handlers use `#[handler]` / `#[handler(inject)]`
+    /// exactly like request handlers.
     fn add_mediator(self) -> Self;
 
     /// Signal that endpoints should be auto-discovered from `#[get]` / `#[endpoint]`
-    /// annotations at compile time.  The actual route table is built during
+    /// annotations at compile time. The actual route table is built during
     /// `Host::build()` by scanning the inventory for `RouteEntry` items.
+    ///
+    /// This marker is a no-op: the inventory scan is on by default. Turn it off
+    /// with `HostBuilder::use_inventory_routes(false)` or narrow it with
+    /// `HostBuilder::routes_from(&[..])` when dependency-library routes should
+    /// not be exposed.
     fn add_request_endpoints(self) -> Self;
 
     /// Register controller types scoped per request.
@@ -183,7 +195,62 @@ impl IServiceCollectionExt for ServiceCollection {
         // Arc; the handler registry is registered by `Host::build` as an
         // instance (or rebuilt when the mediator is used without a host).
         MEDIATOR_ACTIVE.store(true, std::sync::atomic::Ordering::SeqCst);
-        self.transient::<Mediator>(|resolver| {
+
+        // Default event transport: a bounded in-memory queue drained by a
+        // background worker. The publisher and dispatcher use `try_add`, so an
+        // application registration wins. A request-only application (no
+        // `#[handler]` event registration) gets the publisher that fails closed
+        // but no idle worker/queue.
+        let local_handlers = Arc::new(crate::mediator::EventHandlerCache::build());
+        let has_local_events = !local_handlers.is_empty();
+        let capacity = if has_local_events {
+            crate::mediator::DEFAULT_EVENT_QUEUE_CAPACITY
+        } else {
+            1
+        };
+        let (sender, receiver) =
+            tokio::sync::mpsc::channel::<crate::mediator::EventMessage>(capacity);
+
+        let mediator_registration = self
+            .try_add_singleton::<crate::mediator::EventMetrics>(|_| {
+                Arc::new(crate::mediator::EventMetrics::new())
+            })
+            .try_add_singleton::<crate::mediator::EventDispatcher>(|resolver| {
+                let provider = resolver
+                    .provider_arc()
+                    .expect("ServiceProvider not available from DI resolver");
+                Arc::new(crate::mediator::EventDispatcher::new(provider))
+            })
+            .try_add_singleton::<dyn crate::mediator::IEventPublisher>(move |_| {
+                Arc::new(crate::mediator::InMemoryEventPublisher::from_parts(
+                    sender.clone(),
+                    Arc::clone(&local_handlers),
+                )) as Arc<dyn crate::mediator::IEventPublisher>
+            });
+
+        let mediator_registration = if has_local_events {
+            let receiver_slot = Arc::new(std::sync::Mutex::new(Some(receiver)));
+            mediator_registration.add_background_service_with(move |resolver| {
+                let provider = resolver
+                    .provider_arc()
+                    .expect("ServiceProvider not available from DI resolver");
+                let receiver = receiver_slot
+                    .lock()
+                    .expect("event worker receiver lock poisoned")
+                    .take()
+                    .expect("the in-memory event worker is registered twice");
+                Arc::new(crate::mediator::InMemoryEventWorker::new(
+                    receiver, provider,
+                ))
+            })
+        } else {
+            // The queue has no producer: the publisher rejects every event
+            // before touching it, so there is nothing to drain.
+            drop(receiver);
+            mediator_registration
+        };
+
+        mediator_registration.transient::<Mediator>(|resolver| {
             let provider = resolver
                 .provider_arc()
                 .expect("ServiceProvider not available from DI resolver");
@@ -238,12 +305,15 @@ impl IServiceCollectionExt for ServiceCollection {
         Req: Send + 'static,
         Rsp: Send + 'static,
     {
-        // The fast HTTP path must keep behavior semantics: mark the process as
-        // using typed behaviors so the host does not bypass the chain.
+        // Per-host marker: `Host::build` decides the direct dispatch path from
+        // this DI registration, so a behavior registered by another host (or a
+        // test) can never change this host's path. The process-global counter
+        // below is diagnostic-only and retained for `typed_pipeline_count()`.
         TYPED_BEHAVIOR_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // Singleton per (Req, Rsp) pair: the factory (and therefore constructor
         // injection) runs once per provider; behaviors are stateless wrappers.
-        self.add(ServiceLifetime::Singleton, factory)
+        self.singleton_value(TypedPipelineRegistered)
+            .add(ServiceLifetime::Singleton, factory)
     }
 
     fn add_hosted_service<T>(self) -> Self
@@ -349,11 +419,21 @@ static ENDPOINT_SCAN: AtomicBool = AtomicBool::new(false);
 static MEDIATOR_ACTIVE: AtomicBool = AtomicBool::new(false);
 static TYPED_BEHAVIOR_COUNT: AtomicUsize = AtomicUsize::new(0);
 
+/// DI marker registered by [`IServiceCollectionExt::add_typed_pipeline_with`].
+///
+/// `Host::build` decides between the direct HTTP dispatch path and the
+/// mediated path from this marker, so the decision is **per host**. Before
+/// 2.2 the decision used a process-global counter, which meant any other host
+/// (or a test) registering a typed behavior silently downgraded every host in
+/// the same process.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TypedPipelineRegistered;
+
 /// Number of typed pipeline behaviors registered in this process.
 ///
-/// The HTTP fast path bypasses the typed pipeline only when this is zero. A
-/// non-zero count is process-global and intentionally conservative: any host
-/// that registers a behavior falls back to the mediated path for every host.
+/// Diagnostic only: dispatch-path selection is per host and driven by the
+/// [`TypedPipelineRegistered`] DI marker. This counter keeps its historical
+/// process-wide meaning for logs and compatibility.
 pub fn typed_pipeline_count() -> usize {
     TYPED_BEHAVIOR_COUNT.load(std::sync::atomic::Ordering::Relaxed)
 }

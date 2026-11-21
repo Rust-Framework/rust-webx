@@ -172,6 +172,36 @@ if !verify_secret(pepper, parsed.secret, &record.secret_hash) {
 - 撤销：写 DB + 使缓存版本失效；TTL 决定最坏生效时间（可配 0）。
 - 精确的 key 格式、轮换与配额由存储层决定；scheme 只要求"前缀 + 交给 validator"。
 
+## 其他 scheme：HTTP Basic（2.5）
+
+`BasicScheme` 走同一 scheme 链，只做 base64 解码并委托给业务校验器：
+
+```rust
+use webx::*;
+
+struct EnvValidator { user: String, password: String }
+
+#[async_trait::async_trait]
+impl IBasicCredentialValidator for EnvValidator {
+    async fn validate(&self, user: &str, password: &str)
+        -> Result<Option<Box<dyn IClaims>>>
+    {
+        let ok = constant_time_eq(user.as_bytes(), self.user.as_bytes())
+            & constant_time_eq(password.as_bytes(), self.password.as_bytes());
+        Ok(ok.then(|| Box::new(BasicClaims::new(user)) as Box<dyn IClaims>))
+    }
+}
+
+Host::builder()
+    .add_authentication_scheme(Arc::new(BasicScheme::new(Arc::new(EnvValidator { .. }))))
+    .build();
+```
+
+- **只在 TLS 后使用**：Basic 的密码只是 base64，不是加密。
+- 适合遗留集成、健康探针、服务间调用；不要用于浏览器登录（用 Cookie/JWT）。
+- 校验器负责存储与恒定时间比较；`Unknown user` 应返回 `None`（401），后端故障返回 `Err`（5xx）。
+- 用户名不能含 `:`，密码可以；空用户名、非法 base64、缺少 `:` 都是 401。
+
 ## 错误语义
 
 | 情况 | 响应 |

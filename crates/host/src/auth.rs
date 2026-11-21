@@ -26,8 +26,14 @@ use std::time::{Duration, Instant};
 use webx_core::auth::{IAuthenticationHandler, IAuthenticationScheme, IClaims};
 use webx_core::error::{Error, Result};
 use webx_core::http::IHttpContext;
+use webx_core::metrics::{Counter, Histogram, IMeter};
 use webx_core::middleware::IMiddleware;
 use webx_core::security::ISessionStore;
+
+/// Counter of authentication decisions.
+pub const AUTH_REQUESTS_METRIC: &str = "auth.requests";
+/// Latency histogram of one authentication decision, in milliseconds.
+pub const AUTH_DURATION_METRIC: &str = "auth.duration";
 
 /// Claims produced by an API-key validator.
 ///
@@ -404,6 +410,107 @@ impl IAuthenticationScheme for JwtScheme {
     }
 }
 
+/// Outcome of one authentication decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AuthOutcome {
+    /// A credential was presented and verified; claims were set.
+    Authenticated,
+    /// No credential matched, or a matched scheme returned `Ok(None)`.
+    Anonymous,
+    /// A presented credential was rejected (`401`).
+    Unauthorized,
+    /// Authenticated but not allowed (`403`, normally from authorization).
+    Forbidden,
+    /// Throttled (`429`).
+    RateLimited,
+    /// A backend/scheme failure (`5xx`); fail-closed.
+    Error,
+}
+
+impl AuthOutcome {
+    /// Stable metric/log label.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Authenticated => "ok",
+            Self::Anonymous => "anonymous",
+            Self::Unauthorized => "unauthorized",
+            Self::Forbidden => "forbidden",
+            Self::RateLimited => "rate_limited",
+            Self::Error => "error",
+        }
+    }
+}
+
+/// Per-scheme auth metrics, pre-bound so the hot path only looks up a handle.
+pub struct AuthMetrics {
+    counters: HashMap<(&'static str, AuthOutcome), Arc<dyn Counter>>,
+    durations: HashMap<&'static str, Arc<dyn Histogram>>,
+    no_scheme_counter: Arc<dyn Counter>,
+    no_scheme_duration: Arc<dyn Histogram>,
+}
+
+impl AuthMetrics {
+    /// Bind one counter per (scheme, outcome) and one histogram per scheme.
+    pub fn new(meter: &dyn IMeter, schemes: &[Arc<dyn IAuthenticationScheme>]) -> Self {
+        let mut counters = HashMap::new();
+        let mut durations = HashMap::new();
+        for scheme in schemes {
+            let name = scheme.name();
+            durations.insert(
+                name,
+                meter.histogram(AUTH_DURATION_METRIC, &[("scheme", name)]),
+            );
+            for outcome in [
+                AuthOutcome::Authenticated,
+                AuthOutcome::Anonymous,
+                AuthOutcome::Unauthorized,
+                AuthOutcome::Forbidden,
+                AuthOutcome::RateLimited,
+                AuthOutcome::Error,
+            ] {
+                counters.insert(
+                    (name, outcome),
+                    meter.counter(
+                        AUTH_REQUESTS_METRIC,
+                        &[("scheme", name), ("outcome", outcome.as_str())],
+                    ),
+                );
+            }
+        }
+        let no_scheme_counter = meter.counter(
+            AUTH_REQUESTS_METRIC,
+            &[
+                ("scheme", "none"),
+                ("outcome", AuthOutcome::Anonymous.as_str()),
+            ],
+        );
+        let no_scheme_duration = meter.histogram(AUTH_DURATION_METRIC, &[("scheme", "none")]);
+        Self {
+            counters,
+            durations,
+            no_scheme_counter,
+            no_scheme_duration,
+        }
+    }
+
+    /// Record one scheme decision.
+    pub fn record(&self, scheme: &'static str, outcome: AuthOutcome, elapsed: Duration) {
+        if let Some(counter) = self.counters.get(&(scheme, outcome)) {
+            counter.inc();
+        }
+        if let Some(histogram) = self.durations.get(scheme) {
+            histogram.record(elapsed.as_secs_f64() * 1000.0);
+        }
+    }
+
+    /// Record a request that no scheme recognized.
+    pub fn record_no_scheme(&self, elapsed: Duration) {
+        self.no_scheme_counter.inc();
+        self.no_scheme_duration
+            .record(elapsed.as_secs_f64() * 1000.0);
+    }
+}
+
 /// Composes authentication schemes into one middleware.
 ///
 /// The first scheme that matches handles the request. If no scheme matches, the
@@ -412,31 +519,146 @@ impl IAuthenticationScheme for JwtScheme {
 /// binding).
 pub struct AuthenticationMiddleware {
     schemes: Vec<Arc<dyn IAuthenticationScheme>>,
+    metrics: Option<AuthMetrics>,
+    route_policies: Vec<(String, Vec<&'static str>)>,
 }
 
 impl AuthenticationMiddleware {
     /// Build a middleware from an ordered scheme list.
     pub fn new(schemes: Vec<Arc<dyn IAuthenticationScheme>>) -> Self {
-        Self { schemes }
+        Self {
+            schemes,
+            metrics: None,
+            route_policies: Vec::new(),
+        }
+    }
+
+    /// Restrict which schemes may authenticate a path prefix.
+    ///
+    /// The first matching prefix wins; a path with no policy keeps the full
+    /// chain. A policy never turns an unauthenticated request into a 401 by
+    /// itself — protected routes still enforce `#[authorize]`/identity.
+    pub fn with_route_policies(mut self, policies: Vec<(String, Vec<&'static str>)>) -> Self {
+        self.route_policies = policies;
+        self
+    }
+
+    fn allowed_schemes(&self, path: &str) -> Option<&[&'static str]> {
+        self.route_policies
+            .iter()
+            .find(|(prefix, _)| {
+                let prefix = prefix.trim_end_matches('/');
+                path == prefix
+                    || path
+                        .strip_prefix(prefix)
+                        .is_some_and(|rest| rest.starts_with('/'))
+            })
+            .map(|(_, names)| names.as_slice())
+    }
+
+    /// Attach auth metrics (`auth.requests` / `auth.duration`).
+    pub fn with_metrics(mut self, meter: &dyn IMeter) -> Self {
+        self.metrics = Some(AuthMetrics::new(meter, &self.schemes));
+        self
     }
 
     /// Scheme names in registration order, for startup diagnostics.
     pub fn names(&self) -> Vec<&'static str> {
         self.schemes.iter().map(|scheme| scheme.name()).collect()
     }
+
+    fn record_error(
+        &self,
+        scheme: &'static str,
+        error: &Error,
+        elapsed: Duration,
+        trace_id: Option<&str>,
+    ) {
+        let outcome = match error.status_code() {
+            401 => AuthOutcome::Unauthorized,
+            403 => AuthOutcome::Forbidden,
+            429 => AuthOutcome::RateLimited,
+            _ => AuthOutcome::Error,
+        };
+        if let Some(metrics) = &self.metrics {
+            metrics.record(scheme, outcome, elapsed);
+        }
+        match outcome {
+            AuthOutcome::Error => tracing::warn!(
+                scheme,
+                error = %error,
+                trace_id = ?trace_id,
+                "authentication backend failed"
+            ),
+            _ => tracing::debug!(
+                scheme,
+                outcome = outcome.as_str(),
+                trace_id = ?trace_id,
+                "authentication rejected"
+            ),
+        }
+    }
 }
 
 #[async_trait]
 impl IMiddleware for AuthenticationMiddleware {
     async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
+        let started = Instant::now();
+        let allowed = self.allowed_schemes(ctx.request().path());
         for scheme in &self.schemes {
+            if allowed.is_some_and(|allowed| !allowed.contains(&scheme.name())) {
+                continue;
+            }
             if !scheme.matches(ctx) {
                 continue;
             }
-            if let Some(claims) = scheme.authenticate(ctx).await? {
-                ctx.set_claims(claims);
+            let scheme_started = Instant::now();
+            match scheme.authenticate(ctx).await {
+                Ok(Some(claims)) => {
+                    ctx.set_claims(claims);
+                    if let Some(metrics) = &self.metrics {
+                        metrics.record(
+                            scheme.name(),
+                            AuthOutcome::Authenticated,
+                            scheme_started.elapsed(),
+                        );
+                    }
+                    tracing::debug!(
+                        scheme = scheme.name(),
+                        outcome = "ok",
+                        trace_id = ?ctx.trace_id(),
+                        "authentication"
+                    );
+                }
+                Ok(None) => {
+                    if let Some(metrics) = &self.metrics {
+                        metrics.record(
+                            scheme.name(),
+                            AuthOutcome::Anonymous,
+                            scheme_started.elapsed(),
+                        );
+                    }
+                    tracing::debug!(
+                        scheme = scheme.name(),
+                        outcome = "anonymous",
+                        trace_id = ?ctx.trace_id(),
+                        "authentication"
+                    );
+                }
+                Err(error) => {
+                    self.record_error(
+                        scheme.name(),
+                        &error,
+                        scheme_started.elapsed(),
+                        ctx.trace_id(),
+                    );
+                    return Err(error);
+                }
             }
             return Ok(ControlFlow::Continue(()));
+        }
+        if let Some(metrics) = &self.metrics {
+            metrics.record_no_scheme(started.elapsed());
         }
         Ok(ControlFlow::Continue(()))
     }

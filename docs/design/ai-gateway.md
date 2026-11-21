@@ -785,7 +785,7 @@ OpenAI SDK conformance 在端点落地时补。
   执行器在调用前 `allow`，成功/失败回写。
 - **舱壁**：`Bulkhead`——每 provider `Semaphore` 上限 + 最大等待；流式请求持有 permit 直到流结束/
   客户端断开，保护上游与自身。
-- **入站 deadline**：`Server.RequestTimeoutSeconds`（默认 0 关闭）在路由命中后包住绑定 + Handler，
+- **入站 deadline**：`Server.RequestTimeoutSeconds`（默认 30 秒，Production 拒绝 0）在路由命中后包住绑定 + Handler，
   超时取消 future 并返回 `504`；不限制已返回的流式响应体。
 - **首字节规则**仍由执行器保证：非流可重试，流一旦返回不再切换。
 

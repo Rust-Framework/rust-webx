@@ -1,0 +1,35 @@
+[package]
+name = "rust-webx-redis"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Redis distributed cache and event transport for rust-webx (ASP.NET Core style add_redis)"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme = "../../README.md"
+keywords = ["redis", "cache", "events", "webx", "aspnet-core"]
+categories = ["web-programming", "caching", "asynchronous"]
+
+[lib]
+name = "webx_redis"
+
+[dependencies]
+rust-webx-core.workspace = true
+rust-webx-host.workspace = true
+rust-dix.workspace = true
+async-trait.workspace = true
+tokio = { workspace = true, features = ["sync", "time"] }
+serde.workspace = true
+tracing.workspace = true
+redis.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+rust-webx-contract-tests = { path = "../contract-tests" }
+inventory.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[lints]
+workspace = true

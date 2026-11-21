@@ -1,0 +1,5 @@
+error: #[handler] expects `impl IRequestHandler<Req, Rsp> for Handler` (or `IEventHandler`); found trait `Default`
+ --> tests/ui/handler_on_wrong_trait.rs:6:6
+  |
+6 | impl Default for NotAHandler {
+  |      ^^^^^^^

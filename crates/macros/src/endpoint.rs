@@ -62,7 +62,50 @@ fn emit_endpoint(attr: TokenStream, item: TokenStream) -> TokenStream {
     let (method_str, path_str) = parse_endpoint_attr(&attr.to_string());
     match expand_endpoint(&method_str, &path_str, &item_impl) {
         Ok(tokens) => tokens,
-        Err(error) => error.to_compile_error().into(),
+        Err(error) => {
+            // Emit the original impl alongside the diagnostic so the compiler
+            // does not also report every missing trait method as a cascade.
+            let error = error.to_compile_error();
+            quote!(#error #item_impl).into()
+        }
+    }
+}
+
+/// Reject route attributes on anything that is not `impl IRequest<Response>`.
+///
+/// Before 2.2 the macro silently accepted a wrong impl (and defaulted the
+/// response type to `()`), so a misplaced `#[get]` only surfaced at startup as
+/// an orphan route. A route attribute must now fail at compile time.
+fn validate_request_impl(item_impl: &ItemImpl) -> syn::Result<()> {
+    let Some((_, path, _)) = &item_impl.trait_ else {
+        return Err(syn::Error::new_spanned(
+            &item_impl.self_ty,
+            "route attributes (`#[get]`, `#[post]`, ...) must be applied to \
+             `impl IRequest<Response> for Type`, not to an inherent impl",
+        ));
+    };
+    let Some(segment) = path.segments.last() else {
+        return Err(syn::Error::new_spanned(
+            path,
+            "route attributes require `impl IRequest<Response> for Type`",
+        ));
+    };
+    if segment.ident != "IRequest" {
+        return Err(syn::Error::new_spanned(
+            path,
+            format!(
+                "route attributes require `impl IRequest<Response> for Type`; \
+                 found `impl {}` — did you mean to implement `IRequest`?",
+                segment.ident
+            ),
+        ));
+    }
+    match &segment.arguments {
+        PathArguments::AngleBracketed(args) if args.args.len() == 1 => Ok(()),
+        _ => Err(syn::Error::new_spanned(
+            &segment.arguments,
+            "`IRequest` needs exactly one response type: `impl IRequest<Response> for Type`",
+        )),
     }
 }
 
@@ -71,11 +114,18 @@ fn expand_endpoint(
     path_str: &str,
     item_impl: &ItemImpl,
 ) -> syn::Result<TokenStream> {
+    validate_request_impl(item_impl)?;
     let self_ty = &item_impl.self_ty;
     let req_type_name = extract_type_name(self_ty);
     let method_ident = format_ident!("{}", method_str);
 
-    let rsp_type_str = extract_response_type(item_impl).unwrap_or_else(|| "()".to_string());
+    let rsp_type_str = extract_response_type(item_impl).ok_or_else(|| {
+        syn::Error::new_spanned(
+            self_ty,
+            "route attributes require `impl IRequest<Response> for Type` \
+             (the response type is missing)",
+        )
+    })?;
 
     // Text priority: `#[display]` / `#[description]` first, then the impl
     // block's `///` doc comment. The doc's first line is the name, the full
@@ -132,7 +182,7 @@ fn expand_endpoint(
             ctx: &'a mut dyn ::webx::IHttpContext,
         ) -> ::webx::BoxedBindFuture<'a> {
             Box::pin(async move {
-                let request = <#self_ty as ::webx::RequestModel>::bind(ctx).await?;
+                let request = <#self_ty as ::webx::RequestModel>::bind_inline(ctx).await?;
                 Ok(Box::new(request) as Box<dyn ::std::any::Any + Send>)
             })
         }
@@ -211,6 +261,14 @@ fn expand_endpoint(
         ::webx::inventory::submit! {
             #route_entry
         }
+
+        ::webx::inventory::submit! {
+            ::webx::RouteSource::new(
+                ::webx::HttpMethod::#method_ident,
+                #path_str,
+                ::core::module_path!(),
+            )
+        }
     };
 
     Ok(expanded.into())
@@ -244,7 +302,7 @@ fn generate_encoder_fn(
                     "direct response encoder received an unexpected response type".to_string()
                 )
             })?;
-            let body = ::webx::serde_json::to_vec(value)
+            let body = ::webx::json::encode_json(value)
                 .map_err(::webx::Error::ResponseSerialization)?;
             ::core::result::Result::Ok(::webx::EndpointResult::Json {
                 status: 200,

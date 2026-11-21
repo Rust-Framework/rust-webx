@@ -47,6 +47,8 @@ pub struct DbInitService {
     /// instead of relying on a task-local ambient provider.
     #[inject]
     services: Arc<dyn ScopeFactory>,
+    #[inject]
+    hasher: Arc<dyn IPasswordHasher>,
 }
 
 #[inject]
@@ -66,7 +68,7 @@ impl IHostedService for DbInitService {
 
         tracing::info!("[DbInit] Tables created and seed data applied.");
 
-        admin_user::ensure_admin_user(&mut ctx).await?;
+        admin_user::ensure_admin_user(&mut ctx, self.hasher.as_ref()).await?;
 
         // Indexes → exhibition rows → logo copies. Same path the upload endpoint
         // takes, so a manual bundle upload and a restart converge.

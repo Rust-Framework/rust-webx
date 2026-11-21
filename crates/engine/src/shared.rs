@@ -9,10 +9,10 @@
 //!
 //! [`EngineContext`]: crate::EngineContext
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use tokio::sync::watch;
+use tokio::sync::{watch, OwnedSemaphorePermit};
 use webx_core::dispatch_runtime::DispatchRuntime;
 use webx_core::error::IErrorResponseWriter;
 use webx_core::hosted::CancellationToken;
@@ -66,6 +66,126 @@ pub struct Shared {
     pub immediate_watch: watch::Sender<bool>,
     /// One-shot engine lifecycle guard: a `Shared` cannot be served twice.
     pub started: Arc<AtomicBool>,
+    /// Connection admission counters (admitted / rejected / waiting).
+    pub admission: Arc<AdmissionStats>,
+}
+
+/// Process-wide connection admission counters and live gauges.
+///
+/// `waiting` is the queue depth between "socket accepted" and "permit granted";
+/// `active` is the number of admitted connections currently open (one per held
+/// admission permit, including keep-alive and streaming connections);
+/// `rejected` counts sockets that waited past `Server.AdmissionTimeoutMs` and
+/// received a `503` instead of being left in the kernel backlog.
+#[derive(Debug, Default)]
+pub struct AdmissionStats {
+    admitted: AtomicU64,
+    rejected: AtomicU64,
+    waiting: AtomicU64,
+    active: AtomicUsize,
+    capacity: AtomicUsize,
+}
+
+impl AdmissionStats {
+    /// Connections admitted by the global governor.
+    pub fn admitted(&self) -> u64 {
+        self.admitted.load(Ordering::Relaxed)
+    }
+
+    /// Connections rejected after the admission timeout.
+    pub fn rejected(&self) -> u64 {
+        self.rejected.load(Ordering::Relaxed)
+    }
+
+    /// Connections currently open (holding an admission permit).
+    pub fn active(&self) -> usize {
+        self.active.load(Ordering::Relaxed)
+    }
+
+    /// Configured admission capacity (`App.MaxConnections`).
+    ///
+    /// `0` until the host records it; the engine gauge reports it as a
+    /// capacity reference so `active / capacity` is visible on one scrape.
+    pub fn capacity(&self) -> usize {
+        self.capacity.load(Ordering::Relaxed)
+    }
+
+    /// Record the configured admission capacity (host startup).
+    pub fn set_capacity(&self, capacity: usize) {
+        self.capacity.store(capacity, Ordering::Relaxed);
+    }
+
+    pub(crate) fn record_connection_open(&self) {
+        self.active.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn record_connection_closed(&self) {
+        // Saturating decrement: a double close must never wrap the gauge.
+        let mut current = self.active.load(Ordering::Relaxed);
+        while current > 0 {
+            match self.active.compare_exchange_weak(
+                current,
+                current - 1,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(actual) => current = actual,
+            }
+        }
+    }
+
+    /// Accepted sockets currently waiting for an admission slot.
+    pub fn waiting(&self) -> u64 {
+        self.waiting.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn record_admitted(&self) {
+        self.admitted.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn record_rejected(&self) {
+        self.rejected.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn begin_wait(&self) {
+        self.waiting.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn end_wait(&self) {
+        self.waiting.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+/// Admission slot for one accepted connection.
+///
+/// Keeps the global governor permit for the connection's lifetime and maintains
+/// [`AdmissionStats::active`]: the counter is incremented once on construction
+/// and decremented by `Drop`. The permit, this guard, the worker handoff and
+/// the spawned connection task are one ownership chain, so the gauge cannot
+/// leak on abort, shutdown, or a dropped handoff.
+#[derive(Debug)]
+pub struct ConnectionPermit {
+    /// Held for its `Drop` side effect (releases the governor slot).
+    _permit: OwnedSemaphorePermit,
+    stats: Arc<AdmissionStats>,
+}
+
+impl ConnectionPermit {
+    /// Take ownership of `permit` and open one active-connection slot.
+    pub fn new(permit: OwnedSemaphorePermit, stats: Arc<AdmissionStats>) -> Self {
+        stats.record_connection_open();
+        Self {
+            _permit: permit,
+            stats,
+        }
+    }
+}
+
+impl Drop for ConnectionPermit {
+    fn drop(&mut self) {
+        self.stats.record_connection_closed();
+    }
 }
 
 impl Shared {
@@ -175,6 +295,31 @@ mod tests {
         // threads; a non-Send field would only fail at the spawn site.
         assert_send_sync::<Shared>();
         assert_send_sync::<ActiveStreamGuard>();
+        assert_send_sync::<ConnectionPermit>();
+    }
+
+    #[test]
+    fn connection_permit_tracks_the_active_gauge() {
+        let stats = Arc::new(AdmissionStats::default());
+        let governor = Arc::new(tokio::sync::Semaphore::new(2));
+        assert_eq!(stats.active(), 0);
+
+        let first = ConnectionPermit::new(
+            Arc::clone(&governor).try_acquire_owned().expect("permit"),
+            Arc::clone(&stats),
+        );
+        let second = ConnectionPermit::new(
+            Arc::clone(&governor).try_acquire_owned().expect("permit"),
+            Arc::clone(&stats),
+        );
+        assert_eq!(stats.active(), 2);
+        assert_eq!(stats.capacity(), 0, "capacity is recorded by the host");
+
+        drop(first);
+        assert_eq!(stats.active(), 1);
+        drop(second);
+        assert_eq!(stats.active(), 0);
+        assert_eq!(governor.available_permits(), 2);
     }
 
     #[test]

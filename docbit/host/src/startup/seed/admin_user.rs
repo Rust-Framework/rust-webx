@@ -11,7 +11,6 @@
 //! default: shipping `admin123` to a public host hands over the admin panel.
 //! Operator-supplied passwords are never written to the log.
 
-use bcrypt::{hash, DEFAULT_COST};
 use docbit_handlers::db::{save_changes, EfResultExt};
 use rust_ef::{db_context::DbContext, prelude::*};
 use webx::*;
@@ -43,19 +42,45 @@ fn configured_password() -> Option<String> {
 }
 
 /// Create the default admin account when it is missing and a password is available.
-pub async fn ensure_admin_user(ctx: &mut DbContext) -> Result<()> {
+pub async fn ensure_admin_user(ctx: &mut DbContext, hasher: &dyn IPasswordHasher) -> Result<()> {
     let q = ADMIN_EMAIL.to_string();
     let existing = linq!(ctx.set::<User>(), |u: User| u.email == q)
         .first_or_default()
         .await
         .map_ef()?;
 
-    if existing.is_some() {
+    let mode = AppMode::from_env();
+    let password = resolve_password(mode, configured_password());
+
+    if let Some(mut existing) = existing {
+        // 2.5 moved the sample from bcrypt to the framework Argon2 hasher.
+        // Existing development databases keep working by re-hashing the
+        // configured/default admin password once; without a password we leave
+        // the row alone and warn instead of silently locking the account.
+        if existing.password_hash.starts_with("$2") {
+            if let Some(password) = password.as_deref() {
+                existing.password_hash = hasher.hash(password).await?;
+                existing.updated_at = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0);
+                ctx.update(existing);
+                save_changes(ctx).await?;
+                tracing::warn!(
+                    "[DbInit] Re-hashed legacy bcrypt admin to Argon2id; set {ADMIN_PASSWORD_ENV} \
+                     to rotate the password."
+                );
+            } else {
+                tracing::warn!(
+                    "[DbInit] Admin still has a legacy bcrypt hash and no {ADMIN_PASSWORD_ENV} \
+                     is set; set it once to migrate to Argon2id."
+                );
+            }
+        }
         return Ok(());
     }
 
-    let mode = AppMode::from_env();
-    let Some(password) = resolve_password(mode, configured_password()) else {
+    let Some(password) = password else {
         tracing::warn!(
             "[DbInit] No admin account created. Set {ADMIN_PASSWORD_ENV} to provision \
              `{ADMIN_EMAIL}`; Production never falls back to a built-in password."
@@ -68,8 +93,7 @@ pub async fn ensure_admin_user(ctx: &mut DbContext) -> Result<()> {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    let password_hash =
-        hash(&password, DEFAULT_COST).map_err(|e| Error::Internal(e.to_string()))?;
+    let password_hash = hasher.hash(&password).await?;
 
     let user = User {
         id: user_id.clone(),

@@ -103,6 +103,52 @@ impl Error {
         }
     }
 
+    /// Stable machine-readable error code for `problem+json` clients.
+    ///
+    /// Codes are part of the wire contract: they let a client branch without
+    /// parsing the human-readable `detail` (and without depending on a status
+    /// code that may map to several causes). `Problem` errors keep the code the
+    /// endpoint supplied.
+    pub fn code(&self) -> std::borrow::Cow<'static, str> {
+        use std::borrow::Cow;
+        match self {
+            Error::Http(_) => Cow::Borrowed("bad_request"),
+            Error::Status(code, _) => Cow::Borrowed(default_code_for_status(*code)),
+            Error::Unauthorized(_) => Cow::Borrowed("unauthorized"),
+            Error::Forbidden(_) => Cow::Borrowed("forbidden"),
+            Error::Di(_) => Cow::Borrowed("dependency_injection"),
+            Error::Routing(_) => Cow::Borrowed("route_not_found"),
+            Error::Serialization(_) => Cow::Borrowed("invalid_json"),
+            Error::ResponseSerialization(_) => Cow::Borrowed("response_serialization"),
+            Error::State(_) => Cow::Borrowed("invalid_state"),
+            Error::Internal(_) | Error::Message(_) => Cow::Borrowed("internal_error"),
+            Error::Validation(_) => Cow::Borrowed("validation_failed"),
+            Error::NotFound(_) => Cow::Borrowed("not_found"),
+            Error::Conflict(_) => Cow::Borrowed("conflict"),
+            Error::PayloadTooLarge(_) => Cow::Borrowed("payload_too_large"),
+            Error::UnsupportedMediaType(_) => Cow::Borrowed("unsupported_media_type"),
+            Error::Problem(problem) => match problem.code() {
+                Some(code) if !code.is_empty() => Cow::Owned(code.to_string()),
+                _ => Cow::Borrowed(default_code_for_status(problem.status)),
+            },
+        }
+    }
+
+    /// Whether retrying the same request could succeed.
+    ///
+    /// Only transient conditions are retryable: rate limiting and upstream
+    /// unavailability/timeout. A validation error or a server-side defect is
+    /// not — retrying would just repeat the failure.
+    pub fn retryable(&self) -> bool {
+        match self {
+            Error::Status(code, _) => status_is_retryable(*code),
+            Error::Problem(problem) => problem
+                .retryable()
+                .unwrap_or_else(|| status_is_retryable(problem.status)),
+            _ => false,
+        }
+    }
+
     /// The client-facing detail for a 4xx response.
     ///
     /// `Display` is written for operators (`"Unauthorized: …"`,
@@ -133,6 +179,36 @@ impl Error {
             | Error::Problem(_) => None,
         }
     }
+}
+
+/// Stable machine-readable code for a bare HTTP status.
+///
+/// Used when the error carries no more specific information (a raw status or a
+/// problem built from a status).
+pub fn default_code_for_status(status: u16) -> &'static str {
+    match status {
+        400 => "bad_request",
+        401 => "unauthorized",
+        403 => "forbidden",
+        404 => "not_found",
+        405 => "method_not_allowed",
+        409 => "conflict",
+        413 => "payload_too_large",
+        415 => "unsupported_media_type",
+        422 => "unprocessable_entity",
+        429 => "too_many_requests",
+        501 => "not_implemented",
+        500 => "internal_error",
+        502 => "bad_gateway",
+        503 => "service_unavailable",
+        504 => "gateway_timeout",
+        _ => "error",
+    }
+}
+
+/// Whether a bare HTTP status describes a transient condition worth retrying.
+pub fn status_is_retryable(status: u16) -> bool {
+    matches!(status, 429 | 502 | 503 | 504)
 }
 
 /// Shorthand for `Result<T, Error>` — the general fallible type used by
@@ -201,5 +277,34 @@ mod tests {
         assert!(matches!(err, Error::Serialization(_)));
         assert_eq!(err.status_code(), 400);
         assert_eq!(err.public_detail(), None);
+    }
+
+    #[test]
+    fn codes_and_retryability_are_stable() {
+        assert_eq!(Error::Validation("x".into()).code(), "validation_failed");
+        assert_eq!(Error::NotFound("x".into()).code(), "not_found");
+        assert_eq!(Error::Unauthorized("x".into()).code(), "unauthorized");
+        assert_eq!(
+            Error::Status(503, "down".into()).code(),
+            "service_unavailable"
+        );
+        assert_eq!(Error::Internal("x".into()).code(), "internal_error");
+
+        assert!(Error::Status(503, "down".into()).retryable());
+        assert!(Error::Status(429, "slow down".into()).retryable());
+        assert!(!Error::Status(500, "boom".into()).retryable());
+        assert!(!Error::Internal("boom".into()).retryable());
+        assert!(!Error::Validation("bad".into()).retryable());
+    }
+
+    #[test]
+    fn problem_errors_keep_their_code_and_retryability() {
+        let problem = crate::problem::ProblemDetails::new(429, "Too Many Requests")
+            .with_code("rate_limited")
+            .with_retryable(true);
+        let error = problem.to_error();
+        assert_eq!(error.status_code(), 429);
+        assert_eq!(error.code(), "rate_limited");
+        assert!(error.retryable());
     }
 }

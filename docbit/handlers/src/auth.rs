@@ -7,10 +7,9 @@
 //! 辅助函数 `load_user_by_email` / `load_user_by_id` 接收 `&mut DbContext`，
 //! 因为 `DbContext::set::<T>()` 需要 `&mut self`。
 
-use bcrypt::{hash, verify, DEFAULT_COST};
-use jsonwebtoken::{encode, EncodingKey, Header};
+use std::sync::Arc;
+
 use rust_ef::{db_context::DbContext, prelude::*};
-use serde::{Deserialize, Serialize};
 use webx::*;
 
 use docbit_contracts::auth::*;
@@ -20,36 +19,19 @@ use docbit_domain::{new_id, seed_ids};
 use crate::db::{save_changes, EfResultExt};
 use crate::util::{now_secs, operator_id};
 
-#[derive(Debug, Serialize, Deserialize)]
-struct AppJwtClaims {
-    sub: String,
-    name: String,
-    email: String,
-    #[serde(default)]
-    roles: Vec<String>,
-    iat: u64,
-    exp: u64,
-}
-
-fn create_token(user: &UserView) -> Result<String> {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-
-    encode(
-        &Header::default(),
-        &AppJwtClaims {
-            sub: user.id.clone(),
-            name: user.name.clone(),
-            email: user.email.clone(),
-            roles: user.roles.clone(),
-            iat: now,
-            exp: now + 86_400,
-        },
-        &EncodingKey::from_secret(jwt_secret().as_bytes()),
-    )
-    .map_err(|e| Error::Http(format!("Token creation failed: {}", e)))
+/// Mint a token through the framework port; the host stamps `iss`/`aud`
+/// (when configured), `jti`, `iat` and `exp`.
+async fn create_token(issuer: &dyn ITokenIssuer, user: &UserView) -> Result<String> {
+    let issued = issuer
+        .issue(
+            TokenClaims::new(&user.id)
+                .with_roles(user.roles.clone())
+                .with_claim("name", user.name.clone())
+                .with_claim("email", user.email.clone())
+                .expires_in(std::time::Duration::from_secs(86_400)),
+        )
+        .await?;
+    Ok(issued.token)
 }
 
 fn user_to_view(user: User) -> UserView {
@@ -88,12 +70,20 @@ async fn load_user_by_id(ctx: &mut DbContext, id: &str) -> Result<Option<User>> 
 pub struct RegisterHandler {
     #[inject(owned)]
     ctx: DbContext,
+    #[inject]
+    tokens: Arc<dyn ITokenIssuer>,
+    #[inject]
+    hasher: Arc<dyn IPasswordHasher>,
 }
 
 #[derive(Inject)]
 pub struct LoginHandler {
     #[inject(owned)]
     ctx: DbContext,
+    #[inject]
+    tokens: Arc<dyn ITokenIssuer>,
+    #[inject]
+    hasher: Arc<dyn IPasswordHasher>,
 }
 
 #[derive(Inject)]
@@ -112,6 +102,8 @@ pub struct ForgotPasswordHandler {
 pub struct ResetPasswordHandler {
     #[inject(owned)]
     ctx: DbContext,
+    #[inject]
+    hasher: Arc<dyn IPasswordHasher>,
 }
 
 #[handler(inject)]
@@ -125,8 +117,7 @@ impl IRequestHandler<RegisterRequest, AuthResponse> for RegisterHandler {
             return Err(Error::Http("Email already registered".into()));
         }
 
-        let hashed =
-            hash(&req.password, DEFAULT_COST).map_err(|e| Error::Http(format!("Hash: {}", e)))?;
+        let hashed = self.hasher.hash(&req.password).await?;
         let now = now_secs();
         let user_id = new_id();
 
@@ -162,7 +153,7 @@ impl IRequestHandler<RegisterRequest, AuthResponse> for RegisterHandler {
             include row.roles
         );
         let model = user_to_view(saved);
-        let token = create_token(&model)?;
+        let token = create_token(&*self.tokens, &model).await?;
 
         tracing::info!("[Auth] User registered: {} ({})", model.name, model.id);
         Ok(AuthResponse { token, user: model })
@@ -177,15 +168,19 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
             .await?
             .ok_or_else(|| Error::Http("Invalid email or password".into()))?;
 
-        if user.password_hash.is_empty()
-            || !verify(&req.password, &user.password_hash)
-                .map_err(|_| Error::Http("Authentication error".into()))?
-        {
+        let verified = if user.password_hash.is_empty() {
+            false
+        } else {
+            self.hasher
+                .verify(&req.password, &user.password_hash)
+                .await?
+        };
+        if !verified {
             return Err(Error::Http("Invalid email or password".into()));
         }
 
         let model = user_to_view(user);
-        let token = create_token(&model)?;
+        let token = create_token(&*self.tokens, &model).await?;
 
         tracing::info!("[Auth] User logged in: {} ({})", model.name, model.id);
         Ok(AuthResponse { token, user: model })
@@ -274,8 +269,7 @@ impl IRequestHandler<ResetPasswordRequest, ResetPasswordResponse> for ResetPassw
             return Err(Error::Http("Reset token expired".into()));
         }
 
-        let hashed =
-            hash(&req.password, DEFAULT_COST).map_err(|e| Error::Http(format!("Hash: {}", e)))?;
+        let hashed = self.hasher.hash(&req.password).await?;
 
         let user_id = record.user_id.clone();
         let mut user = load_user_by_id(&mut self.ctx, &user_id)

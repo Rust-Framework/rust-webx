@@ -1,48 +1,14 @@
 //! Auth handlers — login / me / change-password.
 
-use bcrypt::{hash, verify, DEFAULT_COST};
-use jsonwebtoken::{encode, EncodingKey, Header};
-use rust_ef::{db_context::DbContext, prelude::*};
-use serde::{Deserialize, Serialize};
-use webx::*;
+use std::sync::Arc;
 
-use dmbit_contracts::auth::*;
-use dmbit_domain::entities::User;
+use rust_ef::{db_context::DbContext, prelude::*};
+use webx::*;
 
 use crate::db::EfResultExt;
 use crate::util::{now_secs, operator_id};
-
-#[derive(Debug, Serialize, Deserialize)]
-struct AppJwtClaims {
-    sub: String,
-    name: String,
-    email: String,
-    #[serde(default)]
-    roles: Vec<String>,
-    iat: u64,
-    exp: u64,
-}
-
-fn create_token(user: &UserView) -> Result<String> {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-
-    encode(
-        &Header::default(),
-        &AppJwtClaims {
-            sub: user.id.clone(),
-            name: user.name.clone(),
-            email: user.email.clone(),
-            roles: user.roles.clone(),
-            iat: now,
-            exp: now + 86_400,
-        },
-        &EncodingKey::from_secret(jwt_secret().as_bytes()),
-    )
-    .map_err(|e| Error::Http(format!("Token creation failed: {}", e)))
-}
+use dmbit_contracts::auth::*;
+use dmbit_domain::entities::User;
 
 fn user_to_view(user: User) -> UserView {
     UserView {
@@ -52,6 +18,14 @@ fn user_to_view(user: User) -> UserView {
         roles: user.roles.items().iter().map(|r| r.name.clone()).collect(),
         created_at: user.created_at,
     }
+}
+
+async fn create_token(tokens: &dyn ITokenIssuer, user: &UserView) -> Result<String> {
+    let claims = TokenClaims::new(&user.id)
+        .with_claim("name", user.name.clone())
+        .with_claim("email", user.email.clone())
+        .with_roles(user.roles.iter().cloned());
+    Ok(tokens.issue(claims).await?.token)
 }
 
 async fn load_user_by_email(ctx: &mut DbContext, email: &str) -> Result<Option<User>> {
@@ -76,6 +50,10 @@ async fn load_user_by_id(ctx: &mut DbContext, id: &str) -> Result<Option<User>> 
 pub struct LoginHandler {
     #[inject(owned)]
     ctx: DbContext,
+    #[inject]
+    tokens: Arc<dyn ITokenIssuer>,
+    #[inject]
+    hasher: Arc<dyn IPasswordHasher>,
 }
 
 #[derive(Inject)]
@@ -88,6 +66,8 @@ pub struct AuthMeHandler {
 pub struct ChangePasswordHandler {
     #[inject(owned)]
     ctx: DbContext,
+    #[inject]
+    hasher: Arc<dyn IPasswordHasher>,
 }
 
 #[handler(inject)]
@@ -99,14 +79,16 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
             .ok_or_else(|| Error::Http("邮箱或密码错误".into()))?;
 
         if user.password_hash.is_empty()
-            || !verify(&req.password, &user.password_hash)
-                .map_err(|_| Error::Http("认证失败".into()))?
+            || !self
+                .hasher
+                .verify(&req.password, &user.password_hash)
+                .await?
         {
             return Err(Error::Http("邮箱或密码错误".into()));
         }
 
         let model = user_to_view(user);
-        let token = create_token(&model)?;
+        let token = create_token(self.tokens.as_ref(), &model).await?;
         tracing::info!("[Auth] login: {} ({})", model.email, model.id);
         Ok(AuthResponse { token, user: model })
     }
@@ -137,14 +119,15 @@ impl IRequestHandler<ChangePasswordRequest, ChangePasswordResponse> for ChangePa
             .await?
             .ok_or_else(|| Error::Http("用户不存在".into()))?;
 
-        if !verify(&req.old_password, &user.password_hash)
-            .map_err(|_| Error::Http("认证失败".into()))?
+        if !self
+            .hasher
+            .verify(&req.old_password, &user.password_hash)
+            .await?
         {
             return Err(Error::Http("原密码不正确".into()));
         }
 
-        let hashed = hash(&req.new_password, DEFAULT_COST)
-            .map_err(|e| Error::Http(format!("Hash: {}", e)))?;
+        let hashed = self.hasher.hash(&req.new_password).await?;
         user.password_hash = hashed;
         user.updated_at = now_secs();
         user.updated_id = Some(uid);

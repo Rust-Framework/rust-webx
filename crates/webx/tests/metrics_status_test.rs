@@ -98,4 +98,23 @@ async fn failed_handler_is_counted_as_5xx_before_after_hooks() {
         metrics.contains("http_responses_5xx_total 1"),
         "metrics did not observe the handler error: {metrics}"
     );
+    // Per-route RED signals (2.2): the failed request is labelled with its
+    // matched route pattern and observed in the latency histogram.
+    assert!(
+        metrics.contains("http_route_requests_total{route=\"/fail\",status=\"5xx\"} 1"),
+        "route label missing: {metrics}"
+    );
+    assert!(
+        metrics.contains("http_request_duration_seconds_count{route=\"/fail\"} 1"),
+        "route latency histogram missing: {metrics}"
+    );
+    assert!(
+        metrics.contains("http_request_duration_seconds_bucket{route=\"/fail\",le=\"+Inf\"} 1"),
+        "histogram +Inf bucket missing: {metrics}"
+    );
+    // Unmatched paths share one bounded label instead of growing the map.
+    assert!(
+        metrics.contains("http_requests_inflight"),
+        "inflight gauge missing: {metrics}"
+    );
 }

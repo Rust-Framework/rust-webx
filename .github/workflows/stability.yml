@@ -1,0 +1,205 @@
+name: Stability
+
+# Nightly soak + chaos. The PR CI keeps the fast gates; these tests are
+# `#[ignore]`d there and only run here (or by hand).
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      soak_seconds:
+        description: "Soak duration in seconds (86400 for a full 24h run)"
+        required: false
+        default: "300"
+
+jobs:
+  soak:
+    name: Soak
+    runs-on: ubuntu-latest
+    # 25h so a manual 86400s run fits; the default run takes ~5 minutes.
+    timeout-minutes: 1500
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run soak
+        env:
+          SOAK_SECONDS: ${{ github.event.inputs.soak_seconds || '300' }}
+          SOAK_MAX_RSS_GROWTH_MB: "256"
+        run: cargo test -p rust-webx --test stability_soak_test -- --ignored --nocapture
+
+  chaos:
+    name: Chaos
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run chaos scenarios
+        run: cargo test -p rust-webx --test stability_chaos_test -- --ignored --nocapture --test-threads=1
+
+  wire-perf:
+    name: Wire latency (p99)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Wire p99 baseline (release)
+        env:
+          WIRE_P99_BUDGET_MS: "5"
+        run: cargo test --release -p rust-webx --test wire_p99_test -- --ignored --nocapture
+
+  broker-integration:
+    name: Broker adapters (redis/nats/rabbitmq/kafka)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+          --health-start-period 5s
+      nats:
+        image: nats:2
+        ports:
+          - 4222:4222
+      rabbitmq:
+        image: rabbitmq:3-management
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 5s
+          --health-timeout 10s
+          --health-retries 24
+          --health-start-period 20s
+      kafka:
+        image: apache/kafka:3.9.0
+        ports:
+          - 9092:9092
+        options: >-
+          --health-cmd "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"
+          --health-interval 10s
+          --health-timeout 10s
+          --health-retries 18
+          --health-start-period 30s
+        env:
+          KAFKA_NODE_ID: 1
+          KAFKA_PROCESS_ROLES: broker,controller
+          KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+          KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://127.0.0.1:9092
+          KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+          KAFKA_CONTROLLER_QUORUM_VOTERS: 1@127.0.0.1:9093
+          KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+          KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+          KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+          KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+          KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Wait for brokers
+        # The service health checks above cover Redis/RabbitMQ/Kafka; this
+        # loop is the final TCP gate (and the only gate for NATS). 240s is
+        # intentionally above Kafka's worst-case 30s start-period + 18x10s.
+        run: |
+          for port in 6379 4222 5672 9092; do
+            ready=0
+            for i in $(seq 1 240); do
+              if (echo > /dev/tcp/127.0.0.1/$port) >/dev/null 2>&1; then
+                ready=1
+                break
+              fi
+              sleep 1
+            done
+            if [ "$ready" -ne 1 ]; then
+              echo "broker on port $port did not start within 240s"
+              exit 1
+            fi
+          done
+      - name: Broker health snapshot
+        # First green run: use this snapshot/timing to tighten the
+        # start_period/retries values in this job and docker-compose.brokers.yml.
+        run: docker ps --format 'table {{.Names}}\t{{.Status}}'
+      - name: Redis adapter integration (cache + event transport)
+        env:
+          WEBX_REDIS_URL: redis://127.0.0.1:6379
+        run: cargo test -p rust-webx-redis --test integration -- --nocapture
+      - name: NATS adapter integration (event transport)
+        env:
+          WEBX_NATS_URL: nats://127.0.0.1:4222
+        run: cargo test -p rust-webx-nats --test integration -- --nocapture
+      - name: RabbitMQ adapter integration (event transport)
+        env:
+          WEBX_RABBITMQ_URL: amqp://guest:guest@127.0.0.1:5672/%2f
+        run: cargo test -p rust-webx-rabbitmq --test integration -- --nocapture
+      - name: Kafka adapter integration (event transport)
+        env:
+          WEBX_KAFKA_BROKERS: 127.0.0.1:9092
+        run: cargo test -p rust-webx-kafka --test integration -- --nocapture
+
+  auth-budget:
+    name: Auth performance budget
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: HS256 p99 budget (release)
+        run: cargo test --release -p rust-webx-host --test auth_budget_test hs256_p99 -- --ignored --nocapture
+      - name: Malformed auth input fuzz
+        run: cargo test -p rust-webx-host --test auth_budget_test
+
+  auth-interop:
+    name: Auth local interop (OIDC/mTLS)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: OIDC over real HTTPS with a private CA
+        run: cargo test -p rust-webx-oidc --test oidc_https_e2e_test
+      - name: mTLS handshake and fingerprint injection
+        run: cargo test -p rust-webx-engine --test tls
+      - name: mTLS scheme and fail-closed build
+        run: cargo test -p rust-webx-host --test mtls_test
+      - name: Quickstart example compiles
+        run: cargo check -p rust-webx --example auth_quickstart
+
+  auth-live:
+    name: Auth live IdP (Google/Duende/Microsoft)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Live discovery + JWKS
+        run: cargo test -p rust-webx-oidc --test oidc_live_test -- --ignored --nocapture
+
+  webauthn-browser:
+    name: WebAuthn browser (Chromium virtual authenticator)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Playwright core + Chromium
+        run: |
+          npm install --prefix /tmp/pw playwright-core
+          /tmp/pw/node_modules/.bin/playwright install --with-deps chromium
+      - name: Capture real create/get and verify in Rust
+        run: |
+          export NODE_PATH=/tmp/pw/node_modules
+          export CHROME_PATH=$(node -e "console.log(require('playwright-core').chromium.executablePath())")
+          node crates/webauthn/tests/browser_e2e.js
+          WEBAUTHN_BROWSER_JSON=browser_webauthn.json cargo test -p rust-webx-webauthn --test browser_e2e_test -- --ignored --nocapture

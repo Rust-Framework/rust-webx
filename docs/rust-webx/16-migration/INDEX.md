@@ -9,6 +9,7 @@
 
 | 小节 | 内容 |
 |------|------|
+| [升级到 2.4（2.x 加性演进）](upgrade-to-2.4.md) | 2.2/2.3/2.4 三条功能线总览、可选采用清单、稳定面与弃用承诺 |
 | [升级到 1.1（破坏性变更）](upgrade-to-1.1.md) | ResponseData 换成 IActionResult 族、IRequest<Response>、OpenAPI 占位组件 |
 | [升级到 1.0.2（破坏性变更）](upgrade-to-1.0.2.md) | Handler 返回类型改名 ActionResult、PagedResponse → PagedResult |
 | [升级到 1.0（破坏性变更）](upgrade-to-1.0.md) | rust-dix 0.10 对齐、删除 ambient DI 与 erased pipeline、dispose/async build |
@@ -28,3 +29,5 @@
 从其它框架过来？看 [从 ASP.NET Core 迁移](from-aspnet-core.md) 或
 [从 Axum / Actix 迁移](from-axum-actix.md)；遇到不熟悉的术语时查
 [概念对照表](concept-mapping.md)。
+
+已在 2.x？直接看 [升级到 2.4](upgrade-to-2.4.md)；兼容性承诺与 LTS 规则见 [compatibility.md](../../design/compatibility.md)。

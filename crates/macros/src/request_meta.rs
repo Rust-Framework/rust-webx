@@ -1227,18 +1227,12 @@ fn bind_fn(fields: &[FieldSpec], plan: &BindingPlan) -> TokenStream2 {
     if !has_fields {
         let construct = construct_expr(fields, plan.is_unit);
         return quote! {
-            fn bind<'__webx>(
-                _ctx: &'__webx mut dyn ::webx::IHttpContext,
-            ) -> ::core::pin::Pin<
-                ::std::boxed::Box<
-                    dyn ::core::future::Future<Output = ::webx::Result<Self>>
-                        + ::core::marker::Send
-                        + '__webx,
-                >,
-            > {
-                ::std::boxed::Box::pin(async move {
-                    ::core::result::Result::Ok(#construct)
-                })
+            fn bind_inline(
+                _ctx: &mut dyn ::webx::IHttpContext,
+            ) -> impl ::core::future::Future<Output = ::webx::Result<Self>>
+            + ::core::marker::Send
+            + '_ {
+                async move { ::core::result::Result::Ok(#construct) }
             }
         };
     }
@@ -1392,16 +1386,12 @@ fn bind_fn(fields: &[FieldSpec], plan: &BindingPlan) -> TokenStream2 {
     let construct = construct_expr(fields, plan.is_unit);
 
     quote! {
-        fn bind<'__webx>(
-            ctx: &'__webx mut dyn ::webx::IHttpContext,
-        ) -> ::core::pin::Pin<
-            ::std::boxed::Box<
-                dyn ::core::future::Future<Output = ::webx::Result<Self>>
-                    + ::core::marker::Send
-                    + '__webx,
-            >,
-        > {
-            ::std::boxed::Box::pin(async move {
+        fn bind_inline(
+            ctx: &mut dyn ::webx::IHttpContext,
+        ) -> impl ::core::future::Future<Output = ::webx::Result<Self>>
+        + ::core::marker::Send
+        + '_ {
+            async move {
                 let __is_multipart = ctx.request().is_multipart();
                 let __is_body_method = ::webx::binding::is_body_method(ctx.request().method());
                 #form_guard
@@ -1433,7 +1423,7 @@ fn bind_fn(fields: &[FieldSpec], plan: &BindingPlan) -> TokenStream2 {
                 }
 
                 ::core::result::Result::Ok(#construct)
-            })
+            }
         }
     }
 }

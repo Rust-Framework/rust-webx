@@ -22,6 +22,21 @@ where
 }
 ```
 
+### 编译期校验（2.2）
+
+路由宏（`#[get]`/`#[post]`/…）只接受 `impl IRequest<Response> for Type`：
+
+- 写在其它 trait impl 或 inherent impl 上会在**编译期**报错（不会再静默把响应类型当成 `()`、
+  等到启动期才发现孤儿路由）；
+- `IRequest` 必须带且只带一个响应类型参数；
+- `#[handler]` 只接受 `impl IRequestHandler<Req, Rsp>` 或
+  `impl IEventHandler<Event>`；事件 impl 与请求 impl 使用同一套构造规则：
+  `#[handler]`（`Default`）或 `#[handler(inject)]`（`#[derive(Inject)]`），
+  自动生成路由 + 构造注册（`EventHandlerRegistration`），不需要显式
+  `dyn IEventHandler` DI 注册。其它 trait 直接编译失败。
+
+端点属性与 handler 的 impl 仍由两个宏分别处理；需要查看生成代码时用 `cargo expand`。
+
 ### 返回类型：`ActionResult<T>`
 
 `handle` 返回 **`ActionResult<T>`** —— 框架级类型，对标 ASP.NET Core 的 `ActionResult<T>`：

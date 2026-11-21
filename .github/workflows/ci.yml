@@ -66,8 +66,26 @@ jobs:
       - name: Check docs consistency
         run: bash scripts/check-docs.sh
 
+      - name: Validate local broker compose
+        # Client-side validation only: no Docker engine is required, so this
+        # catches drift between docker-compose.brokers.yml and the adapter
+        # integration job in PR CI.
+        run: docker compose -f docker-compose.brokers.yml config > /dev/null
+
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # Internal crates are released in lockstep; exact pins keep a consumer
+      # from resolving a mixed set (e.g. umbrella 2.0 + host 2.1).
+      - name: Internal version pins
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          echo "workspace version: $version"
+          if grep 'path = "crates/' Cargo.toml | grep -qv "version = \"=$version\""; then
+            echo "internal crates must be pinned to =$version:"
+            grep 'path = "crates/' Cargo.toml | grep -v "version = \"=$version\"" || true
+            exit 1
+          fi
 
   msrv:
     name: MSRV (1.95)
@@ -149,6 +167,47 @@ jobs:
           cargo bench -p rust-webx-host --bench router_bench -- --warm-up-time 1 --measurement-time 1
           cargo bench -p rust-webx-host --bench pipeline_bench -- --warm-up-time 1 --measurement-time 1
 
+  alloc:
+    name: Allocation budget
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # Compares the framework against a bare-hyper floor measured in the same
+      # window; the gate is the *framework tax*, not an absolute total (the
+      # floor depends on the hyper version). See docs/design/alloc-budget.md.
+      - name: Measure framework allocation tax
+        run: cargo run -p alloc-probe --release --locked -- compare 500 12
+
+  semver:
+    name: SemVer (vs v2.1.0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-semver-checks
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-semver-checks
+      - name: Check the public API against the previous release
+        run: |
+          for package in rust-webx-core rust-webx-engine rust-webx-host rust-webx; do
+            cargo semver-checks --package "$package" --baseline-rev v2.1.0
+          done
+
+  upgrade:
+    name: Upgrade smoke (N-2)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build against rust-webx 2.0.0
+        run: cargo build --manifest-path compat/upgrade-smoke/stable/Cargo.toml
+      - name: Build the same source against the current workspace
+        run: cargo build --manifest-path compat/upgrade-smoke/current/Cargo.toml
+
   build:
     name: Build (release)
     runs-on: ubuntu-latest
@@ -189,3 +248,15 @@ jobs:
 
       - name: Build docbit-host
         run: cargo build -p docbit-host
+
+      # 2.2-7: reference apps must use the framework security ports, not
+      # hand-rolled JWT/bcrypt (the EF `map_ef` adapter is allowed: rust-ef
+      # 2.5's `webx` feature targets rust-webx-core 1.x — see
+      # docs/design/compatibility.md).
+      - name: Reference apps use native auth ports
+        run: |
+          if grep -rnE '^\s*(use (jsonwebtoken|bcrypt)|jsonwebtoken\s*=|bcrypt\s*=)' \
+              docbit dmbit --include='*.rs' --include='Cargo.toml'; then
+            echo "reference apps must use ITokenIssuer/IPasswordHasher, not hand-written JWT/bcrypt"
+            exit 1
+          fi

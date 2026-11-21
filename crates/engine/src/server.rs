@@ -36,7 +36,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{mpsc, watch, Semaphore};
 use webx_core::error::{Error, Result};
 
-use crate::shared::Shared;
+use crate::shared::{ConnectionPermit, Shared};
 use crate::worker::{self, Worker, WorkerFeed};
 
 /// Pause before retrying a failed `accept` (EMFILE, transient network error).
@@ -111,9 +111,11 @@ impl Server {
         let tls = match self.shared.tls.clone() {
             Some(config) => Some(config),
             None => match self.shared.config.tls.as_ref() {
-                Some(config) => Some(crate::tls::build_server_config(
+                Some(config) => Some(crate::tls::build_server_config_with_client_auth(
                     &config.cert_path,
                     &config.key_path,
+                    &config.client_ca_path,
+                    config.client_auth,
                 )?),
                 None => None,
             },
@@ -358,16 +360,34 @@ async fn accept_loop(
         };
 
         // Admission is global: no per-listener or per-worker multiplication.
-        // At most one already-accepted socket per listener waits here, so the
-        // kernel backlog remains the queue when the governor is full.
+        // A socket that cannot get a slot within `AdmissionTimeoutMs` answers
+        // `503` and is closed: leaving it in the kernel backlog would hide the
+        // queue from clients and from `/metrics`.
+        shared.admission.begin_wait();
         let permit = tokio::select! {
             biased;
-            _ = worker::wait_for_shutdown(&mut shutdown) => break,
-            acquired = Arc::clone(&governor).acquire_owned() => match acquired {
-                Ok(permit) => permit,
-                Err(_) => return Err(Error::Internal("connection governor closed".to_string())),
-            },
+            _ = worker::wait_for_shutdown(&mut shutdown) => {
+                shared.admission.end_wait();
+                break;
+            }
+            acquired = acquire_admission(&governor, shared.config.admission_timeout) => {
+                shared.admission.end_wait();
+                match acquired {
+                    Admission::Permit(raw) => {
+                        ConnectionPermit::new(raw, Arc::clone(&shared.admission))
+                    }
+                    Admission::TimedOut => {
+                        shared.admission.record_rejected();
+                        reject_overloaded(stream, peer).await;
+                        continue;
+                    }
+                    Admission::Closed => {
+                        return Err(Error::Internal("connection governor closed".to_string()));
+                    }
+                }
+            }
         };
+        shared.admission.record_admitted();
 
         if let Err(err) = stream.set_nodelay(true) {
             tracing::debug!(peer = %peer, error = %err, "engine: TCP_NODELAY unavailable");
@@ -399,6 +419,57 @@ async fn accept_loop(
     Ok(())
 }
 
+/// One admission attempt result.
+enum Admission {
+    /// A slot was granted.
+    Permit(tokio::sync::OwnedSemaphorePermit),
+    /// The socket waited past `AdmissionTimeout`.
+    TimedOut,
+    /// The governor was closed (engine shutting down).
+    Closed,
+}
+
+/// Acquire a global admission slot, bounded by the configured deadline.
+async fn acquire_admission(governor: &Arc<Semaphore>, timeout: Option<Duration>) -> Admission {
+    // Clone first so the future owns the permit source; `acquire_owned` is
+    // cancellation-safe (a dropped future releases nothing because no permit
+    // was granted).
+    let acquire = Arc::clone(governor).acquire_owned();
+    match timeout {
+        Some(limit) => match tokio::time::timeout(limit, acquire).await {
+            Ok(Ok(permit)) => Admission::Permit(permit),
+            Ok(Err(_)) => Admission::Closed,
+            Err(_) => Admission::TimedOut,
+        },
+        None => match acquire.await {
+            Ok(permit) => Admission::Permit(permit),
+            Err(_) => Admission::Closed,
+        },
+    }
+}
+
+/// Best-effort `503` for a socket that waited past the admission deadline.
+///
+/// The write is bounded so a client that never reads cannot pin the acceptor;
+/// HTTP/2 clients get the same bytes and then a close (the connection is being
+/// shed anyway).
+const OVERLOAD_RESPONSE: &[u8] = b"HTTP/1.1 503 Service Unavailable\r\n\
+content-type: text/plain; charset=utf-8\r\n\
+retry-after: 1\r\n\
+content-length: 0\r\n\
+connection: close\r\n\r\n";
+
+async fn reject_overloaded(mut stream: tokio::net::TcpStream, peer: SocketAddr) {
+    use tokio::io::AsyncWriteExt;
+    tracing::debug!(peer = %peer, "engine: admission timed out; answering 503");
+    let _ = tokio::time::timeout(
+        Duration::from_millis(50),
+        stream.write_all(OVERLOAD_RESPONSE),
+    )
+    .await;
+    let _ = stream.shutdown().await;
+}
+
 /// Insert `stream` into the least-loaded worker that still has budget.
 ///
 /// Selection is least-loaded (queue + active connections) with a round-robin
@@ -413,7 +484,7 @@ async fn handoff(
     stream: std::net::TcpStream,
     peer: SocketAddr,
     tls: Option<Arc<rustls::ServerConfig>>,
-    permit: tokio::sync::OwnedSemaphorePermit,
+    permit: crate::shared::ConnectionPermit,
     shutdown: &mut watch::Receiver<bool>,
 ) -> Result<()> {
     if workers.is_empty() {
@@ -543,14 +614,16 @@ pub(crate) mod connection {
 
     use futures_util::FutureExt;
     use hyper::body::Incoming;
+    use hyper::header::{HeaderName, HeaderValue};
     use hyper::{Request, Response};
     use webx_core::error::{Error, Result};
-    use webx_core::http::IHttpContext;
+    use webx_core::http::{IHttpContext, CLIENT_CERT_FINGERPRINT_HEADER};
     use webx_core::problem::ProblemDetails;
 
     use crate::context::EngineContext;
     use crate::pipeline::FinalHandler;
     use crate::response::RespBody;
+    use crate::router::RouteTarget;
     use crate::shared::{ActiveStreamGuard, Shared};
 
     /// Serve one request on an existing connection.
@@ -561,17 +634,33 @@ pub(crate) mod connection {
     /// dropped connection (or a dead worker under `panic = "abort"`).
     pub(crate) async fn serve(
         shared: Arc<Shared>,
-        request: Request<Incoming>,
+        mut request: Request<Incoming>,
         peer: Option<SocketAddr>,
         streams: Arc<ActiveStreamGuard>,
+        client_cert: Option<Arc<str>>,
         terminal: FinalHandler,
+        upgrade: Option<hyper::upgrade::OnUpgrade>,
     ) -> std::result::Result<Response<RespBody>, Infallible> {
+        // The TLS terminator is the only source of truth for the client
+        // certificate: never let a plain-HTTP or upstream request spoof it.
+        request.headers_mut().remove(CLIENT_CERT_FINGERPRINT_HEADER);
+        if let Some(fingerprint) = client_cert {
+            if let Ok(value) = HeaderValue::from_str(&fingerprint) {
+                request.headers_mut().insert(
+                    HeaderName::from_static(CLIENT_CERT_FINGERPRINT_HEADER),
+                    value,
+                );
+            }
+        }
         let mut ctx = EngineContext::new(
             request,
             Arc::clone(&shared.body_limits),
             peer,
             Arc::clone(&shared.dispatch),
         );
+        if let Some(upgrade) = upgrade {
+            ctx = ctx.with_upgrade(upgrade);
+        }
 
         let error_writer: crate::pipeline::ErrorHandler = {
             let shared = Arc::clone(&shared);
@@ -620,6 +709,20 @@ pub(crate) mod connection {
         Arc::new(move |ctx: &mut EngineContext| route(Arc::clone(&shared), ctx))
     }
 
+    /// Run a matched route target, preferring compile-time direct dispatch
+    /// (2.4-9) so the common JSON route skips the `async_trait` boxed future.
+    async fn dispatch_target(target: &dyn RouteTarget, ctx: &mut EngineContext) -> Result<()> {
+        if let Some((dispatch, encoder)) = target.direct() {
+            // The direct path skips the route guard, so it must keep the one
+            // guard that is not optional: the declared body limit check.
+            ctx.request_mut().validate_declared_body_limit()?;
+            let result = dispatch(&mut *ctx, encoder).await?;
+            ctx.write_endpoint_result(result).await
+        } else {
+            target.handle(ctx).await
+        }
+    }
+
     /// Route one request and dispatch its target.
     fn route<'a>(
         shared: Arc<Shared>,
@@ -649,12 +752,14 @@ pub(crate) mod connection {
                     // route limit and validate against the global cap below.
                     match shared.config.request_timeout {
                         Some(limit) => {
-                            match tokio::time::timeout(limit, hit.target.handle(ctx)).await {
+                            match tokio::time::timeout(limit, dispatch_target(&*hit.target, ctx))
+                                .await
+                            {
                                 Ok(result) => result,
                                 Err(_) => Err(Error::Status(504, "request timed out".to_string())),
                             }
                         }
-                        None => hit.target.handle(ctx).await,
+                        None => dispatch_target(&*hit.target, ctx).await,
                     }
                 }
                 None => {
@@ -752,10 +857,22 @@ pub(crate) mod connection {
     /// 5xx details are logged and replaced with a stable message; 401 carries
     /// the `Bearer` challenge every framework 401 must have.
     async fn write_default_problem(ctx: &mut EngineContext, error: &Error) {
+        let path = ctx.request().path().to_string();
+        let trace_id = ctx.trace_id().map(str::to_string);
+
         if let Error::Problem(problem) = error {
             // A binding/validation failure already carries its full payload
-            // (status and the `errors` extension); write it verbatim.
-            write_problem(ctx, (**problem).clone()).await;
+            // (status and the `errors` extension); keep it and fill only the
+            // framework-guaranteed members the caller left empty.
+            let mut problem = (**problem).clone();
+            if problem.code().is_none() {
+                problem = problem.with_code(error.code().into_owned());
+            }
+            if problem.retryable().is_none() {
+                problem = problem.with_retryable(error.retryable());
+            }
+            problem.complete(Some(&path), trace_id.as_deref());
+            write_problem(ctx, problem).await;
             return;
         }
 
@@ -775,10 +892,20 @@ pub(crate) mod connection {
                 .to_string()
         };
 
-        write_problem(ctx, problem_details(status, detail)).await;
+        let mut problem = problem_details(status, detail)
+            .with_code(error.code().into_owned())
+            .with_retryable(error.retryable());
+        problem.complete(Some(&path), trace_id.as_deref());
+        write_problem(ctx, problem).await;
     }
 
-    async fn write_problem(ctx: &mut EngineContext, problem: ProblemDetails) {
+    async fn write_problem(ctx: &mut EngineContext, mut problem: ProblemDetails) {
+        // Problems built by internal helpers (404/405/deadline) have no `Error`
+        // to derive from; fill the guaranteed extension members here.
+        let path = ctx.request().path().to_string();
+        let trace_id = ctx.trace_id().map(str::to_string);
+        problem.complete(Some(&path), trace_id.as_deref());
+
         ctx.strip_entity_headers();
         let status = problem.status;
         // Serializing a `ProblemDetails` cannot fail; an empty body is still a
@@ -873,8 +1000,10 @@ pub(crate) mod connection {
 
 #[cfg(test)]
 mod tests {
-    use super::{join_budget_for, JOIN_GRACE};
+    use super::{acquire_admission, join_budget_for, Admission, JOIN_GRACE};
+    use std::sync::Arc;
     use std::time::Duration;
+    use tokio::sync::Semaphore;
 
     #[test]
     fn join_budget_covers_the_longest_drain_plus_grace() {
@@ -886,5 +1015,27 @@ mod tests {
             join_budget_for(Duration::from_secs(30), Duration::from_secs(5)),
             Duration::from_secs(30) + JOIN_GRACE
         );
+    }
+
+    #[tokio::test]
+    async fn admission_timeout_reports_timed_out() {
+        let governor = Arc::new(Semaphore::new(0));
+        let started = std::time::Instant::now();
+        let outcome = acquire_admission(&governor, Some(Duration::from_millis(20))).await;
+        assert!(matches!(outcome, Admission::TimedOut));
+        assert!(started.elapsed() >= Duration::from_millis(20));
+    }
+
+    #[tokio::test]
+    async fn admission_without_deadline_waits_for_a_permit() {
+        let governor = Arc::new(Semaphore::new(0));
+        let waiter = {
+            let governor = Arc::clone(&governor);
+            tokio::spawn(async move { acquire_admission(&governor, None).await })
+        };
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        governor.add_permits(1);
+        let outcome = waiter.await.expect("join admission waiter");
+        assert!(matches!(outcome, Admission::Permit(_)));
     }
 }

@@ -97,8 +97,8 @@ impl<T: Serialize + Send> IActionResult for JsonResult<T> {
     async fn execute(self: Box<Self>, ctx: &mut dyn IHttpContext) -> Result<()> {
         // Serialize before touching the response: the body must be a Send
         // buffer, and the DTO itself does not need to be `Sync` to be written.
-        let json =
-            serde_json::to_vec(&self.value).map_err(crate::error::Error::ResponseSerialization)?;
+        let json = crate::json::encode_json(&self.value)
+            .map_err(crate::error::Error::ResponseSerialization)?;
         let response = ctx.response_mut();
         response.set_status(self.status);
         response.set_header("content-type", "application/json");
@@ -182,7 +182,13 @@ impl IActionResult for ContentResult {
         response.set_status(self.status);
         response.set_header("content-type", &self.content_type);
         for (key, value) in &self.headers {
-            response.set_header(key, value);
+            if key.eq_ignore_ascii_case("set-cookie") {
+                // Login sets two cookies (session + CSRF); each `Set-Cookie`
+                // must be an independent header line, not an overwrite.
+                response.append_header(key, value);
+            } else {
+                response.set_header(key, value);
+            }
         }
         response.write_bytes(self.body).await
     }
@@ -311,7 +317,13 @@ impl IActionResult for FileResult {
         let response = ctx.response_mut();
         response.set_status(self.status);
         for (key, value) in &self.headers {
-            response.set_header(key, value);
+            if key.eq_ignore_ascii_case("set-cookie") {
+                // Login sets two cookies (session + CSRF); each `Set-Cookie`
+                // must be an independent header line, not an overwrite.
+                response.append_header(key, value);
+            } else {
+                response.set_header(key, value);
+            }
         }
         response.write_body(ResponseBody::File(self.body)).await
     }

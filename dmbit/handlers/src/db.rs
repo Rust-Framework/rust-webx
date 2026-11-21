@@ -1,4 +1,8 @@
 //! DbContext helpers.
+//!
+//! The local `map_ef()` adapter is intentional: `rust-ef 2.5.1`'s optional
+//! `webx` feature targets `rust-webx-core ^1.2` (see docbit's `db.rs` and
+//! `docs/design/compatibility.md` §5).
 
 use rust_ef::db_context::DbContext;
 use rust_ef::error::EFError;

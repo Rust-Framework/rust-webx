@@ -43,8 +43,14 @@ pub fn problem_to_bytes(problem: &ProblemDetails) -> Vec<u8> {
     serde_json::to_vec(problem).unwrap_or_default()
 }
 
-/// Write RFC 7807 problem+json to the response.
-pub async fn write_problem_response(ctx: &mut dyn IHttpContext, problem: ProblemDetails) {
+/// Write RFC 9457 problem+json to the response.
+pub async fn write_problem_response(ctx: &mut dyn IHttpContext, mut problem: ProblemDetails) {
+    // Host-level writers (401/403/429) run outside the engine's error pipeline,
+    // so they fill the same guaranteed extension members here.
+    let path = ctx.request().path().to_string();
+    let trace_id = ctx.trace_id().map(str::to_string);
+    problem.complete(Some(&path), trace_id.as_deref());
+
     let status = problem.status;
     ctx.response_mut().set_status(status);
     ctx.response_mut()

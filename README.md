@@ -1,4 +1,4 @@
-**English** | [简体中文](README.zh-CN.md)
+﻿**English** | [简体中文](README.zh-CN.md)
 
 <div align="center">
 
@@ -26,6 +26,7 @@ A type-safe, convention-over-configuration platform where *requests are endpoint
 - [Architecture](#architecture)
 - [Request-as-Endpoint: Hello World](#request-as-endpoint-hello-world)
 - [Core Concepts](#core-concepts)
+- [Broker & cache adapters](#broker--cache-adapters)
 - [Example Applications](#example-applications)
 - [Quick Start](#quick-start)
 - [Development](#development)
@@ -65,7 +66,7 @@ rust-webx is **not** a full-stack UI framework (pair it with any frontend), **no
 - **Compile-time route shortcuts** — `#[get("/path")]`, `#[post("/path")]`, `#[put("/path")]`, `#[delete("/path")]` define a full endpoint in one line.
 - **Compile-time scanning** — route metadata is collected at compile time via `inventory`; registered automatically in `Host::build()`.
 - **Zero-config handler registration** — the `#[handler]` attribute macro registers a handler with the DI container automatically.
-- **Authentication & authorization** — JWT Bearer auth + declarative, grouped route authorization (`#[authorize]`).
+- **Authentication & authorization** — JWT Bearer (HS256/RS256/ES256 + JWKS/kid), OIDC, cookie sessions + CSRF, refresh-token rotation, TOTP/WebAuthn passkeys, mTLS, DPoP, HTTP Basic, RFC 7662/7009, OAuth 2.0 social login (GitHub/Google/Microsoft/GitLab/Gitee/DingTalk/Feishu/WeChat/Weibo/QQ/Douyin/Alipay/Facebook), and declarative `#[authorize]`. Start with the [10-minute auth quickstart](docs/rust-webx/09-auth-security/quickstart.md).
 - **Identity on the request** — `#[fromclaim] user: IdentityUser` binds the authenticated identity (id, name, email, tenant, roles) as a plain request field; handlers stop parsing tokens. `#[fromclaim(optional)] viewer: Option<IdentityUser>` covers anonymous endpoints (anonymous access must be declared explicitly).
 - **Endpoint metadata service** — `IEndpointCatalog` exposes every endpoint at runtime (`all()` / `localized()`), so permission sync, admin navigation and OpenAPI share one source.
 - **Localization** — `#[display]` / `#[description]` / `#[category]` store resource keys; a host-wide `Culture.Default` selects the language, with `.json` resources or `include_str!` embedding.
@@ -125,7 +126,7 @@ The framework is split into a small set of focused crates, re-exported through t
 
 ```
 rust-webx/
-├── Cargo.toml                 # workspace root (v2.1.0)
+├── Cargo.toml                 # workspace root (v2.5.0)
 ├── crates/
 │   ├── core/                  # rust-webx-core  — traits, configuration
 │   ├── engine/                # rust-webx-engine — 2.0 worker pool, direct dispatch
@@ -198,10 +199,10 @@ Routing discovery, handler resolution, middleware orchestration, and graceful sh
 | `IRequestHandler<T, R>` | Two-type-parameter handler; `T` is the request type, `R` the response type. |
 | `#[get("/path")]` | Route shortcut annotated on an `impl IRequest<T>` block; registered at compile time. |
 | `#[post("/path")]` / `#[put("/path")]` / `#[delete("/path")]` | HTTP-method route shortcuts. |
-| `IMediator` | Mediator; `send()` dispatches requests, `publish()` publishes events. |
+| `IMediator` | Mediator; `send()` dispatches requests, `publish()` hands events to the event transport (non-blocking, no handler result). |
 | `IMiddleware` | Middleware; sequential pipeline that can short-circuit requests. |
 | `IPipelineBehavior` | Mediator pipeline interceptor that wraps the request-handling chain. |
-| `IEventHandler<T>` | Event handler; broadcast to all registered handlers via `publish()`. |
+| `IEventHandler<T>` | Event handler; `publish()` delivers asynchronously through `IEventPublisher` (default: in-memory queue). |
 | `Error` | Unified error type automatically mapped to HTTP status codes. |
 | `IClaims` / `IAuthenticationHandler` | JWT auth interfaces that extract identity from the Bearer token. |
 | `IAuthorizationPolicy` | Legacy custom-policy interface; route-pattern authorization. |
@@ -236,6 +237,24 @@ after hooks (real error status) → EngineContext::finalize()
     ▼
 hyper::Response                        ← problem+json for errors; bytes/file/SSE for success
 ```
+
+## Broker & cache adapters
+
+Event transport and the distributed cache are opt-in adapter crates. One `add_*` call registers an
+`IEventPublisher` implementation plus a background consumer; `publish()` and `#[handler]` event
+handlers stay unchanged.
+
+| Crate | Entry point | Delivery semantics |
+|-------|-------------|--------------------|
+| [`rust-webx-redis`](https://crates.io/crates/rust-webx-redis) | `add_redis(RedisOptions::new(url))` — also registers `IDistributedCache` | at-least-once (Redis Streams consumer group; `XACK` after handlers, pending reclaimed, bounded retries → dead-letter stream) |
+| [`rust-webx-nats`](https://crates.io/crates/rust-webx-nats) | `add_nats(NatsOptions::new(url))` | at-most-once (core NATS; optional queue group) |
+| [`rust-webx-rabbitmq`](https://crates.io/crates/rust-webx-rabbitmq) | `add_rabbitmq(RabbitMqOptions::new(url))` | at-least-once (quorum topic queue, publisher confirms, manual ack + requeue, `x-delivery-limit` + optional DLX) |
+| [`rust-webx-kafka`](https://crates.io/crates/rust-webx-kafka) | `add_kafka(KafkaOptions::new(brokers, topic))` | single-partition follower; per-partition ordering; no consumer-group offset commits (restart uses the configured start offset); reference starter |
+
+Cache-only: `RedisOptions::cache_only()`. Publisher-only: `.publisher_only()` on NATS/RabbitMQ/Kafka;
+Redis uses `.without_cache()` + `RedisEventsOptions { consumer_enabled: false, .. }`. See
+[event pub/sub](docs/rust-webx/08-mediator-events/event-pub-sub.md) and
+[caching](docs/rust-webx/11-production/caching-rate-limit.md).
 
 ## Example Applications
 

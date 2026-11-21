@@ -11,7 +11,9 @@ use std::io::BufReader;
 use std::sync::Arc;
 
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-use rustls::ServerConfig;
+use rustls::server::WebPkiClientVerifier;
+use rustls::{RootCertStore, ServerConfig};
+use webx_core::config::TlsClientAuth;
 use webx_core::error::{Error, Result};
 
 /// Protocols advertised during the TLS handshake, HTTP/2 first.
@@ -31,9 +33,33 @@ pub const ALPN_PROTOCOLS: [&[u8]; 2] = [b"h2", b"http/1.1"];
 ///   mismatch) is reported as [`Error::Http`] with the offending path — the key
 ///   material itself is never included in the message or logged.
 pub fn build_server_config(cert_path: &str, key_path: &str) -> Result<Arc<ServerConfig>> {
+    build_server_config_with_client_auth(cert_path, key_path, "", TlsClientAuth::Off)
+}
+
+/// Build with mTLS policy.
+///
+/// `client_auth` not `Off` requires `client_ca_path`; the CA bundle is loaded
+/// with the same PEM parser as the server certificate, and a malformed/missing
+/// bundle is a typed startup error.
+pub fn build_server_config_with_client_auth(
+    cert_path: &str,
+    key_path: &str,
+    client_ca_path: &str,
+    client_auth: TlsClientAuth,
+) -> Result<Arc<ServerConfig>> {
     if cert_path.trim().is_empty() || key_path.trim().is_empty() {
         return Err(Error::Http(
             "TLS certificate or key path not configured".to_string(),
+        ));
+    }
+    if client_auth != TlsClientAuth::Off && client_ca_path.trim().is_empty() {
+        return Err(Error::Http(
+            "Tls.ClientAuth requires Tls.ClientCaPath".to_string(),
+        ));
+    }
+    if client_auth == TlsClientAuth::Off && !client_ca_path.trim().is_empty() {
+        return Err(Error::Http(
+            "Tls.ClientCaPath is set but Tls.ClientAuth is Off".to_string(),
         ));
     }
 
@@ -53,20 +79,49 @@ pub fn build_server_config(cert_path: &str, key_path: &str) -> Result<Arc<Server
     let certs = load_certs(cert_path)?;
     let key = load_key(key_path)?;
 
-    let mut config = ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(certs, key)
-        .map_err(|err| {
-            Error::Http(format!(
-                "TLS configuration rejected the certificate/key pair ({cert_path}, {key_path}): {err}"
-            ))
-        })?;
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let builder = ServerConfig::builder();
+    let builder = match client_auth {
+        TlsClientAuth::Off => builder.with_no_client_auth(),
+        TlsClientAuth::Optional | TlsClientAuth::Required => {
+            let roots = load_client_ca(client_ca_path)?;
+            let verifier = WebPkiClientVerifier::builder(Arc::new(roots));
+            let verifier = if client_auth == TlsClientAuth::Optional {
+                verifier.allow_unauthenticated()
+            } else {
+                verifier
+            };
+            let verifier = verifier.build().map_err(|err| {
+                Error::Http(format!("TLS client CA configuration is invalid: {err}"))
+            })?;
+            builder.with_client_cert_verifier(verifier)
+        }
+    };
+
+    let mut config = builder.with_single_cert(certs, key).map_err(|err| {
+        Error::Http(format!(
+            "TLS configuration rejected the certificate/key pair ({cert_path}, {key_path}): {err}"
+        ))
+    })?;
     config.alpn_protocols = ALPN_PROTOCOLS
         .iter()
         .map(|protocol| protocol.to_vec())
         .collect();
 
     Ok(Arc::new(config))
+}
+
+fn load_client_ca(path: &str) -> Result<RootCertStore> {
+    let certs = load_certs(path)?;
+    let mut roots = RootCertStore::empty();
+    for cert in certs {
+        roots.add(cert).map_err(|err| {
+            Error::Http(format!(
+                "cannot add client CA certificate from '{path}': {err}"
+            ))
+        })?;
+    }
+    Ok(roots)
 }
 
 fn load_certs(path: &str) -> Result<Vec<CertificateDer<'static>>> {
@@ -207,5 +262,55 @@ mod tests {
     #[test]
     fn alpn_advertises_h2_before_http1() {
         assert_eq!(ALPN_PROTOCOLS, [&b"h2"[..], &b"http/1.1"[..]]);
+    }
+
+    fn self_signed_files() -> (tempfile::NamedTempFile, tempfile::NamedTempFile) {
+        let certified = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])
+            .expect("self-signed certificate");
+        (
+            temp_file(&certified.cert.pem()),
+            temp_file(&certified.key_pair.serialize_pem()),
+        )
+    }
+
+    #[test]
+    fn client_auth_without_ca_is_a_typed_error() {
+        let (cert, key) = self_signed_files();
+        let err = build_server_config_with_client_auth(
+            cert.path().to_str().unwrap(),
+            key.path().to_str().unwrap(),
+            "",
+            TlsClientAuth::Required,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("ClientCaPath"), "{err}");
+    }
+
+    #[test]
+    fn client_ca_without_client_auth_is_rejected() {
+        let (cert, key) = self_signed_files();
+        let err = build_server_config_with_client_auth(
+            cert.path().to_str().unwrap(),
+            key.path().to_str().unwrap(),
+            cert.path().to_str().unwrap(),
+            TlsClientAuth::Off,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("ClientAuth"), "{err}");
+    }
+
+    #[test]
+    fn required_and_optional_client_auth_build_with_a_ca_bundle() {
+        let (cert, key) = self_signed_files();
+        for policy in [TlsClientAuth::Required, TlsClientAuth::Optional] {
+            let config = build_server_config_with_client_auth(
+                cert.path().to_str().unwrap(),
+                key.path().to_str().unwrap(),
+                cert.path().to_str().unwrap(),
+                policy,
+            )
+            .expect("client CA builds");
+            assert_eq!(config.alpn_protocols.len(), 2);
+        }
     }
 }

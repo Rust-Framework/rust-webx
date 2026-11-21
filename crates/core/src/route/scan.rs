@@ -171,6 +171,40 @@ pub struct RouteEntry {
 // Collect RouteEntry instances at compile time using `inventory`.
 inventory::collect!(RouteEntry);
 
+/// Where a compiled route was declared.
+///
+/// Emitted by `#[get]` / `#[endpoint]` next to [`RouteEntry`] with the call-site
+/// module path (`module_path!()`), so an application can allow-list the routes
+/// that come from a specific crate or module subtree via
+/// [`HostBuilder::routes_from`](https://docs.rs/rust-webx/latest/rust_webx/struct.HostBuilder.html).
+///
+/// The source is a **separate** inventory item rather than a new [`RouteEntry`]
+/// field: adding a public field would break downstream struct construction, and
+/// this data is only needed at startup filtering time.
+#[derive(Debug, Clone, Copy)]
+pub struct RouteSource {
+    /// HTTP method of the route.
+    pub method: HttpMethod,
+    /// Route path pattern, matching the corresponding [`RouteEntry::path`].
+    pub path: &'static str,
+    /// Call-site module path (`module_path!()`).
+    pub module_path: &'static str,
+}
+
+impl RouteSource {
+    /// Record a route's origin.
+    pub const fn new(method: HttpMethod, path: &'static str, module_path: &'static str) -> Self {
+        Self {
+            method,
+            path,
+            module_path,
+        }
+    }
+}
+
+// Collect RouteSource instances at compile time using `inventory`.
+inventory::collect!(RouteSource);
+
 /// Optional query/path/body metadata for a request type, collected via
 /// `#[derive(WebxRequestMeta)]` on the request struct.
 #[derive(Debug, Clone)]

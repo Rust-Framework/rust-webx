@@ -61,12 +61,16 @@ impl CorsMiddleware {
     }
 }
 
-#[async_trait::async_trait]
-impl IMiddleware for CorsMiddleware {
-    async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
+impl CorsMiddleware {
+    fn apply(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
         // Owned, because the response is mutated below while the Origin value
         // is still needed for the preflight decision.
-        let origin = ctx.request().header("origin").map(str::to_string);
+        let Some(origin) = ctx.request().header("origin").map(str::to_string) else {
+            // 2.4-9 fast path: no Origin means no CORS processing for this
+            // response. Skipping the `Vary: Origin` append is safe because a
+            // response without CORS headers has nothing to vary by.
+            return Ok(ControlFlow::Continue(()));
+        };
 
         // A response that may change with Origin must say so, otherwise a
         // shared cache can serve one origin's CORS headers to another.
@@ -79,20 +83,17 @@ impl IMiddleware for CorsMiddleware {
             .config
             .origins
             .iter()
-            .find(|o| *o == "*" || origin.as_deref().is_some_and(|orig| *o == orig))
+            .find(|o| o.as_str() == "*" || **o == origin)
             .cloned();
 
         if let Some(ref origin_value) = allowed {
             // When allow_credentials is true, "*" cannot be used per CORS spec;
-            // echo the request's Origin header instead.
-            let header_value = if origin_value == "*" && self.config.allow_credentials {
-                origin.as_deref().unwrap_or("*").to_string()
-            } else if origin_value == "*" {
+            // echo the request's Origin header instead. A specific configured
+            // origin is echoed too (it matched the request Origin above).
+            let header_value = if origin_value == "*" && !self.config.allow_credentials {
                 "*".to_string()
-            } else if let Some(o) = origin.as_deref() {
-                o.to_string()
             } else {
-                origin_value.clone()
+                origin.clone()
             };
 
             ctx.response_mut()
@@ -111,7 +112,6 @@ impl IMiddleware for CorsMiddleware {
         // answering 204 for any OPTIONS made nonexistent paths look like
         // existing ones.
         let is_preflight = ctx.request().method().eq_ignore_ascii_case("OPTIONS")
-            && origin.is_some()
             && ctx
                 .request()
                 .header("access-control-request-method")
@@ -142,5 +142,20 @@ impl IMiddleware for CorsMiddleware {
         }
 
         Ok(ControlFlow::Continue(()))
+    }
+}
+
+#[async_trait::async_trait]
+impl IMiddleware for CorsMiddleware {
+    async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
+        self.apply(ctx)
+    }
+
+    fn fast_invoke(&self, ctx: &mut dyn IHttpContext) -> Option<Result<ControlFlow<()>>> {
+        Some(self.apply(ctx))
+    }
+
+    fn has_after(&self) -> bool {
+        false
     }
 }

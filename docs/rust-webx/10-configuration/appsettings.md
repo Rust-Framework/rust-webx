@@ -43,6 +43,12 @@ appsettings.Development.json        # 开发环境覆盖（Development 模式）
   "Metrics": {
     "Enabled": false
   },
+  "Turn": {
+    "Secret": "",
+    "Urls": [],
+    "TtlSeconds": 3600,
+    "Realm": null
+  },
   "Form": {
     "MaxRequestSize": 268435456,
     "MaxFileSize": 134217728,
@@ -66,6 +72,7 @@ appsettings.Development.json        # 开发环境覆盖（Development 模式）
 | `Tls` | `TlsSection` |
 | `RateLimit` | `RateLimitSection` |
 | `Metrics` | `MetricsSection` |
+| `Turn` | `TurnSection` |
 | `Form` | `FormSection` |
 | `Culture` | `CultureSection` |
 
@@ -140,6 +147,28 @@ token 生命周期仍由 `Jwt.ExpirationMinutes` 决定。
 不要自行读取 `SecretFile`：那会在 `APP__Jwt__Secret`/`JWT_SECRET` 或 `Jwt.Secret` 已设置时读到错误
 （或空的）密钥。只配置 `SecretFile` 时上述顺序保证 issuer 与 `JwtAuth` 使用同一把密钥；未配置任何
 密钥时 `JwtSecret` 不存在，解析即启动失败，不会空密钥签名。`register` 的签名与行为不变。
+
+### Turn（TURN/STUN 凭据）
+
+`Turn` 节是 TURN REST（coturn `use-auth-secret`）凭据的**唯一配置来源**：
+
+```json
+{
+  "Turn": {
+    "Secret": "与 coturn static-auth-secret 相同的密钥",
+    "Urls": ["turn:turn.example.com:3478", "stun:turn.example.com:3478"],
+    "TtlSeconds": 3600,
+    "Realm": "example"
+  }
+}
+```
+
+- 环境覆盖：`APP__Turn__Secret`、`APP__Turn__Urls__0`、`APP__Turn__TtlSeconds` 等；
+- `Secret`+`Urls` 均为空 = 未配置（Host 不注册 `TurnRestConfig`，TURN 端点报明确 DI 错误）；
+- 只配置一部分（如只有 `Urls`）是**启动错误**，不会静默降级；
+- Host 启动时校验并注册 `TurnRestConfig` 供 Handler 注入（`#[inject] config: Arc<TurnRestConfig>`）；
+  也可用 `HostBuilder::use_turn_config(...)` 显式覆盖；
+- TTL 允许 1..=86400；密钥只存在于服务端，不得下发静态密码。
 
 ## 访问配置
 

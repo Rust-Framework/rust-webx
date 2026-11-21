@@ -112,6 +112,173 @@ pub struct JwtSection {
         rename = "ExpirationMinutes"
     )]
     pub expiration_minutes: u64,
+
+    /// Expected `iss` claim. When set (non-empty), a token without a matching
+    /// `iss` is rejected.
+    ///
+    /// Additive (2.5): unset keeps the previous behaviour (no issuer check).
+    #[serde(default, rename = "Issuer")]
+    pub issuer: Option<String>,
+
+    /// Expected `aud` claim. When set (non-empty), a token without a matching
+    /// `aud` is rejected.
+    ///
+    /// Additive (2.5): unset keeps the previous behaviour (no audience check).
+    #[serde(default, rename = "Audience")]
+    pub audience: Option<String>,
+
+    /// Accepted signature algorithms. Default: `["HS256"]`.
+    ///
+    /// `HS256` is the only algorithm implemented in 2.5 M1; asymmetric
+    /// algorithms are enabled by the JWKS support in M2. A configured value
+    /// that the host cannot verify is a startup error (fail-closed), never a
+    /// silent downgrade.
+    #[serde(default = "default_jwt_algorithms", rename = "Algorithms")]
+    pub algorithms: Vec<JwtAlgorithm>,
+
+    /// Clock-skew allowance for `exp`/`nbf`/`iat`, in seconds. Default: 30.
+    ///
+    /// The host rejects values above [`MAX_JWT_CLOCK_SKEW_SECONDS`] at startup.
+    #[serde(
+        default = "default_jwt_clock_skew_seconds",
+        rename = "ClockSkewSeconds"
+    )]
+    pub clock_skew_seconds: u64,
+
+    /// What an explicitly presented but invalid token means.
+    ///
+    /// `Anonymous` (default) keeps the framework's long-standing semantics: a
+    /// bad token only means "not authenticated", so public endpoints (login,
+    /// health) stay reachable. `Reject` answers `401` immediately, which is the
+    /// OAuth 2.0 resource-server behaviour.
+    #[serde(default, rename = "InvalidTokenBehavior")]
+    pub invalid_token_behavior: InvalidTokenBehavior,
+
+    /// Maximum accepted token size, in bytes. Default: 8192.
+    ///
+    /// Tokens above the limit are rejected before signature verification, so a
+    /// hostile header cannot force a large allocation.
+    #[serde(default = "default_jwt_max_token_bytes", rename = "MaxTokenBytes")]
+    pub max_token_bytes: usize,
+
+    /// Remote JWKS source for asymmetric verification (RFC 7517).
+    ///
+    /// Required when `Algorithms` contains RSA/EC/PS algorithms. The host
+    /// fetches and caches the set, refreshes it for an unknown `kid`, and
+    /// rejects non-HTTPS or SSRF-guarded destinations at startup.
+    #[serde(default, rename = "Jwks")]
+    pub jwks: Option<JwtJwksSection>,
+}
+
+/// Remote JSON Web Key Set (JWKS) configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct JwtJwksSection {
+    /// Absolute `https://` URL of the JWKS document.
+    #[serde(default, rename = "Url")]
+    pub url: String,
+    /// Cache lifetime of a fetched set, in seconds. Default: 300.
+    #[serde(default = "default_jwks_cache_seconds", rename = "CacheSeconds")]
+    pub cache_seconds: u64,
+    /// Per-fetch timeout, in milliseconds. Default: 2000 (bounded 100..=10000).
+    #[serde(default = "default_jwks_timeout_ms", rename = "TimeoutMs")]
+    pub timeout_ms: u64,
+    /// Maximum keys kept from one document (default 32, bounded 1..=256).
+    #[serde(default = "default_jwks_max_keys", rename = "MaxKeys")]
+    pub max_keys: usize,
+    /// Allow a JWKS on a private/loopback network (intranet IdP).
+    ///
+    /// Off by default: the SSRF guard stays enabled. Turn it on only when the
+    /// JWKS host is a trusted internal service.
+    #[serde(default, rename = "AllowPrivateNetworks")]
+    pub allow_private_networks: bool,
+}
+
+impl Default for JwtJwksSection {
+    fn default() -> Self {
+        Self {
+            url: String::new(),
+            cache_seconds: default_jwks_cache_seconds(),
+            timeout_ms: default_jwks_timeout_ms(),
+            max_keys: default_jwks_max_keys(),
+            allow_private_networks: false,
+        }
+    }
+}
+
+fn default_jwks_cache_seconds() -> u64 {
+    300
+}
+
+fn default_jwks_timeout_ms() -> u64 {
+    2000
+}
+
+fn default_jwks_max_keys() -> usize {
+    32
+}
+
+/// JWT signature algorithm accepted by the host.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+pub enum JwtAlgorithm {
+    /// HMAC-SHA256 (shared secret). The only algorithm implemented in 2.5 M1.
+    #[default]
+    #[serde(rename = "HS256")]
+    Hs256,
+    /// RSASSA-PKCS1-v1_5 with SHA-256. Enabled by JWKS in 2.5 M2.
+    #[serde(rename = "RS256")]
+    Rs256,
+    /// ECDSA with P-256 and SHA-256. Enabled by JWKS in 2.5 M2.
+    #[serde(rename = "ES256")]
+    Es256,
+    /// RSASSA-PSS with SHA-256. Enabled by JWKS in 2.5 M2.
+    #[serde(rename = "PS256")]
+    Ps256,
+}
+
+impl JwtAlgorithm {
+    /// Stable configuration/CLI spelling.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Hs256 => "HS256",
+            Self::Rs256 => "RS256",
+            Self::Es256 => "ES256",
+            Self::Ps256 => "PS256",
+        }
+    }
+}
+
+/// What to do when a request explicitly presents an invalid token.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+pub enum InvalidTokenBehavior {
+    /// Bad token = anonymous (public endpoints stay reachable). Default.
+    #[default]
+    #[serde(rename = "Anonymous")]
+    Anonymous,
+    /// Bad token = immediate `401` (OAuth 2.0 resource-server semantics).
+    #[serde(rename = "Reject")]
+    Reject,
+}
+
+fn default_jwt_algorithms() -> Vec<JwtAlgorithm> {
+    vec![JwtAlgorithm::Hs256]
+}
+
+/// Upper bound for `Jwt.ClockSkewSeconds`.
+///
+/// A large leeway silently extends every token's lifetime; the host rejects
+/// configurations above this bound instead of accepting a five-minute grace
+/// period that is really a ten-minute one.
+pub const MAX_JWT_CLOCK_SKEW_SECONDS: u64 = 300;
+
+/// Upper bound for `Jwt.MaxTokenBytes` (1 MiB).
+pub const MAX_JWT_TOKEN_BYTES: usize = 1024 * 1024;
+
+fn default_jwt_clock_skew_seconds() -> u64 {
+    30
+}
+
+fn default_jwt_max_token_bytes() -> usize {
+    8 * 1024
 }
 
 fn default_jwt_expiration_minutes() -> u64 {
@@ -124,6 +291,13 @@ impl Default for JwtSection {
             secret: String::new(),
             secret_file: None,
             expiration_minutes: default_jwt_expiration_minutes(),
+            issuer: None,
+            audience: None,
+            algorithms: default_jwt_algorithms(),
+            clock_skew_seconds: default_jwt_clock_skew_seconds(),
+            invalid_token_behavior: InvalidTokenBehavior::default(),
+            max_token_bytes: default_jwt_max_token_bytes(),
+            jwks: None,
         }
     }
 }
@@ -283,6 +457,18 @@ pub struct MetricsSection {
     pub enabled: bool,
 }
 
+/// Client-certificate policy for the TLS listener.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+pub enum TlsClientAuth {
+    /// No client certificate is requested (TLS server only).
+    #[default]
+    Off,
+    /// Request a certificate but allow clients without one.
+    Optional,
+    /// Require a certificate signed by `Tls.ClientCaPath`.
+    Required,
+}
+
 /// TLS (Transport Layer Security) section.
 ///
 /// TLS is activated automatically when the `App.Urls` array
@@ -296,6 +482,12 @@ pub struct TlsSection {
     /// Path to TLS private key PEM file.
     #[serde(default, rename = "KeyPath")]
     pub key_path: String,
+    /// CA bundle used to verify client certificates (PEM).
+    #[serde(default, rename = "ClientCaPath")]
+    pub client_ca_path: String,
+    /// Client-certificate policy (`Off`/`Optional`/`Required`).
+    #[serde(default, rename = "ClientAuth")]
+    pub client_auth: TlsClientAuth,
 }
 
 /// `multipart/form-data` upload settings.
@@ -360,6 +552,17 @@ fn default_first_request_timeout_seconds() -> u64 {
     10
 }
 
+/// Default admission queue deadline: a saturated server answers `503` instead
+/// of hiding the queue in the kernel backlog.
+fn default_admission_timeout_ms() -> u64 {
+    1_000
+}
+
+/// Default inbound deadline: a bounded request is the fail-closed default.
+fn default_request_timeout_seconds() -> u64 {
+    30
+}
+
 fn default_drain_timeout_seconds() -> u64 {
     30
 }
@@ -378,14 +581,18 @@ pub struct ServerSection {
     /// How long connections with an SSE response may drain during shutdown.
     #[serde(default = "default_stream_drain_timeout_seconds")]
     pub stream_drain_timeout_seconds: u64,
-    /// Deadline for one inbound request, in seconds. Default: 0 (disabled).
+    /// Deadline for one inbound request, in seconds. Default: 30.
     ///
     /// The budget starts after routing and covers binding plus handler
     /// execution. A handler that exceeds it is cancelled and the client gets a
     /// `504`. It deliberately does **not** bound the response body of a streamed
     /// response: an `SseResult` handler returns quickly and the stream then runs
     /// under its own `max_lifetime` / drain budget.
-    #[serde(default)]
+    ///
+    /// `0` disables the deadline. Production rejects it (fail-closed); raise the
+    /// budget for endpoints that legitimately upload large bodies over slow
+    /// links instead of disabling it.
+    #[serde(default = "default_request_timeout_seconds")]
     pub request_timeout_seconds: u64,
     /// Number of engine worker threads. `0` means auto (available parallelism,
     /// clamped to 1..=64). Explicit values are clamped to the same range.
@@ -399,6 +606,15 @@ pub struct ServerSection {
     /// pre-request connection is a denial-of-service vector.
     #[serde(default = "default_first_request_timeout_seconds")]
     pub first_request_timeout_seconds: u64,
+
+    /// How long a newly accepted connection may wait for an admission slot
+    /// before the engine answers `503` and closes it. Default: 1000 ms.
+    ///
+    /// `0` waits forever (the pre-2.2 behaviour) and is rejected in
+    /// Production: a saturated server must shed load instead of letting the
+    /// kernel backlog hide the queue.
+    #[serde(default = "default_admission_timeout_ms")]
+    pub admission_timeout_ms: u64,
 }
 
 impl Default for ServerSection {
@@ -406,11 +622,68 @@ impl Default for ServerSection {
         Self {
             drain_timeout_seconds: default_drain_timeout_seconds(),
             stream_drain_timeout_seconds: default_stream_drain_timeout_seconds(),
-            request_timeout_seconds: 0,
+            request_timeout_seconds: default_request_timeout_seconds(),
             workers: 0,
             first_request_timeout_seconds: default_first_request_timeout_seconds(),
+            admission_timeout_ms: default_admission_timeout_ms(),
         }
     }
+}
+
+/// TURN / STUN configuration (coturn REST API credentials).
+///
+/// JSON keys are PascalCase (`Turn.Secret`, `Turn.Urls`, `Turn.TtlSeconds`,
+/// `Turn.Realm`); environment overrides use `APP__Turn__Secret`,
+/// `APP__Turn__Urls__0`, ... (the generic config binder).
+///
+/// When `Secret` **and** `Urls` are empty the section counts as unconfigured:
+/// the host then does not register a [`TurnRestConfig`] (TURN endpoints fail
+/// with a clear DI error instead of serving unusable credentials).
+///
+/// [`TurnRestConfig`]: crate::realtime::TurnRestConfig
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct TurnSection {
+    /// coturn `static-auth-secret` shared secret.
+    #[serde(default)]
+    pub secret: String,
+    /// TURN/STUN URLs handed to clients (`turn:host:3478`, `stun:host:3478`).
+    #[serde(default)]
+    pub urls: Vec<String>,
+    /// Ephemeral credential lifetime in seconds (default 1h, max 24h).
+    #[serde(default = "default_turn_ttl_seconds")]
+    pub ttl_seconds: u64,
+    /// Optional TURN realm echoed to clients.
+    #[serde(default)]
+    pub realm: Option<String>,
+}
+
+impl Default for TurnSection {
+    fn default() -> Self {
+        Self {
+            secret: String::new(),
+            urls: Vec::new(),
+            ttl_seconds: default_turn_ttl_seconds(),
+            realm: None,
+        }
+    }
+}
+
+impl TurnSection {
+    /// Whether the application configured TURN at all.
+    ///
+    /// Any non-empty field counts as an intent to configure, so a partially
+    /// filled section fails validation at startup instead of being ignored.
+    pub fn is_configured(&self) -> bool {
+        !self.secret.trim().is_empty()
+            || self.urls.iter().any(|url| !url.trim().is_empty())
+            || self.realm.is_some()
+    }
+}
+
+fn default_turn_ttl_seconds() -> u64 {
+    // Single source of truth for the default lifetime.
+    crate::realtime::DEFAULT_TURN_TTL_SECONDS
 }
 
 /// Standard application options loaded from appsettings.json.
@@ -440,6 +713,9 @@ pub struct AppOptions {
     /// Prometheus-style metrics endpoint settings.
     #[serde(default, rename = "Metrics")]
     pub metrics: MetricsSection,
+    /// TURN/STUN credential settings (coturn REST API).
+    #[serde(default, rename = "Turn")]
+    pub turn: TurnSection,
     /// `multipart/form-data` upload settings.
     #[serde(default, rename = "Form")]
     pub form: FormSection,
@@ -452,6 +728,148 @@ pub struct AppOptions {
 // Config loading helpers
 // ---------------------------------------------------------------------------
 
+/// Configuration loading or binding failure.
+///
+/// Returned by the strict loaders and binders. The historical
+/// [`load_appsettings`], [`bind_config`] and [`bind_root`] keep their lossy
+/// behaviour for compatibility; the host itself uses the strict variants.
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    /// A config file exists but cannot be read.
+    #[error("config file `{path}` cannot be read: {source}")]
+    Read {
+        /// Path that was attempted.
+        path: String,
+        /// Underlying I/O error.
+        #[source]
+        source: std::io::Error,
+    },
+    /// A config file exists but is not valid JSON.
+    #[error("config file `{path}` is not valid JSON: {source}")]
+    Parse {
+        /// Path that was attempted.
+        path: String,
+        /// Underlying parse error.
+        #[source]
+        source: serde_json::Error,
+    },
+    /// A section does not match its schema (wrong type, invalid enum, ...).
+    #[error("config section `{section}` does not match its schema: {source}")]
+    Bind {
+        /// Section name (`<root>` for the whole document).
+        section: String,
+        /// Underlying deserialization error.
+        #[source]
+        source: serde_json::Error,
+    },
+    /// A framework section contains keys the schema does not know.
+    ///
+    /// This is a startup error on purpose: the historical behaviour ignored the
+    /// key and kept the default, which silently disabled settings such as rate
+    /// limiting after a single typo.
+    #[error(
+        "unknown key(s) in config section `{section}`: {keys} \
+         (fix the spelling; the framework no longer silently ignores them)"
+    )]
+    UnknownKeys {
+        /// Section(s) that contained unknown keys.
+        section: String,
+        /// Ignored dotted paths, for example `RateLimit.RequestsPerSecondd`.
+        keys: String,
+    },
+}
+
+/// Framework-owned config sections.
+///
+/// Unknown keys inside these sections are startup errors; unknown keys in
+/// application sections are left to the application.
+const FRAMEWORK_SECTIONS: &[&str] = &[
+    "App",
+    "Jwt",
+    "Cors",
+    "Tls",
+    "Server",
+    "RateLimit",
+    "Metrics",
+    "Form",
+    "Culture",
+];
+
+/// Where the effective configuration came from.
+///
+/// Values are never recorded — only file names and environment variable
+/// **names** — so the report can be logged safely.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ConfigSources {
+    /// Files read, in precedence order (base first, overlay second).
+    pub files: Vec<String>,
+    /// `APP__*` environment keys applied.
+    pub env_keys: Vec<String>,
+    /// Conventional environment keys applied (`JWT_SECRET`, ...).
+    pub well_known_env_keys: Vec<String>,
+}
+
+impl ConfigSources {
+    /// Whether nothing but built-in defaults was used.
+    pub fn is_default_only(&self) -> bool {
+        self.files.is_empty() && self.env_keys.is_empty() && self.well_known_env_keys.is_empty()
+    }
+
+    /// One-line operator report with values redacted.
+    pub fn summary(&self) -> String {
+        if self.is_default_only() {
+            return "built-in defaults only".to_string();
+        }
+        let mut parts = Vec::new();
+        if !self.files.is_empty() {
+            parts.push(format!("files=[{}]", self.files.join(", ")));
+        }
+        if !self.well_known_env_keys.is_empty() {
+            parts.push(format!("env=[{}]", self.well_known_env_keys.join(", ")));
+        }
+        if !self.env_keys.is_empty() {
+            parts.push(format!("APP__=[{}]", self.env_keys.join(", ")));
+        }
+        parts.join("; ")
+    }
+}
+
+/// Strict counterpart of [`load_appsettings`].
+///
+/// Missing files are not an error (env-only deployments are supported); a file
+/// that exists but cannot be read or parsed **is** an error.
+pub fn try_load_appsettings(
+    mode: AppMode,
+) -> Result<(Option<serde_json::Value>, ConfigSources), ConfigError> {
+    let mut sources = ConfigSources::default();
+
+    let mut merged = match read_json_file_strict("appsettings.json")? {
+        Some((value, path)) => {
+            sources.files.push(path);
+            value
+        }
+        None => serde_json::json!({}),
+    };
+
+    if let Some((overlay, path)) = read_json_file_strict(mode.overlay_filename())? {
+        sources.files.push(path);
+        merge_json(&mut merged, overlay);
+    }
+
+    // Well-known env vars (JWT_SECRET) — applied before APP__ so APP__Jwt__Secret wins.
+    apply_well_known_env_overrides(&mut merged, &mut sources);
+
+    // Apply environment variable overrides (APP__Section__Key pattern). These
+    // apply even when no appsettings.json exists (env-only deployment).
+    apply_env_overrides(&mut merged, &mut sources);
+
+    sources.env_keys.sort();
+    sources.well_known_env_keys.sort();
+
+    let has_source = !sources.is_default_only();
+    Ok((if has_source { Some(merged) } else { None }, sources))
+}
+
 /// Load the merged appsettings JSON (base + environment overlay + env overrides).
 ///
 /// 按运行模式自动合并对应的 `appsettings.{Mode}.json` overlay：
@@ -460,36 +878,33 @@ pub struct AppOptions {
 ///
 /// Environment variables prefixed with `APP__` override the corresponding JSON values.
 /// For example, `APP__App__Address=0.0.0.0:8080` overrides `{"App": {"Address": "..."}}`.
+///
+/// Lossy compatibility wrapper around [`try_load_appsettings`]: a broken file
+/// logs a warning and falls back to defaults. The host uses the strict variant.
 pub fn load_appsettings(mode: AppMode) -> Option<serde_json::Value> {
-    let mut base = read_json_file("appsettings.json")?;
-
-    let overlay_name = mode.overlay_filename();
-    if let Some(overlay) = read_json_file(overlay_name) {
-        merge_json(&mut base, overlay);
+    match try_load_appsettings(mode) {
+        Ok((value, _)) => value,
+        Err(error) => {
+            tracing::warn!("[Config] {error}; falling back to defaults");
+            None
+        }
     }
-
-    // Well-known env vars (JWT_SECRET) — applied before APP__ so APP__Jwt__Secret wins.
-    apply_well_known_env_overrides(&mut base);
-
-    // Apply environment variable overrides (APP__Section__Key pattern)
-    apply_env_overrides(&mut base);
-
-    Some(base)
 }
 
 /// Apply conventional environment variables that map to config sections.
 ///
 /// `JWT_SECRET` → `Jwt.Secret` (overridden by `APP__Jwt__Secret` if set).
-fn apply_well_known_env_overrides(config: &mut serde_json::Value) {
+fn apply_well_known_env_overrides(config: &mut serde_json::Value, sources: &mut ConfigSources) {
     if let Ok(secret) = std::env::var("JWT_SECRET") {
         if !secret.is_empty() {
             set_json_value(config, &["Jwt", "Secret"], &secret);
+            sources.well_known_env_keys.push("JWT_SECRET".to_string());
         }
     }
 }
 
 /// Apply environment variable overrides following the `APP__Section__Key` pattern.
-fn apply_env_overrides(config: &mut serde_json::Value) {
+fn apply_env_overrides(config: &mut serde_json::Value, sources: &mut ConfigSources) {
     for (key, value) in std::env::vars() {
         if let Some(path) = key.strip_prefix("APP__") {
             // Split by double underscore to get path segments
@@ -498,6 +913,7 @@ fn apply_env_overrides(config: &mut serde_json::Value) {
                 continue;
             }
             set_json_value(config, &segments, &value);
+            sources.env_keys.push(key);
         }
     }
 }
@@ -572,33 +988,120 @@ pub fn bind_root<T: for<'de> Deserialize<'de> + Default>(config: &serde_json::Va
     })
 }
 
+/// Strict counterpart of [`bind_root`]: a schema mismatch is an error, and
+/// unknown keys inside framework-owned sections are rejected.
+///
+/// Application sections (`"MyFeature"`) are not the framework's business, so
+/// unknown top-level sections are ignored as before.
+pub fn try_bind_root<T>(config: &serde_json::Value) -> Result<T, ConfigError>
+where
+    T: for<'de> Deserialize<'de> + Default,
+{
+    let mut ignored = Vec::new();
+    let bound = serde_ignored::deserialize(config.clone(), |path| ignored.push(path.to_string()))
+        .map_err(|source| ConfigError::Bind {
+        section: "<root>".to_string(),
+        source,
+    })?;
+    reject_unknown_framework_keys(&ignored)?;
+    Ok(bound)
+}
+
+/// Strict counterpart of [`bind_config`]: a wrong type is an error, and every
+/// ignored key is reported (the caller opted into this section, so an unknown
+/// key is almost always a typo).
+pub fn try_bind_config<T>(config: &serde_json::Value, section: &str) -> Result<T, ConfigError>
+where
+    T: for<'de> Deserialize<'de> + Default,
+{
+    let value = if section.is_empty() || section == "." {
+        config.clone()
+    } else {
+        match config.get(section) {
+            Some(value) => value.clone(),
+            None => return Ok(T::default()),
+        }
+    };
+    let mut ignored = Vec::new();
+    let bound = serde_ignored::deserialize(value, |path| ignored.push(path.to_string())).map_err(
+        |source| ConfigError::Bind {
+            section: section.to_string(),
+            source,
+        },
+    )?;
+    if !ignored.is_empty() {
+        return Err(ConfigError::UnknownKeys {
+            section: section.to_string(),
+            keys: ignored.join(", "),
+        });
+    }
+    Ok(bound)
+}
+
+fn reject_unknown_framework_keys(ignored: &[String]) -> Result<(), ConfigError> {
+    let mut sections: Vec<&str> = Vec::new();
+    let mut paths: Vec<&str> = Vec::new();
+    for path in ignored {
+        let head = path.split('.').next().unwrap_or(path.as_str());
+        if FRAMEWORK_SECTIONS
+            .iter()
+            .any(|known| known.eq_ignore_ascii_case(head))
+        {
+            paths.push(path.as_str());
+            if !sections.contains(&head) {
+                sections.push(head);
+            }
+        }
+    }
+    if paths.is_empty() {
+        return Ok(());
+    }
+    Err(ConfigError::UnknownKeys {
+        section: sections.join(", "),
+        keys: paths.join(", "),
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-fn read_json_file(path: impl AsRef<Path>) -> Option<serde_json::Value> {
+/// Read `path` from the app base directory or the working directory, strictly.
+///
+/// Returns `Ok(None)` when no candidate exists (env-only deployments), an error
+/// when a candidate exists but cannot be read or parsed.
+fn read_json_file_strict(
+    path: impl AsRef<Path>,
+) -> Result<Option<(serde_json::Value, String)>, ConfigError> {
     let path = path.as_ref();
-
-    /// Try to read and parse a JSON file at the given path.
-    fn try_read(path: &Path) -> Option<serde_json::Value> {
-        let content = std::fs::read_to_string(path).ok()?;
-        serde_json::from_str(&content).ok()
+    let candidates = [crate::paths::app_base().join(path), path.to_path_buf()];
+    for candidate in candidates {
+        match std::fs::metadata(&candidate) {
+            Ok(metadata) if metadata.is_file() => {
+                let display = candidate.display().to_string();
+                let content =
+                    std::fs::read_to_string(&candidate).map_err(|source| ConfigError::Read {
+                        path: display.clone(),
+                        source,
+                    })?;
+                let value =
+                    serde_json::from_str(&content).map_err(|source| ConfigError::Parse {
+                        path: display.clone(),
+                        source,
+                    })?;
+                return Ok(Some((value, display)));
+            }
+            Ok(_) => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(source) => {
+                return Err(ConfigError::Read {
+                    path: candidate.display().to_string(),
+                    source,
+                })
+            }
+        }
     }
-
-    // 1. 应用基准目录（exe 同级 / cwd / 上溯统一由 app_base 处理）。
-    //    部署与开发期均能定位到 appsettings.json 所在目录。
-    let base = crate::paths::app_base();
-    let candidate = base.join(path);
-    if let Some(value) = try_read(&candidate) {
-        return Some(value);
-    }
-
-    // 2. Try as-is (relative to current working directory) — 兜底
-    if let Some(value) = try_read(path) {
-        return Some(value);
-    }
-
-    None
+    Ok(None)
 }
 
 fn merge_json(base: &mut serde_json::Value, overlay: serde_json::Value) {
@@ -634,21 +1137,66 @@ mod tests {
     }
 
     #[test]
-    fn server_request_timeout_defaults_to_disabled_and_parses_seconds() {
-        assert_eq!(ServerSection::default().request_timeout_seconds, 0);
+    fn server_request_timeout_defaults_to_30s_and_parses_seconds() {
+        assert_eq!(ServerSection::default().request_timeout_seconds, 30);
+
+        // The serde default (no `Server` section at all) is the same 30s.
+        let empty: AppOptions = bind_root(&serde_json::json!({}));
+        assert_eq!(empty.server.request_timeout_seconds, 30);
 
         let options: AppOptions = serde_json::from_value(serde_json::json!({
             "Server": { "RequestTimeoutSeconds": 5 }
         }))
         .expect("options parse");
         assert_eq!(options.server.request_timeout_seconds, 5);
+
+        // Explicit zero still parses; the host decides whether it is legal.
+        let disabled: AppOptions = serde_json::from_value(serde_json::json!({
+            "Server": { "RequestTimeoutSeconds": 0 }
+        }))
+        .expect("options parse");
+        assert_eq!(disabled.server.request_timeout_seconds, 0);
+    }
+
+    #[test]
+    fn turn_section_defaults_are_unconfigured_and_bind_from_json() {
+        let empty: AppOptions = bind_root(&serde_json::json!({}));
+        assert!(!empty.turn.is_configured());
+        assert_eq!(
+            empty.turn.ttl_seconds,
+            crate::realtime::DEFAULT_TURN_TTL_SECONDS
+        );
+
+        let options: AppOptions = serde_json::from_value(serde_json::json!({
+            "Turn": {
+                "Secret": "turn-secret",
+                "Urls": ["turn:turn.example:3478", "stun:turn.example:3478"],
+                "TtlSeconds": 120,
+                "Realm": "example"
+            }
+        }))
+        .expect("turn config parse");
+        assert!(options.turn.is_configured());
+        assert_eq!(options.turn.secret, "turn-secret");
+        assert_eq!(options.turn.urls.len(), 2);
+        assert_eq!(options.turn.ttl_seconds, 120);
+        assert_eq!(options.turn.realm.as_deref(), Some("example"));
+
+        // A realm alone is "configured" so validation fails fast instead of
+        // silently ignoring a half-filled section.
+        let partial: AppOptions = serde_json::from_value(serde_json::json!({
+            "Turn": { "Realm": "example" }
+        }))
+        .expect("partial turn config parse");
+        assert!(partial.turn.is_configured());
     }
 
     #[test]
     fn config_env_jwt_and_app_override_precedence() {
         std::env::set_var("JWT_SECRET", "env-jwt-secret-that-is-long-enough-32");
         let mut config = serde_json::json!({ "Jwt": { "Secret": "from-file" } });
-        apply_well_known_env_overrides(&mut config);
+        let mut sources = ConfigSources::default();
+        apply_well_known_env_overrides(&mut config, &mut sources);
         assert_eq!(
             config["Jwt"]["Secret"],
             "env-jwt-secret-that-is-long-enough-32"
@@ -658,13 +1206,96 @@ mod tests {
             "APP__Jwt__Secret",
             "from-app-override-secret-32chars-minimum",
         );
-        apply_env_overrides(&mut config);
+        apply_env_overrides(&mut config, &mut sources);
         std::env::remove_var("JWT_SECRET");
         std::env::remove_var("APP__Jwt__Secret");
         assert_eq!(
             config["Jwt"]["Secret"],
             "from-app-override-secret-32chars-minimum"
         );
+        assert!(sources
+            .well_known_env_keys
+            .iter()
+            .any(|key| key == "JWT_SECRET"));
+        assert!(sources.env_keys.iter().any(|key| key == "APP__Jwt__Secret"));
+    }
+
+    #[test]
+    fn strict_bind_root_rejects_unknown_framework_keys() {
+        let error = try_bind_root::<AppOptions>(&serde_json::json!({
+            "RateLimit": { "Enabled": true, "RequestsPerSecondd": 10.0 }
+        }))
+        .expect_err("a typo in a framework section must fail the startup bind");
+
+        match error {
+            ConfigError::UnknownKeys { section, keys } => {
+                assert_eq!(section, "RateLimit");
+                assert!(
+                    keys.contains("RateLimit.RequestsPerSecondd"),
+                    "the report must name the offending path, got: {keys}"
+                );
+            }
+            other => panic!("expected UnknownKeys, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn strict_bind_root_leaves_application_sections_alone() {
+        let options = try_bind_root::<AppOptions>(&serde_json::json!({
+            "App": { "Name": "svc" },
+            "MyFeature": { "Anything": 1 }
+        }))
+        .expect("application sections are not the framework's business");
+        assert_eq!(options.app.name, "svc");
+    }
+
+    #[test]
+    fn strict_bind_config_reports_type_errors() {
+        let error = try_bind_config::<ServerSection>(
+            &serde_json::json!({ "Server": { "DrainTimeoutSeconds": "soon" } }),
+            "Server",
+        )
+        .expect_err("a wrong type must not fall back to defaults");
+        assert!(matches!(error, ConfigError::Bind { .. }));
+    }
+
+    #[test]
+    fn strict_bind_config_reports_unknown_keys() {
+        let error = try_bind_config::<ServerSection>(
+            &serde_json::json!({ "Server": { "DrainTimeoutSecond": 5 } }),
+            "Server",
+        )
+        .expect_err("an unknown key in an opted-in section must be reported");
+        match error {
+            ConfigError::UnknownKeys { section, keys } => {
+                assert_eq!(section, "Server");
+                assert!(keys.contains("DrainTimeoutSecond"));
+            }
+            other => panic!("expected UnknownKeys, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn strict_file_reader_reports_malformed_json() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("broken.json");
+        std::fs::write(&path, "{ not json").expect("write");
+
+        let error = read_json_file_strict(&path).expect_err("malformed JSON must be an error");
+        match error {
+            ConfigError::Parse { path: reported, .. } => {
+                assert!(reported.ends_with("broken.json"), "got: {reported}");
+            }
+            other => panic!("expected Parse, got: {other}"),
+        }
+
+        let valid = dir.path().join("ok.json");
+        std::fs::write(&valid, r#"{"App":{"Name":"ok"}}"#).expect("write");
+        let (value, reported) = read_json_file_strict(&valid)
+            .expect("valid file")
+            .expect("file exists");
+        assert_eq!(value["App"]["Name"], "ok");
+        assert!(reported.ends_with("ok.json"));
     }
 
     #[test]
@@ -742,6 +1373,57 @@ mod tests {
         }));
         assert_eq!(opts.jwt.secret, "explicit-secret");
         assert_eq!(opts.jwt.secret_file.as_deref(), Some("data/jwt.key"));
+    }
+
+    #[test]
+    fn jwt_section_binds_hardening_fields_with_safe_defaults() {
+        let opts: AppOptions = bind_root(&serde_json::json!({}));
+        assert_eq!(opts.jwt.issuer, None);
+        assert_eq!(opts.jwt.audience, None);
+        assert_eq!(opts.jwt.algorithms, vec![JwtAlgorithm::Hs256]);
+        assert_eq!(opts.jwt.clock_skew_seconds, 30);
+        assert_eq!(
+            opts.jwt.invalid_token_behavior,
+            InvalidTokenBehavior::Anonymous
+        );
+        assert_eq!(opts.jwt.max_token_bytes, 8192);
+
+        let opts: AppOptions = bind_root(&serde_json::json!({
+            "Jwt": {
+                "Issuer": "https://id.example.com",
+                "Audience": "travel-api",
+                "Algorithms": ["HS256"],
+                "ClockSkewSeconds": 10,
+                "InvalidTokenBehavior": "Reject",
+                "MaxTokenBytes": 4096
+            }
+        }));
+        assert_eq!(opts.jwt.issuer.as_deref(), Some("https://id.example.com"));
+        assert_eq!(opts.jwt.audience.as_deref(), Some("travel-api"));
+        assert_eq!(opts.jwt.clock_skew_seconds, 10);
+        assert_eq!(
+            opts.jwt.invalid_token_behavior,
+            InvalidTokenBehavior::Reject
+        );
+        assert_eq!(opts.jwt.max_token_bytes, 4096);
+    }
+
+    #[test]
+    fn jwt_section_binds_jwks_with_bounded_defaults() {
+        let opts: AppOptions = bind_root(&serde_json::json!({}));
+        assert!(opts.jwt.jwks.is_none());
+
+        let opts: AppOptions = bind_root(&serde_json::json!({
+            "Jwt": {
+                "Algorithms": ["RS256"],
+                "Jwks": { "Url": "https://id.example.com/.well-known/jwks.json" }
+            }
+        }));
+        let jwks = opts.jwt.jwks.expect("jwks section");
+        assert_eq!(jwks.url, "https://id.example.com/.well-known/jwks.json");
+        assert_eq!(jwks.cache_seconds, 300);
+        assert_eq!(jwks.timeout_ms, 2000);
+        assert_eq!(jwks.max_keys, 32);
     }
 
     #[test]

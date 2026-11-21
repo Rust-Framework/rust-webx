@@ -20,8 +20,9 @@
 use rust_dix::ServiceCollection;
 use std::sync::{Arc, Mutex};
 use webx_core::error::{ActionResult, Error, Result as LrwfResult};
-use webx_core::handler::{IEventHandler, IRequestHandler};
+use webx_core::handler::IRequestHandler;
 use webx_core::mediator::Mediator;
+use webx_core::mediator::{EventMessage, IEventPublisher};
 use webx_core::mediator::{IEventRequest, IMediator, IRequest};
 use webx_core::route::scan::{HandlerCache, HandlerRegistration};
 
@@ -136,32 +137,11 @@ inventory::submit! {
 
 // --- Event types ---
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 struct TestEvent {
     payload: String,
 }
 impl IEventRequest for TestEvent {}
-
-struct CountingEventHandler {
-    counter: Arc<Mutex<Vec<String>>>,
-}
-
-#[async_trait::async_trait]
-impl IEventHandler<TestEvent> for CountingEventHandler {
-    async fn handle(&self, event: TestEvent) -> LrwfResult<()> {
-        self.counter.lock().unwrap().push(event.payload);
-        Ok(())
-    }
-}
-
-struct FailingEventHandler;
-
-#[async_trait::async_trait]
-impl IEventHandler<TestEvent> for FailingEventHandler {
-    async fn handle(&self, _event: TestEvent) -> LrwfResult<()> {
-        Err(Error::Internal("event handler failure".into()))
-    }
-}
 
 // --- Mediator::send tests ---
 
@@ -192,7 +172,7 @@ impl TestMediator {
         self.mediator.send(req).await
     }
 
-    async fn publish<T: IEventRequest>(&self, event: T) -> LrwfResult<()> {
+    async fn publish<T: IEventRequest + serde::Serialize>(&self, event: T) -> LrwfResult<()> {
         self.mediator.publish(event).await
     }
 }
@@ -234,21 +214,34 @@ async fn mediator_send_handler_not_registered() {
 }
 
 // --- Mediator::publish tests ---
+//
+// `publish` no longer runs handlers: it encodes the event and hands it to the
+// registered `IEventPublisher`. Handler fan-out, isolation and transport swapping
+// are covered in `webx/tests/event_bus_test.rs`.
+
+struct RecordingPublisher {
+    messages: Mutex<Vec<EventMessage>>,
+}
+
+#[async_trait::async_trait]
+impl IEventPublisher for RecordingPublisher {
+    async fn publish(&self, message: EventMessage) -> LrwfResult<()> {
+        self.messages.lock().unwrap().push(message);
+        Ok(())
+    }
+}
 
 #[tokio::test]
-async fn mediator_publish_single_handler() {
-    let counter = Arc::new(Mutex::new(Vec::new()));
-    let counter_clone = Arc::clone(&counter);
-
+async fn mediator_publish_hands_the_encoded_event_to_the_publisher() {
+    let publisher = Arc::new(RecordingPublisher {
+        messages: Mutex::new(Vec::new()),
+    });
     let provider = ServiceCollection::new()
-        .singleton::<dyn IEventHandler<TestEvent>>(move |_| {
-            Arc::new(CountingEventHandler {
-                counter: Arc::clone(&counter_clone),
-            })
-        })
+        .instance::<dyn IEventPublisher>(Arc::clone(&publisher) as Arc<dyn IEventPublisher>)
         .build()
         .unwrap();
     let mediator = TestMediator::new(provider);
+
     mediator
         .publish(TestEvent {
             payload: "event-1".into(),
@@ -256,68 +249,31 @@ async fn mediator_publish_single_handler() {
         .await
         .unwrap();
 
-    let events = counter.lock().unwrap();
-    assert_eq!(events.len(), 1);
-    assert_eq!(events[0], "event-1");
+    let messages = publisher.messages.lock().unwrap();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(
+        messages[0].event_name,
+        <TestEvent as IEventRequest>::event_name()
+    );
+    assert_eq!(
+        messages[0].decode::<TestEvent>().unwrap().payload,
+        "event-1"
+    );
 }
 
 #[tokio::test]
-async fn mediator_publish_multiple_handlers() {
-    let counter = Arc::new(Mutex::new(Vec::new()));
-    let c1 = Arc::clone(&counter);
-    let c2 = Arc::clone(&counter);
-
-    let provider = ServiceCollection::new()
-        .singleton::<dyn IEventHandler<TestEvent>>(move |_| {
-            Arc::new(CountingEventHandler {
-                counter: Arc::clone(&c1),
-            })
-        })
-        .singleton::<dyn IEventHandler<TestEvent>>(move |_| {
-            Arc::new(CountingEventHandler {
-                counter: Arc::clone(&c2),
-            })
-        })
-        .build()
-        .unwrap();
-    let mediator = TestMediator::new(provider);
-    mediator
+async fn mediator_publish_without_a_publisher_is_a_typed_configuration_error() {
+    let mediator = TestMediator::new(build_provider());
+    let error = mediator
         .publish(TestEvent {
-            payload: "multi".into(),
+            payload: "no-transport".into(),
         })
         .await
-        .unwrap();
-
-    let events = counter.lock().unwrap();
-    assert_eq!(events.len(), 2);
-    assert_eq!(events[0], "multi");
-    assert_eq!(events[1], "multi");
-}
-
-#[tokio::test]
-async fn mediator_publish_handler_returns_error() {
-    let provider = ServiceCollection::new()
-        .singleton::<dyn IEventHandler<TestEvent>>(|_| Arc::new(FailingEventHandler))
-        .build()
-        .unwrap();
-    let mediator = TestMediator::new(provider);
-    let result = mediator
-        .publish(TestEvent {
-            payload: "will-fail".into(),
-        })
-        .await;
-    assert!(result.is_err());
-}
-
-#[tokio::test]
-async fn mediator_publish_empty_handler_list() {
-    let mediator = TestMediator::new(build_provider());
-    let result = mediator
-        .publish(TestEvent {
-            payload: "no-handlers".into(),
-        })
-        .await;
-    assert!(result.is_ok());
+        .expect_err("publishing without a transport must fail closed");
+    match error {
+        Error::Di(message) => assert!(message.contains("IEventPublisher"), "{message}"),
+        other => panic!("expected a DI configuration error, got {other:?}"),
+    }
 }
 
 // --- Mediator::send scope provider test ---

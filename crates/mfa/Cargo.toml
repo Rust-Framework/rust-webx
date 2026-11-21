@@ -1,0 +1,31 @@
+[package]
+name = "rust-webx-mfa"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+documentation.workspace = true
+description = "TOTP and recovery-code multi-factor authentication for rust-webx"
+readme = "README.md"
+keywords = ["web", "auth", "mfa", "totp", "2fa"]
+categories = ["web-programming", "authentication"]
+
+[lib]
+name = "webx_mfa"
+
+[dependencies]
+rust-webx-core.workspace = true
+sha1.workspace = true
+sha2.workspace = true
+hmac.workspace = true
+data-encoding = "2"
+uuid.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

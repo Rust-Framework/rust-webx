@@ -5,6 +5,8 @@
 //! * [`ITokenIssuer`] — mint a token from [`TokenClaims`] (login).
 //! * [`ISessionStore`] — revoke / query revoked tokens (logout, forced sign-out);
 //!   the authentication middleware consults it after verifying a token.
+//! * [`ISessionRepository`] — server-side browser sessions for cookie auth:
+//!   opaque id in, `SessionRecord` out; logout is immediate.
 //! * [`IPasswordHasher`] — hash/verify passwords as PHC strings (Argon2id by
 //!   default).
 //!
@@ -38,10 +40,17 @@
 
 mod once;
 mod password;
+mod refresh;
 mod session;
+mod session_repo;
 mod tokens;
 
 pub use once::{constant_time_eq, OneTimeSecret, OneTimeSecretState};
 pub use password::IPasswordHasher;
+pub use refresh::{
+    IRefreshTokenStore, InMemoryRefreshTokenStore, RefreshRotation, RefreshTokenRecord,
+    RefreshTokenStatus,
+};
 pub use session::{ISessionStore, InMemorySessionStore};
+pub use session_repo::{ISessionRepository, InMemorySessionRepository, SessionRecord};
 pub use tokens::{ITokenIssuer, IssuedToken, TokenClaims};

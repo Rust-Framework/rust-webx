@@ -60,19 +60,35 @@
 //! let middleware = jwt_middleware(Arc::new(auth));
 //! ```
 
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{
+    decode, decode_header, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation,
+};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use webx_core::auth::{IAuthenticationHandler, IClaims};
-use webx_core::config::AppOptions;
+use webx_core::config::{
+    AppOptions, InvalidTokenBehavior, JwtAlgorithm, JwtJwksSection, JwtSection,
+    MAX_JWT_CLOCK_SKEW_SECONDS, MAX_JWT_TOKEN_BYTES,
+};
 use webx_core::error::{Error, Result};
 use webx_core::http::IHttpContext;
 use webx_core::middleware::IMiddleware;
 use webx_core::security::{ISessionStore, ITokenIssuer, IssuedToken, TokenClaims};
+
+use crate::auth_jwks::IJwtKeyResolver;
+
+/// Default ceiling for an accepted compact JWT, in bytes.
+///
+/// Tokens are rejected before signature verification when they exceed this
+/// size, so a hostile header cannot force a large allocation.
+pub const DEFAULT_MAX_TOKEN_BYTES: usize = 8 * 1024;
+
+/// Default clock-skew allowance for `exp`/`nbf`/`iat`, in seconds.
+pub const DEFAULT_CLOCK_SKEW_SECONDS: u64 = 30;
 
 // ---------------------------------------------------------------------------
 // JwtClaims —IClaims implementation backed by JWT payload
@@ -173,67 +189,480 @@ impl IClaims for JwtClaims {
 // JwtAuth —IAuthenticationHandler implementation
 // ---------------------------------------------------------------------------
 
+/// Validated JWT verification settings.
+///
+/// Built from [`JwtSection`] by [`JwtValidation::from_section`] or from code
+/// with [`JwtValidation::builder`]. Construction is **fail-closed**: an empty
+/// algorithm list, an algorithm the host cannot verify, an empty issuer or
+/// audience, an oversized clock skew, or a zero/oversized token budget is a
+/// typed error rather than a silent default.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JwtValidation {
+    algorithms: Vec<JwtAlgorithm>,
+    issuer: Option<String>,
+    audience: Option<String>,
+    leeway: Duration,
+    max_token_bytes: usize,
+    invalid_token_behavior: InvalidTokenBehavior,
+    jwks: Option<JwtJwksSection>,
+}
+
+impl JwtValidation {
+    /// Start building a validation configuration.
+    pub fn builder() -> JwtValidationBuilder {
+        JwtValidationBuilder::default()
+    }
+
+    /// Build from the merged `Jwt` configuration section.
+    pub fn from_section(section: &JwtSection) -> Result<Self> {
+        let mut builder = JwtValidationBuilder::default()
+            .algorithms(section.algorithms.iter().copied())
+            .leeway(Duration::from_secs(section.clock_skew_seconds))
+            .max_token_bytes(section.max_token_bytes)
+            .invalid_token_behavior(section.invalid_token_behavior)
+            .jwks(section.jwks.clone());
+        if let Some(issuer) = &section.issuer {
+            builder = builder.require_issuer(issuer.clone());
+        }
+        if let Some(audience) = &section.audience {
+            builder = builder.require_audience(audience.clone());
+        }
+        builder.build()
+    }
+
+    /// Accepted algorithms.
+    pub fn algorithms(&self) -> &[JwtAlgorithm] {
+        &self.algorithms
+    }
+
+    /// Required `iss`, when configured.
+    pub fn issuer(&self) -> Option<&str> {
+        self.issuer.as_deref()
+    }
+
+    /// Required `aud`, when configured.
+    pub fn audience(&self) -> Option<&str> {
+        self.audience.as_deref()
+    }
+
+    /// Clock-skew allowance.
+    pub fn leeway(&self) -> Duration {
+        self.leeway
+    }
+
+    /// Maximum accepted token size, in bytes.
+    pub fn max_token_bytes(&self) -> usize {
+        self.max_token_bytes
+    }
+
+    /// Invalid-token semantics.
+    pub fn invalid_token_behavior(&self) -> InvalidTokenBehavior {
+        self.invalid_token_behavior
+    }
+
+    /// Remote JWKS configuration, when asymmetric algorithms are enabled.
+    pub fn jwks(&self) -> Option<&JwtJwksSection> {
+        self.jwks.as_ref()
+    }
+
+    fn jsonwebtoken_validation(&self) -> Validation {
+        // Base validation; the resolver path narrows `algorithms` to the token
+        // header's algorithm after the key is resolved.
+        let algorithms: Vec<Algorithm> = self
+            .algorithms
+            .iter()
+            .map(|algorithm| jsonwebtoken_algorithm(*algorithm))
+            .collect();
+        let mut validation =
+            Validation::new(algorithms.first().copied().unwrap_or(Algorithm::HS256));
+        validation.algorithms = algorithms;
+        validation.leeway = self.leeway.as_secs();
+        // `nbf` is only checked when the claim is present.
+        validation.validate_nbf = true;
+
+        let mut required: HashSet<String> = HashSet::new();
+        required.insert("exp".to_string());
+        if let Some(issuer) = &self.issuer {
+            validation.set_issuer(&[issuer]);
+            required.insert("iss".to_string());
+        }
+        if let Some(audience) = &self.audience {
+            validation.set_audience(&[audience]);
+            required.insert("aud".to_string());
+        }
+        validation.required_spec_claims = required;
+        validation
+    }
+}
+
+/// Builder for [`JwtValidation`].
+#[derive(Debug, Clone)]
+pub struct JwtValidationBuilder {
+    algorithms: Vec<JwtAlgorithm>,
+    issuer: Option<String>,
+    audience: Option<String>,
+    leeway: Duration,
+    max_token_bytes: usize,
+    invalid_token_behavior: InvalidTokenBehavior,
+    jwks: Option<JwtJwksSection>,
+}
+
+impl Default for JwtValidationBuilder {
+    fn default() -> Self {
+        Self {
+            algorithms: vec![JwtAlgorithm::Hs256],
+            issuer: None,
+            audience: None,
+            leeway: Duration::from_secs(DEFAULT_CLOCK_SKEW_SECONDS),
+            max_token_bytes: DEFAULT_MAX_TOKEN_BYTES,
+            invalid_token_behavior: InvalidTokenBehavior::Anonymous,
+            jwks: None,
+        }
+    }
+}
+
+impl JwtValidationBuilder {
+    /// Replace the accepted algorithm list. Empty is rejected by [`Self::build`].
+    pub fn algorithms(mut self, algorithms: impl IntoIterator<Item = JwtAlgorithm>) -> Self {
+        self.algorithms = algorithms.into_iter().collect();
+        self
+    }
+
+    /// Require the `iss` claim to equal `issuer`.
+    pub fn require_issuer(mut self, issuer: impl Into<String>) -> Self {
+        self.issuer = Some(issuer.into());
+        self
+    }
+
+    /// Require the `aud` claim to contain `audience`.
+    pub fn require_audience(mut self, audience: impl Into<String>) -> Self {
+        self.audience = Some(audience.into());
+        self
+    }
+
+    /// Clock-skew allowance (`exp`/`nbf`/`iat`).
+    pub fn leeway(mut self, leeway: Duration) -> Self {
+        self.leeway = leeway;
+        self
+    }
+
+    /// Maximum accepted token size, in bytes.
+    pub fn max_token_bytes(mut self, max_token_bytes: usize) -> Self {
+        self.max_token_bytes = max_token_bytes;
+        self
+    }
+
+    /// Invalid-token semantics (anonymous vs immediate `401`).
+    pub fn invalid_token_behavior(mut self, behavior: InvalidTokenBehavior) -> Self {
+        self.invalid_token_behavior = behavior;
+        self
+    }
+
+    /// Remote JWKS source for asymmetric algorithms.
+    pub fn jwks(mut self, jwks: Option<JwtJwksSection>) -> Self {
+        self.jwks = jwks;
+        self
+    }
+
+    /// Validate cross-field constraints and produce the configuration.
+    pub fn build(self) -> Result<JwtValidation> {
+        if self.algorithms.is_empty() {
+            return Err(Error::Di(
+                "Jwt.Algorithms must not be empty; set at least [\"HS256\"]".to_string(),
+            ));
+        }
+        if self
+            .issuer
+            .as_deref()
+            .is_some_and(|issuer| issuer.trim().is_empty())
+        {
+            return Err(Error::Di(
+                "Jwt.Issuer must not be empty when configured".to_string(),
+            ));
+        }
+        if self
+            .audience
+            .as_deref()
+            .is_some_and(|audience| audience.trim().is_empty())
+        {
+            return Err(Error::Di(
+                "Jwt.Audience must not be empty when configured".to_string(),
+            ));
+        }
+        let has_asymmetric = self
+            .algorithms
+            .iter()
+            .any(|algorithm| *algorithm != JwtAlgorithm::Hs256);
+        if has_asymmetric && self.jwks.is_none() {
+            return Err(Error::Di(
+                "Jwt.Algorithms contains an asymmetric algorithm but Jwt.Jwks is not configured"
+                    .to_string(),
+            ));
+        }
+        if let Some(jwks) = &self.jwks {
+            if !jwks.url.starts_with("https://") {
+                return Err(Error::Di(format!(
+                    "Jwt.Jwks.Url must be https:// (got '{}')",
+                    jwks.url
+                )));
+            }
+            if jwks.cache_seconds == 0 || jwks.cache_seconds > 86_400 {
+                return Err(Error::Di(
+                    "Jwt.Jwks.CacheSeconds must be between 1 and 86400".to_string(),
+                ));
+            }
+            if !(100..=10_000).contains(&jwks.timeout_ms) {
+                return Err(Error::Di(
+                    "Jwt.Jwks.TimeoutMs must be between 100 and 10000".to_string(),
+                ));
+            }
+            if !(1..=256).contains(&jwks.max_keys) {
+                return Err(Error::Di(
+                    "Jwt.Jwks.MaxKeys must be between 1 and 256".to_string(),
+                ));
+            }
+        }
+
+        let issuer = normalize_claim_value("Jwt.Issuer", self.issuer)?;
+        let audience = normalize_claim_value("Jwt.Audience", self.audience)?;
+
+        if self.leeway > Duration::from_secs(MAX_JWT_CLOCK_SKEW_SECONDS) {
+            return Err(Error::Di(format!(
+                "Jwt.ClockSkewSeconds must be <= {MAX_JWT_CLOCK_SKEW_SECONDS} (got {})",
+                self.leeway.as_secs()
+            )));
+        }
+        if self.max_token_bytes == 0 || self.max_token_bytes > MAX_JWT_TOKEN_BYTES {
+            return Err(Error::Di(format!(
+                "Jwt.MaxTokenBytes must be between 1 and {MAX_JWT_TOKEN_BYTES} (got {})",
+                self.max_token_bytes
+            )));
+        }
+
+        Ok(JwtValidation {
+            algorithms: self.algorithms,
+            issuer,
+            audience,
+            leeway: self.leeway,
+            max_token_bytes: self.max_token_bytes,
+            invalid_token_behavior: self.invalid_token_behavior,
+            jwks: self.jwks,
+        })
+    }
+}
+
+fn jsonwebtoken_algorithm(algorithm: JwtAlgorithm) -> Algorithm {
+    match algorithm {
+        JwtAlgorithm::Hs256 => Algorithm::HS256,
+        JwtAlgorithm::Rs256 => Algorithm::RS256,
+        JwtAlgorithm::Es256 => Algorithm::ES256,
+        JwtAlgorithm::Ps256 => Algorithm::PS256,
+    }
+}
+
+fn normalize_claim_value(label: &str, value: Option<String>) -> Result<Option<String>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(Error::Di(format!(
+            "{label} must not be empty when configured; remove the key or set a value"
+        )));
+    }
+    if trimmed.len() > 1024 {
+        return Err(Error::Di(format!("{label} must be at most 1024 bytes")));
+    }
+    Ok(Some(trimmed.to_string()))
+}
+
 /// JWT-based authentication handler.
 ///
 /// Reads the `Authorization: Bearer <token>` header, decodes and validates
-/// the JWT, and returns the resulting claims. Only a **valid** token produces
-/// claims: a missing header, a non-`Bearer` scheme or a token that fails
-/// validation all yield `Ok(None)` — the request simply continues as anonymous.
+/// the JWT, and returns the resulting claims. A missing header, a non-`Bearer`
+/// scheme or a token that fails validation is **anonymous by default**; the
+/// endpoint then decides (public endpoints stay reachable, protected ones
+/// answer `401`). Configure [`InvalidTokenBehavior::Reject`] for OAuth 2.0
+/// resource-server semantics, where a presented-but-invalid token is a `401`
+/// immediately.
 pub struct JwtAuth {
-    decoding_key: DecodingKey,
+    decoding_key: Option<DecodingKey>,
+    key_resolver: Option<Arc<dyn IJwtKeyResolver>>,
     validation: Validation,
+    max_token_bytes: usize,
+    invalid_token_behavior: InvalidTokenBehavior,
 }
 
+// `JwtAuth` is shared across middleware invocations. The trait-object resolver
+// owns its own synchronization (the JWKS cache is behind a lock), so a panic
+// during authentication leaves no observable broken invariant in `JwtAuth`
+// itself. Asserting unwind safety keeps the 2.1 auto-trait surface intact
+// (a removed auto trait is a semver-major change for `catch_unwind` users).
+impl std::panic::UnwindSafe for JwtAuth {}
+impl std::panic::RefUnwindSafe for JwtAuth {}
+
 impl JwtAuth {
-    /// Create a new JWT authenticator.
+    /// Create a JWT authenticator with the framework defaults: anonymous on
+    /// invalid tokens, 8 KiB token ceiling, the supplied `Validation`.
     pub fn new(decoding_key: DecodingKey, validation: Validation) -> Self {
         Self {
-            decoding_key,
+            decoding_key: Some(decoding_key),
+            key_resolver: None,
             validation,
+            max_token_bytes: DEFAULT_MAX_TOKEN_BYTES,
+            invalid_token_behavior: InvalidTokenBehavior::Anonymous,
         }
+    }
+
+    /// Build from a validated [`JwtValidation`] (issuer/audience/leeway/size/
+    /// behavior all applied consistently).
+    pub fn from_validation(decoding_key: DecodingKey, validation: &JwtValidation) -> Self {
+        Self {
+            decoding_key: Some(decoding_key),
+            key_resolver: None,
+            validation: validation.jsonwebtoken_validation(),
+            max_token_bytes: validation.max_token_bytes,
+            invalid_token_behavior: validation.invalid_token_behavior,
+        }
+    }
+
+    /// Build from a validated [`JwtValidation`] plus a key resolver.
+    ///
+    /// `decoding_key` is the HS256 secret when the host accepts HS256 for
+    /// self-issued tokens; asymmetric tokens are resolved per `kid`.
+    pub fn from_validation_with_resolver(
+        decoding_key: Option<DecodingKey>,
+        validation: &JwtValidation,
+        resolver: Arc<dyn IJwtKeyResolver>,
+    ) -> Self {
+        Self {
+            decoding_key,
+            key_resolver: Some(resolver),
+            validation: validation.jsonwebtoken_validation(),
+            max_token_bytes: validation.max_token_bytes,
+            invalid_token_behavior: validation.invalid_token_behavior,
+        }
+    }
+
+    /// Override the token-size ceiling.
+    pub fn with_max_token_bytes(mut self, max_token_bytes: usize) -> Self {
+        self.max_token_bytes = max_token_bytes;
+        self
+    }
+
+    /// Override what an invalid token means.
+    pub fn with_invalid_token_behavior(mut self, behavior: InvalidTokenBehavior) -> Self {
+        self.invalid_token_behavior = behavior;
+        self
+    }
+
+    fn reject(&self, reason: &str) -> Result<Option<Box<dyn IClaims>>> {
+        // The decoder's message is for operators, not for the client.
+        tracing::debug!(reason, "JWT rejected");
+        match self.invalid_token_behavior {
+            InvalidTokenBehavior::Anonymous => Ok(None),
+            InvalidTokenBehavior::Reject => Err(Error::Unauthorized("invalid token".to_string())),
+        }
+    }
+
+    fn iat_is_plausible(&self, claims: &JwtClaims) -> bool {
+        let Some(issued_at) = claims.raw.get("iat").and_then(|v| v.parse::<u64>().ok()) else {
+            return true;
+        };
+        let now = unix_now();
+        issued_at <= now.saturating_add(self.validation.leeway)
     }
 }
 
 #[async_trait::async_trait]
 impl IAuthenticationHandler for JwtAuth {
     async fn authenticate(&self, ctx: &mut dyn IHttpContext) -> Result<Option<Box<dyn IClaims>>> {
-        // Extract token synchronously —avoids holding &dyn IHttpContext
-        // across any async boundary, keeping the future Send.
+        // Extract the token synchronously — avoids holding `&dyn IHttpContext`
+        // across any async boundary, keeping the future `Send`.
         let header = match ctx.request().header("authorization") {
-            Some(h) => h,
+            Some(header) => header,
             None => return Ok(None),
         };
 
-        // RFC 6750: scheme is case-insensitive
-        let token = if header.len() >= 7 && header[..7].eq_ignore_ascii_case("Bearer ") {
-            header[7..].trim().to_string()
-        } else {
-            return Ok(None);
+        // RFC 6750: the scheme is case-insensitive. `split_once` keeps the
+        // slice on a char boundary even for a non-ASCII header value.
+        let token = match header.split_once(' ') {
+            Some((scheme, rest)) if scheme.eq_ignore_ascii_case("Bearer") => rest.trim(),
+            _ => return Ok(None),
         };
-
         if token.is_empty() {
             return Ok(None);
         }
+        self.validate_token(token).await
+    }
+}
 
-        // A rejected token means "not authenticated", not "reject the request":
-        // the request continues as anonymous and the endpoint decides. This is
-        // what keeps a public endpoint (login, health, docs) reachable while a
-        // client still holds an expired token, instead of dead-locking it with a
-        // 401 on every call. Protected endpoints respond 401 further down the
-        // pipeline (`#[authorize]` rules or a required `#[fromclaim]` identity),
-        // through the single unauthorized writer (detail "authentication
-        // required" + `WWW-Authenticate`).
-        let token_data = match decode::<RawClaims>(&token, &self.decoding_key, &self.validation) {
+impl JwtAuth {
+    /// Validate a token string (no request extraction).
+    ///
+    /// Used by [`JwtAuth::authenticate`] and by sender-constrained schemes
+    /// (DPoP) that carry the access token under a different scheme name.
+    pub async fn validate_token(&self, token: &str) -> Result<Option<Box<dyn IClaims>>> {
+        if token.len() > self.max_token_bytes {
+            return self.reject("token exceeds Jwt.MaxTokenBytes");
+        }
+
+        let decoded = if let Some(resolver) = &self.key_resolver {
+            let header = match decode_header(token) {
+                Ok(header) => header,
+                Err(error) => return self.reject(&format!("invalid JWT header: {error}")),
+            };
+            if !self.validation.algorithms.contains(&header.alg) {
+                return self.reject(&format!(
+                    "JWT algorithm {:?} is not in Jwt.Algorithms",
+                    header.alg
+                ));
+            }
+            let mut validation = self.validation.clone();
+            validation.algorithms = vec![header.alg];
+            if header.alg == Algorithm::HS256 {
+                let Some(key) = &self.decoding_key else {
+                    return self.reject("HS256 token but no Jwt.Secret is configured");
+                };
+                decode::<RawClaims>(token, key, &validation)
+            } else {
+                let kid = header.kid.as_deref().unwrap_or("");
+                let key = match resolver.resolve(kid, header.alg).await {
+                    // A key-backend outage is not "anonymous": fail closed.
+                    Ok(key) => key,
+                    Err(error) if error.status_code() == 503 => return Err(error),
+                    Err(error) => {
+                        return self.reject(&format!("JWKS key resolution failed: {error}"))
+                    }
+                };
+                decode::<RawClaims>(token, key.as_ref(), &validation)
+            }
+        } else {
+            let Some(key) = &self.decoding_key else {
+                return self.reject("no JWT verification key is configured");
+            };
+            decode::<RawClaims>(token, key, &self.validation)
+        };
+
+        let token_data = match decoded {
             Ok(data) => data,
-            Err(e) => {
-                // The decoder's message is for operators, not for the client
-                // (it names InvalidToken/ExpiredSignature/InvalidAlgorithm/...).
-                tracing::debug!(reason = %e, "JWT rejected");
-                return Ok(None);
+            Err(error) => {
+                return self.reject(&format!(
+                    "JWT decode failed (invalid/expired/algorithm/issuer/audience): {error}"
+                ))
             }
         };
 
         let claims: JwtClaims = token_data.claims.into();
+        // A signed token without a subject must never become an authenticated
+        // identity: `IdentityUser::id` would be empty and tenant/ownership
+        // checks would operate on a phantom principal.
+        if claims.subject().trim().is_empty() {
+            return self.reject("JWT has an empty `sub`");
+        }
+        if !self.iat_is_plausible(&claims) {
+            return self.reject("JWT `iat` is in the future");
+        }
         Ok(Some(Box::new(claims)))
     }
 }
@@ -456,19 +885,22 @@ pub fn jwt_middleware_with_revocation(
 
 static JWT_ENCODING_SECRET: OnceLock<String> = OnceLock::new();
 
-/// Initialize the global JWT encoding secret from the configured secret.
-/// This is called automatically by `.add_authentication()` on the `HostBuilder`,
-/// but can also be called manually if needed.
+/// Deprecated 2.5 compatibility shim: initialize the global JWT encoding
+/// secret.
 ///
-/// Idempotent: subsequent calls are no-ops (the first secret wins).
+/// `.add_authentication()` still populates this for applications that have not
+/// migrated yet, but new code must inject `Arc<dyn ITokenIssuer>` and call
+/// `issue(TokenClaims)` instead. The global will be removed in the next major.
+/// (No `#[deprecated]` attribute in 2.x: adding one would break downstream
+/// `-D warnings` builds in a minor release.)
 pub fn init_jwt_secret(secret: &str) {
     let _ = JWT_ENCODING_SECRET.set(secret.to_owned());
 }
 
-/// Retrieve the global JWT encoding secret previously set via [`init_jwt_secret`].
+/// Deprecated 2.5 compatibility shim: retrieve the global JWT encoding secret.
 ///
 /// # Panics
-/// Panics if [`init_jwt_secret`] has not been called yet.
+/// Panics if the global was never initialized.
 pub fn jwt_secret() -> &'static str {
     JWT_ENCODING_SECRET
         .get()

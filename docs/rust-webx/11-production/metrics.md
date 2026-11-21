@@ -2,6 +2,36 @@
 
 框架提供最小指标端口，不绑定 Prometheus/OTel；应用实现 `IMeter` 并把它交给组件。
 
+## 内置 HTTP 指标（`GET /metrics`）
+
+`Metrics.Enabled = true` 时框架直接暴露 `GET /metrics`（Prometheus text 0.0.4），不需要接 `IMeter`：
+
+| 指标 | 类型 | 标签 | 含义 |
+|---|---|---|---|
+| `http_requests_total` / `http_responses_2xx_total` / `http_responses_4xx_total` / `http_responses_5xx_total` | counter | — | 进程级计数（2.1 兼容，保持不变） |
+| `http_requests_inflight` | gauge | — | 当前在管道内的请求数（含本次 scrape） |
+| `http_request_timeouts_total` | counter | — | 被入站 deadline 取消（504）的请求 |
+| `http_route_requests_total` | counter | route, status | 按匹配路由模板的状态类计数 |
+| `http_request_duration_seconds` | histogram | route | 请求延迟（秒；µs 桶，含 `+Inf`） |
+| `http_route_label_overflow_total` | counter | — | 超过 512 个路由标签被丢弃的请求（基数保护） |
+| `engine_connections_admitted_total` | counter | — | 通过全局准入的连接数 |
+| `engine_connections_rejected_total` | counter | — | 等待准入超时、收到 503 的连接数 |
+| `engine_admission_waiting` | gauge | — | 已 accept 但仍在等待准入槽的连接数（准入队列深度） |
+| `engine_connections_active` | gauge | — | 当前打开的连接数（每个连接持有一个准入 permit；含 keep-alive 与 SSE 长连接） |
+| `engine_connections_capacity` | gauge | — | 准入上限 `App.MaxConnections`，与 `active` 一起看容量水位 |
+
+`route` 使用**匹配到的路由模板**（如 `/api/users/{id}`），未匹配请求统一为 `unmatched`；
+路径参数不会成为标签，因此不会因随机 URL 造成基数爆炸。被取消的请求同样进入延迟直方图
+（延迟是真实耗时），并计入 `http_request_timeouts_total`。
+
+```text
+http_route_requests_total{route="/fail",status="5xx"} 1
+http_request_duration_seconds_bucket{route="/fail",le="0.005"} 1
+http_request_duration_seconds_bucket{route="/fail",le="+Inf"} 1
+http_request_duration_seconds_sum{route="/fail"} 0.00041
+http_request_duration_seconds_count{route="/fail"} 1
+```
+
 ```rust
 use std::sync::Arc;
 use webx_ai::GatewayExecutor;
@@ -29,6 +59,53 @@ assert_eq!(
     1
 );
 ```
+
+## OpenTelemetry 桥接（2.2-1b）
+
+框架**不**引入 OTel 依赖（`opentelemetry` 的版本节奏与 MSRV 需单独评审）。两条零依赖桥接路径：
+
+1. **Collector 拉取（推荐）**：`/metrics` 是标准 Prometheus text 0.0.4，
+   OTel Collector 用 `prometheusreceiver` 抓取后走 OTLP 导出：
+
+   ```yaml
+   receivers:
+     prometheus:
+       config:
+         scrape_configs:
+           - job_name: rust-webx
+             scrape_interval: 15s
+             static_configs:
+               - targets: ["app:8080"]
+   exporters:
+     otlp:
+       endpoint: otel-collector:4317
+   service:
+     pipelines:
+       metrics:
+         receivers: [prometheus]
+         exporters: [otlp]
+   ```
+
+2. **进程内自定义指标**：实现 `webx::IMeter`（counter/histogram/gauge）并通过
+   `HostBuilder::use_meter` 注册，AI 执行器等组件会写入；生产实现把三类指标映射到
+   `opentelemetry::metrics::Meter`。内置的 RED/直方图/连接 gauge 目前只走 `/metrics`，
+   进程内 OTel exporter 属于 2.4 的 starter 家族（`otel` crate），单独立项。
+
+## 实时（WebSocket）指标（2.3-6）
+
+存在 WebSocket 路由时，`/metrics` 额外输出 `realtime_*` 系列（进程级聚合，
+`IConnection::stats()` 的聚合版）：
+
+| 指标 | 类型 | 含义 |
+|---|---|---|
+| `realtime_connections_active` | gauge | 注册表活跃连接 |
+| `realtime_connections_opened_total` / `_closed_total` | counter | 会话开/关 |
+| `realtime_messages_in_total` / `_out_total` | counter | 消息数 |
+| `realtime_message_bytes_in_total` / `_out_total` | counter | 消息字节 |
+| `realtime_messages_dropped_total` | counter | 背压丢弃 |
+| `realtime_rate_limited_total` | counter | 入站限流触发 |
+| `realtime_connection_closes_total{code}` | counter | 关闭码分布 |
+| `realtime_message_dispatch_seconds` | histogram | 消息即请求分发延迟 |
 
 ## 执行器指标
 

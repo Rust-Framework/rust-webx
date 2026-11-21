@@ -24,20 +24,24 @@ rust-webx-spa.workspace = true
 rust-webx-openapi.workspace = true
 rust-dix.workspace = true
 jsonwebtoken.workspace = true
+base64.workspace = true
+sha2.workspace = true
 async-trait.workspace = true
 tokio = { workspace = true, features = ["net", "rt", "rt-multi-thread", "macros", "fs", "signal"] }
 hyper.workspace = true
 http-body-util.workspace = true
 hyper-util = { workspace = true, features = ["tokio", "server-auto"] }
 bytes.workspace = true
-futures-util.workspace = true
+futures-util = { workspace = true, features = ["sink"] }
 tokio-util.workspace = true
+tokio-tungstenite.workspace = true
 multer.workspace = true
 mime_guess.workspace = true
 tempfile.workspace = true
 httpdate.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_path_to_error.workspace = true
 thiserror.workspace = true
 inventory.workspace = true
 uuid.workspace = true

@@ -81,6 +81,13 @@ pub struct StubEndpoint {
 }
 
 impl StubEndpoint {
+    /// Whether the compile-time direct dispatch may bypass [`Self::authorize`]
+    /// (2.4-9): no per-route body cap, no declarative rules and no dynamic
+    /// authorizer. The engine still validates the declared body limit itself.
+    pub(crate) fn direct_safe(&self) -> bool {
+        self.max_body_size.is_none() && self.authorization.is_empty() && !self.authorization_dynamic
+    }
+
     /// Apply the route's body limit and declarative/dynamic authorization.
     ///
     /// Kept separate so the direct-dispatch target can enforce exactly the same
@@ -212,6 +219,19 @@ impl DirectRouteTarget {
 
 #[async_trait::async_trait]
 impl webx_engine::RouteTarget for DirectRouteTarget {
+    fn direct(
+        &self,
+    ) -> Option<(
+        webx_engine::DirectDispatchFn,
+        webx_core::route::scan::DirectResponseEncoderFn,
+    )> {
+        if self.auth.direct_safe() {
+            Some((self.dispatch, self.encoder))
+        } else {
+            None
+        }
+    }
+
     async fn handle(&self, ctx: &mut webx_engine::EngineContext) -> Result<()> {
         if !self.auth.authorize(ctx).await? {
             return Ok(());
@@ -336,5 +356,74 @@ impl IEndpoint for StaticHtmlEndpoint {
         ctx.response_mut()
             .write_bytes(self.body.as_bytes().to_vec())
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use webx_core::action::EndpointResult;
+    use webx_core::route::scan::HandlerDispatchFn;
+    use webx_core::route::scan::{AuthorizeRule, DirectResponseEncoderFn};
+
+    fn stub(
+        authorization: &'static [AuthorizeRule],
+        authorization_dynamic: bool,
+        max_body_size: Option<usize>,
+    ) -> Arc<StubEndpoint> {
+        Arc::new(StubEndpoint {
+            method: "GET",
+            path: "/test",
+            handler_type: "test::Request",
+            dispatch_fn: None,
+            authorization,
+            authorization_dynamic,
+            authorizers: None,
+            max_body_size,
+        })
+    }
+
+    fn dummy_dispatch<'a>(
+        _ctx: &'a mut dyn IHttpContext,
+        _encoder: DirectResponseEncoderFn,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<EndpointResult>> + Send + 'a>>
+    {
+        Box::pin(async { Ok(EndpointResult::Empty) })
+    }
+
+    fn dummy_encoder(_: &dyn std::any::Any) -> Result<EndpointResult> {
+        Ok(EndpointResult::Empty)
+    }
+
+    fn target(auth: Arc<StubEndpoint>) -> DirectRouteTarget {
+        let dispatch: HandlerDispatchFn = dummy_dispatch;
+        DirectRouteTarget::new(auth, dispatch, dummy_encoder)
+    }
+
+    #[test]
+    fn direct_fast_path_is_only_selected_for_unguarded_routes() {
+        use webx_engine::RouteTarget;
+
+        // Public, no body cap: the engine may call the dispatch function directly.
+        assert!(
+            target(stub(&[], false, None)).direct().is_some(),
+            "unguarded route should use the direct fast path"
+        );
+
+        // Any authorization rule, dynamic authorization or route body cap means
+        // the guarded `handle` path runs instead.
+        const AUTHENTICATED: &[AuthorizeRule] = &[AuthorizeRule::authenticated()];
+        assert!(
+            target(stub(AUTHENTICATED, false, None)).direct().is_none(),
+            "a route with an authorization rule must go through the guard"
+        );
+        assert!(
+            target(stub(&[], true, None)).direct().is_none(),
+            "a dynamic-authorization route must go through the guard"
+        );
+        assert!(
+            target(stub(&[], false, Some(16))).direct().is_none(),
+            "a route with a per-route body cap must go through the guard"
+        );
     }
 }

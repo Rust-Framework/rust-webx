@@ -36,18 +36,18 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
-use hyper_util::server::conn::auto;
-use tokio::runtime::Builder;
-use tokio::sync::{mpsc, watch, OwnedSemaphorePermit};
-use tokio::task::JoinSet;
-use tokio_rustls::TlsAcceptor;
-use webx_core::error::{Error, Result};
-
 use crate::config::DEFAULT_BLOCKING_THREADS;
 use crate::pipeline::FinalHandler;
 use crate::server::connection;
-use crate::shared::{ActiveStreamGuard, Shared};
+use crate::shared::{ActiveStreamGuard, ConnectionPermit, Shared};
+use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
+use hyper_util::server::conn::auto;
+use sha2::{Digest as _, Sha256};
+use tokio::runtime::Builder;
+use tokio::sync::{mpsc, watch};
+use tokio::task::JoinSet;
+use tokio_rustls::TlsAcceptor;
+use webx_core::error::{Error, Result};
 
 /// Per-worker handoff queue depth.
 ///
@@ -73,7 +73,10 @@ pub(crate) struct Handoff {
     /// TLS configuration for the listener this connection arrived on.
     pub tls: Option<Arc<rustls::ServerConfig>>,
     /// Global admission permit; dropped when the connection task ends.
-    pub permit: OwnedSemaphorePermit,
+    ///
+    /// Wrapped in [`ConnectionPermit`] so the permit's lifetime also drives the
+    /// `engine_connections_active` gauge.
+    pub permit: ConnectionPermit,
     /// Queue gauge; dropped exactly once, whether the message is delivered,
     /// rejected, or dropped at shutdown.
     pub pending: PendingGuard,
@@ -319,6 +322,14 @@ async fn run_connection(
             };
             match handshake {
                 Ok(Ok(tls_stream)) => {
+                    let fingerprint = tls_stream
+                        .get_ref()
+                        .1
+                        .peer_certificates()
+                        .and_then(|certificates| certificates.first())
+                        .map(|certificate| {
+                            Arc::<str>::from(client_cert_fingerprint(certificate.as_ref()))
+                        });
                     serve_io(
                         TokioIo::new(tls_stream),
                         shared,
@@ -326,6 +337,7 @@ async fn run_connection(
                         builder,
                         peer,
                         streams,
+                        fingerprint,
                         shutdown,
                     )
                     .await;
@@ -350,6 +362,7 @@ async fn run_connection(
                 builder,
                 peer,
                 streams,
+                None,
                 shutdown,
             )
             .await;
@@ -358,6 +371,7 @@ async fn run_connection(
 }
 
 /// Drive one hyper connection over a plain or TLS transport.
+#[allow(clippy::too_many_arguments)]
 async fn serve_io<I>(
     io: I,
     shared: Arc<Shared>,
@@ -365,6 +379,7 @@ async fn serve_io<I>(
     builder: auto::Builder<TokioExecutor>,
     peer: SocketAddr,
     streams: Arc<ActiveStreamGuard>,
+    client_cert: Option<Arc<str>>,
     mut shutdown: watch::Receiver<bool>,
 ) where
     I: hyper::rt::Read + hyper::rt::Write + Unpin + Send + 'static,
@@ -376,7 +391,7 @@ async fn serve_io<I>(
     let timeout = shared.config.first_request_timeout;
 
     let service =
-        hyper::service::service_fn(move |request: hyper::Request<hyper::body::Incoming>| {
+        hyper::service::service_fn(move |mut request: hyper::Request<hyper::body::Incoming>| {
             // This is the transition from "connection admitted" to "request
             // processing". The first-request watchdog stops once this fires.
             service_first.store(true, Ordering::Release);
@@ -384,12 +399,27 @@ async fn serve_io<I>(
             let shared = Arc::clone(&shared);
             let terminal = terminal.clone();
             let streams = Arc::clone(&streams);
-            async move { connection::serve(shared, request, Some(peer), streams, terminal).await }
+            let client_cert = client_cert.clone();
+            // WebSocket upgrades are handed to the framework after the `101`
+            // response; the engine only extracts hyper's upgrade future.
+            let upgrade = is_websocket_upgrade(&request).then(|| hyper::upgrade::on(&mut request));
+            async move {
+                connection::serve(
+                    shared,
+                    request,
+                    Some(peer),
+                    streams,
+                    client_cert,
+                    terminal,
+                    upgrade,
+                )
+                .await
+            }
         });
 
-    // `into_owned` detaches the connection from the builder borrow, so the
-    // connection future can be spawned/pinned independently.
-    let conn = builder.serve_connection(io, service).into_owned();
+    // Upgrade-aware connection: the future stays pending until upgraded IO
+    // closes, so WebSocket sessions remain counted by drain/metrics.
+    let conn = builder.serve_connection_with_upgrades(io, service);
     let mut conn = std::pin::pin!(conn);
 
     let mut first_wait = Box::pin(wait_for_first_request(
@@ -429,6 +459,21 @@ async fn serve_io<I>(
             }
         }
     }
+}
+
+/// SHA-256 of the DER client certificate, lowercase hex.
+fn client_cert_fingerprint(certificate: &[u8]) -> String {
+    let digest = Sha256::digest(certificate);
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// Whether the client asked for a WebSocket protocol upgrade.
+fn is_websocket_upgrade(request: &hyper::Request<hyper::body::Incoming>) -> bool {
+    request
+        .headers()
+        .get(hyper::header::UPGRADE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.eq_ignore_ascii_case("websocket"))
 }
 
 /// Wait until the first request starts, or the pre-request deadline expires.

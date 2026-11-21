@@ -1,0 +1,27 @@
+[package]
+name = "imbit"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lib]
+name = "imbit"
+path = "src/lib.rs"
+
+[[bin]]
+name = "imbit"
+path = "src/main.rs"
+
+[dependencies]
+async-trait.workspace = true
+data-encoding.workspace = true
+rust-dix.workspace = true
+rust-webx.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+futures-util = { workspace = true, features = ["sink"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio-tungstenite = { workspace = true, features = ["connect"] }

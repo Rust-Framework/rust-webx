@@ -1,0 +1,17 @@
+[package]
+name = "upgrade-smoke-current"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Same source compiled against the current workspace.
+[[bin]]
+name = "upgrade-smoke"
+path = "../src/main.rs"
+
+[dependencies]
+async-trait = "0.1"
+rust-webx = { path = "../../../crates/webx" }
+serde = { version = "1", features = ["derive"] }
+
+[workspace]

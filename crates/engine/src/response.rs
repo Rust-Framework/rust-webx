@@ -158,6 +158,22 @@ pub(crate) fn set_header(headers: &mut HeaderMap, key: &str, value: &str) {
     headers.insert(name, value);
 }
 
+/// Insert/replace a header from an owned value, adopting the buffer.
+///
+/// Generated values (request ids, trace ids) would otherwise be copied twice:
+/// once into the `String` and once into the `HeaderValue`. `from_maybe_shared`
+/// takes the `Bytes` without another allocation.
+pub(crate) fn set_header_owned(headers: &mut HeaderMap, key: &str, value: String) {
+    let (Ok(name), Ok(value)) = (
+        HeaderName::from_bytes(key.as_bytes()),
+        HeaderValue::from_maybe_shared(bytes::Bytes::from(value)),
+    ) else {
+        tracing::warn!(header = key, "ignoring invalid response header");
+        return;
+    };
+    headers.insert(name, value);
+}
+
 /// Append a header without replacing existing values.
 pub(crate) fn append_header(headers: &mut HeaderMap, key: &str, value: &str) {
     let (Ok(name), Ok(value)) = (

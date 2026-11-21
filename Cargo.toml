@@ -1,4 +1,4 @@
-[workspace]
+﻿[workspace]
 resolver = "2"
 
 members = [
@@ -12,7 +12,18 @@ members = [
     "crates/openapi",
     "crates/ai",
     "crates/ai-ef",
+    "crates/auth-ef",
+    "crates/oidc",
+    "crates/oauth2",
+    "crates/mfa",
+    "crates/webauthn",
     "crates/client",
+    "crates/alloc-probe",
+    "crates/contract-tests",
+    "crates/redis",
+    "crates/nats",
+    "crates/rabbitmq",
+    "crates/kafka",
     "crates/gateway",
     "docbit/contracts",
     "docbit/domain",
@@ -22,13 +33,24 @@ members = [
     "dmbit/domain",
     "dmbit/handlers",
     "dmbit/host",
+    "imbit",
 ]
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
+# cargo-semver-checks policy (CI `semver` job).
+#
+# Config sections are serde-bound DTOs: the documented construction path is
+# `Default` + appsettings/`APP__` overrides, so adding a knob is additive for
+# that usage. They become `#[non_exhaustive]` in the v2.4 breaking window, after
+# which this exception can be removed. Structs that must stay literal-
+# constructible (e.g. `ProblemDetails`) are pinned by `api_stability_test`.
+[workspace.metadata.cargo-semver-checks.lints]
+constructible_struct_adds_field = "allow"
+
 [workspace.package]
-version = "2.1.0"
+version = "2.5.0"
 edition = "2021"
 rust-version = "1.95"
 license = "MIT"
@@ -40,18 +62,27 @@ description = "rust-webx - A Rust WebApi framework inspired by ASP.NET Core, bui
 
 [workspace.dependencies]
 # Internal crates
-rust-webx-core = { version = "2.1.0", path = "crates/core" }
-rust-webx-host = { version = "2.1.0", path = "crates/host" }
-rust-webx-engine = { version = "2.1.0", path = "crates/engine" }
-rust-webx-macros = { version = "2.1.0", path = "crates/macros" }
-rust-webx = { version = "2.1.0", path = "crates/webx" }
-rust-webx-spa = { version = "2.1.0", path = "crates/spa" }
-rust-webx-build = { version = "2.1.0", path = "crates/build" }
-rust-webx-openapi = { version = "2.1.0", path = "crates/openapi" }
-rust-webx-ai = { version = "2.1.0", path = "crates/ai" }
-rust-webx-ai-ef = { version = "2.1.0", path = "crates/ai-ef" }
-rust-webx-client = { version = "2.1.0", path = "crates/client" }
-rust-webx-ai-gateway = { version = "2.1.0", path = "crates/gateway" }
+rust-webx-core = { version = "=2.5.0", path = "crates/core" }
+rust-webx-host = { version = "=2.5.0", path = "crates/host" }
+rust-webx-engine = { version = "=2.5.0", path = "crates/engine" }
+rust-webx-macros = { version = "=2.5.0", path = "crates/macros" }
+rust-webx = { version = "=2.5.0", path = "crates/webx" }
+rust-webx-spa = { version = "=2.5.0", path = "crates/spa" }
+rust-webx-build = { version = "=2.5.0", path = "crates/build" }
+rust-webx-openapi = { version = "=2.5.0", path = "crates/openapi" }
+rust-webx-ai = { version = "=2.5.0", path = "crates/ai" }
+rust-webx-ai-ef = { version = "=2.5.0", path = "crates/ai-ef" }
+rust-webx-auth-ef = { version = "=2.5.0", path = "crates/auth-ef" }
+rust-webx-oidc = { version = "=2.5.0", path = "crates/oidc" }
+rust-webx-oauth2 = { version = "=2.5.0", path = "crates/oauth2" }
+rust-webx-mfa = { version = "=2.5.0", path = "crates/mfa" }
+rust-webx-webauthn = { version = "=2.5.0", path = "crates/webauthn" }
+rust-webx-client = { version = "=2.5.0", path = "crates/client" }
+rust-webx-redis = { version = "=2.5.0", path = "crates/redis" }
+rust-webx-nats = { version = "=2.5.0", path = "crates/nats" }
+rust-webx-rabbitmq = { version = "=2.5.0", path = "crates/rabbitmq" }
+rust-webx-kafka = { version = "=2.5.0", path = "crates/kafka" }
+rust-webx-ai-gateway = { version = "=2.5.0", path = "crates/gateway" }
 
 # Docbit sub-crates
 docbit-contracts = { version = "0.1.0", path = "docbit/contracts" }
@@ -63,11 +94,14 @@ dmbit-contracts = { version = "0.1.0", path = "dmbit/contracts" }
 dmbit-domain = { version = "0.1.0", path = "dmbit/domain" }
 dmbit-handlers = { version = "0.1.0", path = "dmbit/handlers" }
 
-# DI framework (crates.io — no local path required)
+# DI framework (crates.io 鈥?no local path required)
 rust-dix = "1.0"
 rust-dix-macros = "1.0"
 
 # rust-ef ORM (rust-ef 2.5 / rust-dix 1.0 integration via add_dbcontext + owned resolution)
+# NOTE: rust-ef 2.5.1's `webx` feature depends on `rust-webx-core ^1.2`, so it
+# cannot convert into rust-webx 2.x's Error type. Applications keep a small
+# local adapter until rust-ef ships a core-2.x-compatible feature.
 rust-ef = "2.5"
 rust-ef-sqlite = "2.5"
 
@@ -85,10 +119,15 @@ bytes = "1"
 zip = { version = "9", default-features = false, features = ["deflate"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 tokio-util = { version = "0.7", features = ["io"] }
+# WebSocket (RFC 6455) framing for the host session layer; the engine only
+# transports the upgraded byte stream.
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake", "stream"] }
 multer = "3"
 mime_guess = "2"
 sha2 = "0.10"
+sha1 = "0.10"
 hmac = "0.12"
+data-encoding = "2"
 # Embedded static assets: brotli at build time, decoded on demand at runtime.
 brotli = "9"
 brotli-decompressor = "6"
@@ -96,6 +135,8 @@ tempfile = "3"
 httpdate = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Field-path-aware JSON binding for real-time request frames.
+serde_path_to_error = "0.1"
 thiserror = "2"
 inventory = "0.3"
 syn = { version = "2", features = ["full"] }
@@ -103,7 +144,9 @@ quote = "1"
 proc-macro2 = "1"
 tracing = "0.1"
 jsonwebtoken = "9"
+base64 = "0.22"
 uuid = { version = "1", features = ["v4"] }
+url = "2"
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12", "ring"] }
 rustls-pemfile = "2"
@@ -111,6 +154,13 @@ webpki-roots = "1"
 zeroize = { version = "1", features = ["alloc"] }
 criterion = "0.5"
 ctrlc = "3.4"
+# Adapter drivers (2.5-7 starter family). Each adapter crate owns the driver
+# dependency; the umbrella stays free of broker SDKs.
+redis = { version = "0.32", default-features = false, features = ["tokio-rustls-comp", "connection-manager", "keep-alive"] }
+async-nats = { version = "0.53", default-features = false, features = ["ring"] }
+lapin = { version = "4.12", default-features = false, features = ["tokio", "rustls"] }
+# Pure-Rust Kafka client: no C toolchain/librdkafka requirement.
+rskafka = { version = "0.6", default-features = false, features = ["compression-gzip"] }
 
 [profile.release]
 opt-level = 3
@@ -121,7 +171,7 @@ strip = true
 # them into 500 responses. `panic = "abort"` would defeat that isolation and
 # let one bad handler kill the process.
 
-# 鈹€鈹€ Dev/test build hygiene 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+# 閳光偓閳光偓 Dev/test build hygiene 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
 # Windows MSVC emits one .pdb per linked binary, and with the default
 # `debug = 2` on *every* dependency a single integration-test binary needs
 # ~200 MB (rust-webx full `cargo test --workspace` produced >100 GB of

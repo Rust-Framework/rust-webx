@@ -1,4 +1,9 @@
 //! DbContext helpers — error mapping, save, reload macros.
+//!
+//! The local `map_ef()` adapter is intentional: `rust-ef 2.5.1`'s optional
+//! `webx` feature depends on `rust-webx-core ^1.2`, so it cannot convert into
+//! this 2.x workspace's `Error` type. See `docs/design/compatibility.md` §5;
+//! remove the adapter once rust-ef ships a core-2.x-compatible feature.
 
 use rust_ef::db_context::DbContext;
 use rust_ef::error::EFError;

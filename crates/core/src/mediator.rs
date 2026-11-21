@@ -2,9 +2,17 @@
 
 pub mod default;
 pub mod dispatch;
+pub mod event;
 pub mod pipeline;
 pub use default::Mediator;
 pub use dispatch::dispatch;
+pub use event::{
+    dispatch_event_handlers, BoxedEventDispatch, BoxedEventHandlerCall, EventDispatchFn,
+    EventDispatcher, EventHandlerCache, EventHandlerCall, EventHandlerFactory,
+    EventHandlerRegistration, EventMessage, EventMetrics, EventMetricsSnapshot, EventRegistration,
+    IEventPublisher, InMemoryEventPublisher, InMemoryEventWorker, DEFAULT_EVENT_QUEUE_CAPACITY,
+    EVENT_WIRE_VERSION, MAX_EVENT_NAME_BYTES,
+};
 
 use crate::error::Result;
 
@@ -34,15 +42,41 @@ where
 
 /// Marker trait for an event (notification) that does not produce a response.
 ///
-/// Use `IEventRequest` for fire-and-forget notifications.
+/// Events are **messages**: they are encoded by `publish` and decoded by the
+/// event dispatcher, so they must be serde DTOs. That is what lets the same
+/// event travel through the default in-memory queue or an external broker
+/// (Redis, NATS, ...) without a second event type.
 ///
 /// ```ignore
+/// #[derive(Clone, serde::Serialize, serde::Deserialize)]
+/// pub struct UserCreatedEvent { pub user_id: String }
+///
 /// impl IEventRequest for UserCreatedEvent {}
 /// ```
-pub trait IEventRequest: Clone + Send + 'static {}
+///
+/// The default [`IEventRequest::event_name`] is the fully-qualified Rust type
+/// name. It is the routing key a broker consumer uses, so renaming or moving an
+/// event type is a breaking change for messages already in flight; override
+/// `event_name` when the wire name must stay stable.
+///
+/// Serialization is required only where an event crosses a wire boundary
+/// ([`EventMessage::from_event`](crate::mediator::event::EventMessage::from_event)
+/// / `decode`), not by the trait itself — that keeps existing implementors
+/// source-compatible.
+pub trait IEventRequest: Clone + Send + 'static {
+    /// Stable routing name of this event.
+    ///
+    /// Override it to decouple the wire name from the Rust module path.
+    fn event_name() -> &'static str
+    where
+        Self: Sized,
+    {
+        std::any::type_name::<Self>()
+    }
+}
 
-/// The mediator dispatches requests to their handlers and publishes events
-/// to all registered handlers.
+/// The mediator dispatches requests to their handlers and hands events to the
+/// event transport (which delivers them to all registered handlers).
 ///
 /// Analogous to MediatR's IMediator.
 ///
@@ -78,11 +112,24 @@ pub trait IMediator: Send + Sync {
         req: Box<dyn std::any::Any + Send>,
     ) -> Result<Box<dyn std::any::Any + Send>>;
 
-    /// Publish an event to all registered handlers.
+    /// Publish an event for **asynchronous** delivery.
     ///
-    /// Stays generic (not available on `dyn IMediator`): event handlers are
-    /// resolved from DI by their concrete `IEventHandler<T>` type.
-    async fn publish<T: IEventRequest>(&self, event: T) -> Result<()>
+    /// The event is encoded into an [`EventMessage`] and handed to the
+    /// registered [`IEventPublisher`] (the default is the in-memory queue; see
+    /// [`IEventPublisher`] and `HostBuilder::use_event_publisher`). The call
+    /// returns once the transport accepted the event:
+    ///
+    /// * it does **not** wait for event handlers, so a slow subscriber cannot
+    ///   delay the caller;
+    /// * it does **not** return handler errors — those are logged (or retried /
+    ///   dead-lettered) by the transport;
+    /// * an error from `publish` means the event was *not accepted* (missing
+    ///   local registration, full queue, broker unavailable), not that a
+    ///   subscriber failed.
+    ///
+    /// Stays generic (not available on `dyn IMediator`): the event type is
+    /// needed to encode it.
+    async fn publish<T: IEventRequest + serde::Serialize>(&self, event: T) -> Result<()>
     where
         Self: Sized;
 }

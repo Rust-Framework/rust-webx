@@ -1,0 +1,5 @@
+error: route attributes require `impl IRequest<Response> for Type`; found `impl Clone` — did you mean to implement `IRequest`?
+ --> tests/ui/route_on_wrong_trait.rs:6:6
+  |
+6 | impl Clone for NotARequest {
+  |      ^^^^^

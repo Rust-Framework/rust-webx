@@ -49,9 +49,27 @@ pub type DirectDispatchFn = webx_core::route::scan::HandlerDispatchFn;
 pub trait RouteTarget: Send + Sync {
     /// Handle the request, writing status, headers and body into `ctx`.
     async fn handle(&self, ctx: &mut EngineContext) -> Result<()>;
+
+    /// Compile-time direct dispatch pair, when this target supports it (2.4-9).
+    ///
+    /// Returning `Some` lets the engine skip the `async_trait` boxed future for
+    /// the most common route kind (a `#[get]`/`#[post]` JSON handler).
+    fn direct(
+        &self,
+    ) -> Option<(
+        DirectDispatchFn,
+        webx_core::route::scan::DirectResponseEncoderFn,
+    )> {
+        None
+    }
 }
 
 /// Target for a handler reached through compile-time direct dispatch.
+///
+/// This is the engine-level adapter: it has **no route guard** (authorization,
+/// body cap). The host builds guarded routes with `DirectRouteTarget` instead so
+/// declarative/dynamic authorization and per-route body limits are enforced
+/// before dispatch; a `DirectTarget` is only for engine-internal/raw routing.
 pub struct DirectTarget {
     /// The generated dispatch function (see [`DirectDispatchFn`]).
     pub dispatch: DirectDispatchFn,
@@ -71,6 +89,15 @@ impl DirectTarget {
 
 #[async_trait::async_trait]
 impl RouteTarget for DirectTarget {
+    fn direct(
+        &self,
+    ) -> Option<(
+        DirectDispatchFn,
+        webx_core::route::scan::DirectResponseEncoderFn,
+    )> {
+        Some((self.dispatch, self.encoder))
+    }
+
     async fn handle(&self, ctx: &mut EngineContext) -> Result<()> {
         // The generated bridge takes the 1.5-compatible trait object, so the
         // engine context is handed over as `&mut dyn IHttpContext`; the result

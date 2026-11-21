@@ -43,6 +43,9 @@ use crate::response::{self, EndpointResult, RespBody, ResponseBodyState, Respons
 pub struct EngineContext {
     req: EngineRequest,
     resp: EngineResponse,
+    /// When the context was created (effectively "request accepted"), used by
+    /// observability middleware for latency histograms.
+    started_at: std::time::Instant,
     /// Authentication claims set by authentication middleware.
     claims: Option<Box<dyn IClaims>>,
     /// DI handles (provider + handler registry) for endpoint dispatch.
@@ -51,6 +54,16 @@ pub struct EngineContext {
     /// `x-trace-id` response header carries and handlers read through
     /// `RequestContext::trace_id()`.
     trace_id: Option<String>,
+    /// Pending protocol upgrade (WebSocket), when the client asked for one.
+    ///
+    /// The hyper `OnUpgrade` is resolved after the `101` response is committed;
+    /// [`EngineContext::finalize`] spawns the session runner.
+    upgrade: Option<hyper::upgrade::OnUpgrade>,
+    /// Upgraded session installed by middleware/handler (`set_upgrade_session`).
+    upgrade_session: Option<(
+        Arc<dyn webx_core::realtime::IUpgradeSession>,
+        webx_core::realtime::ConnectionMeta,
+    )>,
 }
 
 impl EngineContext {
@@ -104,10 +117,19 @@ impl EngineContext {
         Self {
             req,
             resp: EngineResponse::new(200),
+            started_at: std::time::Instant::now(),
             claims: None,
             dispatch_runtime: None,
             trace_id: None,
+            upgrade: None,
+            upgrade_session: None,
         }
+    }
+
+    /// Attach the connection's pending protocol upgrade.
+    pub fn with_upgrade(mut self, upgrade: hyper::upgrade::OnUpgrade) -> Self {
+        self.upgrade = Some(upgrade);
+        self
     }
 
     /// Record the route matched by the router.
@@ -158,9 +180,46 @@ impl EngineContext {
     /// this applies only status, headers, content type and the body (including
     /// HEAD suppression and file/range semantics).
     pub async fn finalize(self) -> hyper::Response<RespBody> {
-        let Self { mut req, resp, .. } = self;
+        let Self {
+            mut req,
+            resp,
+            upgrade,
+            upgrade_session,
+            ..
+        } = self;
+        spawn_upgrade_session(upgrade, upgrade_session);
         resp.finalize(&mut req).await
     }
+}
+
+/// Drive a committed protocol upgrade on the worker runtime.
+///
+/// The session future owns the upgraded transport; hyper's upgradeable
+/// connection future stays pending until the upgraded IO closes, so the
+/// connection remains counted by admission, metrics and graceful drain while
+/// the session runs.
+fn spawn_upgrade_session(
+    upgrade: Option<hyper::upgrade::OnUpgrade>,
+    session: Option<(
+        Arc<dyn webx_core::realtime::IUpgradeSession>,
+        webx_core::realtime::ConnectionMeta,
+    )>,
+) {
+    let (Some(on_upgrade), Some((session, meta))) = (upgrade, session) else {
+        return;
+    };
+    tokio::spawn(async move {
+        match on_upgrade.await {
+            Ok(upgraded) => {
+                let transport: webx_core::realtime::UpgradedTransport =
+                    Box::new(hyper_util::rt::TokioIo::new(upgraded));
+                if let Err(error) = session.run(transport, meta).await {
+                    tracing::warn!(%error, "engine: upgraded session ended with an error");
+                }
+            }
+            Err(error) => tracing::warn!(%error, "engine: protocol upgrade failed"),
+        }
+    });
 }
 
 impl IClaimsExt for EngineContext {
@@ -207,6 +266,22 @@ impl IHttpContext for EngineContext {
 
     fn set_trace_id(&mut self, trace_id: &str) {
         self.trace_id = Some(trace_id.to_string());
+    }
+
+    fn elapsed(&self) -> Option<std::time::Duration> {
+        Some(self.started_at.elapsed())
+    }
+
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
+    }
+
+    fn set_upgrade_session(
+        &mut self,
+        session: Arc<dyn webx_core::realtime::IUpgradeSession>,
+        meta: webx_core::realtime::ConnectionMeta,
+    ) {
+        self.upgrade_session = Some((session, meta));
     }
 }
 
@@ -632,6 +707,10 @@ impl IHttpResponse for EngineResponse {
         response::set_header(&mut self.headers, key, value);
     }
 
+    fn set_header_owned(&mut self, key: &str, value: String) {
+        response::set_header_owned(&mut self.headers, key, value);
+    }
+
     fn set_header_static(&mut self, key: &'static str, value: &'static str) {
         response::insert_static_header(&mut self.headers, key, value);
     }
@@ -750,6 +829,23 @@ mod tests {
                 .filter_map(|value| value.to_str().ok())
                 .collect::<Vec<_>>(),
             ["two"]
+        );
+    }
+
+    #[tokio::test]
+    async fn set_header_owned_replaces_a_previous_value() {
+        let mut ctx = context("GET", "/", &[], b"");
+        ctx.response_mut().append_header("x-test", "one");
+        ctx.response_mut()
+            .set_header_owned("x-test", "two".to_string());
+
+        let response = ctx.finalize().await;
+        assert_eq!(
+            response
+                .headers()
+                .get("x-test")
+                .and_then(|value| value.to_str().ok()),
+            Some("two")
         );
     }
 

@@ -53,6 +53,7 @@ fn shared() -> Arc<Shared> {
         immediate_shutdown: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         immediate_watch: tokio::sync::watch::channel(false).0,
         started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        admission: Arc::new(webx_engine::shared::AdmissionStats::default()),
     })
 }
 

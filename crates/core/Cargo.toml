@@ -20,8 +20,9 @@ name = "webx_core"
 async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_ignored = "0.1"
 thiserror.workspace = true
-tokio = { workspace = true, features = ["sync", "macros", "time"] }
+tokio = { workspace = true, features = ["sync", "macros", "time", "io-util", "fs"] }
 tokio-util.workspace = true
 futures-util.workspace = true
 rust-dix.workspace = true
@@ -30,6 +31,10 @@ tracing.workspace = true
 tempfile.workspace = true
 zeroize.workspace = true
 bytes.workspace = true
+# TURN REST credentials (HMAC-SHA1) for the signaling control plane (2.4-1).
+hmac.workspace = true
+sha1.workspace = true
+data-encoding.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

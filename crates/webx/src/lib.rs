@@ -33,8 +33,9 @@ pub use webx_core::cache::{
     trait_def::{CacheError, IDistributedCache},
 };
 pub use webx_core::config::{
-    bind_config, bind_root, load_appsettings, AppOptions, AppSection, CorsSection, CultureSection,
-    IAppOptions, JwtSection, MetricsSection, RateLimitSection, TlsSection,
+    bind_config, bind_root, load_appsettings, try_bind_config, try_bind_root, try_load_appsettings,
+    AppOptions, AppSection, ConfigError, ConfigSources, CorsSection, CultureSection, IAppOptions,
+    InvalidTokenBehavior, JwtAlgorithm, JwtSection, MetricsSection, RateLimitSection, TlsSection,
 };
 pub use webx_core::dispatch_runtime::DispatchRuntime;
 pub use webx_core::error::{ActionResult, Error, IErrorResponseWriter, Result};
@@ -54,13 +55,26 @@ pub use webx_core::http::{
     FileBody, FileSource, HttpStatus, IClaimsExt, IHttpContext, IHttpRequest, IHttpResponse,
     RequestBodyStream, ResponseBody, SeekableReader, STREAM_BUF_SIZE,
 };
+pub use webx_core::json;
 pub use webx_core::localization::{
     IStringLocalizer, LocalizationOptions, LocalizedString, StringLocalizer, TextRef,
 };
+pub use webx_core::media::{
+    IMediaPlaneAdapter, InMemoryMediaPlaneAdapter, MediaSession, MediaStats, MediaTrackInfo,
+    MediaTrackKind,
+};
 pub use webx_core::mediator::dispatch;
+pub use webx_core::mediator::{
+    dispatch_event_handlers, BoxedEventDispatch, BoxedEventHandlerCall, EventDispatchFn,
+    EventDispatcher, EventHandlerCache, EventHandlerCall, EventHandlerFactory,
+    EventHandlerRegistration, EventMessage, EventMetrics, EventMetricsSnapshot, EventRegistration,
+    IEventPublisher, InMemoryEventPublisher, InMemoryEventWorker, DEFAULT_EVENT_QUEUE_CAPACITY,
+};
 pub use webx_core::mediator::{IEventRequest, IMediator, IRequest};
 pub use webx_core::metrics::{Counter, Gauge, Histogram, IMeter, MemoryMeter, NoopMeter};
-pub use webx_core::middleware::{IMiddleware, MiddlewareSlot};
+pub use webx_core::middleware::{
+    BoxedNextFuture, IMiddleware, MiddlewareSlot, NextStage, TimeoutMiddleware,
+};
 pub use webx_core::mode::AppMode;
 pub use webx_core::operation::OperationResult;
 pub use webx_core::options_monitor::{IOptionsMonitor, OptionsMonitor};
@@ -70,6 +84,15 @@ pub use webx_core::paths::{
 };
 pub use webx_core::pipeline::{IPipelineBehavior, Next};
 pub use webx_core::problem::{FieldError, ProblemDetails};
+pub use webx_core::rate_limit::{IRateLimiter, RateLimitDecision};
+pub use webx_core::realtime::{
+    BackpressurePolicy, ConnectionContext, ConnectionId, ConnectionMeta, ConnectionScope,
+    ConnectionStats, IConnection, IConnectionRegistry, IUpgradeSession, IWebSocketHandler,
+    InMemoryConnectionRegistry, Presence, PresenceStatus, RealtimeFanoutEvent, RealtimeMessage,
+    RealtimeMetrics, RealtimeMetricsSnapshot, SignalingKind, SignalingMessage, Transport,
+    TransportKind, TurnCredentials, TurnRestConfig, UpgradedTransport, WebSocketLimits,
+    DEFAULT_TURN_TTL_SECONDS, MAX_TURN_TTL_SECONDS,
+};
 pub use webx_core::request_context::RequestContext;
 pub use webx_core::route::catalog::{
     EndpointCatalog, EndpointDescriptor, EndpointInfo, IEndpointCatalog,
@@ -84,10 +107,17 @@ pub use webx_core::secrets::{
     SecretValue,
 };
 pub use webx_core::security::{
-    constant_time_eq, IPasswordHasher, ISessionStore, ITokenIssuer, InMemorySessionStore,
-    IssuedToken, OneTimeSecret, OneTimeSecretState, TokenClaims,
+    constant_time_eq, IPasswordHasher, IRefreshTokenStore, ISessionRepository, ISessionStore,
+    ITokenIssuer, InMemoryRefreshTokenStore, InMemorySessionRepository, InMemorySessionStore,
+    IssuedToken, OneTimeSecret, OneTimeSecretState, RefreshRotation, RefreshTokenRecord,
+    RefreshTokenStatus, SessionRecord, TokenClaims,
+};
+pub use webx_core::storage::{
+    FileSystemObjectStore, IObjectStore, InMemoryObjectStore, ObjectMeta, PartEtag, RecordingMeta,
+    RecordingSegment, RecordingStatus, StoredObject, UploadId,
 };
 pub use webx_core::stream::{SseEvent, SseResult, StreamEnd};
+pub use webx_core::time::{IClock, SystemClock, TestClock};
 
 // --- DI extensions ---
 pub use webx_core::route::binding;
@@ -100,7 +130,7 @@ pub use webx_core::route::scan::{
     BoxedDispatchFn, BoxedDispatchFuture, DirectResponseEncoder, DirectResponseEncoderFn,
     HandlerCache, HandlerDispatch, HandlerDispatchFn, HandlerEntry, HandlerRegistration,
     HandlerRegistry, ParamMeta, RequestBinder, RequestParamEntry, RouteDispatch, RouteDispatchById,
-    RouteDispatchFn, RouteEntry,
+    RouteDispatchFn, RouteEntry, RouteSource,
 };
 
 // --- HTTP layer ---
@@ -109,19 +139,35 @@ pub use webx_client::{
     IHttpClientFactory, OutboundRequest, OutboundResponse, ResponseStream, SseStream,
 };
 pub use webx_host::auth::{
-    ApiKeyClaims, ApiKeyHeader, ApiKeyScheme, AuthenticationMiddleware, IApiKeyValidator, JwtScheme,
+    ApiKeyClaims, ApiKeyHeader, ApiKeyScheme, AuthMetrics, AuthOutcome, AuthenticationMiddleware,
+    IApiKeyValidator, JwtScheme, AUTH_DURATION_METRIC, AUTH_REQUESTS_METRIC,
 };
+pub use webx_host::auth_basic::{
+    BasicClaims, BasicScheme, IBasicCredentialValidator, BASIC_SCHEME_NAME,
+};
+pub use webx_host::auth_cookie::{
+    CookieOptions, IssuedSession, SameSite, SessionCookieScheme, SESSION_COOKIE_SCHEME_NAME,
+};
+pub use webx_host::auth_dpop::{DpopConfig, DpopScheme, IDpopReplayStore, InMemoryDpopReplayStore};
+pub use webx_host::auth_jwks::{
+    HttpJwksFetcher, IJwksFetcher, IJwtKeyResolver, Jwk, JwkSet, JwksHealthCheck, JwksResolver,
+    ResolvedJwk, StaticKeyResolver, JWKS_MAX_DOCUMENT_BYTES,
+};
+#[allow(deprecated)]
 pub use webx_host::auth_jwt::{
     apply_jwt_secret_file, init_jwt_secret, jwt_middleware, jwt_middleware_with_revocation,
-    jwt_secret, JwtAuth, JwtClaims, JwtSecret, JwtTokenIssuer, DEFAULT_TOKEN_LIFETIME,
+    jwt_secret, JwtAuth, JwtClaims, JwtSecret, JwtTokenIssuer, JwtValidation, JwtValidationBuilder,
+    DEFAULT_CLOCK_SKEW_SECONDS, DEFAULT_MAX_TOKEN_BYTES, DEFAULT_TOKEN_LIFETIME,
     MIN_JWT_SECRET_LEN,
 };
+pub use webx_host::auth_mtls::{IMtlsIdentityResolver, MtlsScheme};
 pub use webx_host::authz::collect_authorizers;
 #[allow(deprecated)]
 pub use webx_host::authz::resource_auth_middleware;
 pub use webx_host::authz::{AuthorizerSet, ResourceAuthorization};
 pub use webx_host::compression::{compress_gzip, CompressionConfig, CompressionMiddleware};
 pub use webx_host::cors::{CorsConfig, CorsMiddleware};
+pub use webx_host::csrf::{CsrfConfig, CsrfMiddleware};
 pub use webx_host::diagnostics::log_startup_diagnostics;
 pub use webx_host::endpoint::{
     ControllerEndpoint, RequestEndpoint, StaticHtmlEndpoint, StaticJsonEndpoint,
@@ -130,18 +176,28 @@ pub use webx_host::health::{
     HealthCheckEntry, HealthCheckFn, HealthCheckRegistry, HealthStatus, IHealthCheck,
     DEFAULT_HEALTH_CHECK_TIMEOUT,
 };
+pub use webx_host::introspection::{
+    IntrospectionBasicAuth, IntrospectionResponse, TokenIntrospector, TokenRevoker,
+};
+pub use webx_host::login::{
+    default_password_concurrency, verify_password_or_dummy, BoundedPasswordHasher, ILoginThrottle,
+    LoginThrottleDecision, MemoryLoginThrottle, PasswordPolicy, ThrottlePolicy, MAX_PASSWORD_BYTES,
+};
 pub use webx_host::memory_cache::MemoryCache;
 #[cfg(feature = "password-argon2")]
 pub use webx_host::password_argon2::{Argon2Params, Argon2PasswordHasher};
 pub use webx_host::pipeline::{HandlerFn, MiddlewarePipeline};
-pub use webx_host::rate_limit::{RateLimitMiddleware, RateLimiter};
+pub use webx_host::rate_limit::{InMemoryRateLimiter, RateLimitMiddleware, RateLimiter};
+pub use webx_host::refresh::{IssuedRefreshToken, RefreshTokenService};
 pub use webx_host::request_id::RequestIdMiddleware;
 pub use webx_host::request_tracing::RequestTracing;
 pub use webx_host::router::Router;
 pub use webx_host::security_headers::SecurityHeadersMiddleware;
 pub use webx_host::server::{Host, HostAppBuilder, HostBuilder, Server, ServerHandle};
+pub use webx_host::session_cache::CachedSessionStore;
 #[cfg(feature = "testing")]
 pub use webx_host::testing::{free_port, spawn, spawn_with_health, wait_until_ready, TestServer};
+pub use webx_host::testing::{ChaosControl, TestHost};
 pub use webx_host::timing::TimingMiddleware;
 
 // --- Mediator ---

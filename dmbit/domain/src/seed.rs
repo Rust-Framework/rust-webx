@@ -5,8 +5,8 @@ use rust_ef::prelude::*;
 use crate::entities::{Role, RoleUser, User};
 use crate::ids::seed as id;
 
-/// bcrypt hash for `admin123` (cost 4, same as docbit seed).
-const ADMIN_PASSWORD_HASH: &str = "$2b$04$0Txv1I1N9PmPg4I9fkbZUuFVeDWIDtmlD6CEjiwxAuLzSNMHVQ/3W";
+/// Argon2id hash for `admin123` (host default parameters).
+const ADMIN_PASSWORD_HASH: &str = "$argon2id$v=19$m=19456,t=2,p=1$oPXAx056HRCWKUdW9W+Q9g$B7eyRVgvnDQoT4OFohCyZQempaBVjTD54UQ6nqx3nWw";
 
 pub fn register(ctx: &mut DbContext) {
     let now = 0i64;

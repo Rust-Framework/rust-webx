@@ -1,0 +1,33 @@
+[package]
+name = "rust-webx-webauthn"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+documentation.workspace = true
+description = "WebAuthn/Passkey relying-party verification for rust-webx services"
+readme = "README.md"
+keywords = ["web", "auth", "webauthn", "passkey", "fido2"]
+categories = ["web-programming", "authentication"]
+
+[lib]
+name = "webx_webauthn"
+
+[dependencies]
+rust-webx-core.workspace = true
+ciborium = "0.2"
+p256 = { version = "0.14", features = ["ecdsa"] }
+sha2.workspace = true
+base64.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+rand = "0.10"

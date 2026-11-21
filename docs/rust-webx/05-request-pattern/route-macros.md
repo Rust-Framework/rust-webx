@@ -368,6 +368,32 @@ struct GetUserRequest { id: String }
 impl IRequest<UserDto> for GetUserRequest {}
 ```
 
+## 依赖库路由与白名单（2.2）
+
+路由宏在编译期向 `inventory` 提交两类条目：`RouteEntry`（路由元数据）和
+`RouteSource`（调用点 `module_path!()`）。`Host::build()` 默认注册**所有**编译期路由，
+包括依赖库在自己的 `#[get]` 块里声明的路由。
+
+需要限制暴露面时用 builder：
+
+```rust
+// 只注册本应用与共享库的路由；依赖库里其他模块的路由不会进入 Router。
+let host = Host::builder()
+    .routes_from(&["my_app::api", "my_shared_web::"])
+    .build();
+
+// 完全关闭编译期扫描：路由表为空（/metrics、/health 等 host 自有端点不受影响），
+// 适合把框架当库嵌入已有 Router 的场景。
+let host = Host::builder().use_inventory_routes(false).build();
+```
+
+规则：
+
+- 白名单是 `module_path!()` 的**字符串前缀**匹配；`my_app::api` 也会匹配
+  `my_app::apiv2`，需要模块边界时把前缀写成 `my_app::api::`。
+- 白名单激活时默认 **fail-closed**：没有 `RouteSource` 的手写路由元数据也会被过滤。
+- 被过滤的路由不会出现在 OpenAPI 文档里，因为文档同样从注册后的 Router 生成。
+
 ## 小结
 
 路由宏是「请求即端点」的语法糖。一行 `#[get]` 替代传统框架中路由表 + 处理器映射的两处定义。

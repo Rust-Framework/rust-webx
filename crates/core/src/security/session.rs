@@ -3,10 +3,16 @@
 //! A token stays signature-valid until `exp`. Logout and forced sign-out need a
 //! server-side record the authentication middleware can consult after verifying
 //! the token; that record is keyed by the token's `jti` claim.
+//!
+//! The record carries the token expiry when the caller knows it
+//! ([`ISessionStore::revoke_until`]), so a long-running store does not keep dead
+//! `jti`s forever. The default `revoke` remains indefinite for compatibility
+//! with stores that only know how to insert a key.
 
 use crate::error::{Error, Result};
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::sync::{PoisonError, RwLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Revocation state for issued tokens.
 ///
@@ -25,6 +31,19 @@ pub trait ISessionStore: Send + Sync {
     /// Revoking an already-revoked or unknown `jti` is not an error: logout is
     /// idempotent.
     async fn revoke(&self, jti: &str) -> Result<()>;
+
+    /// Revoke `jti` until `expires_at_unix_secs` (normally the token's `exp`).
+    ///
+    /// Once the token expiry has passed the revocation record is no longer
+    /// needed: the token is invalid by its own `exp` claim. Implementations
+    /// should delete the record after that instant.
+    ///
+    /// The default delegates to [`revoke`](Self::revoke) and keeps the record
+    /// forever — override it when the backing store can express a TTL.
+    async fn revoke_until(&self, jti: &str, expires_at_unix_secs: u64) -> Result<()> {
+        let _ = expires_at_unix_secs;
+        self.revoke(jti).await
+    }
 
     /// Whether the token `jti` has been revoked.
     async fn is_revoked(&self, jti: &str) -> Result<bool>;
@@ -55,14 +74,16 @@ pub trait ISessionStore: Send + Sync {
 /// * Revocations die with the process (a restart resurrects every token that
 ///   has not expired yet) — use a persistent store in production when that
 ///   matters.
-/// * Revoked `jti`s are never garbage-collected (the store cannot know when a
-///   token expires), so a long-running process accumulates one `String` per
-///   revoked token.
+/// * [`revoke`](ISessionStore::revoke) without an expiry is indefinite. Use
+///   [`revoke_until`](ISessionStore::revoke_until) with the token's `exp` (and
+///   [`purge_expired`](InMemorySessionStore::purge_expired) as a sweep) to keep
+///   the map bounded.
 /// * [`ISessionStore::revoke_all_for_subject`] is not supported: the store keeps
 ///   no subject index.
 #[derive(Debug, Default)]
 pub struct InMemorySessionStore {
-    revoked: RwLock<HashSet<String>>,
+    /// `jti` → absolute expiry (Unix seconds); `0` means "no expiry".
+    revoked: RwLock<HashMap<String, u64>>,
 }
 
 impl InMemorySessionStore {
@@ -71,13 +92,31 @@ impl InMemorySessionStore {
         Self::default()
     }
 
-    /// Number of revoked token ids currently tracked (diagnostics/tests).
+    /// Number of tracked `jti`s (including expired entries not yet purged).
     pub fn revoked_count(&self) -> usize {
         self.revoked
             .read()
             .unwrap_or_else(PoisonError::into_inner)
             .len()
     }
+
+    /// Remove every record whose token expiry has passed; returns the count.
+    ///
+    /// [`is_revoked`](ISessionStore::is_revoked) also removes an expired record
+    /// on lookup; this sweep handles ids that are never looked up again.
+    pub fn purge_expired(&self, now_unix_secs: u64) -> usize {
+        let mut revoked = self.revoked.write().unwrap_or_else(PoisonError::into_inner);
+        let before = revoked.len();
+        revoked.retain(|_, expires_at| *expires_at == 0 || *expires_at > now_unix_secs);
+        before - revoked.len()
+    }
+}
+
+fn now_unix_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or_default()
 }
 
 #[async_trait::async_trait]
@@ -91,16 +130,48 @@ impl ISessionStore for InMemorySessionStore {
         self.revoked
             .write()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert(jti.to_string());
+            .insert(jti.to_string(), 0);
+        Ok(())
+    }
+
+    async fn revoke_until(&self, jti: &str, expires_at_unix_secs: u64) -> Result<()> {
+        if jti.is_empty() {
+            return Err(Error::Validation("jti must not be empty".to_string()));
+        }
+        // A token that is already past `exp` does not need a revocation record.
+        if expires_at_unix_secs != 0 && expires_at_unix_secs <= now_unix_secs() {
+            return Ok(());
+        }
+        self.revoked
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(jti.to_string(), expires_at_unix_secs);
         Ok(())
     }
 
     async fn is_revoked(&self, jti: &str) -> Result<bool> {
-        Ok(self
+        let now = now_unix_secs();
+        let expires_at = self
             .revoked
             .read()
             .unwrap_or_else(PoisonError::into_inner)
-            .contains(jti))
+            .get(jti)
+            .copied();
+
+        match expires_at {
+            Some(0) => Ok(true),
+            Some(expires_at) if expires_at > now => Ok(true),
+            Some(_) => {
+                // Lazy delete: the token's own `exp` has passed, so the record
+                // can never matter again.
+                self.revoked
+                    .write()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .remove(jti);
+                Ok(false)
+            }
+            None => Ok(false),
+        }
     }
 }
 
@@ -133,8 +204,52 @@ mod tests {
 
     #[tokio::test]
     async fn empty_jti_is_a_typed_error() {
-        let err = InMemorySessionStore::new().revoke("").await.unwrap_err();
+        let store = InMemorySessionStore::new();
+        let err = store.revoke("").await.unwrap_err();
         assert!(matches!(err, Error::Validation(_)), "got {err:?}");
+        let err = store.revoke_until("", 10).await.unwrap_err();
+        assert!(matches!(err, Error::Validation(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn revoke_until_expires_with_the_token() {
+        let store = InMemorySessionStore::new();
+        let now = now_unix_secs();
+        store.revoke_until("jti-a", now + 1).await.unwrap();
+        assert!(store.is_revoked("jti-a").await.unwrap());
+
+        tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+        assert!(
+            !store.is_revoked("jti-a").await.unwrap(),
+            "a record past the token exp must not revoke anything"
+        );
+        assert_eq!(store.revoked_count(), 0, "lookup deletes the dead record");
+    }
+
+    #[tokio::test]
+    async fn revoke_until_in_the_past_is_a_noop() {
+        let store = InMemorySessionStore::new();
+        store
+            .revoke_until("jti-a", now_unix_secs().saturating_sub(10))
+            .await
+            .unwrap();
+        assert!(!store.is_revoked("jti-a").await.unwrap());
+        assert_eq!(store.revoked_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn purge_expired_removes_only_dead_records() {
+        let store = InMemorySessionStore::new();
+        let now = now_unix_secs();
+        store.revoke("indefinite").await.unwrap();
+        store.revoke_until("dead", now + 1).await.unwrap();
+        store.revoke_until("live", now + 3600).await.unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+        assert_eq!(store.purge_expired(now_unix_secs()), 1);
+        assert_eq!(store.revoked_count(), 2, "indefinite + live remain");
+        assert!(store.is_revoked("indefinite").await.unwrap());
+        assert!(store.is_revoked("live").await.unwrap());
     }
 
     #[tokio::test]

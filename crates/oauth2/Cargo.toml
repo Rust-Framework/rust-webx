@@ -1,0 +1,40 @@
+[package]
+name = "rust-webx-oauth2"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+documentation.workspace = true
+description = "OAuth 2.0 social-login client for rust-webx with provider presets (GitHub, Google, Microsoft, GitLab, Gitee, DingTalk, Feishu)"
+readme = "README.md"
+keywords = ["web", "auth", "oauth2", "social-login", "pkce"]
+categories = ["web-programming", "authentication"]
+
+[lib]
+name = "webx_oauth2"
+
+[dependencies]
+rust-webx-core.workspace = true
+rust-webx-client.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+base64.workspace = true
+sha2.workspace = true
+url.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+rsa = { version = "0.9", features = ["sha2", "pem"] }
+time = { version = "0.3", features = ["formatting"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util"] }
+rust-webx.workspace = true
+rust-dix.workspace = true
+async-trait.workspace = true
+rand = "0.8"
+
+[lints]
+workspace = true

@@ -92,6 +92,14 @@ pub enum Disposition {
 /// size nginx, hyper and tower-http settle on for bulk transfer.
 pub const STREAM_BUF_SIZE: usize = 64 * 1024;
 
+/// Request header carrying the verified TLS client-certificate SHA-256
+/// fingerprint (lowercase hex).
+///
+/// Only the TLS terminator may set this header: the engine removes any
+/// client-supplied value before injecting the verified one, so an mTLS scheme
+/// can trust it.
+pub const CLIENT_CERT_FINGERPRINT_HEADER: &str = "x-webx-client-cert-sha256";
+
 /// An async reader that can also seek.
 ///
 /// Seeking is what lets a stream answer `Range` requests, so a
@@ -477,6 +485,54 @@ pub trait IHttpContext: IClaimsExt + Send {
     /// existing/alternative context implementations keep compiling; such hosts
     /// simply have no trace id.
     fn set_trace_id(&mut self, _trace_id: &str) {}
+
+    /// Record an owned trace id without copying it again.
+    ///
+    /// The default forwards to [`set_trace_id`](Self::set_trace_id); transports
+    /// that store an owned string override this to adopt the buffer.
+    fn set_trace_id_owned(&mut self, trace_id: String) {
+        self.set_trace_id(&trace_id);
+    }
+
+    /// Time elapsed since the transport accepted the request.
+    ///
+    /// Observability middleware uses this to record latency without keeping
+    /// per-request state of its own. Returns `None` for contexts that do not
+    /// track it (test fakes, alternative hosts); such requests are counted but
+    /// not added to the latency histogram.
+    fn elapsed(&self) -> Option<std::time::Duration> {
+        None
+    }
+
+    /// Downcast hook used by continuation pipelines (2.4-4).
+    ///
+    /// The engine implements this so a [`NextStage`](crate::middleware::NextStage)
+    /// continuation can recover the concrete engine context before calling the
+    /// router. Alternative hosts (mocks, embedded adapters) return `None`; the
+    /// engine treats that as an internal error instead of guessing.
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        None
+    }
+
+    /// Accept a protocol upgrade (WebSocket) and run `session` on the upgraded
+    /// transport after the response is committed.
+    ///
+    /// The endpoint/middleware installs the session **and** writes the `101`
+    /// response (with the protocol's handshake headers); the engine hands the
+    /// raw upgraded byte stream to [`IUpgradeSession::run`] and keeps the
+    /// connection counted for admission, metrics and graceful drain until the
+    /// session ends.
+    ///
+    /// Default: no upgrade support (test fakes, alternative hosts); the call is
+    /// a no-op so those contexts still compile.
+    ///
+    /// [`IUpgradeSession::run`]: crate::realtime::IUpgradeSession::run
+    fn set_upgrade_session(
+        &mut self,
+        _session: std::sync::Arc<dyn crate::realtime::IUpgradeSession>,
+        _meta: crate::realtime::ConnectionMeta,
+    ) {
+    }
 }
 
 /// HTTP request abstraction.
@@ -624,6 +680,16 @@ pub trait IHttpResponse: Send {
     /// casing replaces the previous value instead of emitting a duplicate.
     fn set_header(&mut self, key: &str, value: &str);
 
+    /// Set a header from an owned value without copying it again.
+    ///
+    /// The default forwards to [`Self::set_header`]. Transports that can adopt
+    /// the buffer (the HTTP engine uses `HeaderValue::from_maybe_shared`)
+    /// override this, which saves one allocation for generated values such as
+    /// the request id.
+    fn set_header_owned(&mut self, key: &str, value: String) {
+        self.set_header(key, &value);
+    }
+
     /// Set a header whose name and value are compile-time constants.
     ///
     /// The engine overrides this with `HeaderName::from_static` /
@@ -756,7 +822,8 @@ pub async fn write_json_response<T: serde::Serialize + Send>(
     resp: &mut dyn IHttpResponse,
     value: &T,
 ) -> Result<()> {
-    let json = serde_json::to_vec(value).map_err(crate::error::Error::ResponseSerialization)?;
+    let json =
+        crate::json::encode_json(value).map_err(crate::error::Error::ResponseSerialization)?;
     resp.set_header("content-type", "application/json");
     resp.write_bytes(json).await
 }

@@ -201,5 +201,5 @@ jobs:
         run: |
           export NODE_PATH=/tmp/pw/node_modules
           export CHROME_PATH=$(node -e "console.log(require('playwright-core').chromium.executablePath())")
-          node crates/webauthn/tests/browser_e2e.js
+          node crates/auth/webauthn/tests/browser_e2e.js
           WEBAUTHN_BROWSER_JSON=browser_webauthn.json cargo test -p rust-webx-webauthn --test browser_e2e_test -- --ignored --nocapture

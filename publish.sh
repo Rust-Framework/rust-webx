@@ -13,19 +13,25 @@
 # Order (must respect dependency graph):
 #   1. rust-webx-macros   (no internal deps)
 #   2. rust-webx-core     (no internal deps)
-#   3. rust-webx-client   (depends on rust-webx-core; outbound HTTP)
-#   4. rust-webx-ai       (AI domain kit; follows the workspace version)
-#   5. rust-webx-ai-ef    (rust-ef usage ledger)
-#   6. rust-webx-build    (no internal deps; build-dependency of apps)
-#   7. rust-webx-spa      (depends on rust-webx-core)
-#   8. rust-webx-openapi  (depends on rust-webx-core)
-#   9. rust-webx-host     (depends on rust-webx-core, rust-webx-spa, rust-webx-openapi)
-#  10. rust-webx-redis    (event transport + distributed cache; depends on core/host)
-#  11. rust-webx-nats     (event transport; depends on core/host)
-#  12. rust-webx-rabbitmq (event transport; depends on core/host)
-#  13. rust-webx-kafka    (event transport; depends on core/host)
-#  14. rust-webx          (depends on all above, umbrella crate)
-#  15. rust-webx-ai-gateway (OpenAI-compatible surface; depends on webx + webx-ai)
+#   3. rust-webx-engine   (depends on rust-webx-core)
+#   4. rust-webx-client   (depends on rust-webx-core; outbound HTTP)
+#   5. rust-webx-ai       (AI domain kit; depends on core/client)
+#   6. rust-webx-ai-ef    (rust-ef usage ledger)
+#   7. rust-webx-build    (no internal deps; build-dependency of apps)
+#   8. rust-webx-spa      (depends on rust-webx-core)
+#   9. rust-webx-openapi  (depends on rust-webx-core)
+#  10. rust-webx-host     (depends on core/engine/client/macros/spa/openapi)
+#  11. rust-webx-auth-ef  (durable auth stores; depends on core)
+#  12. rust-webx-mfa      (TOTP/recovery codes; depends on core)
+#  13. rust-webx-webauthn (passkey verification; depends on core)
+#  14. rust-webx-oauth2   (social login; depends on core/client)
+#  15. rust-webx-oidc     (OIDC client; depends on core/host/client)
+#  16. rust-webx-redis    (event transport + distributed cache; depends on core/host)
+#  17. rust-webx-nats     (event transport; depends on core/host)
+#  18. rust-webx-rabbitmq (event transport; depends on core/host)
+#  19. rust-webx-kafka    (event transport; depends on core/host)
+#  20. rust-webx          (umbrella crate; depends on all framework crates above)
+#  21. rust-webx-ai-gateway (OpenAI-compatible surface; depends on webx + webx-ai)
 # ─────────────────────────────────────────────────────────────────
 
 # `pipefail` is required: the gate commands below pipe into `tail`, and without
@@ -79,14 +85,18 @@ bump_version() {
 internal_deps() {
     case "$1" in
         rust-webx-core|rust-webx-macros|rust-webx-build) ;;
+        rust-webx-engine) echo "rust-webx-core" ;;
         rust-webx-client) echo "rust-webx-core" ;;
         rust-webx-ai) echo "rust-webx-core rust-webx-client" ;;
         rust-webx-ai-ef) echo "rust-webx-ai rust-webx-core" ;;
         rust-webx-ai-gateway) echo "rust-webx rust-webx-ai" ;;
         rust-webx-spa|rust-webx-openapi) echo "rust-webx-core" ;;
-        rust-webx-host) echo "rust-webx-core rust-webx-client rust-webx-spa rust-webx-openapi" ;;
+        rust-webx-host) echo "rust-webx-core rust-webx-engine rust-webx-client rust-webx-macros rust-webx-spa rust-webx-openapi" ;;
+        rust-webx-auth-ef|rust-webx-mfa|rust-webx-webauthn) echo "rust-webx-core" ;;
+        rust-webx-oauth2) echo "rust-webx-core rust-webx-client" ;;
+        rust-webx-oidc) echo "rust-webx-core rust-webx-host rust-webx-client" ;;
         rust-webx-redis|rust-webx-nats|rust-webx-rabbitmq|rust-webx-kafka) echo "rust-webx-core rust-webx-host" ;;
-        rust-webx) echo "rust-webx-core rust-webx-host rust-webx-client rust-webx-macros rust-webx-spa rust-webx-openapi" ;;
+        rust-webx) echo "rust-webx-core rust-webx-engine rust-webx-host rust-webx-client rust-webx-macros rust-webx-spa rust-webx-openapi" ;;
     esac
 }
 
@@ -177,6 +187,7 @@ bump_version
 # Publish in dependency order (dependencies before dependents)
 publish_crate "rust-webx-macros"
 publish_crate "rust-webx-core"
+publish_crate "rust-webx-engine"
 publish_crate "rust-webx-client"
 publish_crate "rust-webx-ai"
 publish_crate "rust-webx-ai-ef"
@@ -184,6 +195,11 @@ publish_crate "rust-webx-build"
 publish_crate "rust-webx-spa"
 publish_crate "rust-webx-openapi"
 publish_crate "rust-webx-host"
+publish_crate "rust-webx-auth-ef"
+publish_crate "rust-webx-mfa"
+publish_crate "rust-webx-webauthn"
+publish_crate "rust-webx-oauth2"
+publish_crate "rust-webx-oidc"
 publish_crate "rust-webx-redis"
 publish_crate "rust-webx-nats"
 publish_crate "rust-webx-rabbitmq"

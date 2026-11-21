@@ -2,7 +2,7 @@
 //!
 //! The browser captures a real `navigator.credentials.create/get` pair with a
 //! CTAP2 virtual authenticator; this test feeds the exact wire bytes into the
-//! Rust RP verifier. Generate the JSON with `crates/webauthn/tests/browser_e2e.js`
+//! Rust RP verifier. Generate the JSON with `crates/auth/webauthn/tests/browser_e2e.js`
 //! (Playwright) and run:
 //!
 //! ```powershell

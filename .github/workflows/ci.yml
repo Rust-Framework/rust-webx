@@ -66,6 +66,17 @@ jobs:
       - name: Check docs consistency
         run: bash scripts/check-docs.sh
 
+      - name: Check crate ownership layout
+        # crates/ is a closed taxonomy (framework set + ai/auth/cache/queue
+        # groups) and framework crates may not depend on domain adapters.
+        run: bash scripts/check-crate-layout.sh
+
+      - name: Check publish order
+        # Every publishable crate must appear once in both publish paths, with
+        # dependencies before dependents (a dropped crate would publish nothing
+        # on a tag while the workflow stays green).
+        run: python3 scripts/check-publish-order.py
+
       - name: Validate local broker compose
         # Client-side validation only: no Docker engine is required, so this
         # catches drift between docker-compose.brokers.yml and the adapter

@@ -75,7 +75,7 @@
 
 - [x] 授权码 + PKCE + state、token 交换、userinfo → `IdentityUser`。
 - [x] 内置 GitHub/Facebook/Google/Microsoft/GitLab/Gitee/DingTalk/Feishu/WeChat/Weibo/QQ/Douyin 预设；Alipay 使用 RSA2 签名网关客户端。
-- [x] Host 可直接挂载示例：`crates/oauth2/examples/github_host.rs`（start + callback + 本地 JWT）。
+- [x] Host 可直接挂载示例：`crates/auth/oauth2/examples/github_host.rs`（start + callback + 本地 JWT）。
 - [x] 真实 GitHub OAuth：authorize → code → token → `/user`，含 `/user/emails` 回退。
 - [x] 本地 mock 测试：token/userinfo/email 回退/HTTPS 校验/PKCE。
 - [x] 与 OIDC 边界：GitHub 等不接入 `OidcClient`；文档 `09-auth-security/oauth2-social.md`。

@@ -27,7 +27,7 @@
 |---|---|---|---|
 | Scheme 链（Strategy + CoR） | ✅ 公开、可插拔、首个 `matches` 命中即处理 | `crates/core/src/auth.rs:112-127`、`crates/host/src/auth.rs:429-443` | 无 per-route 选择；无重叠诊断 |
 | JWT Bearer（HS256） | ✅ `add_authentication()` + `Jwt.Secret/SecretFile` | `crates/host/src/server.rs:1222-1250` | 算法/iss/aud/leeway/大小不可配；无 JWKS |
-| API Key | ✅ `ApiKeyScheme` + 失败限流 + HMAC store | `crates/host/src/auth.rs:217-357`、`crates/ai/src/api_key_store.rs` | 401 挑战头仍是 `Bearer`；scopes 依赖 claims 约定 |
+| API Key | ✅ `ApiKeyScheme` + 失败限流 + HMAC store | `crates/host/src/auth.rs:217-357`、`crates/ai/core/src/api_key_store.rs` | 401 挑战头仍是 `Bearer`；scopes 依赖 claims 约定 |
 | 口令 | ✅ `IPasswordHasher`（Argon2id，PHC，blocking 线程） | `crates/core/src/security/password.rs:27-53`、`crates/host/src/password_argon2.rs:150-181` | 无策略/防枚举/登录限流/并发闸门 |
 | 吊销 | ✅ `ISessionStore`（按 `jti`），持久化可实现 | `crates/core/src/security/session.rs:22-105` | 无 TTL/GC；无 subject 索引（默认 501）；每请求存储调用无缓存 |
 | 身份/授权 | ✅ `IdentityUser`/`RequestUser`、`#[authorize]`、`IDynamicAuthorizer`（2.x fail-closed） | `crates/core/src/auth.rs:355-419` | claim 规范化契约未文档化 |
@@ -325,10 +325,10 @@ claims 契约（所有 scheme 归一化后必须满足）：
 | `crates/host/src/server.rs` | `use_jwt_validation`/`use_csrf`/`use_refresh` 等 builder；Production 守卫 | 安全默认 |
 | `crates/host/Cargo.toml` | features：`auth-cookie`/`auth-csrf` 默认开（零新依赖）；`auth-jwks`/`auth-refresh` 默认关，依赖预算评审通过后于 M2 默认开 | 可裁剪 |
 | `crates/webx/src/lib.rs` | 导出新 API | 伞形 crate |
-| `crates/oidc/`（新） | OIDC 客户端（discovery/PKCE/token/id_token 验证/会话桥） | A7 |
-| `crates/mfa/`（新） | TOTP + 恢复码 | A8 |
-| `crates/webauthn/`（新） | WebAuthn/Passkey（M3） | A9 |
-| `crates/auth-ef/`（新） | `EfSessionRepository`/`EfRefreshTokenStore` | 持久化 |
+| `crates/auth/oidc/`（新） | OIDC 客户端（discovery/PKCE/token/id_token 验证/会话桥） | A7 |
+| `crates/auth/mfa/`（新） | TOTP + 恢复码 | A8 |
+| `crates/auth/webauthn/`（新） | WebAuthn/Passkey（M3） | A9 |
+| `crates/auth/ef/`（新） | `EfSessionRepository`/`EfRefreshTokenStore` | 持久化 |
 | `docs/rust-webx/09-auth-security/*` | 手册与负例 | 用户第一入口 |
 | `scripts/`/CI | 认证负例、分配/延迟门禁、依赖方向检查 | 门禁 |
 
@@ -555,7 +555,7 @@ let session = oidc.exchange_code(code, pkce_verifier, nonce).await?; // 校验 i
 | 工作项 | 状态 | 证据 |
 |---|---|---|
 | AUTH-2.5-M1-01 JWT 校验硬化 | 🚧 实现完成；host 全量测试 + clippy 通过，全量 fmt 待并行改动收敛 | `crates/core/src/config.rs`（`JwtSection` 新字段 + `JwtAlgorithm`/`InvalidTokenBehavior`）、`crates/host/src/auth_jwt.rs`（`JwtValidation`/`JwtAuth`/`sub`/`iat`/size/Reject）、`crates/host/src/server.rs`（`use_jwt_validation` + 默认 issuer 写入 `iss`/`aud`）、`crates/host/tests/auth_validation_test.rs`（22 例）、`docs/rust-webx/09-auth-security/jwt-authentication.md` |
-| AUTH-2.5-M1-02 Cookie + CSRF + 会话仓储 | ✅ 完成（含 EF 持久化） | `crates/core/src/security/session_repo.rs`（`ISessionRepository`/`SessionRecord`/内存实现）、`crates/host/src/auth_cookie.rs`（`SessionCookieScheme`/`CookieOptions`/`SameSite`）、`crates/host/src/csrf.rs`（双提交 + `Sec-Fetch-Site`）、`crates/host/src/server.rs`（`use_csrf` + 无 CSRF 启动守卫）、`crates/core/src/action.rs`（多 `Set-Cookie` 不覆盖）、`crates/auth-ef/src/session.rs`（`EfSessionRepository`/`auth_sessions`）、`crates/host/tests/cookie_auth_test.rs`（8 例）、`crates/host/tests/csrf_test.rs`（9 例）、`crates/auth-ef` session 测试（4 例）、`docs/rust-webx/09-auth-security/cookie-session.md` |
+| AUTH-2.5-M1-02 Cookie + CSRF + 会话仓储 | ✅ 完成（含 EF 持久化） | `crates/core/src/security/session_repo.rs`（`ISessionRepository`/`SessionRecord`/内存实现）、`crates/host/src/auth_cookie.rs`（`SessionCookieScheme`/`CookieOptions`/`SameSite`）、`crates/host/src/csrf.rs`（双提交 + `Sec-Fetch-Site`）、`crates/host/src/server.rs`（`use_csrf` + 无 CSRF 启动守卫）、`crates/core/src/action.rs`（多 `Set-Cookie` 不覆盖）、`crates/auth/ef/src/session.rs`（`EfSessionRepository`/`auth_sessions`）、`crates/host/tests/cookie_auth_test.rs`（8 例）、`crates/host/tests/csrf_test.rs`（9 例）、`crates/auth/ef` session 测试（4 例）、`docs/rust-webx/09-auth-security/cookie-session.md` |
 | AUTH-2.5-M1-03 口令策略/防枚举/登录限流/Argon2 闸门 | 🚧 实现完成；host 全量测试 + clippy 通过 | `crates/host/src/login.rs`（`PasswordPolicy`/`verify_password_or_dummy`/`ILoginThrottle`/`MemoryLoginThrottle`/`BoundedPasswordHasher`）、`crates/host/src/server.rs`（默认 hasher 包闸门）、`crates/host/tests/login_hardening_test.rs`（10 例）、`docs/rust-webx/09-auth-security/token-session-password.md` |
 | AUTH-2.5-M1-04 吊销 TTL/GC/负缓存/subject 索引 | 🚧 实现完成；host 全量测试 + clippy 通过 | `crates/core/src/security/session.rs`（`revoke_until`/TTL/`purge_expired`）、`crates/host/src/session_cache.rs`（`CachedSessionStore` 负缓存 + 本地失效）、`crates/host/src/server.rs`（`use_session_store_cached`）、`crates/host/tests/session_cache_test.rs`、`docs/rust-webx/09-auth-security/token-session-password.md` |
 | AUTH-2.5-M1-05 认证指标/审计/配置报告 | 🚧 实现完成；host 全量测试 + clippy 通过 | `crates/host/src/auth.rs`（`AuthMetrics`/`AuthOutcome`/`auth.requests`/`auth.duration`）、`crates/host/src/server.rs`（`use_meter` + 启动配置报告）、`crates/host/tests/auth_metrics_test.rs`（8 例）、`docs/rust-webx/09-auth-security/token-session-password.md` |
@@ -569,9 +569,9 @@ let session = oidc.exchange_code(code, pkce_verifier, nonce).await?; // 校验 i
 | 工作项 | 状态 | 证据 |
 |---|---|---|
 | AUTH-2.5-M2-01 JWKS + RS256/ES256 + `kid` 轮换 | 🚧 实现完成；host 全量测试 + clippy 通过 | `crates/core/src/config.rs`（`JwtJwksSection`）、`crates/host/src/auth_jwks.rs`（`JwkSet`/`JwksResolver`/`StaticKeyResolver`/`HttpJwksFetcher`）、`crates/host/src/auth_jwt.rs`（多算法 + `kid` 解析 + 503 fail-closed）、`crates/host/src/server.rs`（JWKS-only 启动/守卫）、`crates/host/tests/auth_jwks_test.rs`（6 例 + 1 单元）、`docs/rust-webx/09-auth-security/jwt-authentication.md` |
-| AUTH-2.5-M2-02 刷新令牌轮换 + 重用检测 | ✅ 完成 | `crates/core/src/security/refresh.rs`（`IRefreshTokenStore`/原子 `rotate`/内存实现）、`crates/host/src/refresh.rs`（`RefreshTokenService`/SHA-256/重用撤销族）、`crates/auth-ef/src/lib.rs`（`EfRefreshTokenStore`：条件更新 + 事务）、`crates/host/tests/refresh_token_test.rs`（7 例）、`crates/auth-ef` SQLite 测试（4 例）、`docs/rust-webx/09-auth-security/token-session-password.md` |
-| AUTH-2.5-M2-03 `rust-webx-oidc` MVP | ✅ 完成（本地 HTTPS IdP e2e；外部厂商待补） | `crates/oidc/src/{discovery,client,http,pkce}.rs`（discovery、PKCE S256、code exchange、id_token iss/aud/nonce/exp/alg/kid/at_hash、会话桥、私有 CA）、`crates/oidc/tests/oidc_test.rs`（13）+ `oidc_live_test.rs`+ `oidc_https_e2e_test.rs`（真实 HTTPS discovery/JWKS/token）、`docs/rust-webx/09-auth-security/oidc.md` |
-| AUTH-2.5-M2-04 `rust-webx-mfa`（TOTP） | ✅ 完成 | `crates/mfa/src/{totp,recovery,assurance}.rs`（RFC 6238 SHA1/256/512、±skew、重放防护、恢复码哈希、`amr`/`acr`）、13 个单元测试、`docs/rust-webx/09-auth-security/mfa.md` |
+| AUTH-2.5-M2-02 刷新令牌轮换 + 重用检测 | ✅ 完成 | `crates/core/src/security/refresh.rs`（`IRefreshTokenStore`/原子 `rotate`/内存实现）、`crates/host/src/refresh.rs`（`RefreshTokenService`/SHA-256/重用撤销族）、`crates/auth/ef/src/lib.rs`（`EfRefreshTokenStore`：条件更新 + 事务）、`crates/host/tests/refresh_token_test.rs`（7 例）、`crates/auth/ef` SQLite 测试（4 例）、`docs/rust-webx/09-auth-security/token-session-password.md` |
+| AUTH-2.5-M2-03 `rust-webx-oidc` MVP | ✅ 完成（本地 HTTPS IdP e2e；外部厂商待补） | `crates/auth/oidc/src/{discovery,client,http,pkce}.rs`（discovery、PKCE S256、code exchange、id_token iss/aud/nonce/exp/alg/kid/at_hash、会话桥、私有 CA）、`crates/auth/oidc/tests/oidc_test.rs`（13）+ `oidc_live_test.rs`+ `oidc_https_e2e_test.rs`（真实 HTTPS discovery/JWKS/token）、`docs/rust-webx/09-auth-security/oidc.md` |
+| AUTH-2.5-M2-04 `rust-webx-mfa`（TOTP） | ✅ 完成 | `crates/auth/mfa/src/{totp,recovery,assurance}.rs`（RFC 6238 SHA1/256/512、±skew、重放防护、恢复码哈希、`amr`/`acr`）、13 个单元测试、`docs/rust-webx/09-auth-security/mfa.md` |
 | AUTH-2.5-M2-05 指标/健康/轮换 runbook | ✅ 完成 | `crates/host/src/auth_jwks.rs`（`JwksHealthCheck` + `ensure_fresh`）、`crates/host/src/refresh.rs`（`auth.refresh.events`）、`crates/host/tests/{auth_jwks,refresh_token}_test.rs`、`docs/rust-webx/09-auth-security/key-rotation-runbook.md` |
 
 **M3 进度**
@@ -579,7 +579,7 @@ let session = oidc.exchange_code(code, pkce_verifier, nonce).await?; // 校验 i
 | 工作项 | 状态 | 证据 |
 |---|---|---|
 | AUTH-2.5-M3-03 DPoP（RFC 9449） | 🚧 实现完成；专项测试通过 | `crates/host/src/auth_dpop.rs`（proof 校验、cnf.jkt、htm/htu/iat/jti/ath、重放存储）、`crates/host/tests/dpop_test.rs`（5 例）、`docs/rust-webx/09-auth-security/dpop.md` |
-| AUTH-2.5-M3-01 WebAuthn/Passkey | 🚧 MVP 验签完成；浏览器协议/更多 attestation 待补 | `crates/webauthn/src/{lib,verify}.rs`（ES256、none attestation、challenge/origin/rpId/flags/counter）、4 个集成测试、`docs/rust-webx/09-auth-security/webauthn.md` |
+| AUTH-2.5-M3-01 WebAuthn/Passkey | 🚧 MVP 验签完成；浏览器协议/更多 attestation 待补 | `crates/auth/webauthn/src/{lib,verify}.rs`（ES256、none attestation、challenge/origin/rpId/flags/counter）、4 个集成测试、`docs/rust-webx/09-auth-security/webauthn.md` |
 | AUTH-2.5-M3-05 `jwt_secret` shim 迁移 | ✅ 完成（保留 N-2 兼容） | `dmbit/handlers/src/auth.rs` 迁移到 `ITokenIssuer`/`IPasswordHasher`；seed 改 Argon2id；`init_jwt_secret`/`jwt_secret` 标记 deprecated 并在下一 major 删除；docbit e2e 3 例通过 |
 | AUTH-2.5-M3-02 mTLS | ✅ 完成 | `Tls.ClientCaPath/ClientAuth`、engine 客户端证书链验证 + 叶证书 SHA-256 指纹注入、`MtlsScheme`/`IMtlsIdentityResolver`、HostBuilder 启动期 fail-closed 校验；engine 10 例 TLS + host 4 例 mTLS |
 | AUTH-2.5-M3-04 per-route scheme（按需） | ✅ 完成 | `AuthenticationMiddleware::with_route_policies` + `HostBuilder::use_auth_scheme_for`；5 例策略/匿名/全局链/路径段边界测试 |
@@ -589,7 +589,7 @@ let session = oidc.exchange_code(code, pkce_verifier, nonce).await?; // 校验 i
 | 工作项 | 状态 | 证据 |
 |---|---|---|
 | AUTH-2.5-M4-01/02 RFC 7662 / RFC 7009 | 🚧 服务原语完成；端点由应用装配 | `crates/host/src/introspection.rs`（active=false 语义、Basic 客户端认证、JWT/refresh 吊销）、`crates/host/src/refresh.rs::revoke_token`、`crates/host/tests/introspection_test.rs`（6 例）、`docs/rust-webx/09-auth-security/introspection.md` |
-| AUTH-2.5-M4-03 性能预算/模糊/GA 台账 | 🚧 认证层 0 分配达成；整请求税/真实 e2e/浸泡待补 | `crates/host/tests/auth_budget_test.rs`（HS256 p99 3.9µs、malformed fuzz）、`crates/webauthn/tests/webauthn_test.rs`、`crates/engine/tests/tls.rs`（mTLS 握手 e2e）、`crates/alloc-probe`（auth +2.00 == noop +2.00 ⇒ 认证层 0 增量）、`docs/design/auth-conformance.md` |
+| AUTH-2.5-M4-03 性能预算/模糊/GA 台账 | 🚧 认证层 0 分配达成；整请求税/真实 e2e/浸泡待补 | `crates/host/tests/auth_budget_test.rs`（HS256 p99 3.9µs、malformed fuzz）、`crates/auth/webauthn/tests/webauthn_test.rs`、`crates/engine/tests/tls.rs`（mTLS 握手 e2e）、`crates/alloc-probe`（auth +2.00 == noop +2.00 ⇒ 认证层 0 增量）、`docs/design/auth-conformance.md` |
 
 ### 6.6 M2 入口（当前阶段）
 

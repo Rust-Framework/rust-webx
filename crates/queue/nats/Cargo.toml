@@ -1,19 +1,19 @@
 [package]
-name = "rust-webx-rabbitmq"
+name = "rust-webx-nats"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "RabbitMQ (AMQP) event transport for rust-webx (ASP.NET Core style add_rabbitmq)"
+description = "NATS event transport for rust-webx (ASP.NET Core style add_nats)"
 repository.workspace = true
 homepage.workspace = true
 documentation.workspace = true
-readme = "../../README.md"
-keywords = ["rabbitmq", "amqp", "events", "webx", "aspnet-core"]
+readme = "../../../README.md"
+keywords = ["nats", "events", "messaging", "webx", "aspnet-core"]
 categories = ["web-programming", "asynchronous"]
 
 [lib]
-name = "webx_rabbitmq"
+name = "webx_nats"
 
 [dependencies]
 rust-webx-core.workspace = true
@@ -24,11 +24,11 @@ tokio = { workspace = true, features = ["sync", "time"] }
 futures-util.workspace = true
 serde.workspace = true
 tracing.workspace = true
-lapin.workspace = true
+async-nats.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
-rust-webx-contract-tests = { path = "../contract-tests" }
+rust-webx-contract-tests = { path = "../../contract-tests" }
 inventory.workspace = true
 
 [lints]

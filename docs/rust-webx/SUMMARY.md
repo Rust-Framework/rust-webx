@@ -47,6 +47,7 @@
   - [错误处理与 ProblemDetails](./05-request-pattern/error-handling.md)
   - [统一分页（PagedRequest / PagedResult）](./05-request-pattern/pagination.md)
   - [流式响应（SSE）](./05-request-pattern/streaming-sse.md)
+  - [WebSocket 会话](./05-request-pattern/websocket.md)
   - [请求体流式读取](./05-request-pattern/request-body-streaming.md)
 
 - [第六章 DI 与生命周期](./06-di-lifecycle/INDEX.md)
@@ -145,6 +146,7 @@
   - [可复用的模式提炼](./15-case-study/docbit-patterns.md)
 
 - [第十六章 迁移指南](./16-migration/INDEX.md)
+  - [升级到 2.4（2.x 加性演进）](./16-migration/upgrade-to-2.4.md)
   - [升级到 1.1（破坏性变更）](./16-migration/upgrade-to-1.1.md)
   - [升级到 1.0.2（破坏性变更）](./16-migration/upgrade-to-1.0.2.md)
   - [升级到 1.0（破坏性变更）](./16-migration/upgrade-to-1.0.md)

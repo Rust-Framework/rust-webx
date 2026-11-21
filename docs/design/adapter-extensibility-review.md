@@ -1,9 +1,12 @@
 # 适配器可扩展性架构评审（rust-webx 2.5 → 2.6）
 
-> 评审对象：事件传输异步化 + 四个 broker/cache 适配器（`crates/redis`、`crates/nats`、`crates/rabbitmq`、`crates/kafka`）
+> 评审对象：事件传输异步化 + 四个 broker/cache 适配器（`crates/cache/redis`、`crates/queue/nats`、`crates/queue/rabbitmq`、`crates/queue/kafka`）
 > 评审人：独立架构评审（只读，未改动任何 Rust/Cargo/文档源文件）
 > 分支 / 时间：`release/2.5`；初审 08:03–08:09，修复轮 1 复核 08:15–08:18，**终审 08:19–08:23**（2026-11-21，Asia/Shanghai）
-> 状态提醒：四个适配器目录仍为未跟踪文件（`?? crates/redis/` 等），`crates/core/src/mediator/event.rs` 为未跟踪新文件。**本报告全程静态复核：未运行 `cargo build`/`test`/`clippy`**（避免持有 target 锁）；上游报告的「适配器 30 个测试 + core 事件测试通过、clippy `-D warnings` 通过」未被本评审独立执行验证，正文以源码与测试断言内容为准。
+> 状态：**历史评审快照**。评审后该迭代已提交并按域重组为 `crates/cache/redis`、
+> `crates/queue/{nats,rabbitmq,kafka}`；文中"未跟踪 / 未运行构建"描述的是评审当时状态，
+> 不代表当前交付状态。当前门禁与结论以 `CHANGELOG.md`、`docs/design/release-evidence.md`
+> 和 CI 为准；§6/§7 的增强项仍按优先级推进。
 
 ## 0. 评审方法与证据
 
@@ -21,8 +24,8 @@
 | 维度 | 分 | 变化 | 证据 |
 |---|---|---|---|
 | 核心隔离 | **5**（5） | — | 终审重跑：`cargo tree -p rust-webx-core --depth 1` 与 umbrella 深度 2 过滤 broker 均为空；四个适配器 `-i` 均只有自身；core 无 feature、无驱动依赖 |
-| API 一致性 | **3**（3） | — | 四份 `*HostBuilderExt`/`*ServiceCollectionExt` 同构；新 option 命名一致（`max_deliveries` / `dead_letter_stream` / `dead_letter_exchange`）。仍存：`connect_timeout_seconds` vs `connection_timeout_seconds`（`crates/nats/src/options.rs:19`）、Redis 无 `publisher_only()`、options 无法真正从配置喂给 `add_*`（§6.8）、4 处 `.expect()`；以及需文档化的 publish-fail-closed vs consume-fail-open 分叉（§4.6） |
-| 失败语义 | **4**（4） | — | **A 关闭**：Redis `max_deliveries`（默认 5）+ `dead_letter_stream`（`crates/redis/src/options.rs:146-152`）、失败时 `XPENDING` 取投递次数、超限 XADD 死信后 `XACK`（`crates/redis/src/events.rs:130-175`）；Rabbit quorum 队列 + `x-delivery-limit`（默认 5）+ 可选 DLX（`crates/rabbitmq/src/events.rs:264-298`）。未到 5：Rabbit `mandatory=false`（`events.rs:84`）在路由不到队列时仍静默 confirm（§6.9 R2）；Kafka/NATS 的弱语义是明示的 scope limit |
+| API 一致性 | **3**（3） | — | 四份 `*HostBuilderExt`/`*ServiceCollectionExt` 同构；新 option 命名一致（`max_deliveries` / `dead_letter_stream` / `dead_letter_exchange`）。仍存：`connect_timeout_seconds` vs `connection_timeout_seconds`（`crates/queue/nats/src/options.rs:19`）、Redis 无 `publisher_only()`、options 无法真正从配置喂给 `add_*`（§6.8）、4 处 `.expect()`；以及需文档化的 publish-fail-closed vs consume-fail-open 分叉（§4.6） |
+| 失败语义 | **4**（4） | — | **A 关闭**：Redis `max_deliveries`（默认 5）+ `dead_letter_stream`（`crates/cache/redis/src/options.rs:146-152`）、失败时 `XPENDING` 取投递次数、超限 XADD 死信后 `XACK`（`crates/cache/redis/src/events.rs:130-175`）；Rabbit quorum 队列 + `x-delivery-limit`（默认 5）+ 可选 DLX（`crates/queue/rabbitmq/src/events.rs:264-298`）。未到 5：Rabbit `mandatory=false`（`events.rs:84`）在路由不到队列时仍静默 confirm（§6.9 R2）；Kafka/NATS 的弱语义是明示的 scope limit |
 | 可运维性 | **3**（2） | ↑1 | 有界重试 + 死信出口（Redis 死信 stream 带 `attempts`/`source_id`/`error` 字段，`events.rs:304-333`；Rabbit DLX 可配）+ classic→quorum 迁移已入档（`event-pub-sub.md:170-172`）。未到 4：指标仍为零、health 仍只探连接、payload 仍无上限、自定义 CA 无入口 |
 | 可测试性 | **3**（3） | — | 4 个适配器共 **33 个测试函数**（19 单元 + 9 免 broker 注册 + 5 env-gated 集成）；新增 `xautoclaim_reply_reports_deleted_ids_for_pel_cleanup`（`redis/events.rs:472`）与 `xpending_reply_exposes_the_delivery_count`（`:484`）。未到 4：CI 仍无 broker（5 个 env-gated 集成用例空跑通过）、Rabbit 队列参数内联在 `ensure_topology` 里无法单测（§6.9 R3）、仍未接 `crates/contract-tests` |
 | 依赖/构建负担 | **4**（4） | — | 发布路径已闭环（`publish.yml:49`、`publish.sh:88,187-190`）；workspace 仍需三平台编译 4 个 SDK，属结构性成本 |
@@ -81,14 +84,14 @@
 
 | crate | 文件 | 生产源码 | 内联测试 | 集成测试 | Cargo.toml | 合计 |
 |---|---|---|---|---|---|---|
-| `crates/redis` | 9 | 1,220 | 152 | 217 | 33 | **1,622** |
-| `crates/nats` | 8 | 429 | 35 | 161 | 34 | **659** |
-| `crates/rabbitmq` | 8 | 657 | 42 | 171 | 34 | **904** |
-| `crates/kafka` | 8 | 594 | 26 | 185 | 34 | **839** |
+| `crates/cache/redis` | 9 | 1,220 | 152 | 217 | 33 | **1,622** |
+| `crates/queue/nats` | 8 | 429 | 35 | 161 | 34 | **659** |
+| `crates/queue/rabbitmq` | 8 | 657 | 42 | 171 | 34 | **904** |
+| `crates/queue/kafka` | 8 | 594 | 26 | 185 | 34 | **839** |
 | 合计 | **33** | **2,900** | 255 | 734 | 135 | **4,024** |
 
 （`src` 合计 3,155 行，其中 255 行 `#[cfg(test)]` 内联单测；`tests/` 目录 734 行 = 免 broker 的注册测试 + `WEBX_*_URL` 门控的集成测试。三轮里 redis 从 1,069 → 1,220 生产行（+151：死信、XPENDING、PEL 清理、`start_id`/`claim_pending`），rabbitmq 从 625 → 657（+32：quorum 参数与选项）。）
-单文件最大：`crates/redis/src/events.rs` 507、`crates/redis/src/cache.rs` 339、`crates/rabbitmq/src/events.rs` 312、`crates/redis/src/lib.rs` 191。
+单文件最大：`crates/cache/redis/src/events.rs` 507、`crates/cache/redis/src/cache.rs` 339、`crates/queue/rabbitmq/src/events.rs` 312、`crates/cache/redis/src/lib.rs` 191。
 
 ### 3.2 每个适配器必须实现的注册面（不变）
 
@@ -136,24 +139,24 @@ rust_dix::ServiceCollection / IServiceResolver::provider_arc()
 ### 4.1 Kafka：单分区 / 无 offset 提交 / 纯明文（已入档，维持 scope limit）
 
 - 单分区 follower，无 rebalance；无 `commit`：`Latest` 丢停摆期消息、`Earliest` 重放。
-- 明文限制三处明示：`crates/kafka/src/options.rs:5-8`、`CHANGELOG.md:114`、`event-pub-sub.md:179-181`。
-- **仍开（性能）**：`ensure_topic()` 在 `partition()` 里先于缓存检查执行（`crates/kafka/src/events.rs:44-50`），每次都 `list_topics()`（`:226-233`）→ 每条 publish 一次多余 metadata RPC。
+- 明文限制三处明示：`crates/queue/kafka/src/options.rs:5-8`、`CHANGELOG.md:114`、`event-pub-sub.md:179-181`。
+- **仍开（性能）**：`ensure_topic()` 在 `partition()` 里先于缓存检查执行（`crates/queue/kafka/src/events.rs:44-50`），每次都 `list_topics()`（`:226-233`）→ 每条 publish 一次多余 metadata RPC。
 
 ### 4.2 NATS：at-most-once（已脱敏）
 
 - 无 ack/持久化/JetStream；订阅者不在线即丢。
-- 连接错误经 `redact_url`（`crates/nats/src/connection.rs:40-48`，实现 `:64-81`，单测 `:87-94`），`/health/ready` 不再回显凭据。
+- 连接错误经 `redact_url`（`crates/queue/nats/src/connection.rs:40-48`，实现 `:64-81`，单测 `:87-94`），`/health/ready` 不再回显凭据。
 - 残余（低）：`NatsConnection::url()`（`:27-30`）仍返回原文。
 
 ### 4.3 Redis：毒消息有界 + PEL 清理（**A/B 均关闭**）
 
-- **B 关闭**：`parse_claim_reply` 现返回 `(messages, deleted_ids)`，从 `XAUTOCLAIM` 的 `parts[2]` 取被裁剪但仍挂 PEL 的 id（`crates/redis/src/events.rs:353-370`）；`run_once` 在投递认领条目**之前**逐个 `XACK`（`:106-114`）。测试 `xautoclaim_reply_reports_deleted_ids_for_pel_cleanup`（`:472`）。
+- **B 关闭**：`parse_claim_reply` 现返回 `(messages, deleted_ids)`，从 `XAUTOCLAIM` 的 `parts[2]` 取被裁剪但仍挂 PEL 的 id（`crates/cache/redis/src/events.rs:353-370`）；`run_once` 在投递认领条目**之前**逐个 `XACK`（`:106-114`）。测试 `xautoclaim_reply_reports_deleted_ids_for_pel_cleanup`（`:472`）。
 - **A 关闭**：失败时用 `XPENDING key group <id> <id> 1` 精确查询该条目的投递次数（`:287-302`，解析 `:372-383`）；`attempts >= max_deliveries` 时先 `XADD` 死信（带 `event/payload/attempts/source_id/error`，`:304-333`）再 `XACK`（`:142-161`）；未达上限则保持 pending（`:162-170`）。**顺序正确**：XADD 失败会 `Err` 返回，条目仍在 PEL，不会「既删源又没写死信」。
 - 残余：`claim_pending=false`（Redis <6.2）时 `XAUTOCLAIM` 根本不跑 → `max_deliveries` 与 PEL 清理同时失效，条目永久 pending；options doc 未点明这个耦合（§6.9 R1）。死信 stream 与主流同名时消息会自环（未校验）。
 
 ### 4.4 RabbitMQ：broker 侧有界（**A 关闭**）
 
-- 队列以 `x-queue-type=quorum` + `x-delivery-limit=max_deliveries`（默认 5）声明，可选 `x-dead-letter-exchange` + `x-dead-letter-routing-key`（`crates/rabbitmq/src/events.rs:264-298`）；publisher 与 consumer 共用 `ensure_topology`，参数一致，不会互相 `PRECONDITION_FAILED`。
+- 队列以 `x-queue-type=quorum` + `x-delivery-limit=max_deliveries`（默认 5）声明，可选 `x-dead-letter-exchange` + `x-dead-letter-routing-key`（`crates/queue/rabbitmq/src/events.rs:264-298`）；publisher 与 consumer 共用 `ensure_topology`，参数一致，不会互相 `PRECONDITION_FAILED`。
 - `nack(requeue=true)` 保留（应用侧语义不变），但 quorum 队列把重入队消息放**队尾**：上一个版本担心的「毒消息队头回插饿死后续」在 quorum 下自然消失；超限后由 broker 进 DLX 或丢弃。
 - 迁移已入档：`event-pub-sub.md:170-172` 写明 RabbitMQ 3.8+、DLX 需预建、**已存在的同名 classic 队列需换名或删除重建**——这是本轮最有价值的文档补充（否则升级即 `queue.declare` 失败）。
 - 残余：DLX 若未预建且 `mandatory=false`，超限消息会在 DLX 处静默丢弃；`x-dead-letter-strategy`（默认 at-most-once）在 DLX 不可达时也可能丢消息；队列参数内联在 `ensure_topology`，无法单测（§6.9 R3）。
@@ -180,7 +183,7 @@ rust_dix::ServiceCollection / IServiceResolver::provider_arc()
 
 ### 5.1 四份 `execute` 循环仍逐字相同
 
-Redis `crates/redis/src/events.rs:185-207`、NATS `crates/nats/src/events.rs:107-129`、Rabbit `crates/rabbitmq/src/events.rs:223-245`、Kafka `crates/kafka/src/events.rs:200-222`——**各 23 行**，行级 diff 差异仍为 4/4/6 行（只有 log 字段名与文本）。**92 行里 78 行完全相同。** 三轮修复都没有动这段（说明它确实稳定），但也说明它仍在四处漂移风险中。
+Redis `crates/cache/redis/src/events.rs:185-207`、NATS `crates/queue/nats/src/events.rs:107-129`、Rabbit `crates/queue/rabbitmq/src/events.rs:223-245`、Kafka `crates/queue/kafka/src/events.rs:200-222`——**各 23 行**，行级 diff 差异仍为 4/4/6 行（只有 log 字段名与文本）。**92 行里 78 行完全相同。** 三轮修复都没有动这段（说明它确实稳定），但也说明它仍在四处漂移风险中。
 
 ### 5.2 其他重复
 
@@ -252,12 +255,12 @@ Redis `crates/redis/src/events.rs:185-207`、NATS `crates/nats/src/events.rs:107
 
 ### 6.8 其他（状态）
 
-1. **配置绑定仍断**：`RedisOptions` doc 建议 `add_options::<RedisOptions>("Redis")`（`crates/redis/src/options.rs:8-9`），但 `add_options` 只把值注册进 DI（`crates/host/src/server.rs:452-470`），`add_redis(options)` 在建容器前就要值；缺 `add_*_from_config(section)`。
-2. **重复注册静默覆盖**：四份 `lib.rs` 仍 `instance::<dyn IEventPublisher>` 无条件追加（`crates/redis/src/lib.rs:87` 等），rust-dix 取最后一个（`provider.rs:765`，推断）；`add_redis` 默认开事件传输，所以「Redis 缓存 + RabbitMQ 事件」会双消费且无告警（需 `.cache_only()`）。
+1. **配置绑定仍断**：`RedisOptions` doc 建议 `add_options::<RedisOptions>("Redis")`（`crates/cache/redis/src/options.rs:8-9`），但 `add_options` 只把值注册进 DI（`crates/host/src/server.rs:452-470`），`add_redis(options)` 在建容器前就要值；缺 `add_*_from_config(section)`。
+2. **重复注册静默覆盖**：四份 `lib.rs` 仍 `instance::<dyn IEventPublisher>` 无条件追加（`crates/cache/redis/src/lib.rs:87` 等），rust-dix 取最后一个（`provider.rs:765`，推断）；`add_redis` 默认开事件传输，所以「Redis 缓存 + RabbitMQ 事件」会双消费且无告警（需 `.cache_only()`）。
 3. **4 处 `provider_arc().expect(...)`** 仍在。
-4. **Redis cache 信封兼容性**：`decode_entry` 以 `bytes[0]==1 && len>=13` 判定信封并丢前 13 字节（`crates/redis/src/cache.rs:255-266`），`0x01` 开头的二进制值会被静默截断。
+4. **Redis cache 信封兼容性**：`decode_entry` 以 `bytes[0]==1 && len>=13` 判定信封并丢前 13 字节（`crates/cache/redis/src/cache.rs:255-266`），`0x01` 开头的二进制值会被静默截断。
 5. **`event_name()` 默认 `type_name`**：重命名即换 wire 名；无编译期提示。
-6. **`::webx::` 绝对路径**：`#[handler]` 生成代码依赖 umbrella；只用 `webx_core` + 适配器须手写 `EventRegistration`（`crates/nats/tests/integration.rs:26-46`）。
+6. **`::webx::` 绝对路径**：`#[handler]` 生成代码依赖 umbrella；只用 `webx_core` + 适配器须手写 `EventRegistration`（`crates/queue/nats/tests/integration.rs:26-46`）。
 
 ### 6.9 本轮新增的残余风险（均为低/中，不构成 must-fix）
 
@@ -286,10 +289,10 @@ Redis `crates/redis/src/events.rs:185-207`、NATS `crates/nats/src/events.rs:107
 | # | 问题 | 关闭 | 证据 |
 |---|---|---|---|
 | M1（轮 1） | 未注册事件被当作 handler 失败 → 无限重投 | ✅ | `crates/core/src/mediator/event.rs:280-293`、`:448-459`、`:461-488`；测试 `:625-644` |
-| M2（轮 1） | NATS 凭据经 `/health/ready` 泄漏 | ✅ | `crates/nats/src/connection.rs:40-48,64-81`；单测 `:87-94` |
+| M2（轮 1） | NATS 凭据经 `/health/ready` 泄漏 | ✅ | `crates/queue/nats/src/connection.rs:40-48,64-81`；单测 `:87-94` |
 | M3（轮 1） | 发布清单漏四 crate + CHANGELOG 归属错误 | ✅ | `publish.yml:49`、`publish.sh:88,187-190`、`CHANGELOG.md:96,138,140` |
-| **A（轮 2）** | **永久失败无限重投（Rabbit / Redis）** | ✅ **关闭** | Redis：`max_deliveries` 默认 5（`crates/redis/src/options.rs:146-148,167`）、`dead_letter_stream`（`:149-151,168`）、`XPENDING` 精确计数（`events.rs:287-302`，解析 `:372-383`）、超限 XADD 死信后 XACK（`:142-161`）、未超限留 pending（`:162-170`）；测试 `xpending_reply_exposes_the_delivery_count`（`:484`）。Rabbit：quorum + `x-delivery-limit`（默认 5）+ 可选 DLX（`crates/rabbitmq/src/events.rs:264-298`；`crates/rabbitmq/src/options.rs:20-28,40-41`），publisher/consumer 共用 `ensure_topology`；迁移已入档（`event-pub-sub.md:170-172`） |
-| **B（轮 2）** | **Redis PEL `deleted_ids` 被丢弃 → PEL 无界增长** | ✅ **关闭** | `parse_claim_reply` 返回 `(messages, deleted_ids)` 并读 `parts[2]`（`crates/redis/src/events.rs:353-370`）；`run_once` 在投递前逐个 `XACK`（`:106-114`）；测试 `xautoclaim_reply_reports_deleted_ids_for_pel_cleanup`（`:472`） |
+| **A（轮 2）** | **永久失败无限重投（Rabbit / Redis）** | ✅ **关闭** | Redis：`max_deliveries` 默认 5（`crates/cache/redis/src/options.rs:146-148,167`）、`dead_letter_stream`（`:149-151,168`）、`XPENDING` 精确计数（`events.rs:287-302`，解析 `:372-383`）、超限 XADD 死信后 XACK（`:142-161`）、未超限留 pending（`:162-170`）；测试 `xpending_reply_exposes_the_delivery_count`（`:484`）。Rabbit：quorum + `x-delivery-limit`（默认 5）+ 可选 DLX（`crates/queue/rabbitmq/src/events.rs:264-298`；`crates/queue/rabbitmq/src/options.rs:20-28,40-41`），publisher/consumer 共用 `ensure_topology`；迁移已入档（`event-pub-sub.md:170-172`） |
+| **B（轮 2）** | **Redis PEL `deleted_ids` 被丢弃 → PEL 无界增长** | ✅ **关闭** | `parse_claim_reply` 返回 `(messages, deleted_ids)` 并读 `parts[2]`（`crates/cache/redis/src/events.rs:353-370`）；`run_once` 在投递前逐个 `XACK`（`:106-114`）；测试 `xautoclaim_reply_reports_deleted_ids_for_pel_cleanup`（`:472`） |
 
 **评审范围内已无 must-fix。** 剩余的 §6.9 R1–R5 与 §6.2/§6.4/§6.5 均为「生产增强项」，不阻塞当前 starter 定位。
 
@@ -316,16 +319,16 @@ N1（指标，让其余一切可见）→ N3 的 broker CI（否则 ack/DLX 行�
 | 1 | `EventDispatcher::dispatch` 未注册 → warn + `Ok(())` | `crates/core/src/mediator/event.rs:280-293`；测试 `:625-633` | ✅ 属实 |
 | 2 | `dispatch_event_handlers` 无 DI handler → warn + `Ok(())` | `:448-459`；测试 `:635-644` | ✅ 属实 |
 | 3 | 处理器失败仍 `Err` | `:461-488`；测试 `:646-671`、panic `:673-691` | ✅ 未被削弱 |
-| 4 | NATS `redact_url` + 单测 | `crates/nats/src/connection.rs:40-48,64-81`；测试 `:87-94` | ✅ 属实 |
+| 4 | NATS `redact_url` + 单测 | `crates/queue/nats/src/connection.rs:40-48,64-81`；测试 `:87-94` | ✅ 属实 |
 | 5 | `publish.yml` 含四 crate | `.github/workflows/publish.yml:49`；版本一致性循环覆盖 `$CRATES` 全表 | ✅ 属实；顺序（host 后、webx 前）依赖正确 |
 | 6 | `publish.sh` 含四 crate + `internal_deps` | **仓库根** `publish.sh`（非 `scripts/`）：`:187-190`、`:88`（`core host`）、`:23-26` 注释 | ✅ 属实（注意路径口径） |
 | 7 | wire 版本字节 + 拒绝未知版本 | `:100-116`、`:119-151`（`HEADER_LEN = 5`）、`:155`；测试 `:604-615`、`:617-623` | ✅ 属实；旧无版本帧按 `version 0` 明确拒绝 |
 | 8 | CHANGELOG 2.6.0 / 表述 / Kafka 限制 | `CHANGELOG.md:96`、`:138`、`:140`、`:114`、`:117` | ✅ 属实，与代码一致（`crates/core/src/mediator.rs:64,130`） |
 | 9 | `starters.md` 四适配器 + env-gated | `docs/design/starters.md:4`、`:45-48`、`:79`、`:80-81` | ✅ 属实 |
-| 10 | Redis `start_id` / `claim_pending` | `crates/redis/src/options.rs:128-131,143-145`（默认 `"$"` / `true`）；`events.rs:185`、`:104` | ✅ 属实 |
+| 10 | Redis `start_id` / `claim_pending` | `crates/cache/redis/src/options.rs:128-131,143-145`（默认 `"$"` / `true`）；`events.rs:185`、`:104` | ✅ 属实 |
 | 11 | Redis `max_deliveries` + `dead_letter_stream` + XPENDING | `options.rs:146-152,167-168`；`events.rs:133-175`（失败分支）、`:287-302`（XPENDING 精确 id 范围）、`:304-333`（死信 XADD 含 attempts/source_id/error）；测试 `:484` | ✅ 属实；XADD 在 XACK 之前，XADD 失败不会丢源条目 |
-| 12 | Rabbit quorum + `x-delivery-limit` + 可选 DLX | `crates/rabbitmq/src/events.rs:264-298`（`x-queue-type=quorum`、`x-delivery-limit`、可选 `x-dead-letter-exchange`/`-routing-key`）；`crates/rabbitmq/src/options.rs:20-28,40-41`（默认 5 / 空）；publisher 与 consumer 均调用 `ensure_topology` | ✅ 属实；重入队由队头变队尾，副作用是顺序改变（已在 §4 表格标注） |
-| 13 | Redis PEL 清理（`parts[2]` → XACK） | `crates/redis/src/events.rs:353-370`、`:106-114`；测试 `:472` | ✅ 属实；清理在投递之前执行，顺序正确 |
+| 12 | Rabbit quorum + `x-delivery-limit` + 可选 DLX | `crates/queue/rabbitmq/src/events.rs:264-298`（`x-queue-type=quorum`、`x-delivery-limit`、可选 `x-dead-letter-exchange`/`-routing-key`）；`crates/queue/rabbitmq/src/options.rs:20-28,40-41`（默认 5 / 空）；publisher 与 consumer 均调用 `ensure_topology` | ✅ 属实；重入队由队头变队尾，副作用是顺序改变（已在 §4 表格标注） |
+| 13 | Redis PEL 清理（`parts[2]` → XACK） | `crates/cache/redis/src/events.rs:353-370`、`:106-114`；测试 `:472` | ✅ 属实；清理在投递之前执行，顺序正确 |
 | 14 | 适配器 30 测试 + core 事件测试 + clippy 通过 | 本评审未执行；实测测试函数数 **33**（19 单元 + 9 免 broker 注册 + 5 env-gated 集成），与「全部通过」不矛盾（5 个集成用例无 broker 时空跑） | ⚠️ 未独立验证（只读约束）；数量与结构已核对 |
 
 **复核未发现**：core/host 新增编译期依赖、新增 feature、wire 版本校验遗漏、发布列表回归、`redact_url` 漏用、XADD/XACK 顺序错误、publisher/consumer 队列参数不一致。
@@ -343,10 +346,10 @@ N1（指标，让其余一切可见）→ N3 的 broker CI（否则 ack/DLX 行�
 
 | 项 | 处理 | 证据 |
 |---|---|---|
-| R1 `claim_pending=false` 耦合 | `RedisEventsOptions::claim_pending` 文档明确「同时停掉 pending 重试、`max_deliveries` 与 PEL/deleted-id 清理」 | `crates/redis/src/options.rs` |
-| R2 Rabbit `mandatory=false` 静默丢弃 | 发布改为 `mandatory=true`；`Ack(Some(returned))` 映射为可重试 503，不再把「未路由」当成功 | `crates/rabbitmq/src/events.rs` |
-| R3 队列参数不可单测 | 抽出 `queue_arguments(&RabbitMqOptions) -> FieldTable`，新增 quorum/`x-delivery-limit`/DLX 两个单测 | `crates/rabbitmq/src/events.rs` |
-| R4 DLQ 自环 | `dead_letter_stream == stream` 时告警并降级为丢弃，不向源流自环 | `crates/redis/src/events.rs` |
+| R1 `claim_pending=false` 耦合 | `RedisEventsOptions::claim_pending` 文档明确「同时停掉 pending 重试、`max_deliveries` 与 PEL/deleted-id 清理」 | `crates/cache/redis/src/options.rs` |
+| R2 Rabbit `mandatory=false` 静默丢弃 | 发布改为 `mandatory=true`；`Ack(Some(returned))` 映射为可重试 503，不再把「未路由」当成功 | `crates/queue/rabbitmq/src/events.rs` |
+| R3 队列参数不可单测 | 抽出 `queue_arguments(&RabbitMqOptions) -> FieldTable`，新增 quorum/`x-delivery-limit`/DLX 两个单测 | `crates/queue/rabbitmq/src/events.rs` |
+| R4 DLQ 自环 | `dead_letter_stream == stream` 时告警并降级为丢弃，不向源流自环 | `crates/cache/redis/src/events.rs` |
 | R5 死信重放入口 | 文档给出 Redis `XADD`/`XREADGROUP` 与 RabbitMQ shovel/DLX consumer 两种重放方式 | `docs/rust-webx/08-mediator-events/event-pub-sub.md` |
 
 **Lead 验证（本轮实际执行）**：`cargo test` 四适配器 + core 事件测试通过；`cargo clippy -p core -p redis -p nats -p rabbitmq -p kafka --all-targets --no-deps -- -D warnings` 通过；`cargo check --workspace --all-targets` 通过；`RUSTDOCFLAGS=-D warnings cargo doc ...` 通过。R2/R3/R4 的 broker 级行为仍需 nightly `services:` 验证（N3）。

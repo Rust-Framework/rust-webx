@@ -1,4 +1,4 @@
-﻿[English](README.md) | **简体中文**
+[English](README.md) | **简体中文**
 
 <div align="center">
 
@@ -124,19 +124,33 @@ rust-webx/
 ├── Cargo.toml                 # workspace 根 (v2.5.0)
 ├── crates/
 │   ├── core/                  # rust-webx-core  — trait 与配置
+│   ├── engine/                # rust-webx-engine — 执行引擎：worker 池、直接分发
 │   ├── host/                  # rust-webx-host  — Host 构建器、中间件管道
 │   │                          #   Trie 路由器、hyper 集成
 │   ├── macros/                # rust-webx-macros — 过程宏
 │   ├── spa/                   # rust-webx-spa   — 静态文件 / SPA 中间件
 │   ├── openapi/               # rust-webx-openapi — OpenAPI 规范生成 + UI
-│   ├── ai/                    # rust-webx-ai    — AI 网关领域包
-│   │                          #   （IR、provider、路由、配额、用量）
-│   ├── ai-ef/                 # rust-webx-ai-ef — rust-ef 持久化用量账本
 │   ├── client/                # rust-webx-client — 出站 HTTP：连接池、流式、SSE
-│   ├── gateway/               # rust-webx-ai-gateway — OpenAI 兼容 /v1 表面
-│   └── webx/                  # rust-webx       — 伞 crate（重新导出）
+│   ├── webx/                  # rust-webx       — 伞 crate（重新导出）
+│   ├── ai/                    # AI 领域组
+│   │   ├── core/              #   rust-webx-ai         — AI 网关领域包
+│   │   ├── ef/                #   rust-webx-ai-ef      — rust-ef 持久化用量账本
+│   │   └── gateway/           #   rust-webx-ai-gateway — OpenAI 兼容 /v1 表面
+│   ├── auth/                  # 认证领域组
+│   │   ├── ef/                #   rust-webx-auth-ef — 持久化会话/刷新令牌
+│   │   ├── oidc/              #   rust-webx-oidc
+│   │   ├── oauth2/            #   rust-webx-oauth2
+│   │   ├── mfa/               #   rust-webx-mfa
+│   │   └── webauthn/          #   rust-webx-webauthn
+│   ├── cache/                 # 第三方缓存适配器
+│   │   └── redis/             #   rust-webx-redis — IDistributedCache + 事件传输
+│   └── queue/                 # 第三方消息队列适配器
+│       ├── nats/              #   rust-webx-nats
+│       ├── rabbitmq/          #   rust-webx-rabbitmq
+│       └── kafka/             #   rust-webx-kafka
 ├── docbit/                    # 参考应用：作品集 + 博客 + RBAC + 文档
-└── dmbit/                     # 参考应用：设备与库存管理
+├── dmbit/                     # 参考应用：设备与库存管理
+└── imbit/                     # 参考应用：实时 IM（WS + 信令）
 ```
 
 > **包名 vs 导入名**：依赖写 `rust-webx`，代码写 `use webx::*;`。子 crate 同理：
@@ -144,8 +158,12 @@ rust-webx/
 > `rust-webx-macros` → `webx_macros`、`rust-webx-spa` → `webx_spa`、
 > `rust-webx-openapi` → `webx_openapi`、`rust-webx-ai` → `webx_ai`、
 > `rust-webx-client` → `webx_client`、`rust-webx-ai-ef` → `webx_ai_ef`、
-> `rust-webx-ai-gateway` → `webx_ai_gateway`。从 0.4 及更早版本升级见
-> [0.5 升级指南](docs/rust-webx/16-migration/upgrade-to-0.5.md)。
+> `rust-webx-ai-gateway` → `webx_ai_gateway`、`rust-webx-auth-ef` → `webx_auth_ef`、
+> `rust-webx-oidc` → `webx_oidc`、`rust-webx-oauth2` → `webx_oauth2`、
+> `rust-webx-mfa` → `webx_mfa`、`rust-webx-webauthn` → `webx_webauthn`、
+> `rust-webx-redis` → `webx_redis`、`rust-webx-nats` → `webx_nats`、
+> `rust-webx-rabbitmq` → `webx_rabbitmq`、`rust-webx-kafka` → `webx_kafka`。
+> 从 0.4 及更早版本升级见 [0.5 升级指南](docs/rust-webx/16-migration/upgrade-to-0.5.md)。
 
 ## 请求即端点：Hello World
 

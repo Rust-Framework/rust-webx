@@ -213,4 +213,4 @@ Host::builder()
 
 实现见 `rust-webx-host` 的 `auth` 模块；测试覆盖 Bearer、`x-api-key`、无效 key、JWT 共存与
 既有 JWT 匿名语义（`crates/webx/tests/api_key_auth_test.rs`）。EF store 与 TTL 缓存测试在
-`crates/ai-ef/src/api_key.rs`、`crates/ai/src/api_key_store.rs`。
+`crates/ai/ef/src/api_key.rs`、`crates/ai/core/src/api_key_store.rs`。

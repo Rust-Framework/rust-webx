@@ -1,4 +1,4 @@
-﻿**English** | [简体中文](README.zh-CN.md)
+**English** | [简体中文](README.zh-CN.md)
 
 <div align="center">
 
@@ -129,21 +129,34 @@ rust-webx/
 ├── Cargo.toml                 # workspace root (v2.5.0)
 ├── crates/
 │   ├── core/                  # rust-webx-core  — traits, configuration
-│   ├── engine/                # rust-webx-engine — 2.0 worker pool, direct dispatch
+│   ├── engine/                # rust-webx-engine — worker pool, direct dispatch
 │   │                          #   zero-copy context, pipeline, TLS/HTTP2
 │   ├── host/                  # rust-webx-host  — Host builder, middleware
 │   │                          #   routing/health/SPA adapters over the engine
 │   ├── macros/                # rust-webx-macros — procedural macros
 │   ├── spa/                   # rust-webx-spa   — static-file / SPA middleware
 │   ├── openapi/               # rust-webx-openapi — OpenAPI spec generation + UI
-│   ├── ai/                    # rust-webx-ai    — AI gateway domain kit
-│   │                          #   (IR, providers, routing, quota, usage)
-│   ├── ai-ef/                 # rust-webx-ai-ef — durable EF usage ledger
 │   ├── client/                # rust-webx-client — outbound HTTP: pool, streaming, SSE
-│   ├── gateway/               # rust-webx-ai-gateway — OpenAI-compatible /v1 surface
-│   └── webx/                  # rust-webx       — umbrella crate (re-exports)
+│   ├── webx/                  # rust-webx       — umbrella crate (re-exports)
+│   ├── ai/                    # AI domain group
+│   │   ├── core/              #   rust-webx-ai         — gateway domain kit
+│   │   ├── ef/                #   rust-webx-ai-ef      — durable EF usage ledger
+│   │   └── gateway/           #   rust-webx-ai-gateway — OpenAI-compatible /v1
+│   ├── auth/                  # authentication domain group
+│   │   ├── ef/                #   rust-webx-auth-ef — durable session/refresh stores
+│   │   ├── oidc/              #   rust-webx-oidc
+│   │   ├── oauth2/            #   rust-webx-oauth2
+│   │   ├── mfa/               #   rust-webx-mfa
+│   │   └── webauthn/          #   rust-webx-webauthn
+│   ├── cache/                 # third-party cache adapters
+│   │   └── redis/             #   rust-webx-redis — IDistributedCache + event transport
+│   └── queue/                 # third-party message-queue adapters
+│       ├── nats/              #   rust-webx-nats
+│       ├── rabbitmq/          #   rust-webx-rabbitmq
+│       └── kafka/             #   rust-webx-kafka
 ├── docbit/                    # reference app: portfolio + blog + RBAC + docs
-└── dmbit/                     # reference app: device & inventory management
+├── dmbit/                     # reference app: device & inventory management
+└── imbit/                     # reference app: real-time IM (WS + signaling)
 ```
 
 > **Package vs import name**: the dependency is `rust-webx`, the code is
@@ -152,7 +165,12 @@ rust-webx/
 > `rust-webx-macros` → `webx_macros`,
 > `rust-webx-spa` → `webx_spa`, `rust-webx-openapi` → `webx_openapi`,
 > `rust-webx-ai` → `webx_ai`, `rust-webx-client` → `webx_client`,
-> `rust-webx-ai-ef` → `webx_ai_ef`, `rust-webx-ai-gateway` → `webx_ai_gateway`.
+> `rust-webx-ai-ef` → `webx_ai_ef`, `rust-webx-ai-gateway` → `webx_ai_gateway`,
+> `rust-webx-auth-ef` → `webx_auth_ef`, `rust-webx-oidc` → `webx_oidc`,
+> `rust-webx-oauth2` → `webx_oauth2`, `rust-webx-mfa` → `webx_mfa`,
+> `rust-webx-webauthn` → `webx_webauthn`, `rust-webx-redis` → `webx_redis`,
+> `rust-webx-nats` → `webx_nats`, `rust-webx-rabbitmq` → `webx_rabbitmq`,
+> `rust-webx-kafka` → `webx_kafka`.
 > Upgrading from 0.4 or earlier: see the
 > [0.5 upgrade guide](docs/rust-webx/16-migration/upgrade-to-0.5.md).
 

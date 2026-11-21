@@ -1,4 +1,4 @@
-﻿[workspace]
+[workspace]
 resolver = "2"
 
 members = [
@@ -10,21 +10,24 @@ members = [
     "crates/spa",
     "crates/build",
     "crates/openapi",
-    "crates/ai",
-    "crates/ai-ef",
-    "crates/auth-ef",
-    "crates/oidc",
-    "crates/oauth2",
-    "crates/mfa",
-    "crates/webauthn",
+    # Bounded domain groups: new adapters go under the existing group instead
+    # of adding another top-level `crates/<vendor>` entry. Enforced by
+    # scripts/check-crate-layout.sh.
+    "crates/ai/core",
+    "crates/ai/ef",
+    "crates/ai/gateway",
+    "crates/auth/ef",
+    "crates/auth/oidc",
+    "crates/auth/oauth2",
+    "crates/auth/mfa",
+    "crates/auth/webauthn",
+    "crates/cache/redis",
+    "crates/queue/nats",
+    "crates/queue/rabbitmq",
+    "crates/queue/kafka",
     "crates/client",
     "crates/alloc-probe",
     "crates/contract-tests",
-    "crates/redis",
-    "crates/nats",
-    "crates/rabbitmq",
-    "crates/kafka",
-    "crates/gateway",
     "docbit/contracts",
     "docbit/domain",
     "docbit/handlers",
@@ -70,19 +73,19 @@ rust-webx = { version = "=2.5.0", path = "crates/webx" }
 rust-webx-spa = { version = "=2.5.0", path = "crates/spa" }
 rust-webx-build = { version = "=2.5.0", path = "crates/build" }
 rust-webx-openapi = { version = "=2.5.0", path = "crates/openapi" }
-rust-webx-ai = { version = "=2.5.0", path = "crates/ai" }
-rust-webx-ai-ef = { version = "=2.5.0", path = "crates/ai-ef" }
-rust-webx-auth-ef = { version = "=2.5.0", path = "crates/auth-ef" }
-rust-webx-oidc = { version = "=2.5.0", path = "crates/oidc" }
-rust-webx-oauth2 = { version = "=2.5.0", path = "crates/oauth2" }
-rust-webx-mfa = { version = "=2.5.0", path = "crates/mfa" }
-rust-webx-webauthn = { version = "=2.5.0", path = "crates/webauthn" }
+rust-webx-ai = { version = "=2.5.0", path = "crates/ai/core" }
+rust-webx-ai-ef = { version = "=2.5.0", path = "crates/ai/ef" }
+rust-webx-auth-ef = { version = "=2.5.0", path = "crates/auth/ef" }
+rust-webx-oidc = { version = "=2.5.0", path = "crates/auth/oidc" }
+rust-webx-oauth2 = { version = "=2.5.0", path = "crates/auth/oauth2" }
+rust-webx-mfa = { version = "=2.5.0", path = "crates/auth/mfa" }
+rust-webx-webauthn = { version = "=2.5.0", path = "crates/auth/webauthn" }
 rust-webx-client = { version = "=2.5.0", path = "crates/client" }
-rust-webx-redis = { version = "=2.5.0", path = "crates/redis" }
-rust-webx-nats = { version = "=2.5.0", path = "crates/nats" }
-rust-webx-rabbitmq = { version = "=2.5.0", path = "crates/rabbitmq" }
-rust-webx-kafka = { version = "=2.5.0", path = "crates/kafka" }
-rust-webx-ai-gateway = { version = "=2.5.0", path = "crates/gateway" }
+rust-webx-redis = { version = "=2.5.0", path = "crates/cache/redis" }
+rust-webx-nats = { version = "=2.5.0", path = "crates/queue/nats" }
+rust-webx-rabbitmq = { version = "=2.5.0", path = "crates/queue/rabbitmq" }
+rust-webx-kafka = { version = "=2.5.0", path = "crates/queue/kafka" }
+rust-webx-ai-gateway = { version = "=2.5.0", path = "crates/ai/gateway" }
 
 # Docbit sub-crates
 docbit-contracts = { version = "0.1.0", path = "docbit/contracts" }

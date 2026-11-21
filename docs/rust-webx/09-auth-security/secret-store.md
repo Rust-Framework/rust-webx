@@ -88,4 +88,4 @@ let provider = OpenAiProvider::new("openai", client, key); // key: SecretValue
 
 `crates/core/src/secrets.rs` 覆盖：env 读取/空值、`Debug` 脱敏、文件读取与换行裁剪、空文件、
 路径穿越/分隔符拒绝、Unix `0600` 校验、链式 `NotFound`/`Unavailable` 语义；
-`crates/ai/src/openai.rs` 覆盖 `from_secret_store` 成功与 typed 失败。
+`crates/ai/core/src/openai.rs` 覆盖 `from_secret_store` 成功与 typed 失败。

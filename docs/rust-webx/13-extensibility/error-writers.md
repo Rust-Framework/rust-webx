@@ -66,4 +66,4 @@ Host::builder()
 `rate_limit_error`/`server_error` 等，并保证 5xx 不回显内部消息。
 
 测试覆盖：自定义 writer 接管绑定错误与 404、其他路径仍 `problem+json`
-（`crates/webx/tests/error_writer_test.rs`）；信封形状与状态映射在 `crates/ai/src/error.rs`。
+（`crates/webx/tests/error_writer_test.rs`）；信封形状与状态映射在 `crates/ai/core/src/error.rs`。

@@ -90,4 +90,4 @@ match store.reserve(request).await {
 - 不要用 `settle` 之后的值去"修正"已经发给客户端的额度；额度以 `reserve` 的原子结果为准。
 
 单测覆盖 RPM/TPM/TPD/并发/预算、结算多退少补、释放退款、幂等、租约过期与按 key 覆盖
-（`crates/ai/src/quota.rs`）。
+（`crates/ai/core/src/quota.rs`）。

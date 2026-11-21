@@ -70,4 +70,4 @@ SSE 解码器另有“任意字节切分点 + 100 组伪随机多 chunk 切分�
 - 默认保存会脱敏凭据头，但**不**自动识别 body 内的密钥/prompt；
 - 官方 SDK conformance、SSE fuzz/压测仍在后续版本。
 
-示例测试见 `crates/ai/tests/openai_provider_test.rs`（complete/stream 真实 HTTP）。
+示例测试见 `crates/ai/core/tests/openai_provider_test.rs`（complete/stream 真实 HTTP）。

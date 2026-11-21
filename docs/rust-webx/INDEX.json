@@ -15,7 +15,7 @@
     "demoUrl": "",
     "featured": true,
     "sortOrder": 1,
-    "version": "2.1.0",
+    "version": "2.5.0",
     "language": "zh-CN",
     "author": "Start",
     "logo": "logo.svg",
@@ -241,6 +241,13 @@
               "title": "流式响应（SSE）",
               "summary": "SseResult、逐帧推送、断连回调与长流停机",
               "readingTime": 12,
+              "difficulty": "intermediate"
+            },
+            {
+              "id": "websocket",
+              "title": "WebSocket 会话",
+              "summary": "use_websocket、101 升级、IConnection 消息抽象与连接级生命周期",
+              "readingTime": 16,
               "difficulty": "intermediate"
             },
             {
@@ -786,6 +793,13 @@
           "title": "迁移指南",
           "subtitle": "版本升级、ASP.NET Core 与 Axum / Actix 迁移",
           "sections": [
+            {
+              "id": "upgrade-to-2.4",
+              "title": "升级到 2.4（2.x 加性演进）",
+              "summary": "2.2/2.3/2.4 三条功能线总览、可选采用清单、稳定面与弃用承诺",
+              "readingTime": 18,
+              "difficulty": "intermediate"
+            },
             {
               "id": "upgrade-to-1.1",
               "title": "升级到 1.1（破坏性变更）",

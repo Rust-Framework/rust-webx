@@ -167,6 +167,16 @@ All notable changes to **rust-webx** are documented in this file.
 
 ### Changed
 
+- **Crate ownership is a closed taxonomy.** `crates/` now keeps the fixed
+  framework set at `crates/<name>` and groups opt-in capabilities by domain:
+  `crates/ai/{core,ef,gateway}`, `crates/auth/{ef,oidc,oauth2,mfa,webauthn}`,
+  `crates/cache/redis` and `crates/queue/{nats,rabbitmq,kafka}`. Package names
+  and import paths (`rust-webx-*` / `webx_*`) are unchanged; only workspace
+  layout moved, so no consumer code changes. Adding a vendor adapter no longer
+  adds a top-level `crates/<vendor>` entry. The direction is enforced in CI by
+  `scripts/check-crate-layout.py` (wired through `scripts/check-crate-layout.sh`):
+  framework crates and the umbrella may not depend on a domain group, and the
+  umbrella does not link adapters. See `docs/design/starters.md` §6.
 - **Events are asynchronous and transport-agnostic.** `IMediator::publish` is
   now fire-and-forget: it encodes the event into an `EventMessage` and hands it
   to the registered `IEventPublisher`. It no longer resolves or awaits

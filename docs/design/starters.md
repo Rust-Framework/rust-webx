@@ -26,7 +26,7 @@ consumer 路由；适配器级契约由本 crate 的 **`EventTransportContract`*
 
 ```toml
 [dev-dependencies]
-rust-webx-contract-tests = { path = "../contract-tests" }
+rust-webx-contract-tests = { path = "../../contract-tests" }
 ```
 
 ```rust
@@ -43,10 +43,10 @@ async fn s3_store_satisfies_the_contract() {
 | Starter | 端口/依赖 | 配置（starter 自持，`AppOptions` 之外） | 契约测试 | 状态 |
 |---|---|---|---|---|
 | **postgres** | rust-ef `DbContext` + 迁移（`bootstrap`/`migrate`） | `Database:ConnectionString`、`Database:Pool` | 迁移/bootstrap 烟测 + 就绪探针 | rust-ef 2.5 已提供；参考应用 docbit 在用；独立 starter crate 排入 2.5 |
-| **redis** | `IDistributedCache` + 事件传输 `IEventPublisher`（+ consumer 后台服务） | `RedisOptions`（url/prefix/TTL/stream） | `event_bus_test` 语义 + env-gated `tests/integration.rs` | 已落地 `crates/redis`（`add_redis`） |
-| **nats** | 事件传输 `IEventPublisher` | `NatsOptions`（url/subject/queue group） | 同上 | 已落地 `crates/nats`（`add_nats`） |
-| **rabbitmq** | 事件传输 `IEventPublisher`（durable topic/queue） | `RabbitMqOptions`（url/exchange/routing key/queue） | env-gated `tests/integration.rs` | 已落地 `crates/rabbitmq`（`add_rabbitmq`） |
-| **kafka** | 事件传输 `IEventPublisher`（单分区 follower） | `KafkaOptions`（brokers/topic/partition/start offset） | env-gated `tests/integration.rs` | 已落地 `crates/kafka`（`add_kafka`）；无 consumer-group offset 提交 |
+| **redis** | `IDistributedCache` + 事件传输 `IEventPublisher`（+ consumer 后台服务） | `RedisOptions`（url/prefix/TTL/stream） | `event_bus_test` 语义 + env-gated `tests/integration.rs` | 已落地 `crates/cache/redis`（`add_redis`） |
+| **nats** | 事件传输 `IEventPublisher` | `NatsOptions`（url/subject/queue group） | 同上 | 已落地 `crates/queue/nats`（`add_nats`） |
+| **rabbitmq** | 事件传输 `IEventPublisher`（durable topic/queue） | `RabbitMqOptions`（url/exchange/routing key/queue） | env-gated `tests/integration.rs` | 已落地 `crates/queue/rabbitmq`（`add_rabbitmq`） |
+| **kafka** | 事件传输 `IEventPublisher`（单分区 follower） | `KafkaOptions`（brokers/topic/partition/start offset） | env-gated `tests/integration.rs` | 已落地 `crates/queue/kafka`（`add_kafka`）；无 consumer-group offset 提交 |
 | **s3** | `IObjectStore`（可选 `presign_put`） | `Storage:Endpoint/Bucket/Region/AccessKey/SecretKey` | `object_store_contract` | 契约套件已就绪；真实适配器（2.5，MinIO nightly） |
 | **otel** | `IMeter` + `/metrics` 镜像 | `Otel:Endpoint`、`Otel:ServiceName`、采样 | 指标名/标签契约 + `MemoryMeter` 断言（含 `RealtimeMetrics::export_to`（scrape 时导出增量）） | 契约方向已定；OTLP exporter（2.5，可选 feature） |
 
@@ -135,3 +135,26 @@ docker compose -f docker-compose.brokers.yml down -v
   真实服务集成已接入 nightly（见上）；
 - 后续：nightly `broker-integration` 首次真实运行确认服务健康参数；S3/OTel starter 的示例与契约；
   postgres starter 提供 `Database` 配置与迁移辅助。
+
+## 6. Crate 归属：有界分类法（2.6）
+
+`crates/` 不再按厂商平铺，而是**固定框架集 + 四个领域组**；新增适配器只能进已有组，
+crate 归属数量不随第三方产品数量线性增长：
+
+| 位置 | 成员 | 说明 |
+|---|---|---|
+| `crates/<framework>` | core / engine / host / macros / spa / openapi / client / webx / build / alloc-probe / contract-tests | 框架本体，依赖方向只向内 |
+| `crates/ai/` | core / ef / gateway | AI 网关领域：端口与 IR、EF 账本、OpenAI 兼容表面 |
+| `crates/auth/` | ef / oidc / oauth2 / mfa / webauthn | 认证协议适配器；HTTP 认证 scheme 管线仍在 `host`（框架内聚） |
+| `crates/cache/` | redis | 第三方缓存；Redis 同时提供事件传输，但只保留一个驱动依赖 |
+| `crates/queue/` | nats / rabbitmq / kafka | 第三方消息队列 |
+
+依赖方向（P10「小核大生态」）：
+
+- 框架 crate 与 umbrella **不得**依赖任何领域组 crate（适配器必须 opt-in）；
+- 领域组 crate 只依赖 `rust-webx-core`/`rust-webx-client`/`rust-webx-host` 的端口；
+  只有 `ai/gateway` 这类应用表面允许依赖 umbrella；
+- 组内 crate 通过相对 `path` 复用 `crates/contract-tests`，不复制契约套件。
+
+门禁：`scripts/check-crate-layout.py`（CI Lint 调用 `scripts/check-crate-layout.sh`）校验
+成员分类、孤儿 crate、框架→领域反向依赖与 umbrella 是否链接适配器；放错位置即 CI 失败。

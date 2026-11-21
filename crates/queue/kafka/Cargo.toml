@@ -1,19 +1,19 @@
 [package]
-name = "rust-webx-redis"
+name = "rust-webx-kafka"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Redis distributed cache and event transport for rust-webx (ASP.NET Core style add_redis)"
+description = "Kafka event transport for rust-webx (ASP.NET Core style add_kafka)"
 repository.workspace = true
 homepage.workspace = true
 documentation.workspace = true
-readme = "../../README.md"
-keywords = ["redis", "cache", "events", "webx", "aspnet-core"]
-categories = ["web-programming", "caching", "asynchronous"]
+readme = "../../../README.md"
+keywords = ["kafka", "events", "messaging", "webx", "aspnet-core"]
+categories = ["web-programming", "asynchronous"]
 
 [lib]
-name = "webx_redis"
+name = "webx_kafka"
 
 [dependencies]
 rust-webx-core.workspace = true
@@ -21,15 +21,15 @@ rust-webx-host.workspace = true
 rust-dix.workspace = true
 async-trait.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }
+futures-util.workspace = true
 serde.workspace = true
 tracing.workspace = true
-redis.workspace = true
+rskafka.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
-rust-webx-contract-tests = { path = "../contract-tests" }
+rust-webx-contract-tests = { path = "../../contract-tests" }
 inventory.workspace = true
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [lints]
 workspace = true

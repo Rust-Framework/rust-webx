@@ -152,7 +152,7 @@ token 使用 JSON POST，响应字段在 `/data/*`；userinfo 以 JSON body 发�
 
 ## 7. 直接挂到 Host
 
-完整可运行示例：[crates/oauth2/examples/github_host.rs](../../../crates/oauth2/examples/github_host.rs)。
+完整可运行示例：[crates/auth/oauth2/examples/github_host.rs](../../../crates/auth/oauth2/examples/github_host.rs)。
 
 ```powershell
 $env:GITHUB_CLIENT_ID = "..."

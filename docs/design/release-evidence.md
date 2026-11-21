@@ -43,7 +43,7 @@ cargo test -p imbit --tests                     # IM 参考应用端到端
 
 ## 0.2 当前工作树补充（2026-11-21 晚）
 
-上表复核完成后，并行工作线合入了 2.5 starter 适配器初版（`crates/redis`、`crates/nats`，
+上表复核完成后，并行工作线合入了 2.5 starter 适配器初版（`crates/cache/redis`、`crates/queue/nats`，
 `add_redis`/`add_nats` 形态）；随后复跑 `cargo check --workspace` 与
 `cargo fmt --all --check` 均通过。本文件记录的 2.2/2.3/2.4 门禁结果对应三条功能线交付
 时的树状态；2.5 适配器门禁由其自身的 2.5-7 台账条目跟踪。

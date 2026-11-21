@@ -146,5 +146,5 @@ let windows = rollup_events(events, 60); // 按 60s 窗口、tenant+model 分组
 - 不要把 prompt/response 文本写进事件；只保留计量与标识字段。
 
 单测覆盖事件 serde、token 桶、saturating、estimator、sink 幂等/盖章/空 id、rollup 分组与窗口
-（`crates/ai/src/usage.rs`）；EF 账本/outbox/rollup 与 workers（`crates/ai-ef/src/{lib,worker}.rs`，
+（`crates/ai/core/src/usage.rs`）；EF 账本/outbox/rollup 与 workers（`crates/ai/ef/src/{lib,worker}.rs`，
 8 个 SQLite 测试）。

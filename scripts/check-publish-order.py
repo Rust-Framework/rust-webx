@@ -32,7 +32,7 @@ def internal_deps(name, manifests):
     """Workspace dependencies of `name` (path or exact-pinned workspace deps)."""
     data = manifests[name]
     deps = set()
-    for section in ("dependencies", "build-dependencies"):
+    for section in ("dependencies", "build-dependencies", "dev-dependencies"):
         for dep, spec in data.get(section, {}).items():
             if dep in manifests and dep != name:
                 deps.add(dep)

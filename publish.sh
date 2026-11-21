@@ -24,13 +24,13 @@
 #  11. rust-webx-auth-ef  (durable auth stores; depends on core)
 #  12. rust-webx-mfa      (TOTP/recovery codes; depends on core)
 #  13. rust-webx-webauthn (passkey verification; depends on core)
-#  14. rust-webx-oauth2   (social login; depends on core/client)
-#  15. rust-webx-oidc     (OIDC client; depends on core/host/client)
-#  16. rust-webx-redis    (event transport + distributed cache; depends on core/host)
-#  17. rust-webx-nats     (event transport; depends on core/host)
-#  18. rust-webx-rabbitmq (event transport; depends on core/host)
-#  19. rust-webx-kafka    (event transport; depends on core/host)
-#  20. rust-webx          (umbrella crate; depends on all framework crates above)
+#  14. rust-webx          (umbrella crate; depends on all framework crates above)
+#  15. rust-webx-oauth2   (social login; depends on core/client; dev-dep on webx)
+#  16. rust-webx-oidc     (OIDC client; depends on core/host/client)
+#  17. rust-webx-redis    (event transport + distributed cache; depends on core/host)
+#  18. rust-webx-nats     (event transport; depends on core/host)
+#  19. rust-webx-rabbitmq (event transport; depends on core/host)
+#  20. rust-webx-kafka    (event transport; depends on core/host)
 #  21. rust-webx-ai-gateway (OpenAI-compatible surface; depends on webx + webx-ai)
 # ─────────────────────────────────────────────────────────────────
 
@@ -93,7 +93,7 @@ internal_deps() {
         rust-webx-spa|rust-webx-openapi) echo "rust-webx-core" ;;
         rust-webx-host) echo "rust-webx-core rust-webx-engine rust-webx-client rust-webx-macros rust-webx-spa rust-webx-openapi" ;;
         rust-webx-auth-ef|rust-webx-mfa|rust-webx-webauthn) echo "rust-webx-core" ;;
-        rust-webx-oauth2) echo "rust-webx-core rust-webx-client" ;;
+        rust-webx-oauth2) echo "rust-webx-core rust-webx-client rust-webx" ;;
         rust-webx-oidc) echo "rust-webx-core rust-webx-host rust-webx-client" ;;
         rust-webx-redis|rust-webx-nats|rust-webx-rabbitmq|rust-webx-kafka) echo "rust-webx-core rust-webx-host" ;;
         rust-webx) echo "rust-webx-core rust-webx-engine rust-webx-host rust-webx-client rust-webx-macros rust-webx-spa rust-webx-openapi" ;;
@@ -118,6 +118,13 @@ publish_crate() {
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "  Publishing: $crate"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    # Resumable: a re-run after a partial failure must not fail on crates that
+    # are already visible in the index (same contract as the tag workflow).
+    if index_has "$crate" "$(workspace_version)"; then
+        echo "  … $crate $(workspace_version) is already published — skipping"
+        return 0
+    fi
 
     # Packaging sanity: file list only, so this never resolves against
     # crates.io and therefore works on a fresh version bump.
@@ -198,13 +205,13 @@ publish_crate "rust-webx-host"
 publish_crate "rust-webx-auth-ef"
 publish_crate "rust-webx-mfa"
 publish_crate "rust-webx-webauthn"
+publish_crate "rust-webx"
 publish_crate "rust-webx-oauth2"
 publish_crate "rust-webx-oidc"
 publish_crate "rust-webx-redis"
 publish_crate "rust-webx-nats"
 publish_crate "rust-webx-rabbitmq"
 publish_crate "rust-webx-kafka"
-publish_crate "rust-webx"
 publish_crate "rust-webx-ai-gateway"
 
 echo ""

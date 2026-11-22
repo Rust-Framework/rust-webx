@@ -32,10 +32,12 @@ pub use webx_core::cache::{
     options::DistributedCacheEntryOptions,
     trait_def::{CacheError, IDistributedCache},
 };
+pub use webx_core::client_info::ClientInfo;
 pub use webx_core::config::{
     bind_config, bind_root, load_appsettings, try_bind_config, try_bind_root, try_load_appsettings,
-    AppOptions, AppSection, ConfigError, ConfigSources, CorsSection, CultureSection, IAppOptions,
-    InvalidTokenBehavior, JwtAlgorithm, JwtSection, MetricsSection, RateLimitSection, TlsSection,
+    AppOptions, AppSection, ClientInfoSection, ConfigError, ConfigSources, CorsSection,
+    CultureSection, IAppOptions, IdempotencySection, InvalidTokenBehavior, JwtAlgorithm,
+    JwtSection, MetricsSection, RateLimitSection, TlsSection,
 };
 pub use webx_core::dispatch_runtime::DispatchRuntime;
 pub use webx_core::error::{ActionResult, Error, IErrorResponseWriter, Result};
@@ -55,10 +57,16 @@ pub use webx_core::http::{
     FileBody, FileSource, HttpStatus, IClaimsExt, IHttpContext, IHttpRequest, IHttpResponse,
     RequestBodyStream, ResponseBody, SeekableReader, STREAM_BUF_SIZE,
 };
+pub use webx_core::idempotency::{
+    IIdempotencyStore, IdempotencyBegin, IdempotentResponse, IDEMPOTENCY_KEY_HEADER,
+    IDEMPOTENCY_REPLAYED_HEADER,
+};
 pub use webx_core::json;
+pub use webx_core::keyset::{Cursor, CursorError, CursorPage, KeysetRequest, MAX_CURSOR_BYTES};
 pub use webx_core::localization::{
     IStringLocalizer, LocalizationOptions, LocalizedString, StringLocalizer, TextRef,
 };
+pub use webx_core::locking::{AdvisoryLease, IAdvisoryLock};
 pub use webx_core::media::{
     IMediaPlaneAdapter, InMemoryMediaPlaneAdapter, MediaSession, MediaStats, MediaTrackInfo,
     MediaTrackKind,
@@ -71,11 +79,14 @@ pub use webx_core::mediator::{
     IEventPublisher, InMemoryEventPublisher, InMemoryEventWorker, DEFAULT_EVENT_QUEUE_CAPACITY,
 };
 pub use webx_core::mediator::{IEventRequest, IMediator, IRequest};
-pub use webx_core::metrics::{Counter, Gauge, Histogram, IMeter, MemoryMeter, NoopMeter};
+pub use webx_core::metrics::{
+    Counter, Gauge, Histogram, IMeter, MemoryMeter, MetricKind, MetricSample, NoopMeter,
+};
 pub use webx_core::middleware::{
     BoxedNextFuture, IMiddleware, MiddlewareSlot, NextStage, TimeoutMiddleware,
 };
 pub use webx_core::mode::AppMode;
+pub use webx_core::notifications::{EmailMessage, IEmailSender, ISmsSender, SmsMessage};
 pub use webx_core::operation::OperationResult;
 pub use webx_core::options_monitor::{IOptionsMonitor, OptionsMonitor};
 pub use webx_core::pagination::{PagedRequest, PagedResult};
@@ -84,13 +95,18 @@ pub use webx_core::paths::{
 };
 pub use webx_core::pipeline::{IPipelineBehavior, Next};
 pub use webx_core::problem::{FieldError, ProblemDetails};
-pub use webx_core::rate_limit::{IRateLimiter, RateLimitDecision};
+pub use webx_core::rate_limit::{
+    IRateLimiter, RateLimitDecision, RateLimitPolicy, RateLimitRoute, RateLimitRule,
+    RateLimitSubject,
+};
 pub use webx_core::realtime::{
     BackpressurePolicy, ConnectionContext, ConnectionId, ConnectionMeta, ConnectionScope,
-    ConnectionStats, IConnection, IConnectionRegistry, IUpgradeSession, IWebSocketHandler,
-    InMemoryConnectionRegistry, Presence, PresenceStatus, RealtimeFanoutEvent, RealtimeMessage,
-    RealtimeMetrics, RealtimeMetricsSnapshot, SignalingKind, SignalingMessage, Transport,
-    TransportKind, TurnCredentials, TurnRestConfig, UpgradedTransport, WebSocketLimits,
+    ConnectionStats, IConnection, IConnectionRegistry, IPresenceObserver, IRealtimeEventStore,
+    IUpgradeSession, IWebSocketHandler, InMemoryConnectionRegistry, InMemoryRealtimeEventStore,
+    Presence, PresenceDirection, PresenceStatus, PresenceTransition, RealtimeEvent,
+    RealtimeEventStoreLimits, RealtimeFanoutEvent, RealtimeMessage, RealtimeMetrics,
+    RealtimeMetricsSnapshot, ResumeFrame, ResumeRequest, SignalingKind, SignalingMessage,
+    Transport, TransportKind, TurnCredentials, TurnRestConfig, UpgradedTransport, WebSocketLimits,
     DEFAULT_TURN_TTL_SECONDS, MAX_TURN_TTL_SECONDS,
 };
 pub use webx_core::request_context::RequestContext;
@@ -103,8 +119,8 @@ pub use webx_core::route::diagnostics::{
 };
 pub use webx_core::routing::{HttpMethod, IEndpoint, IRouter, RouteMeta};
 pub use webx_core::secrets::{
-    ChainSecretStore, EnvSecretStore, FileSecretStore, ISecretStore, SecretError, SecretRef,
-    SecretValue,
+    ChainSecretStore, EnvSecretStore, FileSecretStore, ISecretProtector, ISecretStore, SecretError,
+    SecretRef, SecretValue, PROTECTED_SECRET_PREFIX,
 };
 pub use webx_core::security::{
     constant_time_eq, IPasswordHasher, IRefreshTokenStore, ISessionRepository, ISessionStore,
@@ -138,6 +154,7 @@ pub use webx_client::{
     BodySource, HttpClient, HttpClientError, HttpClientOptions, HttpClientRegistry, IHttpClient,
     IHttpClientFactory, OutboundRequest, OutboundResponse, ResponseStream, SseStream,
 };
+pub use webx_host::advisory_lock::InMemoryAdvisoryLock;
 pub use webx_host::auth::{
     ApiKeyClaims, ApiKeyHeader, ApiKeyScheme, AuthMetrics, AuthOutcome, AuthenticationMiddleware,
     IApiKeyValidator, JwtScheme, AUTH_DURATION_METRIC, AUTH_REQUESTS_METRIC,
@@ -176,6 +193,7 @@ pub use webx_host::health::{
     HealthCheckEntry, HealthCheckFn, HealthCheckRegistry, HealthStatus, IHealthCheck,
     DEFAULT_HEALTH_CHECK_TIMEOUT,
 };
+pub use webx_host::idempotency::{IdempotencyMiddleware, InMemoryIdempotencyStore};
 pub use webx_host::introspection::{
     IntrospectionBasicAuth, IntrospectionResponse, TokenIntrospector, TokenRevoker,
 };
@@ -184,6 +202,7 @@ pub use webx_host::login::{
     LoginThrottleDecision, MemoryLoginThrottle, PasswordPolicy, ThrottlePolicy, MAX_PASSWORD_BYTES,
 };
 pub use webx_host::memory_cache::MemoryCache;
+pub use webx_host::notifications::{InMemoryEmailSender, InMemorySmsSender};
 #[cfg(feature = "password-argon2")]
 pub use webx_host::password_argon2::{Argon2Params, Argon2PasswordHasher};
 pub use webx_host::pipeline::{HandlerFn, MiddlewarePipeline};
@@ -192,6 +211,7 @@ pub use webx_host::refresh::{IssuedRefreshToken, RefreshTokenService};
 pub use webx_host::request_id::RequestIdMiddleware;
 pub use webx_host::request_tracing::RequestTracing;
 pub use webx_host::router::Router;
+pub use webx_host::secret_protector::{protector_from_base64_keys, AesGcmSecretProtector};
 pub use webx_host::security_headers::SecurityHeadersMiddleware;
 pub use webx_host::server::{Host, HostAppBuilder, HostBuilder, Server, ServerHandle};
 pub use webx_host::session_cache::CachedSessionStore;

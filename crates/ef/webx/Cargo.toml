@@ -1,0 +1,24 @@
+[package]
+name = "rust-webx-ef"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+documentation.workspace = true
+description = "rust-webx boundary for rust-ef: sanitized EFError -> webx::Error mapping"
+readme = "README.md"
+keywords = ["web", "orm", "error-handling", "rust-ef"]
+categories = ["web-programming", "database"]
+
+[lib]
+name = "webx_ef"
+
+[dependencies]
+rust-webx-core.workspace = true
+rust-ef.workspace = true
+
+[lints]
+workspace = true

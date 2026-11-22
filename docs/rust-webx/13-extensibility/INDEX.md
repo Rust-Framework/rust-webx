@@ -11,6 +11,8 @@
 | [出站 HTTP（rust-webx-client）](outbound-http.md) | 命名客户端、连接池、流式响应与 SSE 解码 |
 | [错误响应写入器](error-writers.md) | 按路由接管错误信封（problem+json / OpenAI） |
 | [Mock 上游](mock-upstream.md) | 脚本化 HTTP/SSE 上游与请求录制 |
+| [支付](payments.md) | 统一支付端口、运行时配置/多账户、回调入口与 inbox |
+| [事务性 outbox](outbox.md) | 同事务写事件行、租约派发、重试与死信 |
 
 ## 下一步
 

@@ -29,6 +29,7 @@ pub struct UpdateUserRequest {
 | `#[fromheader("X-Name")]` | 请求头 | 省略参数时按字段名转 `-` 小写 |
 | `#[fromclaim("key")]` | 认证声明 | `sub`/`roles`/`permissions` 走专用槽位 |
 | `#[fromclaim]` + `IdentityUser` | 认证主体 | 统一身份对象，见下文「用户身份」 |
+| `#[fromclient]` + `ClientInfo` | 可信客户端信息 | 对端地址 + 受信代理链；见下文「客户端信息」 |
 | 无标记 | 按方法推断 | 见下一节 |
 
 `FormFile`、`Option<FormFile>`、`Vec<FormFile>` 来自表单；未标注时按字段名取分段，标注 `#[fromfile]` 可改名。
@@ -110,6 +111,41 @@ Handler 里直接用 `req.user.id`、`req.user.tenant_id`、`req.user.is_in_role
 或 `req.require_user()?`。匿名可访问的端点用 `#[fromclaim(optional)] viewer: Option<IdentityUser>`（只写 `#[fromclaim]` 会编译失败）。
 完整场景与收益对照见[用户身份与多租户](user-identity.md)。
 
+## 客户端信息
+
+需要在 Handler 内做登录 IP 维度限流、审计或风控时，把 `ClientInfo` 声明成请求字段：
+
+```rust
+#[derive(WebxRequestMeta)]
+pub struct LoginRequest {
+    #[fromclient]
+    pub client: ClientInfo,   // 永远可用，无 Option
+    pub username: String,
+    pub password: String,
+}
+```
+
+| 字段 | 含义 |
+|---|---|
+| `peer_addr` | 监听器看到的 TCP 对端（生产通常是反向代理） |
+| `client_ip` | 业务应使用的客户端地址：对端，或受信代理后的真实客户端 |
+| `forwarded_for` | 解析后的转发链（左→右）；**未启用信任时为空**，绝不把客户端可伪造的头当可信值 |
+
+转发头只在对端属于配置的可信代理时才采信（`ClientInfo` 配置节）：
+
+```json
+{
+  "ClientInfo": {
+    "TrustForwardedHeaders": true,
+    "TrustedProxies": ["10.0.0.0/8"]
+  }
+}
+```
+
+`client_ip` 取 `X-Forwarded-For` 中**最右侧的非可信代理** hop（客户端在左侧塞入伪造地址不会生效）；
+没有可信转发时它就是对端地址，`forwarded_for` 为空。默认关闭：直连客户端可以随意伪造
+`X-Forwarded-For`，只有明确知道代理网段时才开启。
+
 ## 优先级
 
 - **写方法**：Body → Form → Query；body/表单里有该字段就优先使用，缺失才回退到 query。
@@ -144,7 +180,7 @@ Handler 里直接用 `req.user.id`、`req.user.tenant_id`、`req.user.is_in_role
 ## OpenAPI
 
 `param_meta()` 给出每个字段的来源、类型与 JSON 键，路由宏再补上模板里的路径参数（合并时以结构体的类型为准）。
-`#[fromclaim]` 属于认证信息，不写进文档；未标记字段按路由方法解析成 body 或 query。body 字段
+`#[fromclaim]` 属于认证信息、`#[fromclient]` 属于连接信息，都不写进文档；未标记字段按路由方法解析成 body 或 query。body 字段
 **逐个**进入请求体 schema，不再只输出一个 `{"type": "object"}` 占位：
 
 - **写方法（POST/PUT/PATCH）**：`requestBody.content["application/json"].schema` 的

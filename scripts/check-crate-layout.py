@@ -9,6 +9,9 @@ taxonomy:
     crates/auth/<leaf>      authentication (ef/oidc/oauth2/mfa/webauthn)
     crates/cache/<leaf>     third-party cache adapters (redis)
     crates/queue/<leaf>     third-party message-queue adapters (nats/rabbitmq/kafka)
+    crates/payment/<leaf>   payment domain (core/stripe/alipay/wechatpay/paypal/adyen/square/ef)
+    crates/ef/<leaf>        ORM boundary adapters (webx)
+    crates/outbox/<leaf>    transactional-outbox starters (ef)
 
 Rules enforced here (the dependency direction is the constitution's P10
 "small core, large ecosystem"):
@@ -41,7 +44,7 @@ FRAMEWORK = {
     "alloc-probe",
     "contract-tests",
 }
-GROUPS = {"ai", "auth", "cache", "queue"}
+GROUPS = {"ai", "auth", "cache", "queue", "payment", "ef", "outbox"}
 
 
 def load(path: Path):
@@ -80,7 +83,7 @@ def main() -> int:
                 if leaf not in FRAMEWORK:
                     errors.append(
                         f"{member}: crates/<name> is reserved for the framework "
-                        "set; put the crate in crates/{ai,auth,cache,queue}/<leaf>"
+                        "set; put the crate in crates/{ai,auth,cache,queue,payment}/<leaf>"
                     )
             elif len(parts) == 3:
                 group, leaf = parts[1], parts[2]
@@ -152,7 +155,7 @@ def main() -> int:
         if leaked:
             errors.append(
                 f"{name} ({member}) depends on domain crate(s) {leaked}; "
-                "framework core must stay free of ai/auth/cache/queue"
+                "framework core must stay free of ai/auth/cache/queue/payment"
             )
 
     # The umbrella is the one crate users opt into; it must not pull adapters.

@@ -17,6 +17,9 @@
 //! ```
 
 use crate::problem_response::write_problem;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine as _;
+use sha2::{Digest, Sha256};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
@@ -29,7 +32,10 @@ use webx_core::config::RateLimitSection;
 use webx_core::error::Result;
 use webx_core::http::IHttpContext;
 use webx_core::middleware::IMiddleware;
-use webx_core::rate_limit::{IRateLimiter, RateLimitDecision};
+use webx_core::rate_limit::{
+    IRateLimiter, RateLimitDecision, RateLimitPolicy, RateLimitRoute, RateLimitRule,
+    RateLimitSubject,
+};
 
 struct TokenBucket {
     tokens: f64,
@@ -237,7 +243,7 @@ impl RateLimiter {
 }
 
 pub struct RateLimitMiddleware {
-    limiter: Arc<dyn IRateLimiter>,
+    policy: RateLimitPolicy,
     trust_proxy: bool,
     /// CIDR ranges whose peer addresses may supply `X-Forwarded-For`.
     trusted_proxies: Vec<IpCidr>,
@@ -261,12 +267,32 @@ impl RateLimitMiddleware {
     }
 
     /// Use a custom store (for example a Redis-backed distributed limiter).
+    ///
+    /// The store becomes one global rule keyed by the client IP, matching the
+    /// pre-authentication middleware position where no claims are available.
     pub fn with_limiter(limiter: Arc<dyn IRateLimiter>) -> Self {
-        Self {
+        Self::from_policy(RateLimitPolicy::new().with_rule(RateLimitRule::new(
+            RateLimitRoute::Any,
+            RateLimitSubject::Ip,
             limiter,
+        )))
+    }
+
+    /// Rate-limit with per-route/subject rules.
+    ///
+    /// The host installs this after authentication (so `User`/`Tenant`/`ApiKey`
+    /// subjects resolve); rule routes match the raw request path.
+    pub fn from_policy(policy: RateLimitPolicy) -> Self {
+        Self {
+            policy,
             trust_proxy: false,
             trusted_proxies: Vec::new(),
         }
+    }
+
+    /// Whether the policy has no rules (the middleware then always passes).
+    pub fn is_empty(&self) -> bool {
+        self.policy.is_empty()
     }
 
     pub fn from_config(cfg: &RateLimitSection) -> Self {
@@ -290,11 +316,16 @@ impl RateLimitMiddleware {
                  forwarded headers are ignored (a client could otherwise spoof them)"
             );
         }
+        let limiter: Arc<dyn IRateLimiter> = Arc::new(InMemoryRateLimiter::new(
+            cfg.requests_per_second,
+            cfg.burst_size,
+            cfg.max_tracked_ips,
+        ));
         Self {
-            limiter: Arc::new(InMemoryRateLimiter::new(
-                cfg.requests_per_second,
-                cfg.burst_size,
-                cfg.max_tracked_ips,
+            policy: RateLimitPolicy::new().with_rule(RateLimitRule::new(
+                RateLimitRoute::Any,
+                RateLimitSubject::Ip,
+                limiter,
             )),
             trust_proxy: cfg.trust_proxy,
             trusted_proxies,
@@ -304,13 +335,13 @@ impl RateLimitMiddleware {
 
 /// A parsed CIDR range used to identify trusted reverse proxies.
 #[derive(Debug, Clone, Copy)]
-struct IpCidr {
+pub(crate) struct IpCidr {
     network: IpAddr,
     prefix: u8,
 }
 
 impl IpCidr {
-    fn parse(value: &str) -> Option<Self> {
+    pub(crate) fn parse(value: &str) -> Option<Self> {
         let (addr, prefix) = value.split_once('/')?;
         let network = IpAddr::from_str(addr.trim()).ok()?;
         let prefix: u8 = prefix.trim().parse().ok()?;
@@ -321,7 +352,7 @@ impl IpCidr {
         (prefix <= max_prefix).then_some(Self { network, prefix })
     }
 
-    fn contains(&self, ip: IpAddr) -> bool {
+    pub(crate) fn contains(&self, ip: IpAddr) -> bool {
         match (self.network, ip) {
             (IpAddr::V4(network), IpAddr::V4(ip)) => {
                 let mask = if self.prefix == 0 {
@@ -347,16 +378,20 @@ impl IpCidr {
 #[async_trait::async_trait]
 impl IMiddleware for RateLimitMiddleware {
     async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
-        // No peer address means the host cannot tell clients apart. Falling
+        let Some(rule) = self.policy.resolve(ctx.request().path()) else {
+            return Ok(ControlFlow::Continue(()));
+        };
+        // No usable subject means the host cannot tell clients apart. Falling
         // back to a constant would turn per-client limiting into one global
-        // bucket, so the limiter passes the request through and the host is
-        // expected to expose `IHttpRequest::remote_addr`.
-        let Some(ip) = extract_client_ip(ctx, self.trust_proxy, &self.trusted_proxies) else {
-            tracing::debug!("rate limit skipped: request has no peer address");
+        // bucket, so the limiter passes the request through.
+        let Some(key) =
+            resolve_subject_key(ctx, rule.subject, self.trust_proxy, &self.trusted_proxies)
+        else {
+            tracing::debug!("rate limit skipped: request has no usable subject");
             return Ok(ControlFlow::Continue(()));
         };
 
-        let decision = self.limiter.check(&ip.to_string()).await;
+        let decision = rule.limiter.check(&key).await;
         if !decision.allowed {
             ctx.response_mut()
                 .set_header("retry-after", &decision.retry_after_secs.to_string());
@@ -366,6 +401,64 @@ impl IMiddleware for RateLimitMiddleware {
 
         Ok(ControlFlow::Continue(()))
     }
+}
+
+/// Resolve the budget key for `subject`, falling back to the client IP when the
+/// principal/credential is absent (fail-closed: anonymous traffic still gets
+/// limited, just per address instead of per user).
+fn resolve_subject_key(
+    ctx: &dyn IHttpContext,
+    subject: RateLimitSubject,
+    trust_proxy: bool,
+    trusted_proxies: &[IpCidr],
+) -> Option<String> {
+    let ip_key =
+        || extract_client_ip(ctx, trust_proxy, trusted_proxies).map(|ip| format!("ip:{ip}"));
+    match subject {
+        RateLimitSubject::Ip => ip_key(),
+        RateLimitSubject::User => claims_subject(ctx)
+            .map(|subject| format!("user:{subject}"))
+            .or_else(ip_key),
+        RateLimitSubject::Tenant => claims_tenant(ctx)
+            .map(|tenant| format!("tenant:{tenant}"))
+            .or_else(ip_key),
+        RateLimitSubject::ApiKey => presented_credential(ctx)
+            .map(|credential| format!("key:{}", hash_credential(credential)))
+            .or_else(ip_key),
+    }
+}
+
+fn claims_subject(ctx: &dyn IHttpContext) -> Option<String> {
+    ctx.claims()
+        .map(|claims| claims.subject().to_string())
+        .filter(|subject| !subject.is_empty())
+}
+
+fn claims_tenant(ctx: &dyn IHttpContext) -> Option<String> {
+    ctx.claims()
+        .and_then(|claims| claims.get_tenantid())
+        .map(str::to_string)
+        .filter(|tenant| !tenant.is_empty())
+}
+
+/// The presented credential: `x-api-key`, or a `Bearer` authorization value.
+fn presented_credential(ctx: &dyn IHttpContext) -> Option<&str> {
+    if let Some(value) = ctx.request().header("x-api-key") {
+        if !value.trim().is_empty() {
+            return Some(value.trim());
+        }
+    }
+    let authorization = ctx.request().header("authorization")?;
+    let (scheme, token) = authorization.split_once(' ')?;
+    scheme
+        .eq_ignore_ascii_case("bearer")
+        .then_some(token.trim())
+        .filter(|token| !token.is_empty())
+}
+
+/// Hash the credential so the raw API key never becomes a store key.
+fn hash_credential(credential: &str) -> String {
+    URL_SAFE_NO_PAD.encode(Sha256::digest(credential.as_bytes()))
 }
 
 /// Resolve the client IP the token bucket is keyed by.
@@ -405,7 +498,7 @@ fn extract_client_ip(
 ///
 /// Proxies append, so the right-most entries are the ones closest to the
 /// server; skipping trusted proxies from the right yields the real client.
-fn client_from_forwarded_for(value: &str, trusted_proxies: &[IpCidr]) -> Option<IpAddr> {
+pub(crate) fn client_from_forwarded_for(value: &str, trusted_proxies: &[IpCidr]) -> Option<IpAddr> {
     let hops: Vec<IpAddr> = value
         .split(',')
         .filter_map(|part| IpAddr::from_str(part.trim()).ok())

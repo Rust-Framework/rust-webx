@@ -24,6 +24,7 @@ use syn::{
 /// | `#[fromheader("X-Name")]` | an HTTP header (case-insensitive) |
 /// | `#[fromclaim("tenant")]` | a claim of the authenticated principal |
 /// | `#[fromclaim(optional)]` | an `Option<IdentityUser>` identity that may stay anonymous |
+/// | `#[fromclient]` | trusted client information (`ClientInfo`) resolved by the host |
 ///
 /// Every marker except `#[frombody]` takes an optional source key, defaulting to
 /// the field name (with `_` → `-` for headers); `#[fromclaim]` additionally
@@ -83,6 +84,8 @@ enum Src {
     Header,
     Claim,
     Body,
+    /// The trusted client information resolved by the host (`ClientInfo`).
+    Client,
     /// No marker: resolved from the request method.
     Auto,
 }
@@ -95,6 +98,9 @@ impl Src {
             Src::Form | Src::File => "form",
             Src::Header => "header",
             Src::Claim => "claim",
+            // Client info is not a request parameter; it is never advertised in
+            // OpenAPI metadata (`param_meta` skips it).
+            Src::Client => "client",
             Src::Body => "body",
             Src::Auto => "",
         }
@@ -183,6 +189,14 @@ fn shape_of(ty: &Type) -> Shape {
 fn is_current_user(ty: &Type) -> bool {
     match shape_of(ty) {
         Shape::Scalar(inner) | Shape::Optional(inner) => path_ends_with(&inner, "IdentityUser"),
+        _ => false,
+    }
+}
+
+/// Whether `ty` is the framework's `ClientInfo` (only the non-optional form).
+fn is_client_info(ty: &Type) -> bool {
+    match shape_of(ty) {
+        Shape::Scalar(inner) => path_ends_with(&inner, "ClientInfo"),
         _ => false,
     }
 }
@@ -619,6 +633,8 @@ fn declared_source(field: &Field) -> syn::Result<Option<SourceDecl>> {
             Src::Header
         } else if attr.path().is_ident("fromclaim") {
             Src::Claim
+        } else if attr.path().is_ident("fromclient") {
+            Src::Client
         } else {
             continue;
         };
@@ -644,6 +660,12 @@ fn declared_source(field: &Field) -> syn::Result<Option<SourceDecl>> {
                 decl.key = args.key;
                 decl.optional = args.optional;
                 decl.identity = args.identity;
+            }
+            Meta::List(list) if src == Src::Client => {
+                return Err(syn::Error::new_spanned(
+                    list,
+                    "`#[fromclient]` takes no key; the whole ClientInfo is bound from the request",
+                ))
             }
             Meta::List(list) => {
                 let lit: LitStr = list.parse_args()?;
@@ -840,6 +862,35 @@ fn build_fields(
             ));
         }
 
+        if is_client_info(&field.ty) {
+            let Some(decl) = declared.as_ref().filter(|decl| decl.src == Src::Client) else {
+                return Err(syn::Error::new_spanned(
+                    field,
+                    "a `ClientInfo` field carries the request's client address; mark it \
+                     `#[fromclient]`",
+                ));
+            };
+            if decl.key.is_some() {
+                return Err(syn::Error::new_spanned(
+                    field,
+                    "`#[fromclient]` on a `ClientInfo` field takes no key; the whole client \
+                     information is bound from the request",
+                ));
+            }
+            if matches!(&shape, Shape::Optional(_)) {
+                return Err(syn::Error::new_spanned(
+                    field,
+                    "`ClientInfo` is always available; use `#[fromclient] client: ClientInfo` \
+                     instead of an `Option`",
+                ));
+            }
+        } else if src == Src::Client {
+            return Err(syn::Error::new_spanned(
+                field,
+                "`#[fromclient]` requires a `ClientInfo` field",
+            ));
+        }
+
         if serde.flatten && serde.custom.is_some() {
             return Err(syn::Error::new_spanned(
                 field,
@@ -872,6 +923,7 @@ fn build_fields(
             Src::Path | Src::Query | Src::Form | Src::File => extra.unwrap_or_else(|| name.clone()),
             Src::Header => extra.unwrap_or_else(|| name.replace('_', "-")),
             Src::Claim => extra.unwrap_or_else(|| name.clone()),
+            Src::Client => name.clone(),
             Src::Body | Src::Auto => name.clone(),
         };
         if matches!(src, Src::Header) && source_key.is_empty() {
@@ -1142,6 +1194,11 @@ fn param_meta(fields: &[FieldSpec], has_form: bool) -> Vec<TokenStream2> {
 
     for f in fields.iter().filter(|f| !f.skipped) {
         if is_current_user(&f.ty) {
+            continue;
+        }
+        // Client information is not a request parameter (it is resolved by the
+        // host, not supplied by the caller).
+        if f.src == Src::Client {
             continue;
         }
 
@@ -1472,6 +1529,14 @@ fn bind_field(f: &FieldSpec, plan: &BindingPlan) -> TokenStream2 {
         Shape::Files => quote! { ::std::vec::Vec<::webx::FormFile> },
     };
 
+    if is_client_info(&f.ty) {
+        // The host resolves the client address before the endpoint runs; the
+        // binder snapshots it into the owned request field.
+        return quote! {
+            let #local: #local_ty = ::core::option::Option::Some(ctx.client_info());
+        };
+    }
+
     if is_current_user(&f.ty) {
         // The HTTP adapter has already built the request's `IdentityUser` and
         // put it in `RequestContext` (shared with audit). Reuse that Arc and
@@ -1530,6 +1595,7 @@ fn bind_field(f: &FieldSpec, plan: &BindingPlan) -> TokenStream2 {
                 Src::Form | Src::File => vec![Read::Form],
                 Src::Header => vec![Read::Header(f.source_key.to_ascii_lowercase())],
                 Src::Claim => vec![Read::Claim(f.source_key.clone())],
+                Src::Client => unreachable!("client info is bound before the source chain"),
                 Src::Body => vec![Read::Body],
                 Src::Auto if f.body_only() => vec![Read::Body],
                 Src::Auto if plan.has_form => vec![Read::Form, Read::Query],

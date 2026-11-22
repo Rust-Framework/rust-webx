@@ -504,6 +504,24 @@ pub trait IHttpContext: IClaimsExt + Send {
         None
     }
 
+    /// Record the resolved client information for this request.
+    ///
+    /// Called by the host's `ClientInfo` middleware after it applied the
+    /// trusted-proxy rules. The default is a no-op so alternative hosts and test
+    /// contexts keep compiling; they fall back to
+    /// [`Self::client_info`]'s peer-only default.
+    fn set_client_info(&mut self, _info: crate::client_info::ClientInfo) {}
+
+    /// Resolved client information for this request.
+    ///
+    /// Default: the peer address only, with an empty forwarded chain (raw
+    /// `X-Forwarded-For` is never exposed as trusted). A host that enables
+    /// `ClientInfo.TrustForwardedHeaders` stores the resolved value through
+    /// [`Self::set_client_info`].
+    fn client_info(&self) -> crate::client_info::ClientInfo {
+        crate::client_info::ClientInfo::from_peer(self.request().remote_addr())
+    }
+
     /// Downcast hook used by continuation pipelines (2.4-4).
     ///
     /// The engine implements this so a [`NextStage`](crate::middleware::NextStage)
@@ -554,6 +572,22 @@ pub trait IHttpRequest: Send {
     fn header_all(&self, name: &str) -> Vec<&str> {
         self.header(name).into_iter().collect()
     }
+
+    /// Every request header as `(name, value)` pairs, in wire order.
+    ///
+    /// Header names are lower-case and repeated headers appear once per value.
+    /// The default returns no pairs so alternative/test hosts keep compiling;
+    /// the rust-webx HTTP engine overrides it with a zero-copy view of the
+    /// original `HeaderMap`.
+    ///
+    /// This is the primitive signature-verification code needs: webhook
+    /// schemes (Stripe, WeChat Pay, PayPal, Square) sign over headers whose
+    /// names are only known to the adapter, so a name-by-name lookup is not
+    /// enough.
+    fn header_pairs(&self) -> Box<dyn Iterator<Item = (&str, &str)> + '_> {
+        Box::new(std::iter::empty())
+    }
+
     fn query(&self) -> &HashMap<String, String>;
 
     /// The peer address of the client connection, when the host exposes it.

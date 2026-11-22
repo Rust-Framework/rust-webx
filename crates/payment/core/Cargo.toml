@@ -1,0 +1,39 @@
+[package]
+name = "rust-webx-pay"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+documentation.workspace = true
+description = "Provider-neutral payment ports, models and webhook ingress for rust-webx (Stripe, Alipay, WeChat Pay, PayPal, Adyen, Square)"
+readme = "../../../README.md"
+keywords = ["web", "payment", "stripe", "alipay", "wechatpay"]
+categories = ["web-programming"]
+
+[lib]
+name = "webx_pay"
+
+[dependencies]
+rust-webx-core.workspace = true
+rust-webx-client.workspace = true
+rust-webx-host.workspace = true
+rust-dix.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+bytes.workspace = true
+url.workspace = true
+tokio = { workspace = true, features = ["sync", "time"] }
+tracing.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+rust-webx.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+[lints]
+workspace = true

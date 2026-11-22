@@ -1,6 +1,6 @@
 # 兼容性政策（SemVer、N-2 升级、锁步版本）
 
-> 基线：rust-webx 2.6.0。门禁在 `.github/workflows/ci.yml` 的 `semver`、`upgrade`、
+> 基线：rust-webx 2.7.0。门禁在 `.github/workflows/ci.yml` 的 `semver`、`upgrade`、
 > `lint`（内部版本钉）三个 job。
 
 ## 1. 三条承诺
@@ -52,21 +52,22 @@ compat/upgrade-smoke/current/Cargo.toml  → rust-webx = { path = "../../../crat
 ## 4. 边界约定：rust-ef 错误映射
 
 `rust-ef` 是 Web 无关的 ORM：2.6 起它不再提供 `webx` feature，也不依赖
-`rust-webx`。持久层错误到 HTTP 的翻译属于**应用边界**，本仓不提供、也不依赖任何
-ef 错误桥接版本：
+`rust-webx`。持久层错误到 HTTP 的翻译属于**应用边界**，由单独的适配 crate
+`rust-webx-ef` 承担（应用按需依赖；core 与 umbrella 不链接它）：
 
 - 不在 `rust-webx-core` / umbrella 增加 `ef` feature 或可选 `rust-ef` 依赖。即使
   默认关闭，也会把 ORM 概念带进 core 的 feature 图与发布清单，破坏“小核心”边界。
 - 不启用 `rust-ef` 的 `features = ["webx"]`，不恢复 `compat/webx-core-shim` 或
   `[patch.crates-io]`。
-- 应用侧不写 `impl From<EFError> for webx::Error`（孤儿规则）；在
-  `handlers/src/db.rs`（或 `common_mapper.rs`）实现一次 `map_ef_error` +
-  `EfResultExt::map_ef()`，调用点写 `.map_ef()?`。
+- 应用侧不写 `impl From<EFError> for webx::Error`（孤儿规则），也不重复实现映射：
+  依赖 `rust-webx-ef`，调用点写 `.map_ef()?`。
 
 ```rust
-// handlers/src/db.rs —— 每个应用一份
-pub fn map_ef_error(error: EFError) -> webx::Error { /* 见下表 */ }
-pub trait EfResultExt<T> { fn map_ef(self) -> webx::Result<T>; }
+// Cargo.toml
+rust-webx-ef = "2.7"
+
+// handlers/src/db.rs
+pub use webx_ef::{map_ef_error, EfResultExt};
 
 // Handler
 let blogs = ctx.set::<Blog>().query().to_list().await.map_ef()?;
@@ -86,7 +87,7 @@ let blogs = ctx.set::<Blog>().query().to_list().await.map_ef()?;
 
 5xx 的原文与 `source` 链拼进 `Error::Internal`，`public_detail()` 为 `None`，由
 host 写入日志。新增 rust-ef 变体走同一隐藏 500 分支，升级依赖不会扩大客户端可见
-信息。参考实现见 docbit/dmbit 的 `handlers/src/db.rs`。
+信息。参考实现见 docbit/dmbit 的 `handlers/src/db.rs`（已改为 re-export 适配 crate）。
 
 若未来确需框架级桥接，只能另立**独立集成 crate**（依赖方向
 rust-webx → rust-ef），单独评审；本仓 core/umbrella 始终零 ef 依赖，也不允许

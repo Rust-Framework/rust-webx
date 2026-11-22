@@ -25,6 +25,19 @@ members = [
     "crates/queue/nats",
     "crates/queue/rabbitmq",
     "crates/queue/kafka",
+    # Payment domain group: ports + per-provider protocol adapters + durability.
+    "crates/payment/core",
+    "crates/payment/stripe",
+    "crates/payment/alipay",
+    "crates/payment/wechatpay",
+    "crates/payment/paypal",
+    "crates/payment/adyen",
+    "crates/payment/square",
+    "crates/payment/ef",
+    # ORM boundary group: Web/ORM adapters live here, never in core/umbrella.
+    "crates/ef/webx",
+    # Outbox group: transactional-outbox starter over rust-ef.
+    "crates/outbox/ef",
     "crates/client",
     "crates/alloc-probe",
     "crates/contract-tests",
@@ -53,7 +66,7 @@ unsafe_code = "forbid"
 constructible_struct_adds_field = "allow"
 
 [workspace.package]
-version = "2.6.0"
+version = "2.7.0"
 edition = "2021"
 rust-version = "1.95"
 license = "MIT"
@@ -65,27 +78,41 @@ description = "rust-webx - A Rust WebApi framework inspired by ASP.NET Core, bui
 
 [workspace.dependencies]
 # Internal crates
-rust-webx-core = { version = "=2.6.0", path = "crates/core" }
-rust-webx-host = { version = "=2.6.0", path = "crates/host" }
-rust-webx-engine = { version = "=2.6.0", path = "crates/engine" }
-rust-webx-macros = { version = "=2.6.0", path = "crates/macros" }
-rust-webx = { version = "=2.6.0", path = "crates/webx" }
-rust-webx-spa = { version = "=2.6.0", path = "crates/spa" }
-rust-webx-build = { version = "=2.6.0", path = "crates/build" }
-rust-webx-openapi = { version = "=2.6.0", path = "crates/openapi" }
-rust-webx-ai = { version = "=2.6.0", path = "crates/ai/core" }
-rust-webx-ai-ef = { version = "=2.6.0", path = "crates/ai/ef" }
-rust-webx-auth-ef = { version = "=2.6.0", path = "crates/auth/ef" }
-rust-webx-oidc = { version = "=2.6.0", path = "crates/auth/oidc" }
-rust-webx-oauth2 = { version = "=2.6.0", path = "crates/auth/oauth2" }
-rust-webx-mfa = { version = "=2.6.0", path = "crates/auth/mfa" }
-rust-webx-webauthn = { version = "=2.6.0", path = "crates/auth/webauthn" }
-rust-webx-client = { version = "=2.6.0", path = "crates/client" }
-rust-webx-redis = { version = "=2.6.0", path = "crates/cache/redis" }
-rust-webx-nats = { version = "=2.6.0", path = "crates/queue/nats" }
-rust-webx-rabbitmq = { version = "=2.6.0", path = "crates/queue/rabbitmq" }
-rust-webx-kafka = { version = "=2.6.0", path = "crates/queue/kafka" }
-rust-webx-ai-gateway = { version = "=2.6.0", path = "crates/ai/gateway" }
+rust-webx-core = { version = "=2.7.0", path = "crates/core" }
+rust-webx-host = { version = "=2.7.0", path = "crates/host" }
+rust-webx-engine = { version = "=2.7.0", path = "crates/engine" }
+rust-webx-macros = { version = "=2.7.0", path = "crates/macros" }
+rust-webx = { version = "=2.7.0", path = "crates/webx" }
+rust-webx-spa = { version = "=2.7.0", path = "crates/spa" }
+rust-webx-build = { version = "=2.7.0", path = "crates/build" }
+rust-webx-openapi = { version = "=2.7.0", path = "crates/openapi" }
+rust-webx-ai = { version = "=2.7.0", path = "crates/ai/core" }
+rust-webx-ai-ef = { version = "=2.7.0", path = "crates/ai/ef" }
+rust-webx-auth-ef = { version = "=2.7.0", path = "crates/auth/ef" }
+rust-webx-oidc = { version = "=2.7.0", path = "crates/auth/oidc" }
+rust-webx-oauth2 = { version = "=2.7.0", path = "crates/auth/oauth2" }
+rust-webx-mfa = { version = "=2.7.0", path = "crates/auth/mfa" }
+rust-webx-webauthn = { version = "=2.7.0", path = "crates/auth/webauthn" }
+rust-webx-client = { version = "=2.7.0", path = "crates/client" }
+rust-webx-redis = { version = "=2.7.0", path = "crates/cache/redis" }
+rust-webx-nats = { version = "=2.7.0", path = "crates/queue/nats" }
+rust-webx-rabbitmq = { version = "=2.7.0", path = "crates/queue/rabbitmq" }
+rust-webx-kafka = { version = "=2.7.0", path = "crates/queue/kafka" }
+rust-webx-ai-gateway = { version = "=2.7.0", path = "crates/ai/gateway" }
+# Payment domain group (opt-in; the umbrella never links these).
+rust-webx-pay = { version = "=2.7.0", path = "crates/payment/core" }
+rust-webx-pay-stripe = { version = "=2.7.0", path = "crates/payment/stripe" }
+rust-webx-pay-alipay = { version = "=2.7.0", path = "crates/payment/alipay" }
+rust-webx-pay-wechatpay = { version = "=2.7.0", path = "crates/payment/wechatpay" }
+rust-webx-pay-paypal = { version = "=2.7.0", path = "crates/payment/paypal" }
+rust-webx-pay-adyen = { version = "=2.7.0", path = "crates/payment/adyen" }
+rust-webx-pay-square = { version = "=2.7.0", path = "crates/payment/square" }
+rust-webx-pay-ef = { version = "=2.7.0", path = "crates/payment/ef" }
+
+# ORM boundary (opt-in; core/umbrella never link rust-ef).
+rust-webx-ef = { version = "=2.7.0", path = "crates/ef/webx" }
+# Transactional outbox starter (opt-in; own crate group).
+rust-webx-outbox-ef = { version = "=2.7.0", path = "crates/outbox/ef" }
 
 # Docbit sub-crates
 docbit-contracts = { version = "0.1.0", path = "docbit/contracts" }
@@ -148,6 +175,14 @@ tracing = "0.1"
 jsonwebtoken = "9"
 base64 = "0.22"
 uuid = { version = "1", features = ["v4"] }
+# Payment protocol adapters: request signing (Stripe/Alipay/WeChat/Adyen/Square),
+# X.509 platform certificates (WeChat, Alipay cert mode) and Alipay cert SNs.
+rsa = { version = "0.10", features = ["pkcs1v15"] }
+aes-gcm = "0.10"
+x509-cert = { version = "0.2", features = ["pem"] }
+der = "0.7"
+md-5 = "0.10"
+percent-encoding = "2"
 url = "2"
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12", "ring"] }

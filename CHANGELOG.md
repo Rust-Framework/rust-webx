@@ -3,6 +3,218 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [2.7.0] — 2026-11-22
+
+> **English** · **简体中文**
+
+### English
+
+Payment domain release. New opt-in `crates/payment/` group: one provider-neutral port for
+Stripe, Alipay, WeChat Pay APIv3, PayPal, Adyen and Square, plus a rust-ef webhook inbox.
+No framework crate or umbrella crate links a payment adapter; no provider SDK and no second
+HTTP stack is introduced.
+
+#### Added
+
+- **`rust-webx-pay`** — `Money` (integer minor units + ISO 4217 exponent table),
+  normalized statuses/refunds/events, `IPaymentProvider` + `IPaymentWebhookVerifier`,
+  raw-body `PaymentWebhook`, the `Payments` runtime (TTL cache, single-flight,
+  invalidation), `PaymentScope` (provider/tenant/account), `AccountSet` (multi-account),
+  `IPaymentServiceFactory`/`IPaymentProviderFactory`/`IPaymentProviderBuilder` for
+  runtime/DB-driven configuration, provider-specific ACKs and `PaymentError → webx::Error`
+  mapping (`Unavailable` → 503).
+- **Adapters** — `rust-webx-pay-stripe` (PaymentIntents/Checkout, refunds,
+  `Stripe-Signature`), `-alipay` (page/wap/app/precreate, RSA2 signing, notify
+  verification in public-key/certificate mode), `-wechatpay` (APIv3 request signing,
+  platform-certificate/public-key verification, AEAD resource decryption), `-paypal`
+  (Orders v2, OAuth2 token cache, verify-webhook-signature), `-adyen` (Checkout
+  payments/captures/cancels/refunds, HMAC notifications), `-square` (Payments/Refunds,
+  Payment Links, HMAC notifications). Each exposes `add_*()` (runtime config from its
+  `IOptionsMonitor` section) and `add_*_with(options)` (static), plus a provider
+  factory/builder; there is no `add_payments()` or `add_*_from_config()`.
+- **`rust-webx-pay-ef`** — durable webhook inbox on rust-ef: unique `(provider,
+  dedupe_key)`, lease-based claim, exponential backoff and dead-letter, drained by a
+  `PeriodicBackgroundService`.
+- **Multi-account / service-provider mode** — several merchant accounts per adapter,
+  selection through `PaymentScope::account`, tenant through `PaymentScope::tenant`, and an
+  account-scoped webhook route using the same `PaymentWebhook` type.
+- **`payment_webhook!`** — generates the application-local request type Rust's orphan
+  rule requires for `IRequest<Response>`, binds the raw body and declares the route; the
+  handler stays application code. One type/macro handles both plain and account-scoped
+  callbacks.
+- **Frontend payment catalog** — `PaymentOption`/`PaymentFlowKind` plus
+  `Payments::payment_options(_for)` list the currently enabled provider/account/method/flow
+  combinations with display metadata (`provider_name`, `display_name`, `description`, `icon`
+  key, `brand_color`, `sort_order`) and public client config (Stripe publishable key, Adyen
+  client key, PayPal client id, Square application id, Alipay/WeChat app id). Secrets are
+  never included.
+- **`IHttpRequest::header_pairs()`** — object-safe, zero-copy header enumeration in
+  `rust-webx-core`, implemented by the engine; signature schemes can read headers whose
+  names are only known to the adapter.
+- **`WebSocketLimits` lifetime bounds** — `with_max_connection_lifetime` closes a session
+  at an absolute deadline (`1001`, traffic never extends it) and `close_at_token_expiry()`
+  closes it when the upgrade token's `exp` passes (`1008`); the earlier deadline wins.
+- **Realtime resume** — `IRealtimeEventStore` contract (`RealtimeEvent`,
+  `ResumeRequest`, `ResumeFrame`) with an in-memory default (bounded per-subscription
+  retention), registered for WebSocket hosts and replaceable with
+  `HostBuilder::use_realtime_event_store`; `IConnectionRegistry` gains
+  `user_connection_count`/`room_connection_count`/`tenant_connection_count`.
+- **Presence transitions** — `IPresenceObserver` + `PresenceTransition`
+  (`PresenceDirection`, `is_first`/`is_last`) delivered atomically from
+  `register_observed`/`unregister_observed` and wired with
+  `HostBuilder::use_presence_observer`, so online/offline announcements never need
+  app-side connection counting.
+- **`rust-webx-ef`** — new opt-in ORM-boundary crate (`crates/ef/webx`):
+  sanitized `EFError → webx::Error` mapping (`map_ef_error`, `EfResultExt::map_ef`)
+  with the 404/400/409/503/500 contract; core/umbrella still never link `rust-ef`,
+  and the reference apps now re-export the shared mapper instead of duplicating it.
+- **Notification ports** — `IEmailSender`/`ISmsSender` with `EmailMessage`/`SmsMessage`
+  shape validation, `HostBuilder::use_email_sender`/`use_sms_sender`, and bounded
+  `InMemoryEmailSender`/`InMemorySmsSender` capture senders for tests and local
+  development. No sender is registered by default: a missing adapter fails at DI
+  resolution instead of silently dropping messages.
+- **At-rest secret protection** — `ISecretProtector` (`protect`/`unprotect`,
+  `active_key_id`) with `AesGcmSecretProtector` (AES-256-GCM, self-describing
+  `webx1:<key-id>:…` ciphertext, rotatable key ring loaded from `ISecretStore`,
+  fail-closed on tamper/unknown key) and `HostBuilder::use_secret_protector`.
+- **Advisory locks** — `IAdvisoryLock` (`AdvisoryLease`, `try_acquire` / `release` /
+  `renew`, contention as `None`, expired leases reclaimable) with
+  `HostBuilder::use_advisory_lock`, the process-local `InMemoryAdvisoryLock`, and
+  `rust-webx-redis`'s `RedisAdvisoryLock` (`add_redis_advisory_lock`, `SET NX PX`
+  plus compare-and-delete/extend Lua). No lock is registered by default.
+- **Rate-limit policies** — `RateLimitPolicy` / `RateLimitRule` / `RateLimitRoute`
+  / `RateLimitSubject` (exact > longest prefix > any; IP, user, tenant and API-key
+  subjects with an IP fallback for anonymous traffic), installed after
+  authentication with `HostBuilder::use_rate_limit_policy`; `use_rate_limiter`
+  registers an explicit `IRateLimiter` for the pre-auth middleware. The 429
+  contract (`Retry-After` + `problem+json`) is unchanged.
+- **Request idempotency** — `Idempotency-Key` middleware over `IIdempotencyStore`
+  (`begin` / `complete` / `release`), the bounded process-local
+  `InMemoryIdempotencyStore`, `HostBuilder::use_idempotency` and an `Idempotency`
+  configuration section. Retries replay the stored 2xx response
+  (`Idempotency-Replayed: true`), concurrent duplicates get `409` + `Retry-After`,
+  and non-2xx/oversized/streaming responses release the key.
+- **Business metrics on `/metrics`** — `IMeter::snapshot()` (default empty) with
+  `MetricSample`/`MetricKind`; `MemoryMeter` now stores structured series and
+  enforces a cardinality cap (`Metrics.MaxSeries`, `with_max_series`,
+  `dropped_series`). A metrics-enabled host registers a bounded `MemoryMeter` by
+  default (an application `use_meter` wins) and `/metrics` renders application
+  counters/gauges/histograms (histograms as `_count`/`_sum` summaries).
+- **Transactional outbox** — new opt-in starter crate `rust-webx-outbox-ef`
+  (`crates/outbox/ef`): the `OutboxMessage` entity + `register_outbox_model`,
+  same-transaction `enqueue_outbox`/`enqueue_outbox_with_id` (a duplicate id is a
+  `UniqueViolation`), the `IOutbox` lease-claim port, and an `OutboxDispatcher`
+  (`PeriodicBackgroundService`) that dispatches rows through the process's
+  `EventDispatcher` with exponential backoff, dead-lettering (including events
+  with no handler) and retention cleanup. Registered with `add_outbox`.
+- **`ClientInfo` request binding** — `#[fromclient] client: ClientInfo` binds the
+  listener peer address plus trusted `X-Forwarded-For` resolution
+  (`peer_addr` / `client_ip` / `forwarded_for`; the chain stays empty unless
+  forwarding is trusted). A `ClientInfo` config section
+  (`TrustForwardedHeaders`, `TrustedProxies`) drives a host middleware that
+  resolves the right-most untrusted hop before authentication and binding.
+- **Keyset pagination** — `KeysetRequest` (`cursor` + `page_size`, defaults and
+  clamping like offset pagination, `decoded()`), the opaque `Cursor` codec
+  (base64url JSON sort-key components, 4 KiB limit, typed `CursorError` → 400),
+  and `CursorPage<T>` (`items` / `cursor` / `has_more`; `from_rows` derives an
+  exact `has_more` from one extra fetched row). Offset `PagedRequest` /
+  `PagedResult` remain unchanged.
+
+#### Changed
+
+- Workspace version `2.6.0` → `2.7.0` (all internal `=2.6.0` pins moved together).
+
+### 简体中文
+
+支付领域发布。新增按需引入的 `crates/payment/` 组：Stripe、支付宝、微信支付 APIv3、PayPal、
+Adyen、Square 共用一套与供应商无关的端口，并提供基于 rust-ef 的回调 inbox。框架 crate 与
+umbrella 均不链接支付适配器；不引入服务商 SDK，也不引入第二套 HTTP 栈。
+
+#### 新增
+
+- **`rust-webx-pay`** — `Money`（最小单位整数 + ISO 4217 指数表）、规范化的状态/退款/事件、
+  `IPaymentProvider` + `IPaymentWebhookVerifier`、原始 body 的 `PaymentWebhook`、
+  `Payments` 运行时（TTL 缓存、单飞、失效）、`PaymentScope`（provider/tenant/account）、
+  多账户 `AccountSet`、`IPaymentServiceFactory`/`IPaymentProviderFactory`/
+  `IPaymentProviderBuilder`（运行时/DB 配置）、各供应商 ACK，以及
+  `PaymentError → webx::Error` 映射（`Unavailable` → 503）。
+- **适配器** — `rust-webx-pay-stripe`（PaymentIntents/Checkout、退款、`Stripe-Signature`）、
+  `-alipay`（page/wap/app/precreate、RSA2 签名、公钥/证书模式异步通知验签）、
+  `-wechatpay`（APIv3 请求签名、平台证书/公钥验签、AEAD 资源解密）、`-paypal`
+  （Orders v2、OAuth2 令牌缓存、verify-webhook-signature）、`-adyen`（Checkout
+  payments/captures/cancels/refunds、HMAC 回调）、`-square`（Payments/Refunds、
+  Payment Links、HMAC 回调）。每个适配器提供 `add_*()`（运行时读取配置节）与
+  `add_*_with(options)`（静态），并注册 provider factory/builder；不再有
+  `add_payments()`/`add_*_from_config()`。
+- **`rust-webx-pay-ef`** — rust-ef 持久化回调 inbox：`(provider, dedupe_key)` 唯一、
+  租约领取、指数退避与死信，由 `PeriodicBackgroundService` 消费。
+- **多账户/服务商模式** — 一个适配器多商户账户；账户用 `PaymentScope::account` 选择，
+  租户用 `PaymentScope::tenant`；账户级回调复用同一个 `PaymentWebhook` 类型。
+- **`payment_webhook!`** — 生成应用本地请求类型（满足 Rust 孤儿规则）、绑定原始 body
+  并声明路由；业务 Handler 仍写在应用里。单一类型/宏同时覆盖普通与账户级回调。
+- **前端支付方式目录** — `PaymentOption`/`PaymentFlowKind` 与
+  `Payments::payment_options(_for)` 返回当前启用的 provider/account/method/flow，包含
+  展示元数据（`provider_name`、`display_name`、`description`、`icon` key、`brand_color`、
+  `sort_order`）及公开客户端配置（Stripe publishable key、Adyen client key、PayPal
+  client id、Square application id、支付宝/微信 app id）；绝不包含密钥。
+- **`IHttpRequest::header_pairs()`** — `rust-webx-core` 新增对象安全、零拷贝的请求头枚举，
+  由 engine 实现；验签代码可读取只有适配器才知道名字的请求头。
+- **`WebSocketLimits` 生命周期上限** — `with_max_connection_lifetime` 在绝对期限关闭会话
+  （`1001`，入站流量不续期）；`close_at_token_expiry()` 让会话在升级令牌 `exp` 到期时关闭
+  （`1008`）；两者取较早者。
+- **实时续传** — `IRealtimeEventStore` 契约（`RealtimeEvent`、`ResumeRequest`、`ResumeFrame`）
+  与进程内存默认实现（按 subscription 有界保留）；WebSocket 宿主自动注册，可用
+  `HostBuilder::use_realtime_event_store` 换成共享实现；`IConnectionRegistry` 新增
+  `user_connection_count`/`room_connection_count`/`tenant_connection_count`。
+- **presence 原子转移** — `IPresenceObserver` + `PresenceTransition`（`PresenceDirection`、
+  `is_first`/`is_last`）由 `register_observed`/`unregister_observed` 在注册表锁内计算并交付，
+  用 `HostBuilder::use_presence_observer` 接入；上线/下线广播不再需要业务侧数连接。
+- **`rust-webx-ef`** — 新增按需 ORM 边界 crate（`crates/ef/webx`）：脱敏的
+  `EFError → webx::Error` 映射（`map_ef_error`、`EfResultExt::map_ef`，覆盖
+  404/400/409/503/500 契约）；core/umbrella 仍不链接 `rust-ef`，参考应用改为
+  re-export 共享映射，不再各自复制。
+- **通知端口** — `IEmailSender`/`ISmsSender` 与 `EmailMessage`/`SmsMessage` 形状校验；
+  `HostBuilder::use_email_sender`/`use_sms_sender` 注册适配器；测试与本地开发用有界
+  `InMemoryEmailSender`/`InMemorySmsSender` 捕获实现。默认不注册发送器：缺适配器在 DI
+  解析阶段失败，而不是静默吞信。
+- **静态密钥保护** — `ISecretProtector`（`protect`/`unprotect`、`active_key_id`）与
+  `AesGcmSecretProtector`（AES-256-GCM、自描述 `webx1:<key-id>:…` 密文、可轮换 key ring
+  从 `ISecretStore` 加载、篡改/未知 key 失败关闭），用 `HostBuilder::use_secret_protector`
+  注册；默认不注册，避免明文静默落库。
+- **分布式锁** — `IAdvisoryLock`（`AdvisoryLease`、`try_acquire`/`release`/`renew`，冲突返回
+  `None`、过期租约可回收）与 `HostBuilder::use_advisory_lock`；进程内 `InMemoryAdvisoryLock`
+  用于测试/单节点，`rust-webx-redis` 提供 `RedisAdvisoryLock`（`add_redis_advisory_lock`，
+  `SET NX PX` + compare-and-delete/extend Lua）。默认不注册任何锁。
+- **限流策略层** — `RateLimitPolicy`/`RateLimitRule`/`RateLimitRoute`/`RateLimitSubject`
+  （exact > 最长 prefix > Any；Ip/User/Tenant/ApiKey 主体，匿名流量回退 IP），在鉴权之后
+  用 `HostBuilder::use_rate_limit_policy` 安装；`use_rate_limiter` 为鉴权前的中间件注册
+  显式 `IRateLimiter`。429 契约（`Retry-After` + `problem+json`）不变。
+- **请求级幂等** — `Idempotency-Key` 中间件 + `IIdempotencyStore`（`begin`/`complete`/`release`）
+  与有界进程内 `InMemoryIdempotencyStore`；`HostBuilder::use_idempotency` 与 `Idempotency`
+  配置节。重试重放已存的 2xx 响应（`Idempotency-Replayed: true`），并发重复请求返回
+  `409` + `Retry-After`；非 2xx/超大/流式响应会释放键。
+- **`/metrics` 业务指标导出** — `IMeter::snapshot()`（默认空）与 `MetricSample`/`MetricKind`；
+  `MemoryMeter` 改为结构化存储并加基数上限（`Metrics.MaxSeries`、`with_max_series`、
+  `dropped_series`）。启用 metrics 时 host 默认注册有界 `MemoryMeter`（应用 `use_meter` 优先），
+  `/metrics` 渲染业务 counter/gauge/histogram（histogram 为 `_count`/`_sum` summary）。
+- **事务性 outbox** — 新增按需 starter crate `rust-webx-outbox-ef`（`crates/outbox/ef`）：
+  `OutboxMessage` 实体 + `register_outbox_model`；同事务 `enqueue_outbox`/
+  `enqueue_outbox_with_id`（重复 id 为 `UniqueViolation`）；`IOutbox` 租约领取端口；
+  `OutboxDispatcher`（`PeriodicBackgroundService`）通过 `EventDispatcher` 派发，
+  指数退避、死信（含无 handler 事件）与保留期清理；用 `add_outbox` 注册。
+- **`ClientInfo` 请求绑定** — `#[fromclient] client: ClientInfo` 绑定监听器对端地址与
+  受信 `X-Forwarded-For` 解析（`peer_addr`/`client_ip`/`forwarded_for`；未启用信任时转发链为空）。
+  `ClientInfo` 配置节（`TrustForwardedHeaders`、`TrustedProxies`）驱动 host 中间件在鉴权与绑定前
+  解析最右侧非可信 hop。
+- **Keyset 分页** — `KeysetRequest`（`cursor` + `page_size`，默认/夹紧与 offset 一致，
+  `decoded()`）与不透明 `Cursor` 编解码（base64url JSON 排序键分量、4 KiB 上限、
+  `CursorError` → 400），以及 `CursorPage<T>`（`items`/`cursor`/`has_more`；`from_rows` 用多取的
+  一行给出精确 `has_more`）。offset `PagedRequest`/`PagedResult` 保持不变。
+
+#### 变更
+
+- workspace 版本 `2.6.0` → `2.7.0`（所有内部 `=2.6.0` 钉版同步）。
+
 ## [2.6.0] — 2026-11-21
 
 > **English** · **简体中文**

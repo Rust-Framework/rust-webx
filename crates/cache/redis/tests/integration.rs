@@ -19,8 +19,8 @@ use webx_core::mediator::{
     IEventPublisher, IEventRequest,
 };
 use webx_redis::{
-    RedisCache, RedisConnection, RedisEventConsumer, RedisEventPublisher, RedisEventsOptions,
-    RedisOptions,
+    RedisAdvisoryLock, RedisCache, RedisConnection, RedisEventConsumer, RedisEventPublisher,
+    RedisEventsOptions, RedisOptions,
 };
 
 use webx_contract_tests::event_transport::EventTransportContract;
@@ -645,6 +645,66 @@ async fn event_transport_satisfies_the_shared_contract() {
     if let Ok(mut raw) = connection.manager().await {
         let _ = redis::cmd("DEL")
             .arg(&stream)
+            .query_async::<i64>(&mut raw)
+            .await;
+    }
+}
+// ---------------------------------------------------------------------------
+// Advisory lock
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn redis_advisory_lock_serializes_and_recovers_from_expiry() {
+    use webx_core::locking::IAdvisoryLock;
+
+    let Ok(url) = std::env::var("WEBX_REDIS_URL") else {
+        return;
+    };
+    let suffix = unique_suffix();
+    let prefix = format!("webx:test:lock:{suffix}:");
+    let connection = Arc::new(RedisConnection::new(
+        url,
+        Duration::from_secs(3),
+        Duration::from_secs(2),
+    ));
+    let lock = RedisAdvisoryLock::new(Arc::clone(&connection), prefix.clone());
+    let key = "quota:t1";
+
+    let held = lock
+        .try_acquire(key, Duration::from_secs(5))
+        .await
+        .expect("acquire")
+        .expect("free key");
+    assert!(lock
+        .try_acquire(key, Duration::from_secs(5))
+        .await
+        .expect("contention is not an error")
+        .is_none());
+    assert!(lock.renew(&held).await.expect("renew"));
+    assert!(lock.release(&held).await.expect("release"));
+    assert!(!lock.release(&held).await.expect("double release is false"));
+
+    // A crashed owner's lease expires and can be reclaimed; the stale token
+    // cannot release the new lease.
+    let short = lock
+        .try_acquire(key, Duration::from_millis(50))
+        .await
+        .expect("acquire")
+        .expect("free");
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let fresh = lock
+        .try_acquire(key, Duration::from_secs(5))
+        .await
+        .expect("acquire")
+        .expect("expired lease is reclaimable");
+    assert_ne!(fresh.token, short.token);
+    assert!(!lock.release(&short).await.expect("stale release is false"));
+    assert!(lock.release(&fresh).await.expect("release fresh"));
+
+    // Best-effort cleanup so the live test leaves no lock key behind.
+    if let Ok(mut raw) = connection.manager().await {
+        let _ = redis::cmd("DEL")
+            .arg(format!("{prefix}lock:{key}"))
             .query_async::<i64>(&mut raw)
             .await;
     }

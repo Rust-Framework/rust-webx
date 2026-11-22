@@ -15,7 +15,7 @@
     "demoUrl": "",
     "featured": true,
     "sortOrder": 1,
-    "version": "2.6.0",
+    "version": "2.7.0",
     "language": "zh-CN",
     "author": "Start",
     "logo": "logo.svg",
@@ -537,6 +537,20 @@
               "difficulty": "intermediate"
             },
             {
+              "id": "advisory-lock",
+              "title": "分布式锁与租约",
+              "summary": "IAdvisoryLock：跨实例互斥与配额原子性",
+              "readingTime": 8,
+              "difficulty": "intermediate"
+            },
+            {
+              "id": "idempotency",
+              "title": "请求级幂等",
+              "summary": "Idempotency-Key：重试重放、并发 409 与共享存储",
+              "readingTime": 9,
+              "difficulty": "intermediate"
+            },
+            {
               "id": "quota",
               "title": "配额与预扣-结算",
               "summary": "按 key/模型的请求、token、并发与预算配额",
@@ -716,6 +730,20 @@
               "summary": "脚本化 HTTP/SSE 上游与请求录制",
               "readingTime": 8,
               "difficulty": "intermediate"
+            },
+            {
+              "id": "payments",
+              "title": "支付（Stripe/支付宝/微信/PayPal/Adyen/Square）",
+              "summary": "统一支付端口、运行时配置/多账户、回调入口与 inbox",
+              "readingTime": 18,
+              "difficulty": "advanced"
+            },
+            {
+              "id": "outbox",
+              "title": "事务性 outbox",
+              "summary": "同事务写事件行、租约派发、重试与死信",
+              "readingTime": 10,
+              "difficulty": "advanced"
             }
           ]
         },

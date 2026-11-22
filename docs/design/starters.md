@@ -49,6 +49,7 @@ async fn s3_store_satisfies_the_contract() {
 | **kafka** | 事件传输 `IEventPublisher`（单分区 follower） | `KafkaOptions`（brokers/topic/partition/start offset） | env-gated `tests/integration.rs` | 已落地 `crates/queue/kafka`（`add_kafka`）；无 consumer-group offset 提交 |
 | **s3** | `IObjectStore`（可选 `presign_put`） | `Storage:Endpoint/Bucket/Region/AccessKey/SecretKey` | `object_store_contract` | 契约套件就绪；真实适配器为后续工作 |
 | **otel** | `IMeter` + `/metrics` 镜像 | `Otel:Endpoint`、`Otel:ServiceName`、采样 | 指标名/标签契约 + `MemoryMeter` 断言（含 `RealtimeMetrics::export_to`（scrape 时导出增量）） | 契约方向已定；OTLP exporter 为后续工作 |
+| **outbox** | 事件传输 `EventDispatcher` + rust-ef `DbContext` | `OutboxOptions`（interval/batch/lease/attempts/retention） | 同事务 enqueue + 租约 claim + 死信（`crates/outbox/ef/tests/outbox_test.rs`） | 已落地 `crates/outbox/ef`（`add_outbox`） |
 
 > 为什么真实 SDK 适配器不在 PR CI：Redis/NATS/S3/OTLP 需要外部服务或容器；PR 用内存实现
 > 与契约测试保证语义，真实服务在 `stability.yml` 的 nightly job 用 `services:` 跑同一契约。
@@ -138,7 +139,7 @@ docker compose -f docker-compose.brokers.yml down -v
 
 ## 6. Crate 归属：有界分类法
 
-`crates/` 不再按厂商平铺，而是**固定框架集 + 四个领域组**；新增适配器只能进已有组，
+`crates/` 不再按厂商平铺，而是**固定框架集 + 领域组**；新增适配器只能进已有组，
 crate 归属数量不随第三方产品数量线性增长：
 
 | 位置 | 成员 | 说明 |
@@ -148,6 +149,9 @@ crate 归属数量不随第三方产品数量线性增长：
 | `crates/auth/` | ef / oidc / oauth2 / mfa / webauthn | 认证协议适配器；HTTP 认证 scheme 管线仍在 `host`（框架内聚） |
 | `crates/cache/` | redis | 第三方缓存；Redis 同时提供事件传输，但只保留一个驱动依赖 |
 | `crates/queue/` | nats / rabbitmq / kafka | 第三方消息队列 |
+| `crates/payment/` | core / stripe / alipay / wechatpay / paypal / adyen / square / ef | 支付领域：端口、供应商适配器、rust-ef 回调 inbox |
+| `crates/ef/` | webx | ORM 边界：`EFError → webx::Error` 脱敏映射 |
+| `crates/outbox/` | ef | 事务性 outbox：同事务写入 + 租约派发 |
 
 依赖方向（P10「小核大生态」）：
 

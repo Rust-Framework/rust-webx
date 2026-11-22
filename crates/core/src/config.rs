@@ -451,10 +451,88 @@ fn default_rate_limit_max_ips() -> usize {
 }
 
 /// HTTP request metrics (`GET /metrics` Prometheus text when enabled).
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct MetricsSection {
     #[serde(default, rename = "Enabled")]
     pub enabled: bool,
+    /// Cardinality cap for the default in-memory `IMeter` bridge.
+    ///
+    /// `/metrics` renders the application meter; the cap bounds its series
+    /// (labels included) so a label explosion cannot exhaust memory. Ignored when
+    /// the application registers its own meter.
+    #[serde(default = "default_metrics_max_series", rename = "MaxSeries")]
+    pub max_series: usize,
+}
+
+impl Default for MetricsSection {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_series: default_metrics_max_series(),
+        }
+    }
+}
+
+fn default_metrics_max_series() -> usize {
+    10_000
+}
+
+/// Trusted client information (`X-Forwarded-For` resolution).
+///
+/// Forwarded headers are only honoured when both `TrustForwardedHeaders` is on
+/// **and** the direct peer belongs to `TrustedProxies`; a directly reachable
+/// client could otherwise rotate `X-Forwarded-For` to spoof its address.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ClientInfoSection {
+    /// Resolve the client address from forwarded headers behind trusted proxies.
+    #[serde(default, rename = "TrustForwardedHeaders")]
+    pub trust_forwarded_headers: bool,
+    /// CIDR ranges of the trusted reverse proxies (for example `["10.0.0.0/8"]`).
+    #[serde(default, rename = "TrustedProxies")]
+    pub trusted_proxies: Vec<String>,
+}
+
+/// Request-level idempotency (`Idempotency-Key`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct IdempotencySection {
+    /// Install the idempotency middleware. Default: false.
+    #[serde(default, rename = "Enabled")]
+    pub enabled: bool,
+    /// How long a stored response (or in-flight reservation) is retained.
+    #[serde(default = "default_idempotency_ttl_seconds", rename = "TtlSeconds")]
+    pub ttl_seconds: u64,
+    /// Maximum retained keys for the default in-memory store.
+    #[serde(default = "default_idempotency_max_keys", rename = "MaxTrackedKeys")]
+    pub max_tracked_keys: usize,
+    /// Responses larger than this are not cached (the key is released instead).
+    #[serde(
+        default = "default_idempotency_max_body_bytes",
+        rename = "MaxBodyBytes"
+    )]
+    pub max_body_bytes: usize,
+}
+
+impl Default for IdempotencySection {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            ttl_seconds: default_idempotency_ttl_seconds(),
+            max_tracked_keys: default_idempotency_max_keys(),
+            max_body_bytes: default_idempotency_max_body_bytes(),
+        }
+    }
+}
+
+fn default_idempotency_ttl_seconds() -> u64 {
+    24 * 60 * 60
+}
+
+fn default_idempotency_max_keys() -> usize {
+    10_000
+}
+
+fn default_idempotency_max_body_bytes() -> usize {
+    1024 * 1024
 }
 
 /// Client-certificate policy for the TLS listener.
@@ -713,6 +791,12 @@ pub struct AppOptions {
     /// Prometheus-style metrics endpoint settings.
     #[serde(default, rename = "Metrics")]
     pub metrics: MetricsSection,
+    /// Request-level idempotency settings.
+    #[serde(default, rename = "Idempotency")]
+    pub idempotency: IdempotencySection,
+    /// Trusted client information (`X-Forwarded-For`) settings.
+    #[serde(default, rename = "ClientInfo")]
+    pub client_info: ClientInfoSection,
     /// TURN/STUN credential settings (coturn REST API).
     #[serde(default, rename = "Turn")]
     pub turn: TurnSection,

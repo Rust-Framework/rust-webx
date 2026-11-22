@@ -59,6 +59,9 @@ pub struct WebSocketMiddleware {
     provider: Arc<rust_dix::ServiceProvider>,
     /// Per-connection limits copied into every accepted session.
     limits: WebSocketLimits,
+    /// Presence observers resolved once at assembly (registration is static),
+    /// so accepting a connection does no DI enumeration or allocation.
+    observers: Arc<[Arc<dyn webx_core::realtime::IPresenceObserver>]>,
 }
 
 impl WebSocketMiddleware {
@@ -67,11 +70,13 @@ impl WebSocketMiddleware {
         routes: Vec<WebSocketRoute>,
         provider: Arc<rust_dix::ServiceProvider>,
         limits: WebSocketLimits,
+        observers: Arc<[Arc<dyn webx_core::realtime::IPresenceObserver>]>,
     ) -> Self {
         Self {
             routes: routes.into(),
             provider,
             limits,
+            observers,
         }
     }
 
@@ -135,6 +140,15 @@ impl IMiddleware for WebSocketMiddleware {
         let identity = ctx
             .claims()
             .map(|claims| Arc::new(webx_core::auth::IdentityUser::from_claims(claims)));
+        // A browser cannot refresh the credential it used to upgrade, so the
+        // session can be bounded by the token's own expiry (opt-in).
+        let token_expires_at_unix_secs = if self.limits.close_at_token_expiry {
+            ctx.claims()
+                .and_then(|claims| claims.claims().get("exp"))
+                .and_then(|value| value.parse::<u64>().ok())
+        } else {
+            None
+        };
         let accept = derive_accept_key(key.as_bytes());
 
         ctx.response_mut().set_status(101);
@@ -152,6 +166,8 @@ impl IMiddleware for WebSocketMiddleware {
                 provider: Arc::clone(&self.provider),
                 identity,
                 limits: self.limits.clone(),
+                token_expires_at_unix_secs,
+                observers: Arc::clone(&self.observers),
             }),
             meta,
         );
@@ -165,6 +181,10 @@ struct WebSocketSession {
     provider: Arc<rust_dix::ServiceProvider>,
     identity: Option<Arc<webx_core::auth::IdentityUser>>,
     limits: WebSocketLimits,
+    /// `exp` (Unix seconds) of the token that authorized the upgrade.
+    token_expires_at_unix_secs: Option<u64>,
+    /// Presence observers resolved once when the middleware was assembled.
+    observers: Arc<[Arc<dyn webx_core::realtime::IPresenceObserver>]>,
 }
 
 #[async_trait]
@@ -203,17 +223,53 @@ impl IUpgradeSession for WebSocketSession {
             window: std::sync::Mutex::new(InboundWindow::new()),
         });
         // Register for fan-out/presence; the host registers the in-memory
-        // registry by default when WebSocket routes exist.
+        // registry by default when WebSocket routes exist. The transition is
+        // computed inside the registry lock and delivered before the handler
+        // runs, so "first connection" is not a count race in business code.
         let registry = context.resolve::<dyn webx_core::realtime::IConnectionRegistry>();
+        let observers = &self.observers;
         if let Some(registry) = &registry {
-            registry.register(Arc::clone(&connection) as Arc<dyn IConnection>);
+            if let Some(transition) =
+                registry.register_observed(Arc::clone(&connection) as Arc<dyn IConnection>)
+            {
+                for observer in observers.iter() {
+                    observer.on_presence_transition(transition.clone()).await;
+                }
+            }
         }
-        let result = self
-            .handler
-            .on_connect(Arc::clone(&connection) as Arc<dyn IConnection>)
-            .await;
+        let result = match session_deadline(&limits, self.token_expires_at_unix_secs) {
+            Some((at, code, reason)) => {
+                // Absolute deadline: the handler owns the receive loop, so the
+                // session races its future against the deadline. Traffic does
+                // not extend it.
+                let handler = Box::pin(
+                    self.handler
+                        .on_connect(Arc::clone(&connection) as Arc<dyn IConnection>),
+                );
+                tokio::select! {
+                    biased;
+                    result = handler => result,
+                    _ = tokio::time::sleep_until(at) => {
+                        // `close` records the close code in the session metrics
+                        // and marks the connection closed, which makes the
+                        // handler's next `recv` return `None`.
+                        let _ = connection.close(code, reason).await;
+                        Ok(())
+                    }
+                }
+            }
+            None => {
+                self.handler
+                    .on_connect(Arc::clone(&connection) as Arc<dyn IConnection>)
+                    .await
+            }
+        };
         if let Some(registry) = &registry {
-            registry.unregister(connection.id());
+            if let Some(transition) = registry.unregister_observed(connection.id()) {
+                for observer in observers.iter() {
+                    observer.on_presence_transition(transition.clone()).await;
+                }
+            }
         }
         // Best-effort graceful close; dropping the last outbound sender lets the
         // writer flush and close the socket.
@@ -225,6 +281,50 @@ impl IUpgradeSession for WebSocketSession {
         }
         result
     }
+}
+
+/// Absolute server-side deadline for one accepted session.
+///
+/// Returns the earlier of the lifetime cap (`1001`) and the upgrade token's
+/// `exp` (`1008`), plus the close reason the client should observe. `None`
+/// means the session is only bounded by the handler and the idle timeout.
+fn session_deadline(
+    limits: &WebSocketLimits,
+    token_expires_at_unix_secs: Option<u64>,
+) -> Option<(tokio::time::Instant, u16, &'static str)> {
+    let now = tokio::time::Instant::now();
+    let lifetime = limits
+        .max_connection_lifetime
+        .map(|lifetime| (now + lifetime, 1001u16, "connection lifetime exceeded"));
+    let token = if limits.close_at_token_expiry {
+        token_expires_at_unix_secs.map(|expires_at| {
+            let remaining = expires_at.saturating_sub(unix_now_secs());
+            (
+                now + Duration::from_secs(remaining),
+                1008u16,
+                "access token expired",
+            )
+        })
+    } else {
+        None
+    };
+    match (lifetime, token) {
+        (Some(lifetime), Some(token)) => Some(if lifetime.0 <= token.0 {
+            lifetime
+        } else {
+            token
+        }),
+        (Some(deadline), None) | (None, Some(deadline)) => Some(deadline),
+        (None, None) => None,
+    }
+}
+
+/// Seconds since the Unix epoch (`0` when the clock is before 1970).
+fn unix_now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0)
 }
 
 /// Per-connection counters behind [`ConnectionStats`].
@@ -759,5 +859,44 @@ mod tests {
         for _ in 0..10_000 {
             assert!(window.allow(1024, &unlimited));
         }
+    }
+
+    #[test]
+    fn session_deadline_is_absent_without_limits() {
+        assert!(session_deadline(&WebSocketLimits::default(), Some(1)).is_none());
+    }
+
+    #[test]
+    fn session_deadline_uses_the_lifetime_cap() {
+        let limits =
+            WebSocketLimits::default().with_max_connection_lifetime(Duration::from_secs(60));
+        let (at, code, reason) = session_deadline(&limits, None).expect("deadline");
+        assert_eq!(code, 1001);
+        assert_eq!(reason, "connection lifetime exceeded");
+        let remaining = at.saturating_duration_since(tokio::time::Instant::now());
+        assert!(remaining <= Duration::from_secs(60));
+        assert!(remaining > Duration::from_secs(59));
+    }
+
+    #[test]
+    fn session_deadline_prefers_the_earlier_token_expiry() {
+        let limits = WebSocketLimits::default()
+            .with_max_connection_lifetime(Duration::from_secs(600))
+            .close_at_token_expiry();
+        let expiry = unix_now_secs() + 30;
+        let (at, code, reason) = session_deadline(&limits, Some(expiry)).expect("deadline");
+        assert_eq!(code, 1008);
+        assert_eq!(reason, "access token expired");
+        let remaining = at.saturating_duration_since(tokio::time::Instant::now());
+        assert!(remaining <= Duration::from_secs(30));
+
+        // An already-expired token closes immediately.
+        let (_, code, _) = session_deadline(&limits, Some(unix_now_secs().saturating_sub(5)))
+            .expect("expired token deadline");
+        assert_eq!(code, 1008);
+
+        // Without a token claim, the lifetime cap still applies.
+        let (_, code, _) = session_deadline(&limits, None).expect("lifetime only");
+        assert_eq!(code, 1001);
     }
 }

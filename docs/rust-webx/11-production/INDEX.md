@@ -6,6 +6,8 @@
 |------|------|
 | [CORS、TLS 与健康检查](cors-tls-health.md) | 网络层能力 |
 | [缓存与速率限制](caching-rate-limit.md) | 性能与防护 |
+| [分布式锁与租约](advisory-lock.md) | 跨实例互斥与配额原子性 |
+| [请求级幂等](idempotency.md) | `Idempotency-Key`：重试重放与并发冲突 |
 | [配额与预扣-结算](quota.md) | 按 key/模型的请求、token、并发与预算配额 |
 | [用量计量与账本](usage-metering.md) | 幂等 UsageEvent、tokenizer 兜底与窗口聚合 |
 | [模型目录与路由](model-routing.md) | provider 端口、别名策略、健康与容量规划 |

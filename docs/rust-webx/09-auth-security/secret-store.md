@@ -65,6 +65,34 @@ let store = ChainSecretStore::new()
 按注册顺序尝试；`NotFound` 继续，`Unavailable` 立即返回（避免"文件坏了就悄悄用环境变量"的
 隐蔽降级）。全部 `NotFound` 时返回第一个 `NotFound`。
 
+## 静态保护（ISecretProtector）
+
+`ISecretStore` 解决"密钥从哪来"；落库字段（TOTP seed、供应商 refresh token）还需要
+"存进去的是密文"。端口 `ISecretProtector` 提供 `protect` / `unprotect`；host 的
+`AesGcmSecretProtector` 是 AES-256-GCM + 可轮换 key ring 实现：
+
+```rust
+let store = Arc::new(EnvSecretStore::new()) as Arc<dyn ISecretStore>;
+let protector = Arc::new(
+    AesGcmSecretProtector::from_secret_store(
+        store.as_ref(),
+        &["SECRET_PROTECTION_K1", "SECRET_PROTECTION_K2"], // 32 字节密钥的 base64
+        "SECRET_PROTECTION_K2",                            // 当前写密钥
+    )
+    .await?,
+);
+Host::builder().use_secret_protector(protector).build();
+```
+
+- 密文自描述：`webx1:<key-id>:<base64url(nonce||ciphertext)>`，读取按内嵌 key id 选密钥；
+- 轮换：新 ring 把 active 换成新 key、保留旧 key；旧行可读，新写入自动用新 key；
+- 失败关闭：密文被篡改 / 未知 key / 前缀不符 → `SecretError::Unavailable`，绝不返回明文；
+- `from_keys(Vec<(id, [u8; 32])>, active)` 用于测试或自定义加载；
+- KMS/Vault 实现同一 trait 即可，调用方不变；不要把远调用放进长事务或锁内。
+
+部署语义：多实例必须共享同一 key ring（同一 secret store / KMS），否则 A 节点写的行 B 节点读不出；
+容器重启安全（密钥来自 env/挂载 secret，不落本地盘）；单字段一次 AEAD（微秒级），不要保护大 blob。
+
 ## 与 provider 集成
 
 `OpenAiProvider::new` 接受 `impl Into<SecretValue>`，并把密钥保存在 `SecretValue` 中：
@@ -78,9 +106,10 @@ let provider = OpenAiProvider::new("openai", client, key); // key: SecretValue
 
 ## 边界
 
-- 已实现：端口、`SecretValue`、`SecretRef`、env/file/chain、provider 集成。
-- 未实现：信封加密/KMS/Vault 实现、自动轮换与 key pool 健康、把 `SecretRef` 直接放进目录配置
-  （应用在构建 provider 时解析）。
+- 已实现：端口、`SecretValue`、`SecretRef`、env/file/chain、provider 集成、静态保护端口
+  （AES-256-GCM + key ring 轮换）。
+- 未实现：KMS/Vault **适配实现**、不重启的热轮换（通过重新注册 protector 实现）、
+  把 `SecretRef` 直接放进目录配置（应用在构建 provider / protector 时解析）。
 - 不要把 `SecretValue::expose()` 的返回值写日志、指标或错误详情；日志只记录名字。
 - 环境变量在进程内可被 `std::env::var` 读到，容器env 仍建议用 secret 挂载而非镜像层。
 
@@ -88,4 +117,6 @@ let provider = OpenAiProvider::new("openai", client, key); // key: SecretValue
 
 `crates/core/src/secrets.rs` 覆盖：env 读取/空值、`Debug` 脱敏、文件读取与换行裁剪、空文件、
 路径穿越/分隔符拒绝、Unix `0600` 校验、链式 `NotFound`/`Unavailable` 语义；
-`crates/ai/core/src/openai.rs` 覆盖 `from_secret_store` 成功与 typed 失败。
+`crates/host/src/secret_protector.rs` 覆盖：往返/随机 nonce、篡改与未知 key 失败关闭、
+轮换后旧行可读、key ring 校验、从 `ISecretStore` 加载；`crates/ai/core/src/openai.rs`
+覆盖 `from_secret_store` 成功与 typed 失败。

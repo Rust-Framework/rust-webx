@@ -1,0 +1,45 @@
+[package]
+name = "rust-webx-pay-alipay"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+documentation.workspace = true
+description = "Alipay adapter for rust-webx-pay: page/wap/app/precreate, RSA2 signing, notification verification (public-key and certificate mode)"
+readme = "../../../README.md"
+keywords = ["web", "payment", "alipay", "rsa2"]
+categories = ["web-programming"]
+
+[lib]
+name = "webx_pay_alipay"
+
+[dependencies]
+rust-webx-core.workspace = true
+rust-webx-host.workspace = true
+rust-webx-client.workspace = true
+rust-webx-pay.workspace = true
+rust-dix.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+bytes.workspace = true
+base64.workspace = true
+sha2.workspace = true
+rsa.workspace = true
+x509-cert.workspace = true
+der.workspace = true
+md-5.workspace = true
+url.workspace = true
+percent-encoding.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+rust-webx.workspace = true
+
+[lints]
+workspace = true

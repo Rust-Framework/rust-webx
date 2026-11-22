@@ -166,3 +166,36 @@ async fn idle_connection_is_closed_by_the_timeout() {
     assert_server_closed(next);
     handle.shutdown();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn max_connection_lifetime_closes_even_a_traffic_keeping_session() {
+    let port = free_port();
+    let handle = spawn_host(
+        port,
+        WebSocketLimits::default().with_max_connection_lifetime(Duration::from_millis(300)),
+    )
+    .await;
+    let mut client = connect(port).await;
+
+    // Keep the session busy: traffic must not extend the absolute deadline.
+    let started = Instant::now();
+    loop {
+        if client.send(Message::Text("ping".into())).await.is_err() {
+            break;
+        }
+        match client.next().await {
+            Some(Ok(Message::Text(_))) => {
+                if started.elapsed() > Duration::from_secs(2) {
+                    panic!("the server never enforced the connection lifetime");
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            other => {
+                assert_server_closed(other);
+                break;
+            }
+        }
+    }
+    assert!(started.elapsed() < Duration::from_secs(2));
+    handle.shutdown();
+}

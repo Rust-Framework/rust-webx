@@ -178,7 +178,8 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Registers parameter metadata and the request binder from `#[from*]` fields.
 ///
 /// Markers: `#[frompath]`, `#[fromquery]`, `#[frombody]`, `#[fromform]`,
-/// `#[fromfile]`, `#[fromheader("Name")]`, `#[fromclaim("key")]`. Every marker
+/// `#[fromfile]`, `#[fromheader("Name")]`, `#[fromclaim("key")]`,
+/// `#[fromclient]`. Every marker
 /// except `#[frombody]` accepts an optional source key.
 ///
 /// # Identity fields (fail-closed)
@@ -208,7 +209,8 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_derive(
     WebxRequestMeta,
     attributes(
-        frompath, fromquery, frombody, fromform, fromfile, fromheader, fromclaim, request
+        frompath, fromquery, frombody, fromform, fromfile, fromheader, fromclaim, fromclient,
+        request
     )
 )]
 pub fn webx_request_meta(input: TokenStream) -> TokenStream {

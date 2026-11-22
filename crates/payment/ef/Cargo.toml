@@ -1,0 +1,37 @@
+[package]
+name = "rust-webx-pay-ef"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+documentation.workspace = true
+description = "Durable payment webhook inbox for rust-webx-pay: unique dedupe key, retry/backoff and dead-letter with rust-ef"
+readme = "../../../README.md"
+keywords = ["web", "payment", "webhooks", "rust-ef"]
+categories = ["web-programming", "database"]
+
+[lib]
+name = "webx_pay_ef"
+
+[dependencies]
+rust-webx-core.workspace = true
+rust-webx-host.workspace = true
+rust-webx-pay.workspace = true
+rust-dix.workspace = true
+rust-ef.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+rust-ef-sqlite.workspace = true
+
+[lints]
+workspace = true

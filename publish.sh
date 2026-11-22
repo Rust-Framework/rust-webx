@@ -1,5 +1,5 @@
-#!/usr/bin/env bash
-# ─────────────────────────────────────────────────────────────────
+﻿#!/usr/bin/env bash
+# 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 # rust-webx crate publish script
 #
 # Publishes all rust-webx crates to crates.io in dependency order.
@@ -32,11 +32,19 @@
 #  19. rust-webx-rabbitmq (event transport; depends on core/host)
 #  20. rust-webx-kafka    (event transport; depends on core/host)
 #  21. rust-webx-ai-gateway (OpenAI-compatible surface; depends on webx + webx-ai)
-# ─────────────────────────────────────────────────────────────────
+#  22. rust-webx-pay       (payment ports/models; depends on core/host/client)
+#  23. rust-webx-pay-stripe
+#  24. rust-webx-pay-alipay
+#  25. rust-webx-pay-wechatpay
+#  26. rust-webx-pay-paypal
+#  27. rust-webx-pay-adyen
+#  28. rust-webx-pay-square
+#  29. rust-webx-pay-ef    (durable webhook inbox; depends on rust-webx-pay + rust-ef)
+# 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 # `pipefail` is required: the gate commands below pipe into `tail`, and without
 # it a failing `cargo clippy`/`test` would only be observed as `tail`'s status
-# 0 — the release preflight would report success on a red tree.
+# 0 鈥?the release preflight would report success on a red tree.
 set -euo pipefail
 
 DO_PUBLISH=false
@@ -53,7 +61,7 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-# ── Bump version if requested ──
+# 鈹€鈹€ Bump version if requested 鈹€鈹€
 #
 # Two places have to move together: `[workspace.package] version`, and the
 # `rust-webx*` entries in `[workspace.dependencies]`. The latter are path
@@ -61,7 +69,7 @@ done
 # would publish crates pinning the previous release.
 bump_version() {
     if [ -n "$NEW_VERSION" ]; then
-        echo "  → Bumping workspace version to $NEW_VERSION"
+        echo "  鈫?Bumping workspace version to $NEW_VERSION"
         sed -i -E \
             -e "s/^version = \".*\"/version = \"$NEW_VERSION\"/" \
             -e "s/^(rust-webx[a-z-]* = \{ version = )\"[^\"]*\"/\1\"$NEW_VERSION\"/" \
@@ -69,11 +77,11 @@ bump_version() {
     fi
 }
 
-# ── crates.io sparse-index helpers ──
+# 鈹€鈹€ crates.io sparse-index helpers 鈹€鈹€
 # A dependent crate can only be *published* (and therefore verified) once its
 # internal dependencies are visible on crates.io. `cargo publish --dry-run`
 # rewrites path deps to registry deps, so on a fresh version bump it fails for
-# dependents purely because the deps are not live yet — not because the crate
+# dependents purely because the deps are not live yet 鈥?not because the crate
 # is broken. These helpers let the check mode tell those two cases apart.
 # `index_path` / `index_has` / `workspace_version` / `wait_for_index` are shared
 # with the release workflow (`scripts/crates-index.sh`) so the two paths cannot
@@ -111,82 +119,82 @@ internal_deps_ready() {
     return 0
 }
 
-# ── Publish a single crate ──
+# 鈹€鈹€ Publish a single crate 鈹€鈹€
 publish_crate() {
     local crate="$1"
     echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹?
     echo "  Publishing: $crate"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹?
 
     # Resumable: a re-run after a partial failure must not fail on crates that
     # are already visible in the index (same contract as the tag workflow).
     if index_has "$crate" "$(workspace_version)"; then
-        echo "  … $crate $(workspace_version) is already published — skipping"
+        echo "  鈥?$crate $(workspace_version) is already published 鈥?skipping"
         return 0
     fi
 
     # Packaging sanity: file list only, so this never resolves against
     # crates.io and therefore works on a fresh version bump.
     if ! cargo package -p "$crate" --list --allow-dirty >/dev/null 2>&1; then
-        echo "  ✗ cargo package --list failed for $crate"
+        echo "  鉁?cargo package --list failed for $crate"
         exit 1
     fi
 
     if [ "$DRY_RUN" = true ]; then
         if internal_deps_ready "$crate"; then
             if cargo publish -p "$crate" --dry-run --allow-dirty >/dev/null 2>&1; then
-                echo "  ✓ $crate — dry-run OK"
+                echo "  鉁?$crate 鈥?dry-run OK"
             else
-                echo "  ✗ Dry-run failed for $crate"
+                echo "  鉁?Dry-run failed for $crate"
                 exit 1
             fi
         else
-            echo "  … $crate — packages OK; publish dry-run skipped"
+            echo "  鈥?$crate 鈥?packages OK; publish dry-run skipped"
             echo "    internal dependency not yet on crates.io at this version,"
             echo "    so cargo cannot verify it before the dependency is published"
         fi
         return 0
     fi
 
-    echo "  → Publishing $crate..."
+    echo "  鈫?Publishing $crate..."
     if cargo publish -p "$crate" --registry crates-io; then
-        echo "  ✓ $crate published successfully"
+        echo "  鉁?$crate published successfully"
     else
-        echo "  ✗ Failed to publish $crate"
+        echo "  鉁?Failed to publish $crate"
         exit 1
     fi
     # Dependent crates need this one to be visible in the index first.
     wait_for_index "$crate"
 }
 
-# ── Main ──
+# 鈹€鈹€ Main 鈹€鈹€
 echo ""
-echo "┌─────────────────────────────────────────────────┐"
-echo "│      rust-webx — Crate Publish Script         │"
+echo "鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?
+echo "鈹?     rust-webx 鈥?Crate Publish Script         鈹?
 if [ "$DO_PUBLISH" = true ]; then
-    echo "│          MODE: PUBLISH (live)                   │"
+    echo "鈹?         MODE: PUBLISH (live)                   鈹?
 else
-    echo "│          MODE: CHECK (dry-run only)             │"
+    echo "鈹?         MODE: CHECK (dry-run only)             鈹?
 fi
 if [ -n "$NEW_VERSION" ]; then
-    echo "│          VERSION: $NEW_VERSION                  │"
+    echo "鈹?         VERSION: $NEW_VERSION                  鈹?
 fi
-echo "└─────────────────────────────────────────────────┘"
+echo "鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?
 
-# Pre-check — mirrors the CI gates so a release cannot be attempted on a tree
+# Pre-check 鈥?mirrors the CI gates so a release cannot be attempted on a tree
 # that would fail there.
 echo ""
-echo "▸ Checking formatting..."
-cargo fmt --all --check || { echo "  ✗ cargo fmt --all --check failed"; exit 1; }
+echo "鈻?Checking formatting..."
+cargo fmt --all --check || { echo "  鉁?cargo fmt --all --check failed"; exit 1; }
 
-echo "▸ Running Clippy (deny warnings)..."
+echo "鈻?Running Clippy (deny warnings)..."
 cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tail -3
 
-echo "▸ Verifying workspace..."
+echo "鈻?Verifying workspace..."
 cargo check --workspace 2>&1 | tail -1
 
-echo "▸ Running tests..."
+echo "鈻?Running tests..."
 cargo test --workspace --quiet 2>&1 | tail -1
 
 bump_version
@@ -196,6 +204,7 @@ publish_crate "rust-webx-macros"
 publish_crate "rust-webx-core"
 publish_crate "rust-webx-engine"
 publish_crate "rust-webx-client"
+publish_crate "rust-webx-ef"
 publish_crate "rust-webx-ai"
 publish_crate "rust-webx-ai-ef"
 publish_crate "rust-webx-build"
@@ -206,6 +215,7 @@ publish_crate "rust-webx-auth-ef"
 publish_crate "rust-webx-mfa"
 publish_crate "rust-webx-webauthn"
 publish_crate "rust-webx"
+publish_crate "rust-webx-outbox-ef"
 publish_crate "rust-webx-oauth2"
 publish_crate "rust-webx-oidc"
 publish_crate "rust-webx-redis"
@@ -213,12 +223,20 @@ publish_crate "rust-webx-nats"
 publish_crate "rust-webx-rabbitmq"
 publish_crate "rust-webx-kafka"
 publish_crate "rust-webx-ai-gateway"
+publish_crate "rust-webx-pay"
+publish_crate "rust-webx-pay-stripe"
+publish_crate "rust-webx-pay-alipay"
+publish_crate "rust-webx-pay-wechatpay"
+publish_crate "rust-webx-pay-paypal"
+publish_crate "rust-webx-pay-adyen"
+publish_crate "rust-webx-pay-square"
+publish_crate "rust-webx-pay-ef"
 
 echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹?
 if [ "$DO_PUBLISH" = true ]; then
-    echo "  ✓ All crates published to crates.io"
+    echo "  鉁?All crates published to crates.io"
 else
-    echo "  ✓ All crates verified (dry-run). Use --do to publish."
+    echo "  鉁?All crates verified (dry-run). Use --do to publish."
 fi
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹?

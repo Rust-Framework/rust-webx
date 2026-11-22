@@ -54,6 +54,8 @@ pub struct EngineContext {
     /// `x-trace-id` response header carries and handlers read through
     /// `RequestContext::trace_id()`.
     trace_id: Option<String>,
+    /// Client information resolved by the host's `ClientInfo` middleware.
+    client_info: Option<webx_core::client_info::ClientInfo>,
     /// Pending protocol upgrade (WebSocket), when the client asked for one.
     ///
     /// The hyper `OnUpgrade` is resolved after the `101` response is committed;
@@ -121,6 +123,7 @@ impl EngineContext {
             claims: None,
             dispatch_runtime: None,
             trace_id: None,
+            client_info: None,
             upgrade: None,
             upgrade_session: None,
         }
@@ -272,6 +275,16 @@ impl IHttpContext for EngineContext {
         Some(self.started_at.elapsed())
     }
 
+    fn set_client_info(&mut self, info: webx_core::client_info::ClientInfo) {
+        self.client_info = Some(info);
+    }
+
+    fn client_info(&self) -> webx_core::client_info::ClientInfo {
+        self.client_info.clone().unwrap_or_else(|| {
+            webx_core::client_info::ClientInfo::from_peer(self.req.remote_addr())
+        })
+    }
+
     fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
         Some(self)
     }
@@ -404,6 +417,14 @@ impl IHttpRequest for EngineRequest {
             .iter()
             .filter_map(|value| value.to_str().ok())
             .collect()
+    }
+
+    fn header_pairs(&self) -> Box<dyn Iterator<Item = (&str, &str)> + '_> {
+        Box::new(
+            self.parts.headers.iter().filter_map(|(name, value)| {
+                value.to_str().ok().map(|value| (name.as_str(), value))
+            }),
+        )
     }
 
     fn query(&self) -> &HashMap<String, String> {
@@ -847,6 +868,28 @@ mod tests {
                 .and_then(|value| value.to_str().ok()),
             Some("two")
         );
+    }
+
+    #[test]
+    fn header_pairs_exposes_every_header_for_signature_verification() {
+        let ctx = context(
+            "POST",
+            "/webhooks/stripe",
+            &[
+                ("stripe-signature", "t=1,v1=abc"),
+                ("content-type", "application/json"),
+            ],
+            b"{}",
+        );
+        let pairs: Vec<(String, String)> = ctx
+            .request()
+            .header_pairs()
+            .map(|(name, value)| (name.to_string(), value.to_string()))
+            .collect();
+        assert!(pairs
+            .iter()
+            .any(|(name, value)| name == "stripe-signature" && value == "t=1,v1=abc"));
+        assert!(pairs.iter().any(|(name, _)| name == "content-type"));
     }
 
     #[tokio::test]

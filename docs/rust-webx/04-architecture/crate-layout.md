@@ -28,6 +28,7 @@ Cargo **包名**带连字符，Rust **导入名**用下划线库名。两者不�
 | `rust-webx-ai-ef` | `webx_ai_ef` | rust-ef 持久化用量账本（`EfUsageSink`） |
 | `rust-webx-ai-gateway` | `webx_ai_gateway` | OpenAI 兼容 `/v1` HTTP 表面（依赖 webx + webx-ai） |
 | `rust-webx-client` | `webx_client` | 出站 HTTP（连接池/流式/SSE；伞 crate 只重导出传输类型） |
+| `rust-webx-ef` | `webx_ef` | rust-ef 边界适配：`EFError → webx::Error` 脱敏映射 + `EfResultExt`（应用按需依赖，core/伞不链接） |
 | `rust-webx-build` | `webx` | 构建期（`build-dependencies`） |
 
 对照 `rust-dix` / `rust-ef`：包名与导入名同样分别是 `rust-dix`→`rust_dix`、`rust-ef`→`rust_ef`。
@@ -112,6 +113,54 @@ HTTP 数据面端点、非 OpenAI 适配器与租户级路由后续加入。
 `POST /v1/chat/completions` 的请求 DTO、IR 转换、JSON/SSE 输出与 OpenAI 错误信封。
 它依赖伞 crate 与 `rust-webx-ai`，但不反向进入 `rust-webx-ai` 的领域依赖；应用注册
 `Arc<GatewayExecutor>`、鉴权 scheme 与 `OpenAiErrorWriter` 后即可使用。
+
+## payment — 可选支付领域组
+
+`crates/payment/` 是与 ai/auth/cache/queue 同级的封闭领域组：
+
+| crate | 导入名 | 职责 |
+|---|---|---|
+| `rust-webx-pay` | `webx_pay` | 统一模型与端口：`Money`/`PaymentStatus`/`PaymentEvent`、`IPaymentProvider`、`IPaymentWebhookVerifier`、`PaymentWebhook`、`Payments` 运行时（缓存/单飞/失效）、`PaymentScope`、`IPaymentServiceFactory`/`IPaymentProviderFactory`/`IPaymentProviderBuilder` |
+| `rust-webx-pay-stripe` | `webx_pay_stripe` | Stripe PaymentIntents/Checkout、退款、`Stripe-Signature` |
+| `rust-webx-pay-alipay` | `webx_pay_alipay` | 支付宝 page/wap/app/precreate、RSA2 签名与异步通知 |
+| `rust-webx-pay-wechatpay` | `webx_pay_wechatpay` | 微信支付 APIv3、请求签名、平台证书/公钥、AEAD 解密 |
+| `rust-webx-pay-paypal` | `webx_pay_paypal` | Orders v2、OAuth2、capture/void/refund、验签 API |
+| `rust-webx-pay-adyen` | `webx_pay_adyen` | Checkout payments/captures/refunds、HMAC 回调 |
+| `rust-webx-pay-square` | `webx_pay_square` | Payments/Refunds、Payment Links、HMAC 回调 |
+| `rust-webx-pay-ef` | `webx_pay_ef` | 基于 rust-ef 的回调 inbox：唯一去重、重试、死信 |
+
+- **不进入伞 crate**：应用显式依赖所需适配器；不需要支付的项目不引入。
+- **唯一 HTTP 栈**：适配器只依赖 `rust-webx-client`，不引入服务商 SDK（官方 SDK 无 Rust 版本）。
+- **回调路由由应用声明**：crate 只提供原始 body 请求类型、验签与 ACK，不注入隐式路由。
+- **多账户/服务商**：一个适配器实例可持有多个商户账户；请求可选账户，回调可用
+  `/webhooks/payments/{provider}/{account}`。
+- **版本跟随 workspace**：`version.workspace = true`，与 `rust-webx` 同一版本号。
+
+## ef — ORM 边界组
+
+`crates/ef/` 存放把 Web 框架与 ORM 连接起来的边界适配器；`rust-ef` 保持 Web 无关，
+core/伞 crate 不链接它：
+
+| crate | 导入名 | 职责 |
+|---|---|---|
+| `rust-webx-ef` | `webx_ef` | `EFError → webx::Error` 脱敏映射（404/400/409/503/500）与 `EfResultExt::map_ef()` |
+
+- **应用按需依赖**：`rust-webx-ef = "2.7"`，调用点 `.map_ef()?`；参考应用在
+  `handlers/src/db.rs` re-export 它。
+- **无状态边界**：不建立连接、不读配置；多实例/容器语义与纯函数一致。
+- **性能**：成功路径零开销，固定文案是常量，5xx 仅在日志侧拼接 source 链。
+
+## outbox — 事务性 outbox 组
+
+`crates/outbox/` 存放"业务事务与事件原子"的 starter：
+
+| crate | 导入名 | 职责 |
+|---|---|---|
+| `rust-webx-outbox-ef` | `webx_outbox_ef` | 同事务入队（`enqueue_outbox`）、租约领取、事件派发、重试/死信、保留期清理 |
+
+- **应用按需依赖**：`rust-webx-outbox-ef = "2.7"`；core/umbrella 不链接 rust-ef。
+- **表由实体声明**：`webx_outbox` 由官方 rust-ef 迁移生成，`bootstrap` 仅测试。
+- **与事件传输分工**：outbox 保证本地事务与事件同生共死；跨进程投递交给 `IEventPublisher`。
 
 ## client — 出站 HTTP 层
 

@@ -15,7 +15,7 @@ Handler 通过 `Arc<MemoryCache>` 或 `IDistributedCache` trait 注入使用。
 
 ```toml
 [dependencies]
-rust-webx-redis = "2.5"
+rust-webx-redis = "2.7"
 ```
 
 ```rust
@@ -105,17 +105,56 @@ TTL）。
 ### 代码注册（可选）
 
 ```rust
-Host::builder()
-    .use_middleware_with(|| {
-        Arc::new(RateLimitMiddleware::new(10.0, 20)) as Arc<dyn IMiddleware>
-    })
+// 单一存储、按客户端 IP 限流（与配置节位置相同：鉴权之前）
+Host::builder().use_rate_limiter(Arc::new(MyDistributedLimiter::new(/* ... */)));
 ```
 
-超限返回 RFC 9457 `429` + `application/problem+json`，并携带 `Retry-After`（按 `RequestsPerSecond` 推出的整秒等待时间）。
+显式 limiter 优先于 `RateLimit` 配置节。超限返回 RFC 9457 `429` +
+`application/problem+json`，并携带 `Retry-After`。
+
+### 按路由 / 主体限流（RateLimitPolicy）
+
+路由与主体维度的策略用 `use_rate_limit_policy`：它在**鉴权之后**安装（因此
+`User`/`Tenant`/`ApiKey` 可用），规则按**请求路径**匹配（`Exact` > 最长 `Prefix` > `Any`），
+每条规则自带 limiter，所以不同区域可以有不同预算：
+
+```rust
+let policy = RateLimitPolicy::new()
+    .with_rule(RateLimitRule::new(
+        RateLimitRoute::prefix("/api/im"),
+        RateLimitSubject::User,
+        Arc::new(InMemoryRateLimiter::new(5.0, 10, 100_000)),
+    ))
+    .with_rule(RateLimitRule::new(
+        RateLimitRoute::exact("/api/login"),
+        RateLimitSubject::Ip,
+        Arc::new(InMemoryRateLimiter::new(1.0, 5, 100_000)),
+    ))
+    .with_rule(RateLimitRule::new(
+        RateLimitRoute::Any,
+        RateLimitSubject::ApiKey,
+        Arc::new(InMemoryRateLimiter::new(50.0, 100, 100_000)),
+    ));
+
+Host::builder().use_rate_limit_policy(policy).build();
+```
+
+| 主体 | 桶键 | 缺失时 |
+|---|---|---|
+| `Ip` | 对端地址（按 `TrustProxy` 规则可采信代理头） | 跳过（无法区分客户端） |
+| `User` | `sub` | 回退 IP（匿名流量仍被限流） |
+| `Tenant` | `tenant_id` | 回退 IP |
+| `ApiKey` | `x-api-key` 或 `Authorization: Bearer`，SHA-256 后入桶 | 回退 IP |
+
+- 鉴权之前的 IP 防护仍由 `RateLimit` 配置节承担；两者可以同时存在。
+- 每条规则一个 limiter：分布式部署时给需要的规则注入共享实现（Redis），否则该规则的预算仍是
+  单实例的。
+- 429 契约不变（`Retry-After` + `problem+json`）。
 
 ### 分布式限流
 
-多实例部署时，内存桶各自计数会让实际限额翻倍。框架把计数存储抽成端口 `IRateLimiter`：
+多实例部署时，内存桶各自计数会让实际限额翻倍。框架把计数存储抽成端口 `IRateLimiter`，
+用 `use_rate_limiter`（全局 IP 桶）或策略里逐规则注入共享实现：
 
 ```rust
 use webx::IRateLimiter;
@@ -130,10 +169,7 @@ impl IRateLimiter for RedisLimiter {
     }
 }
 
-Host::builder().use_middleware_with(|| {
-    Arc::new(RateLimitMiddleware::with_limiter(Arc::new(RedisLimiter { /* ... */ })))
-        as Arc<dyn IMiddleware>
-})
+Host::builder().use_rate_limiter(Arc::new(RedisLimiter { /* ... */ }));
 ```
 
 默认实现 `InMemoryRateLimiter` 按 CPU 并行度分片（1–32 片），把原先的单全局 `Mutex` 从
@@ -155,6 +191,7 @@ Host::builder().use_middleware_with(|| {
 ## 小结
 
 `add_memory_cache()` 一行启用进程内缓存；多实例用 `add_redis(...)` 换共享缓存与事件传输；
-`RateLimit` / `Metrics` 配置节用于生产防护与可观测性。
+`RateLimit` 配置节做鉴权前 IP 防护，`use_rate_limit_policy` 做按路由/主体的预算，
+`use_rate_limiter` 注入共享存储；`Metrics` 配置节用于可观测性。
 
 下一节：[OpenAPI 与 SPA 托管](openapi-spa.md)

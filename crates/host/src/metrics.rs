@@ -10,12 +10,14 @@
 //!   cannot grow the map by requesting random paths.
 
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use webx_core::error::Result;
 use webx_core::http::IHttpContext;
+use webx_core::metrics::{IMeter, MetricKind};
 use webx_core::middleware::IMiddleware;
 use webx_core::routing::IEndpoint;
 
@@ -398,6 +400,9 @@ impl IEndpoint for MetricsEndpoint {
         if let Some(events) = &self.events {
             body.push_str(&render_events(events));
         }
+        if let Some(meter) = &self.meter {
+            body.push_str(&render_meter(meter.as_ref()));
+        }
         ctx.response_mut().set_status(200);
         ctx.response_mut()
             .set_header("content-type", "text/plain; version=0.0.4; charset=utf-8");
@@ -597,9 +602,94 @@ fn render_admission(stats: &webx_engine::shared::AdmissionStats) -> String {
     )
 }
 
+/// Prometheus text for the application meter (`IMeter::snapshot`).
+///
+/// Counters and gauges render as one line per series; a bucket-less histogram
+/// renders as a summary (`_count` + `_sum`) because the port records raw
+/// observations without bucket boundaries.
+fn render_meter(meter: &dyn IMeter) -> String {
+    let samples = meter.snapshot();
+    if samples.is_empty() {
+        return String::new();
+    }
+    let mut out = String::with_capacity(samples.len() * 64);
+    let mut last: Option<(&str, MetricKind)> = None;
+    for sample in &samples {
+        if last.is_none_or(|(name, kind)| name != sample.name || kind != sample.kind) {
+            let _ = writeln!(
+                out,
+                "# TYPE {} {}",
+                sample.name,
+                sample.kind.prometheus_type()
+            );
+            last = Some((sample.name.as_str(), sample.kind));
+        }
+        let labels = render_labels(&sample.tags);
+        match sample.kind {
+            MetricKind::Histogram => {
+                let _ = writeln!(out, "{}_count{} {}", sample.name, labels, sample.count);
+                let _ = writeln!(out, "{}_sum{} {}", sample.name, labels, sample.value);
+            }
+            MetricKind::Counter | MetricKind::Gauge => {
+                let _ = writeln!(out, "{}{} {}", sample.name, labels, sample.value);
+            }
+        }
+    }
+    out
+}
+
+fn render_labels(tags: &[(String, String)]) -> String {
+    if tags.is_empty() {
+        return String::new();
+    }
+    let mut out = String::with_capacity(tags.len() * 16);
+    out.push('{');
+    for (index, (name, value)) in tags.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(name);
+        out.push_str("=\"");
+        out.push_str(&escape_label(value));
+        out.push('"');
+    }
+    out.push('}');
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_application_meter_is_rendered_in_prometheus_text() {
+        let meter = webx_core::metrics::MemoryMeter::new();
+        meter
+            .counter("orders_total", &[("tenant", "a"), ("status", "ok")])
+            .add(3);
+        meter.gauge("workers", &[]).set(2.0);
+        meter
+            .histogram("order_seconds", &[("tenant", "a")])
+            .record(0.5);
+
+        let text = render_meter(&meter);
+        assert!(text.contains("# TYPE orders_total counter"), "{text}");
+        assert!(
+            text.contains("orders_total{status=\"ok\",tenant=\"a\"} 3"),
+            "{text}"
+        );
+        assert!(text.contains("# TYPE workers gauge"), "{text}");
+        assert!(text.contains("workers 2"), "{text}");
+        assert!(text.contains("# TYPE order_seconds summary"), "{text}");
+        assert!(
+            text.contains("order_seconds_count{tenant=\"a\"} 1"),
+            "{text}"
+        );
+        assert!(
+            text.contains("order_seconds_sum{tenant=\"a\"} 0.5"),
+            "{text}"
+        );
+    }
 
     #[test]
     fn event_metrics_render_prometheus_counters() {

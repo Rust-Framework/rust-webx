@@ -16,14 +16,22 @@ use async_trait::async_trait;
 
 use crate::error::Result;
 
+pub mod event_store;
 pub mod fanout;
 pub mod metrics;
 pub mod registry;
 pub mod signaling;
 
+pub use event_store::{
+    IRealtimeEventStore, InMemoryRealtimeEventStore, RealtimeEvent, RealtimeEventStoreLimits,
+    ResumeFrame, ResumeRequest,
+};
 pub use fanout::RealtimeFanoutEvent;
 pub use metrics::{RealtimeMetrics, RealtimeMetricsSnapshot};
-pub use registry::{IConnectionRegistry, InMemoryConnectionRegistry, Presence, PresenceStatus};
+pub use registry::{
+    IConnectionRegistry, IPresenceObserver, InMemoryConnectionRegistry, Presence,
+    PresenceDirection, PresenceStatus, PresenceTransition,
+};
 pub use signaling::{
     hmac_sha1_base64, SignalingKind, SignalingMessage, TurnCredentials, TurnRestConfig,
     DEFAULT_TURN_TTL_SECONDS, MAX_TURN_TTL_SECONDS,
@@ -169,6 +177,18 @@ pub struct WebSocketLimits {
     pub on_queue_full: BackpressurePolicy,
     /// Close the connection when no inbound frame arrives within this duration.
     pub idle_timeout: Option<std::time::Duration>,
+    /// Absolute cap on how long one connection may live (`None` = unlimited).
+    ///
+    /// Unlike [`Self::idle_timeout`], traffic does not extend this deadline:
+    /// the session is closed at `opened_at + lifetime` with close code `1001`.
+    pub max_connection_lifetime: Option<std::time::Duration>,
+    /// Also close the session when the upgrade token's `exp` passes.
+    ///
+    /// Browser clients cannot refresh the credential used at upgrade time, so a
+    /// session outliving its access token keeps an expired credential alive.
+    /// When enabled (default `false`), the session closes with code `1008` and
+    /// the earlier of this and [`Self::max_connection_lifetime`] wins.
+    pub close_at_token_expiry: bool,
 }
 
 impl Default for WebSocketLimits {
@@ -180,6 +200,8 @@ impl Default for WebSocketLimits {
             outbound_queue: 64,
             on_queue_full: BackpressurePolicy::Drop,
             idle_timeout: None,
+            max_connection_lifetime: None,
+            close_at_token_expiry: false,
         }
     }
 }
@@ -218,6 +240,18 @@ impl WebSocketLimits {
     /// Close connections that stay idle for `timeout`.
     pub fn with_idle_timeout(mut self, timeout: std::time::Duration) -> Self {
         self.idle_timeout = Some(timeout);
+        self
+    }
+
+    /// Cap how long one connection may live, regardless of traffic.
+    pub fn with_max_connection_lifetime(mut self, lifetime: std::time::Duration) -> Self {
+        self.max_connection_lifetime = Some(lifetime);
+        self
+    }
+
+    /// Close the session when the upgrade token's `exp` passes.
+    pub fn close_at_token_expiry(mut self) -> Self {
+        self.close_at_token_expiry = true;
         self
     }
 }

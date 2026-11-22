@@ -73,6 +73,7 @@ rust-webx is **not** a full-stack UI framework (pair it with any frontend), **no
 - **Production capabilities out of the box** — graceful shutdown, live health checks, security headers, request IDs, CORS, TLS, rate limiting, compression, OpenAPI + SPA hosting.
 - **File upload & download** — typed `FormFile` binding for `multipart/form-data` (streamed, spooled to disk, size-limited) and ASP.NET Core-shaped file responses (`FileResult::path` / `::stream` / `::seekable_stream`, `ContentResult`) with `Content-Disposition`, `ETag`, `Last-Modified` and `Range`.
 - **ORM-agnostic** — the framework does not depend on `rust-ef`; the `docbit` reference app wires it in with minimal glue.
+- **Payments as a domain group** — opt-in `rust-webx-pay*` crates: one `IPaymentProvider` port for Stripe, Alipay, WeChat Pay v3, PayPal, Adyen and Square, with runtime `IPaymentServiceFactory`/`PaymentScope` configuration, a frontend payment-method catalog (`PaymentOption`), multi-account routing, raw-body webhook verification, provider-specific ACKs and a rust-ef inbox. See the [payments chapter](docs/rust-webx/13-extensibility/payments.md).
 - **Mediator without an annotation tax** — a `#[handler]` whose Request has no HTTP route is automatically an `IMediator` handler; its response does not need `Serialize`. HTTP capability belongs to the route, not to a handler mode flag.
 
 ## Why rust-webx
@@ -126,7 +127,7 @@ The framework is split into a small set of focused crates, re-exported through t
 
 ```
 rust-webx/
-├── Cargo.toml                 # workspace root (v2.6.0)
+├── Cargo.toml                 # workspace root (v2.7.0)
 ├── crates/
 │   ├── core/                  # rust-webx-core  — traits, configuration
 │   ├── engine/                # rust-webx-engine — worker pool, direct dispatch
@@ -150,10 +151,14 @@ rust-webx/
 │   │   └── webauthn/          #   rust-webx-webauthn
 │   ├── cache/                 # third-party cache adapters
 │   │   └── redis/             #   rust-webx-redis — IDistributedCache + event transport
-│   └── queue/                 # third-party message-queue adapters
-│       ├── nats/              #   rust-webx-nats
-│       ├── rabbitmq/          #   rust-webx-rabbitmq
-│       └── kafka/             #   rust-webx-kafka
+│   ├── queue/                 # third-party message-queue adapters
+│   │   ├── nats/              #   rust-webx-nats
+│   │   ├── rabbitmq/          #   rust-webx-rabbitmq
+│   │   └── kafka/             #   rust-webx-kafka
+│   ├── ef/                    # ORM boundary adapters
+│   │   └── webx/              #   rust-webx-ef — sanitized EFError → webx::Error mapping
+│   └── outbox/                # transactional-outbox starters
+│       └── ef/                #   rust-webx-outbox-ef — same-transaction enqueue + dispatch
 ├── docbit/                    # reference app: portfolio + blog + RBAC + docs
 ├── dmbit/                     # reference app: device & inventory management
 └── imbit/                     # reference app: real-time IM (WS + signaling)
@@ -170,7 +175,8 @@ rust-webx/
 > `rust-webx-oauth2` → `webx_oauth2`, `rust-webx-mfa` → `webx_mfa`,
 > `rust-webx-webauthn` → `webx_webauthn`, `rust-webx-redis` → `webx_redis`,
 > `rust-webx-nats` → `webx_nats`, `rust-webx-rabbitmq` → `webx_rabbitmq`,
-> `rust-webx-kafka` → `webx_kafka`.
+> `rust-webx-kafka` → `webx_kafka`, `rust-webx-ef` → `webx_ef`,
+> `rust-webx-outbox-ef` → `webx_outbox_ef`.
 
 ## Request-as-Endpoint: Hello World
 

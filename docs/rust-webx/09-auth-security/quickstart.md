@@ -1,4 +1,4 @@
-﻿# 认证快速上手（TTFPE ≤ 10 分钟）
+# 认证快速上手（TTFPE ≤ 10 分钟）
 
 > 目标：从空项目到“登录拿 JWT → 访问受保护端点”不超过 10 分钟。
 > 生产加固见 [安全最佳实践](security-best-practices.md) 与 [密钥轮换 Runbook](key-rotation-runbook.md)。
@@ -7,7 +7,7 @@
 
 ```toml
 [dependencies]
-rust-webx = "2.6.0"
+rust-webx = "2.7.0"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 ```

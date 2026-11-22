@@ -26,12 +26,14 @@
 //! connection is lazy, so host startup does not fail when Redis is temporarily
 //! down; `/health/ready` reports the real state.
 
+mod advisory_lock;
 mod cache;
 mod connection;
 mod events;
 mod health;
 mod options;
 
+pub use advisory_lock::RedisAdvisoryLock;
 pub use cache::RedisCache;
 pub use connection::RedisConnection;
 pub use events::{RedisEventConsumer, RedisEventPublisher};
@@ -42,6 +44,7 @@ use std::sync::Arc;
 
 use rust_dix::ServiceCollection;
 use webx_core::cache::IDistributedCache;
+use webx_core::locking::IAdvisoryLock;
 use webx_core::mediator::{EventDispatcher, IEventPublisher};
 use webx_core::route::ext::IServiceCollectionExt;
 use webx_host::server::HostBuilder;
@@ -116,6 +119,12 @@ pub trait RedisHostBuilderExt: Sized {
 
     /// Same as [`add_redis`](Self::add_redis), but with a pre-built connection.
     fn add_redis_with(self, connection: Arc<RedisConnection>, options: RedisOptions) -> Self;
+
+    /// Register a Redis advisory lock (`IAdvisoryLock`) at `options.url`.
+    ///
+    /// The lock shares the URL/prefix conventions of the cache but uses its own
+    /// lazily connected handle; keys become `{key_prefix}lock:{key}`.
+    fn add_redis_advisory_lock(self, options: impl Into<RedisOptions>) -> Self;
 }
 
 impl RedisHostBuilderExt for HostBuilder {
@@ -141,6 +150,18 @@ impl RedisHostBuilderExt for HostBuilder {
         } else {
             builder
         }
+    }
+
+    fn add_redis_advisory_lock(self, options: impl Into<RedisOptions>) -> Self {
+        let options = options.into();
+        let connection = Arc::new(RedisConnection::new(
+            options.url.clone(),
+            options.connect_timeout(),
+            options.command_timeout(),
+        ));
+        let lock: Arc<dyn IAdvisoryLock> =
+            Arc::new(RedisAdvisoryLock::new(connection, options.key_prefix));
+        self.register(move |services| services.instance::<dyn IAdvisoryLock>(lock))
     }
 }
 

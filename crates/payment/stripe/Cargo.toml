@@ -1,0 +1,42 @@
+[package]
+name = "rust-webx-pay-stripe"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+documentation.workspace = true
+description = "Stripe adapter for rust-webx-pay: PaymentIntents, refunds and webhook signature verification"
+readme = "../../../README.md"
+keywords = ["web", "payment", "stripe", "webhooks"]
+categories = ["web-programming"]
+
+[lib]
+name = "webx_pay_stripe"
+
+[dependencies]
+rust-webx-core.workspace = true
+rust-webx-host.workspace = true
+rust-webx-client.workspace = true
+rust-webx-pay.workspace = true
+rust-dix.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+bytes.workspace = true
+url.workspace = true
+hmac.workspace = true
+sha2.workspace = true
+data-encoding.workspace = true
+percent-encoding.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+rust-webx.workspace = true
+
+[lints]
+workspace = true

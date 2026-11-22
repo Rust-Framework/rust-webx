@@ -41,7 +41,18 @@ appsettings.Development.json        # 开发环境覆盖（Development 模式）
     "TrustProxy": false
   },
   "Metrics": {
-    "Enabled": false
+    "Enabled": false,
+    "MaxSeries": 10000
+  },
+  "Idempotency": {
+    "Enabled": false,
+    "TtlSeconds": 86400,
+    "MaxTrackedKeys": 10000,
+    "MaxBodyBytes": 1048576
+  },
+  "ClientInfo": {
+    "TrustForwardedHeaders": false,
+    "TrustedProxies": []
   },
   "Turn": {
     "Secret": "",
@@ -72,6 +83,8 @@ appsettings.Development.json        # 开发环境覆盖（Development 模式）
 | `Tls` | `TlsSection` |
 | `RateLimit` | `RateLimitSection` |
 | `Metrics` | `MetricsSection` |
+| `Idempotency` | `IdempotencySection` |
+| `ClientInfo` | `ClientInfoSection` |
 | `Turn` | `TurnSection` |
 | `Form` | `FormSection` |
 | `Culture` | `CultureSection` |

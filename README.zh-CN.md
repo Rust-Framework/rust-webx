@@ -71,6 +71,10 @@ rust-webx **不是** 全栈 UI 框架（可搭配任意前端）、**不是** OR
 - **开箱即用的生产能力** — 优雅关闭、动态健康检查、安全响应头、请求 ID、CORS、TLS、速率限制、压缩、OpenAPI + SPA 托管。
 - **文件上传与下载** — `multipart/form-data` 以类型化 `FormFile` 绑定（流式接收、按阈值落盘、大小受控）；下载提供对齐 ASP.NET Core 的结果类型（`FileResult::path` / `::stream` / `::seekable_stream`、`ContentResult`），自带 `Content-Disposition`、`ETag`、`Last-Modified` 与 `Range`。
 - **ORM 无关** — 框架不依赖 `rust-ef`；`docbit` 参考应用用极少量胶水代码接入。
+- **支付领域组** — 按需引入 `rust-webx-pay*`：Stripe、支付宝、微信支付 v3、PayPal、Adyen、Square 共用
+  一套 `IPaymentProvider` 端口，支持运行时 `IPaymentServiceFactory`/`PaymentScope` 配置、前端支付方式目录
+  （`PaymentOption`）、多账户/服务商、原始 body 回调验签、各供应商 ACK 与 rust-ef inbox。
+  见[支付章](docs/rust-webx/13-extensibility/payments.md)。
 - **Mediator 不增加认知负担** — `#[handler]` 对应的 Request 没有 HTTP 路由时，自动作为 `IMediator` handler；响应不要求 `Serialize`。HTTP 能力属于路由，而不是 handler 上的模式开关。
 
 ## 为什么选择 rust-webx
@@ -121,7 +125,7 @@ rust-webx **不是** 全栈 UI 框架（可搭配任意前端）、**不是** OR
 
 ```
 rust-webx/
-├── Cargo.toml                 # workspace 根 (v2.6.0)
+├── Cargo.toml                 # workspace 根 (v2.7.0)
 ├── crates/
 │   ├── core/                  # rust-webx-core  — trait 与配置
 │   ├── engine/                # rust-webx-engine — 执行引擎：worker 池、直接分发
@@ -144,10 +148,14 @@ rust-webx/
 │   │   └── webauthn/          #   rust-webx-webauthn
 │   ├── cache/                 # 第三方缓存适配器
 │   │   └── redis/             #   rust-webx-redis — IDistributedCache + 事件传输
-│   └── queue/                 # 第三方消息队列适配器
-│       ├── nats/              #   rust-webx-nats
-│       ├── rabbitmq/          #   rust-webx-rabbitmq
-│       └── kafka/             #   rust-webx-kafka
+│   ├── queue/                 # 第三方消息队列适配器
+│   │   ├── nats/              #   rust-webx-nats
+│   │   ├── rabbitmq/          #   rust-webx-rabbitmq
+│   │   └── kafka/             #   rust-webx-kafka
+│   ├── ef/                    # ORM 边界适配器
+│   │   └── webx/              #   rust-webx-ef — EFError → webx::Error 脱敏映射
+│   └── outbox/                # 事务性 outbox starter
+│       └── ef/                #   rust-webx-outbox-ef — 同事务入队 + 租约派发
 ├── docbit/                    # 参考应用：作品集 + 博客 + RBAC + 文档
 ├── dmbit/                     # 参考应用：设备与库存管理
 └── imbit/                     # 参考应用：实时 IM（WS + 信令）
@@ -162,7 +170,8 @@ rust-webx/
 > `rust-webx-oidc` → `webx_oidc`、`rust-webx-oauth2` → `webx_oauth2`、
 > `rust-webx-mfa` → `webx_mfa`、`rust-webx-webauthn` → `webx_webauthn`、
 > `rust-webx-redis` → `webx_redis`、`rust-webx-nats` → `webx_nats`、
-> `rust-webx-rabbitmq` → `webx_rabbitmq`、`rust-webx-kafka` → `webx_kafka`。
+> `rust-webx-rabbitmq` → `webx_rabbitmq`、`rust-webx-kafka` → `webx_kafka`、
+> `rust-webx-ef` → `webx_ef`、`rust-webx-outbox-ef` → `webx_outbox_ef`。
 
 ## 请求即端点：Hello World
 

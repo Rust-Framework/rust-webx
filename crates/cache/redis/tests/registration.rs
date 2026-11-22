@@ -2,6 +2,7 @@
 //! server (the connection is lazy).
 
 use webx_core::cache::IDistributedCache;
+use webx_core::locking::IAdvisoryLock;
 use webx_core::mediator::IEventPublisher;
 use webx_core::mode::AppMode;
 use webx_host::server::Host;
@@ -44,4 +45,17 @@ fn service_collection_registration_is_usable_from_register() {
 
     assert!(host.provider().get::<dyn IEventPublisher>().is_ok());
     assert!(host.provider().get::<dyn IDistributedCache>().is_err());
+}
+
+#[test]
+fn add_redis_advisory_lock_registers_only_the_lock() {
+    let host = Host::builder()
+        .mode(AppMode::Development)
+        .add_redis_advisory_lock(RedisOptions::new("redis://127.0.0.1:1").with_prefix("app:"))
+        .try_build()
+        .expect("host builds without connecting");
+
+    assert!(host.provider().get::<dyn IAdvisoryLock>().is_ok());
+    assert!(host.provider().get::<dyn IDistributedCache>().is_err());
+    assert!(host.provider().get::<dyn IEventPublisher>().is_err());
 }

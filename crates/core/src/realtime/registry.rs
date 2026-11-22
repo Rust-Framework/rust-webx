@@ -64,6 +64,58 @@ struct AwayMarker {
     until: Instant,
 }
 
+/// Direction of a user-level connection-count change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PresenceDirection {
+    /// A connection for the user was added.
+    Connected,
+    /// A connection for the user was removed.
+    Disconnected,
+}
+
+/// One atomic user-level presence change.
+///
+/// Computed inside the registry lock, so it is the race-free way to answer
+/// "is this the user's first/last connection": business code never counts
+/// `user_connections` across two calls.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PresenceTransition {
+    /// Authenticated user whose connection count changed.
+    pub user_id: String,
+    /// Tenant claim of the connection (`None` when the token has none).
+    pub tenant_id: Option<String>,
+    /// Live connection count of the user *after* the change.
+    pub connections: usize,
+    /// Whether a connection was added or removed.
+    pub direction: PresenceDirection,
+}
+
+impl PresenceTransition {
+    /// This was the user's first live connection (became online).
+    pub fn is_first(&self) -> bool {
+        self.direction == PresenceDirection::Connected && self.connections == 1
+    }
+
+    /// This was the user's last live connection (became offline).
+    pub fn is_last(&self) -> bool {
+        self.direction == PresenceDirection::Disconnected && self.connections == 0
+    }
+}
+
+/// Observer notified for every authenticated connection's presence transition.
+///
+/// Register it with `HostBuilder::use_presence_observer` (or as a DI singleton
+/// for `dyn IPresenceObserver`). Observers run on the session task before
+/// `IWebSocketHandler::on_connect` and after the connection is unregistered, so
+/// "announce online/offline exactly once per transition" needs no app-side
+/// counting. Never block the session: do fan-out/event publishing, not I/O
+/// waits that outlive the transition.
+#[async_trait::async_trait]
+pub trait IPresenceObserver: Send + Sync {
+    /// Called after the registry applied the change.
+    async fn on_presence_transition(&self, transition: PresenceTransition);
+}
+
 /// Process-local connection registry.
 pub trait IConnectionRegistry: Send + Sync {
     /// Add a live connection (called by the transport when a session starts).
@@ -71,6 +123,24 @@ pub trait IConnectionRegistry: Send + Sync {
 
     /// Remove a connection (called when the session ends).
     fn unregister(&self, id: ConnectionId);
+
+    /// Add a connection and atomically report the user-level transition.
+    ///
+    /// Default: register and report nothing (a remote registry may not track
+    /// presence locally). The in-memory registry reports every authenticated
+    /// registration; anonymous connections report `None`.
+    fn register_observed(&self, connection: Arc<dyn IConnection>) -> Option<PresenceTransition> {
+        self.register(connection);
+        None
+    }
+
+    /// Remove a connection and atomically report the user-level transition.
+    ///
+    /// Default: unregister and report nothing.
+    fn unregister_observed(&self, id: ConnectionId) -> Option<PresenceTransition> {
+        self.unregister(id);
+        None
+    }
 
     /// Look up one live connection.
     fn get(&self, id: ConnectionId) -> Option<Arc<dyn IConnection>>;
@@ -95,6 +165,25 @@ pub trait IConnectionRegistry: Send + Sync {
     /// All live connections in a room.
     fn room_connections(&self, room: &str) -> Vec<Arc<dyn IConnection>>;
 
+    /// Number of live connections for `user_id` (`0` when offline).
+    fn user_connection_count(&self, user_id: &str) -> usize {
+        self.user_connections(user_id).len()
+    }
+
+    /// Number of live connections in `room`.
+    fn room_connection_count(&self, room: &str) -> usize {
+        self.room_connections(room).len()
+    }
+
+    /// Number of live connections in `tenant_id`.
+    ///
+    /// Connections whose identity carries no tenant claim are not counted. The
+    /// default returns `0`; a remote/shared registry must override it when it
+    /// knows the tenant index.
+    fn tenant_connection_count(&self, _tenant_id: &str) -> usize {
+        0
+    }
+
     /// Set an explicit away marker for `user_id`; it expires after `ttl` (a
     /// reconnecting user is online again).
     fn set_presence(&self, user_id: &str, status: PresenceStatus, ttl: Duration);
@@ -114,6 +203,10 @@ struct RegistryState {
     rooms: HashMap<String, HashSet<u64>>,
     /// user id -> away marker.
     away: HashMap<String, AwayMarker>,
+    /// tenant id -> connection ids (identities without a claim are not indexed).
+    tenants: HashMap<String, HashSet<u64>>,
+    /// connection id -> tenant id.
+    connection_tenants: HashMap<u64, String>,
 }
 
 /// In-memory [`IConnectionRegistry`].
@@ -166,38 +259,95 @@ impl InMemoryConnectionRegistry {
     pub fn next_token(&self) -> u64 {
         self.subscriber_seq.fetch_add(1, Ordering::Relaxed)
     }
-}
 
-impl IConnectionRegistry for InMemoryConnectionRegistry {
-    fn register(&self, connection: Arc<dyn IConnection>) {
+    /// Shared registration body: inserts the connection and, for an
+    /// authenticated identity, computes the user-level transition while the
+    /// indexes are still locked.
+    fn register_inner(&self, connection: Arc<dyn IConnection>) -> Option<PresenceTransition> {
         let id = connection.id().value();
-        let identity = connection
-            .context()
-            .identity()
-            .map(|identity| identity.id.clone());
+        let identity = connection.context().identity().cloned();
         let mut state = self.lock();
-        if let Some(user_id) = identity {
-            state.users.entry(user_id.clone()).or_default().insert(id);
-            state.connection_users.insert(id, user_id);
-        }
+        let transition = identity.map(|identity| {
+            state
+                .users
+                .entry(identity.id.clone())
+                .or_default()
+                .insert(id);
+            state.connection_users.insert(id, identity.id.clone());
+            let tenant_id = identity.tenant().map(str::to_string);
+            if let Some(tenant_id) = &tenant_id {
+                state
+                    .tenants
+                    .entry(tenant_id.clone())
+                    .or_default()
+                    .insert(id);
+                state.connection_tenants.insert(id, tenant_id.clone());
+            }
+            PresenceTransition {
+                user_id: identity.id.clone(),
+                tenant_id,
+                connections: state.users.get(&identity.id).map_or(0, HashSet::len),
+                direction: PresenceDirection::Connected,
+            }
+        });
         state.connections.insert(id, connection);
+        transition
     }
 
-    fn unregister(&self, id: ConnectionId) {
+    /// Shared unregistration body: removes the connection and, for an
+    /// authenticated identity, computes the user-level transition atomically.
+    fn unregister_inner(&self, id: ConnectionId) -> Option<PresenceTransition> {
         let mut state = self.lock();
         state.connections.remove(&id.value());
-        if let Some(user_id) = state.connection_users.remove(&id.value()) {
+        let user_id = state.connection_users.remove(&id.value());
+        let tenant_id = state.connection_tenants.remove(&id.value());
+        let transition = user_id.map(|user_id| {
+            let mut connections = 0;
             if let Some(ids) = state.users.get_mut(&user_id) {
                 ids.remove(&id.value());
+                connections = ids.len();
                 if ids.is_empty() {
                     state.users.remove(&user_id);
                 }
             }
-        }
+            if let Some(tenant_id) = &tenant_id {
+                if let Some(ids) = state.tenants.get_mut(tenant_id) {
+                    ids.remove(&id.value());
+                    if ids.is_empty() {
+                        state.tenants.remove(tenant_id);
+                    }
+                }
+            }
+            PresenceTransition {
+                user_id: user_id.clone(),
+                tenant_id: tenant_id.clone(),
+                connections,
+                direction: PresenceDirection::Disconnected,
+            }
+        });
         for ids in state.rooms.values_mut() {
             ids.remove(&id.value());
         }
         state.rooms.retain(|_, ids| !ids.is_empty());
+        transition
+    }
+}
+
+impl IConnectionRegistry for InMemoryConnectionRegistry {
+    fn register(&self, connection: Arc<dyn IConnection>) {
+        let _ = self.register_inner(connection);
+    }
+
+    fn unregister(&self, id: ConnectionId) {
+        let _ = self.unregister_inner(id);
+    }
+
+    fn register_observed(&self, connection: Arc<dyn IConnection>) -> Option<PresenceTransition> {
+        self.register_inner(connection)
+    }
+
+    fn unregister_observed(&self, id: ConnectionId) -> Option<PresenceTransition> {
+        self.unregister_inner(id)
     }
 
     fn get(&self, id: ConnectionId) -> Option<Arc<dyn IConnection>> {
@@ -257,6 +407,18 @@ impl IConnectionRegistry for InMemoryConnectionRegistry {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    fn user_connection_count(&self, user_id: &str) -> usize {
+        self.lock().users.get(user_id).map_or(0, HashSet::len)
+    }
+
+    fn room_connection_count(&self, room: &str) -> usize {
+        self.lock().rooms.get(room).map_or(0, HashSet::len)
+    }
+
+    fn tenant_connection_count(&self, tenant_id: &str) -> usize {
+        self.lock().tenants.get(tenant_id).map_or(0, HashSet::len)
     }
 
     fn set_presence(&self, user_id: &str, status: PresenceStatus, ttl: Duration) {
@@ -368,6 +530,92 @@ mod tests {
             id: id.to_string(),
             ..Default::default()
         })
+    }
+
+    fn tenant_user(id: &str, tenant_id: &str) -> Arc<IdentityUser> {
+        Arc::new(IdentityUser {
+            id: id.to_string(),
+            tenant_id: tenant_id.to_string(),
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn observed_registration_reports_first_and_last_transitions() {
+        let registry = InMemoryConnectionRegistry::new();
+        let first_connection = Arc::new(FakeConnection::new(Some(tenant_user("alice", "acme"))));
+        let second_connection = Arc::new(FakeConnection::new(Some(tenant_user("alice", "acme"))));
+        let anonymous = Arc::new(FakeConnection::new(None));
+
+        let first = registry
+            .register_observed(Arc::clone(&first_connection) as Arc<dyn IConnection>)
+            .expect("an authenticated registration reports a transition");
+        assert_eq!(first.direction, PresenceDirection::Connected);
+        assert_eq!(first.user_id, "alice");
+        assert_eq!(first.tenant_id.as_deref(), Some("acme"));
+        assert_eq!(first.connections, 1);
+        assert!(first.is_first());
+        assert!(!first.is_last());
+
+        let second = registry
+            .register_observed(Arc::clone(&second_connection) as Arc<dyn IConnection>)
+            .expect("the second registration still reports the count");
+        assert_eq!(second.connections, 2);
+        assert!(!second.is_first());
+
+        assert!(
+            registry
+                .register_observed(Arc::clone(&anonymous) as Arc<dyn IConnection>)
+                .is_none(),
+            "anonymous connections have no presence"
+        );
+
+        let after_second = registry
+            .unregister_observed(second_connection.id())
+            .expect("authenticated unregistration reports a transition");
+        assert_eq!(after_second.direction, PresenceDirection::Disconnected);
+        assert_eq!(after_second.connections, 1);
+        assert!(!after_second.is_last());
+
+        let last = registry
+            .unregister_observed(first_connection.id())
+            .expect("the last unregistration reports");
+        assert!(last.is_last());
+        assert_eq!(last.connections, 0);
+        assert_eq!(last.tenant_id.as_deref(), Some("acme"));
+
+        assert!(
+            registry
+                .unregister_observed(first_connection.id())
+                .is_none(),
+            "unknown connections report nothing"
+        );
+    }
+
+    #[test]
+    fn connection_counts_are_indexed_by_user_room_and_tenant() {
+        let registry = InMemoryConnectionRegistry::new();
+        let alice = Arc::new(FakeConnection::new(Some(tenant_user("alice", "acme"))));
+        let bob = Arc::new(FakeConnection::new(Some(tenant_user("bob", "acme"))));
+        let anonymous = Arc::new(FakeConnection::new(None));
+        for connection in [&alice, &bob, &anonymous] {
+            registry.register(Arc::clone(connection) as Arc<dyn IConnection>);
+        }
+        registry.join(alice.id(), "room-1");
+        registry.join(bob.id(), "room-1");
+
+        assert_eq!(registry.user_connection_count("alice"), 1);
+        assert_eq!(registry.user_connection_count("nobody"), 0);
+        assert_eq!(registry.room_connection_count("room-1"), 2);
+        assert_eq!(registry.room_connection_count("room-2"), 0);
+        assert_eq!(registry.tenant_connection_count("acme"), 2);
+        assert_eq!(registry.tenant_connection_count("other"), 0);
+
+        registry.unregister(alice.id());
+        assert_eq!(registry.tenant_connection_count("acme"), 1);
+        assert_eq!(registry.room_connection_count("room-1"), 1);
+        registry.unregister(bob.id());
+        assert_eq!(registry.tenant_connection_count("acme"), 0);
     }
 
     #[test]

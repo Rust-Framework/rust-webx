@@ -98,6 +98,8 @@
 - [第十一章 生产级能力](./11-production/INDEX.md)
   - [CORS、TLS 与健康检查](./11-production/cors-tls-health.md)
   - [缓存与速率限制](./11-production/caching-rate-limit.md)
+  - [分布式锁与租约](./11-production/advisory-lock.md)
+  - [请求级幂等](./11-production/idempotency.md)
   - [配额与预扣-结算](./11-production/quota.md)
   - [用量计量与账本](./11-production/usage-metering.md)
   - [模型目录与路由](./11-production/model-routing.md)
@@ -129,6 +131,8 @@
   - [出站 HTTP（rust-webx-client）](./13-extensibility/outbound-http.md)
   - [错误响应写入器](./13-extensibility/error-writers.md)
   - [Mock 上游](./13-extensibility/mock-upstream.md)
+  - [支付（Stripe/支付宝/微信/PayPal/Adyen/Square）](./13-extensibility/payments.md)
+  - [事务性 outbox](./13-extensibility/outbox.md)
 
 - [第十四章 最佳实践](./14-best-practices/INDEX.md)
   - [常见陷阱与排查](./14-best-practices/common-pitfalls.md)

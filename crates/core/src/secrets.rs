@@ -320,6 +320,51 @@ impl ISecretStore for FileSecretStore {
     }
 }
 
+/// Ciphertext prefix produced by the framework's AES-GCM protector
+/// (`webx1:<key-id>:<base64url(nonce||ciphertext)>`).
+pub const PROTECTED_SECRET_PREFIX: &str = "webx1";
+
+/// Encrypt-before-store port for secrets that must live in a database row
+/// (TOTP seeds, provider refresh tokens, one-time signing keys).
+///
+/// The [`ISecretStore`] port answers "where does the key live"; this port
+/// answers "how is a value encrypted at rest". A local AES-256-GCM
+/// implementation lives in `webx_host::secret_protector`; a KMS/Vault
+/// implementation of the same trait changes no call site.
+///
+/// # Contract
+///
+/// * `protect` uses the **active** key and returns a self-describing ciphertext
+///   (algorithm prefix + key id), so old rows stay decryptable after rotation.
+/// * `unprotect` selects the key by the id embedded in the ciphertext and must
+///   fail closed: a tampered ciphertext is `Unavailable`, never plaintext.
+/// * Neither method ever logs or returns the plaintext in an error detail.
+///
+/// # Deployment semantics
+///
+/// * **Single process**: the key ring is loaded once at startup from
+///   [`ISecretStore`]; plaintext never enters configuration files.
+/// * **Multiple instances**: all nodes must share the same key ring (same
+///   secret store), otherwise a row written by one node cannot be read by
+///   another. Key rotation = deploy a ring whose active key is new while old
+///   keys stay for reads; rows are re-encrypted on their next write.
+/// * **Containers**: keys come from mounted/environment secrets at boot; a
+///   restart is safe because nothing secret is cached on local disk.
+/// * **Performance**: one AEAD operation per protected field (microseconds);
+///   protect small values, not blobs. Do not call it while holding a database
+///   transaction open on a remote KMS.
+#[async_trait]
+pub trait ISecretProtector: Send + Sync {
+    /// Encrypt `plaintext` with the active key; returns a self-describing ciphertext.
+    async fn protect(&self, plaintext: &str) -> Result<String, SecretError>;
+
+    /// Decrypt a ciphertext produced by any retained key.
+    async fn unprotect(&self, ciphertext: &str) -> Result<SecretValue, SecretError>;
+
+    /// Active key id (diagnostics and rotation bookkeeping).
+    fn active_key_id(&self) -> &str;
+}
+
 /// Try each store in order until one returns a value.
 pub struct ChainSecretStore {
     stores: Vec<Arc<dyn ISecretStore>>,

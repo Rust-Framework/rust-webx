@@ -60,6 +60,43 @@ assert_eq!(
 );
 ```
 
+## 业务指标导出（IMeter → /metrics）
+
+`Metrics.Enabled = true` 时 host 自动注册一个**有界** `MemoryMeter` 作为 `IMeter`（可用
+`HostBuilder::use_meter` 覆盖）。业务代码通过端口记录，`/metrics` 直接渲染：
+
+```rust
+#[derive(Inject)]
+struct CreateOrderHandler {
+    #[inject]
+    meter: Arc<dyn IMeter>,
+}
+
+self.meter
+    .counter("orders_created_total", &[("channel", "web")])
+    .inc();
+self.meter
+    .histogram("order_seconds", &[("channel", "web")])
+    .record(elapsed);
+```
+
+```text
+# TYPE orders_created_total counter
+orders_created_total{channel="web"} 3
+# TYPE order_seconds summary
+order_seconds_count{channel="web"} 3
+order_seconds_sum{channel="web"} 0.42
+```
+
+- **渲染契约**：`IMeter::snapshot()` 返回 `MetricSample { name, kind, tags, value, count }`；
+  counter/gauge 一行一个序列，histogram 渲染为 summary（`_count` + `_sum`，端口不记录桶边界）。
+- **计数器命名**：按 Prometheus 约定以 `_total` 结尾；框架不会自动加后缀。
+- **基数上限**：`MemoryMeter` 的序列数受 `Metrics.MaxSeries`（默认 10000）约束，超过上限的**新**
+  序列被丢弃（已有序列继续更新），可用 `dropped_series()` 观测。
+- **自定义 meter**：`snapshot()` 默认返回空——OTel 等自带 exporter 的实现不需要它；若也要让
+  `/metrics` 暴露，实现 `snapshot()` 即可（必须非阻塞、返回有界快照）。
+- **多实例**：每个实例只导出自己的序列，聚合在 Prometheus 侧完成；容器重启后计数从 0 开始。
+
 ## OpenTelemetry 桥接
 
 框架**不**引入 OTel 依赖（`opentelemetry` 的版本节奏与 MSRV 需单独评审）。两条零依赖桥接路径：
@@ -206,6 +243,9 @@ impl IMeter for PrometheusMeter {
     fn counter(&self, name: &'static str, tags: &[(&str, &str)]) -> Arc<dyn Counter> { /* ... */ }
     fn histogram(&self, name: &'static str, tags: &[(&str, &str)]) -> Arc<dyn Histogram> { /* ... */ }
     fn gauge(&self, name: &'static str, tags: &[(&str, &str)]) -> Arc<dyn Gauge> { /* ... */ }
+
+    // 可选：让框架的 `/metrics` 也暴露这些序列。
+    fn snapshot(&self) -> Vec<MetricSample> { /* bounded, non-blocking */ }
 }
 ```
 
@@ -214,7 +254,9 @@ impl IMeter for PrometheusMeter {
 
 ## 边界
 
-- 已有：端口、Noop/Memory、执行器请求/TTFT/token/成本/上游错误/配额/active streams/熔断状态指标、
-  结构化完成/失败/流日志，以及 `GatewayHealth` 的 `/health/ready` 聚合。
-- 未做：租户档位标签、上游子 span、OTel exporter、`tracestate`。
+- 已有：端口、Noop/Memory（有界基数）、执行器请求/TTFT/token/成本/上游错误/配额/active
+  streams/熔断状态指标、`IMeter` 快照导出到 `/metrics`、结构化完成/失败/流日志，
+  以及 `GatewayHealth` 的 `/health/ready` 聚合。
+- 未做：租户档位标签、上游子 span、OTel exporter、`tracestate`、histogram 桶边界
+  （端口只记录观测值，导出的 histogram 是 count/sum summary）。
 - 指标失败不得影响请求；exporter 由应用注册。

@@ -22,6 +22,7 @@ rust-dix.workspace = true
 async-trait.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }
 serde.workspace = true
+uuid.workspace = true
 tracing.workspace = true
 redis.workspace = true
 

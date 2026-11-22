@@ -227,8 +227,40 @@ impl IWebSocketHandler for RoomHandler {
 | `len()` / `get(id)` / `is_empty()` | 在线连接数与单连接查找 |
 | `user_connections(user_id)` | 某认证用户的所有连接（多端登录） |
 | `join(id, room)` / `leave(id, room)` / `room_connections(room)` | 房间索引与扇出 |
+| `user_connection_count` / `room_connection_count` / `tenant_connection_count` | 按用户/房间/租户的在线数（无需拉连接列表） |
 | `presence(user_id)` | `Presence { status, connections }` |
 | `set_presence(user_id, Away, ttl)` | 显式 away；TTL 过期且仍有连接时回到 Online；无连接即 Offline |
+
+### 第一端 / 最后一端（原子转移）
+
+“上线广播一次、下线广播一次”不要用 `user_connection_count` 前后对比：两个连接并发进入时，
+双方都可能看到“不是第一端”。注册表在**同一个锁内**同时完成索引更新与转移计算，
+通过 `IPresenceObserver` 交付：
+
+```rust
+struct PresenceBroadcaster;
+
+#[async_trait::async_trait]
+impl IPresenceObserver for PresenceBroadcaster {
+    async fn on_presence_transition(&self, transition: PresenceTransition) {
+        if transition.is_first() {
+            // 用户上线（仅一次）：广播/写在线表
+        } else if transition.is_last() {
+            // 用户下线（仅一次）：广播/清理
+        }
+        // transition: user_id / tenant_id / connections / direction
+    }
+}
+
+Host::builder()
+    .use_websocket("/ws", Arc::new(handler))
+    .use_presence_observer(Arc::new(PresenceBroadcaster))
+    .build();
+```
+
+观察者在 `on_connect` 之前（Connected）与会话注销之后（Disconnected）调用，只对携带身份的连接触发；
+匿名连接不产生转移。多个观察者可用 `use_presence_observer` 多次注册。观察者应只做扇出/发事件，
+不要阻塞会话。
 
 替换实现：
 
@@ -264,6 +296,8 @@ mediator.publish(RealtimeFanoutEvent::to_room("room-1", "hello")).await?;
 | `max_bytes_per_second` | 0（不限） | 同上 |
 | `outbound_queue` + `on_queue_full` | 64 深，`Drop` | `Drop`：丢弃并计入 `dropped_outbound`；`Disconnect`：发送失败并关闭 |
 | `idle_timeout` | `None` | 关闭连接（close `1001`） |
+| `max_connection_lifetime` | `None` | 绝对生命周期到点关闭（close `1001`，reason `connection lifetime exceeded`）；入站流量不会续期 |
+| `close_at_token_expiry` | `false` | 升级令牌的 `exp` 到点即关闭（close `1008`，reason `access token expired`）；与 `max_connection_lifetime` 取较早者 |
 
 ```rust
 use std::time::Duration;
@@ -275,16 +309,81 @@ Host::builder()
             .with_max_frame_bytes(256 * 1024)
             .with_max_messages_per_second(50)
             .with_outbound_queue(32, BackpressurePolicy::Drop)
-            .with_idle_timeout(Duration::from_secs(120)),
+            .with_idle_timeout(Duration::from_secs(120))
+            .with_max_connection_lifetime(Duration::from_secs(3600))
+            .close_at_token_expiry(),
     )
     .build();
 ```
+
+浏览器客户端无法刷新升级时所用的凭据：长连接默认不会因 JWT 过期而断开。需要“令牌过期即重连”的部署
+启用 `close_at_token_expiry()`；把 `max_connection_lifetime` 设得略小于令牌有效期，还可以让客户端在
+过期前主动重连（服务端到点关闭时客户端按 close code 重连即可）。
 
 实现要点：
 
 - **出站有序队列**：每次连接一条有界 `mpsc` + 独立 writer task；`send_*` 只入队（`try_send`），慢客户端永远不会阻塞调用方（扇出安全）；
 - **入站限速**：1 秒滑窗（消息数 + 字节数），违规先错误帧再关闭，`Recv` 返回 `None`；
+- **生命周期**：`idle_timeout` 由接收循环计时；`max_connection_lifetime` / 令牌 `exp` 是绝对期限，会话与 Handler 的接收循环竞速，到点主动关闭（Handler 之后从 `recv()` 得到 `None`）；
 - **统计**：`IConnection::stats()` 返回 `ConnectionStats`（in/out、字节、`dropped_outbound`、`rate_limited`）， 会把它接到 `/metrics`。
+
+## 断线续传与回放
+
+框架提供统一的续传契约与可替换的事件日志：连接断开期间产生的事件仍可回放。
+
+| 类型 | 作用 |
+|---|---|
+| `RealtimeEvent { event_id, subscription, payload, created_at_unix_secs }` | 一条被保留的事件；`event_id` 进程内单调递增，就是游标 |
+| `ResumeRequest { subscription, cursor }` | 客户端重连时声明“我已处理到 `cursor`”（`null` 表示从头） |
+| `ResumeFrame { subscription, events, next_cursor, truncated }` | 服务端回放；`truncated=true` 表示游标之后的事件已被保留策略淘汰，客户端必须按快照重建 |
+| `IRealtimeEventStore` | 端口：`append` / `resume` / `latest_cursor`，可换 Redis Stream、PG 表等共享实现 |
+| `InMemoryRealtimeEventStore` | 默认实现：每 subscription 保留 1024 条（`RealtimeEventStoreLimits` 可配 `max_age`） |
+
+存在 WebSocket 路由时 host 自动注册默认（进程内）实现在连接作用域里；多实例部署用
+`HostBuilder::use_realtime_event_store(Arc<dyn IRealtimeEventStore>)` 换成共享实现。
+
+```rust
+struct ChatHandler;
+
+#[async_trait::async_trait]
+impl IWebSocketHandler for ChatHandler {
+    async fn on_connect(&self, connection: Arc<dyn IConnection>) -> Result<()> {
+        let store = connection
+            .context()
+            .resolve::<dyn IRealtimeEventStore>()
+            .expect("host registers the store");
+        while let Some(message) = connection.recv().await {
+            let RealtimeMessage::Text(text) = message? else { continue };
+            let request: ResumeRequest = serde_json::from_str(&text)?;
+            let frame = store.resume(request).await?;
+            connection.send_text(serde_json::to_string(&frame)?).await?;
+        }
+        Ok(())
+    }
+}
+```
+
+写入侧形状：`store.append(subscription, payload).await?` 与消息广播在同一处调用；`payload` 由应用定义
+（通常是客户端帧的 JSON 字符串），框架只负责 id、保留期与回放顺序。
+
+在线数：`IConnectionRegistry::user_connection_count` / `room_connection_count` /
+`tenant_connection_count` 直接返回本进程计数（默认实现按连接列表计算，内存实现是 O(1) 索引），
+presence 判断不再由业务自己数连接。
+
+## 部署形态（单进程 / 多实例 / 容器）
+
+| 形态 | 行为 | 需要做什么 |
+|---|---|---|
+| 单进程 | 注册表、presence 转移、事件日志、指标全在进程内，零外部依赖 | 无 |
+| 多实例 | 房间扇出只在节点内直发；跨节点用 `RealtimeFanoutEvent`（事件传输 + broker，at-most-once）；在线数与 presence 是节点局部的 | 用 `use_connection_registry` 换成共享注册表，或用事件同步 presence；续传改用共享 `IRealtimeEventStore`（Redis Stream/PG 表），并由共享 store 分配全局单调游标 |
+| 容器 | 不依赖本地持久状态；重启后事件日志为空，重连客户端会得到空回放或 `truncated=true`，必须按快照重建；滚动升级时旧实例以 close `1001`/`1008` 让客户端重连 | 客户端按 close code 重连并按 `truncated` 重同步；容器配置只来自 `appsettings`/`APP__`；优雅停机沿用 host 的排空 |
+
+性能边界（已实现）：
+
+- presence 观察者列表在装配期解析一次，接受连接时零 DI 枚举/分配；
+- `register`/`unregister` 单次互斥临界区（纯索引，无 I/O、无 await），在线数 O(1)；
+- 事件日志有界（默认每 subscription 1024 条），回放 O(保留条数)，`next_cursor` 支持增量拉取；
+- presence 观察者只在真实转移时调用（每连接最多两次：上线/下线）。
 
 ## 实时观测
 
@@ -302,11 +401,11 @@ Host::builder()
 | `realtime_connection_closes_total{code}` | counter | 按关闭码（1000/1001/1008/…） |
 | `realtime_message_dispatch_seconds` | histogram | 消息即请求的分发延迟 |
 
-定位顺序：连接异常先看 `closes{code}`（1008=限流、1001=空闲），吞吐问题看
+定位顺序：连接异常先看 `closes{code}`（1008=限流或令牌过期、1001=空闲或生命周期到期），吞吐问题看
 `dropped_total`/`rate_limited_total`，延迟看 dispatch 直方图。
 
 ## 当前边界
 
-- 已支持自定义会话 Handler、连接作用域、消息即请求、升级鉴权与帧绑定错误、进程内注册表/房间扇出/presence、跨节点扇出（事件传输上的 `RealtimeFanoutEvent`）、连接级背压与限流、`realtime_*` 指标；
-- 跨节点存在性/在线状态同步（presence）由应用通过事件或共享存储实现（框架只提供单实例 presence）；
+- 已支持自定义会话 Handler、连接作用域、消息即请求、升级鉴权与帧绑定错误、进程内注册表/房间扇出/presence、跨节点扇出（事件传输上的 `RealtimeFanoutEvent`）、连接级背压与限流、连接级绝对生命周期（含令牌过期）、断线续传契约与事件日志、按 user/room/tenant 的在线数、presence 原子转移（first/last）、`realtime_*` 指标；
+- 事件日志与在线数默认都是进程局部的：多实例部署用共享 `IRealtimeEventStore` / 共享注册表实现，或继续用事件传输同步 presence；
 - 非文本/二进制控制帧（Ping/Pong）不进入业务层。

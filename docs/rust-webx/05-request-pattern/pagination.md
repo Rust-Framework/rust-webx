@@ -1,9 +1,9 @@
-# 统一分页（PagedRequest / PagedResult）
+# 统一分页（PagedRequest / PagedResult / Keyset）
 
-列表端点一律使用框架随附的分页类型：请求侧用 `PagedRequest` 表达 `page` / `page_size`，
-响应侧用 `PagedResult<T>` 作为统一信封。业务模块不要再自定义 `Page<T>`、`PageQuery`、
-`next_cursor`、`limit + cursor` 之类的分页结构，也不要手写 `{items, total, page, page_size}`
-信封——否则前端/客户端要按端点各写一套解码逻辑。
+列表端点一律使用框架随附的分页类型：**offset**（请求 `PagedRequest`、响应 `PagedResult<T>`）或
+**keyset/游标**（请求 `KeysetRequest`、响应 `CursorPage<T>`）。业务模块不要再自定义
+`Page<T>`、`PageQuery`、`next_cursor`、`limit + cursor` 之类的分页结构，也不要手写
+`{items, total, page, page_size}` 信封——否则前端/客户端要按端点各写一套解码逻辑。
 
 ## 契约
 
@@ -96,13 +96,63 @@ impl IRequestHandler<ListUsersRequest, PagedResult<UserDto>> for ListUsersHandle
   不要再把原始 query 值写回响应（否则前端拿到的页码与实际数据不一致）。
 - 排序必须**稳定且唯一**：只按 `created_at` 排序时，同时间戳的行在两次查询间顺序可能变化，
   翻页会重复/漏行；用主键或其它唯一列兜底。
-- 深分页（`page` 很大）仍是 `OFFSET` 扫描；导出/批量场景用独立端点 + 内部游标，
-  不要把它做成列表端点的参数。
+- 深分页（`page` 很大）仍是 `OFFSET` 扫描：持续追加、需要翻到很深的数据改用下面的
+  Keyset 分页；导出/批量场景用独立端点。
+
+## Keyset（游标）分页
+
+offset 分页在并发写入时会翻页重复/漏行，深页还会做全量 `OFFSET` 扫描。对**消息流、审计日志、
+事件列表**这类持续追加的数据用 keyset：客户端拿不透明游标，问"这个键之后的 N 行"。
+
+| 位置 | 类型 | 说明 |
+|---|---|---|
+| Query | `cursor: Option<String>`、`page_size: Option<u32>` | 两个平铺字段；`KeysetRequest::from_parts(cursor, page_size)` 归一（默认 `20`，夹紧 `1..=100`） |
+| 响应 | `CursorPage<T>` | `{ items, cursor?, has_more }`；`cursor` 为 `None` 表示没有下一页 |
+
+```rust
+#[derive(WebxRequestMeta)]
+pub struct ListMessagesRequest {
+    #[fromquery] pub cursor: Option<String>,
+    #[fromquery] pub page_size: Option<u32>,
+    #[fromquery] pub room_id: String,
+}
+
+#[handler(inject)]
+#[async_trait]
+impl IRequestHandler<ListMessagesRequest, CursorPage<MessageDto>> for ListMessagesHandler {
+    async fn handle(&mut self, req: ListMessagesRequest) -> ActionResult<CursorPage<MessageDto>> {
+        let paging = KeysetRequest::from_parts(req.cursor, req.page_size);
+        let (created_at, id) = match paging.decoded()?.as_slice() {
+            [] => (i64::MIN, String::new()),           // 第一页
+            [at, id, ..] => (at.parse()?, id.clone()), // 客户端输入：必须校验
+            _ => return Err(Error::Validation("invalid cursor".into())),
+        };
+        // WHERE room_id = ? AND (created_at, id) > (?, ?)
+        // ORDER BY created_at ASC, id ASC LIMIT page_size + 1
+        let rows = load_after(&mut self.ctx, &req.room_id, created_at, &id, paging.page_size() + 1)
+            .await?;
+        Ok(CursorPage::from_rows(rows, paging.page_size(), |row| {
+            vec![row.created_at.to_string(), row.id.clone()]
+        }))
+    }
+}
+```
+
+要点：
+
+- **多取一行**：查 `page_size + 1` 行，`CursorPage::from_rows` 用多出的行判断 `has_more`
+  并把它丢弃；不需要额外 `COUNT`。
+- **稳定全序**：游标必须覆盖完整排序键（例如时间戳 + 唯一 id 兜底）；只按时间排序会
+  在游标边界跳过或重复行。
+- **游标是客户端输入**：`Cursor::decode` 只验证编码，解码出的值必须校验，并且租户/用户 id
+  只能来自身份，不能来自游标。
+- **编码器用框架的**：`Cursor::encode` / `Cursor::decode` 负责不透明编码；业务只决定排序键组成。
+- 第一页传 `cursor=None`；响应 `cursor=None` 表示结束。
 
 ## 反例
 
 ```rust
-// ❌ 自建分页结构
+// ❌ 自建分页结构（框架已有两套）
 struct Page<T> { items: Vec<T>, total: u64 }
 struct PageQuery { limit: Option<u32>, cursor: Option<String> }
 
@@ -111,15 +161,18 @@ let page = req.page.unwrap_or(1).max(1);
 let page_size = req.page_size.unwrap_or(20).clamp(1, 100);
 // ✅ 一行替代
 let paging = PagedRequest::from_parts(req.page, req.page_size);
+let keyset = KeysetRequest::from_parts(req.cursor, req.page_size);
 
-// ❌ 响应信封自造 { list, count, current, size }
-// ✅ 返回 PagedResult<T>，字段名由框架固定
+// ❌ 响应信封自造 { list, count, current, size } / { data, next }
+// ✅ 返回 PagedResult<T> 或 CursorPage<T>，字段名由框架固定
 ```
 
 ## 小结
 
-- 请求：两个平铺的 `Option<u32>` query 字段；Handler 用 `PagedRequest::from_parts` 归一。
-- 响应：`PagedResult<T>`，用 `from_request` 构造。
-- 查询：同条件 `count` + 稳定排序 + `offset`/`page_size`。
+- offset：请求两个平铺 `Option<u32>` 字段 + `PagedRequest::from_parts`；响应 `PagedResult<T>`
+  （同条件 `count` + 稳定排序 + `offset`/`page_size`）。
+- keyset：请求 `cursor` + `page_size` + `KeysetRequest::from_parts`；响应 `CursorPage<T>`
+  （多取一行、稳定全序、游标值校验）。
+- 两套都用框架类型；不要为某个端点另造第三种分页结构。
 
 下一节：[用户身份与多租户](user-identity.md)

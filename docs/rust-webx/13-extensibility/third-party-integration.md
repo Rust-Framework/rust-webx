@@ -45,7 +45,9 @@ pub struct CreateItemHandler {
 }
 ```
 
-schema 初始化在 `IHostedService` 中执行（没有版本化迁移模块，直接 ensure schema 后 seed）。
+生产升级走 rust-ef 的版本化迁移：`ctx.migrate("Migrations")` 应用迁移目录（历史表
+`__ef_migrations_history`），`ensure_created` 只用于测试；启动期迁移放在 `IHostedService` 里，
+失败即拒绝启动，schema 漂移用 `MigrationDiff::has_drift()` 接 `IHealthCheck`。
 后台任务注入 rust-dix 内建的 `Arc<dyn ScopeFactory>` 并显式开 scope：
 
 ```rust
@@ -61,61 +63,138 @@ async fn start(&self) -> Result<()> {
         .get_owned()
         .map_err(|e| Error::Internal(format!("DbContext resolution failed: {}", e)))?;
 
-    ctx.ensure_created()
+    ctx.migrate("Migrations")
         .await
-        .map_err(|e| Error::Internal(format!("ensure_created failed: {}", e)))?;
+        .map_err(|e| Error::Internal(format!("migration failed: {}", e)))?;
     // 之后可执行 seed
     Ok(())
 }
 ```
 
-## 密码哈希（bcrypt）
+## 持久化错误映射（rust-webx-ef）
 
-```rust
-let hashed = bcrypt::hash(password, bcrypt::DEFAULT_COST)?;
-let valid = bcrypt::verify(password, &stored_hash)?;
+`EFError` → `webx::Error` 的脱敏映射由 **`rust-webx-ef`** 提供；core 与 umbrella 不链接
+rust-ef，应用按需依赖：
+
+```toml
+rust-webx-ef = "2.7"
 ```
 
-## JWT 签发（jsonwebtoken）
-
 ```rust
-use jsonwebtoken::{encode, EncodingKey, Header};
+// handlers/src/db.rs
+pub use webx_ef::{map_ef_error, EfResultExt};
 
-let token = encode(
-    &Header::default(),
-    &claims,
-    &EncodingKey::from_secret(jwt_secret().as_bytes()),
-)?;
+// Handler
+let blog = ctx
+    .set::<Blog>()
+    .query()
+    .first_or_default()
+    .await
+    .map_ef()?; // NotFound→404、Validation→400、Conflict→409、Connection/Transaction→可重试 503、其余→隐藏 500
 ```
 
-## 外部 HTTP 客户端
+`Query`/`TypeConversion`（400）与 `UniqueViolation`（409）使用固定文案：SQL、列名、
+constraint/table 不会回显；500 保留原始信息与 source 链供操作者日志。完整契约见
+[边界约定](../../design/compatibility.md#4-边界约定rust-ef-错误映射)。
+
+## 密码哈希（IPasswordHasher）
+
+框架启动时注册 Argon2 实现（包在带并发上限的 `BoundedPasswordHasher` 里），业务只注入端口：
 
 ```rust
-// 在 Service 中封装
-pub struct GitHubClient {
-    client: reqwest::Client,
-    token: String,
+#[derive(Inject)]
+struct LoginHandler {
+    #[inject]
+    hasher: Arc<dyn IPasswordHasher>,
 }
 
-impl GitHubClient {
-    pub async fn get_repo(&self, owner: &str, repo: &str) -> Result<RepoInfo> {
-        let resp = self.client
-            .get(format!("https://api.github.com/repos/{}/{}", owner, repo))
-            .header("Authorization", format!("Bearer {}", self.token))
-            .send().await?;
-        resp.json().await.map_err(|e| Error::Internal(e.to_string()))
-    }
-}
+let stored = self.hasher.hash(&password).await?;
+let valid = self.hasher.verify(&password, &stored).await?;
 ```
 
-通过 DI 注入到 Handler。
+口令强度用 `PasswordPolicy::nist()`（长度 + 可选常见口令黑名单）在注册/改密端点校验；
+登录用 `verify_password_or_dummy` 抹平“账号不存在”的时延。不要自己接 bcrypt/argon2 crate；
+`HostBuilder::use_password_hasher` 可换实现或调 Argon2 成本。
+
+## 令牌签发（ITokenIssuer）
+
+```rust
+#[derive(Inject)]
+struct LoginHandler {
+    #[inject]
+    issuer: Arc<dyn ITokenIssuer>,
+}
+
+let claims = TokenClaims::new(&user.id)
+    .with_roles(["member"])
+    .with_claim("tenant_id", &tenant.id);
+let issued = self.issuer.issue(claims).await?;
+// issued.token / issued.jti（登出/下线用 ISessionStore::revoke）/ issued.expires_at_unix_secs
+```
+
+密钥来自 `Jwt.Secret`（或 `Jwt.SecretFile` / `JWT_SECRET`），不要手写 `jsonwebtoken` 签发；
+WebSocket 长连接需要“令牌过期即断开”时启用 `WebSocketLimits::close_at_token_expiry()`。
+
+## 出站 HTTP（HttpClient）
+
+服务端调用第三方 HTTP 统一使用框架客户端（连接池、超时分层、W3C trace、流式 body），
+经 `add_http_client` 注册后注入 `Arc<dyn IHttpClientFactory>`：
+
+```rust
+let client = self.clients.create("github")?;
+let response = client.execute(OutboundRequest::get("/repos/owner/repo")).await?;
+```
+
+详见[出站 HTTP](outbound-http.md)；不要在业务里另起 reqwest/裸 hyper 客户端。
+
+## 邮件 / 短信发送（IEmailSender / ISmsSender）
+
+端口在 core；host 不注册默认发送器（避免静默吞信）。测试与本地开发用捕获实现：
+
+```rust
+let email = Arc::new(InMemoryEmailSender::new());
+Host::builder().use_email_sender(email.clone()).build();
+
+#[derive(Inject)]
+struct ForgotPasswordHandler {
+    #[inject]
+    email: Arc<dyn IEmailSender>,
+}
+
+self.email
+    .send(&EmailMessage::new(to, "Reset your password", &link))
+    .await?;
+```
+
+生产实现（SMTP/SES/Postmark、Twilio）把传输失败映射为可重试 503，且失败细节只进操作者日志；
+不要在数据库事务或锁内发送。多实例要求“恰好一次”投递时，用 outbox + 后台任务
+（见[后台服务](../06-di-lifecycle/hosted-services.md)），请求内只写库。
+`use_sms_sender` 与 `InMemorySmsSender` 同构，用于断言验证码短信。
+
+## 一次性令牌与防枚举（OneTimeSecret）
+
+密码重置/邮箱验证：令牌由应用生成（如 `uuid::Uuid::new_v4()`），存储只放摘要，
+TTL + 原子单赢家消费用框架原语：
+
+```rust
+let slot = OneTimeSecret::new(Duration::from_secs(30 * 60));
+slot.issue(sha256_hex(&minted))?;                  // 进程内；持久化场景把摘要写库
+let valid = slot.consume(&sha256_hex(&candidate)); // 原子 check-and-consume，并发只有一个赢家
+```
+
+- 多实例/容器重启：把摘要 + 过期时间存数据库，用条件更新
+  （`UPDATE ... WHERE used = 0 AND expires_at > now()`）得到同样的单赢家语义；
+- 忘记密码端点对“账号存在/不存在”返回同一响应（固定 `202 Accepted` + 固定文案），
+  只在存在时发送邮件；登录用 `verify_password_or_dummy`；
+- 重置成功后用 `ISessionStore::revoke` 让该用户旧 `jti` 会话立刻失效。
 
 ## 集成原则
 
-1. 第三方类型在 `startup/extensions/` 的 DI 扩展中注册
-2. 业务代码通过 trait 或 Service 封装访问
-3. 初始化逻辑放 `IHostedService`
-4. domain 层不直接依赖第三方 crate
+1. 基础设施在宿主组合根注册（`.add_http_client(...)`、`.use_email_sender(...)`、
+   `svc.singleton::<dyn Port>(...)`）；
+2. 业务代码只依赖 core 端口（trait），不依赖具体 crate/SDK；
+3. 初始化与升级走官方迁移 / 后台服务，不在请求路径里做全量 schema 操作；
+4. domain/application 层不直接依赖第三方 crate；适配器放宿主或独立 crate。
 
 ## 小结
 

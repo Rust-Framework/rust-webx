@@ -252,6 +252,20 @@ pub struct HostBuilder {
     )>,
     /// Per-connection WebSocket limits (backpressure, rates, frame size, idle).
     websocket_limits: webx_core::realtime::WebSocketLimits,
+    /// Explicit real-time replay log; `None` keeps the in-memory default when
+    /// the host has WebSocket routes.
+    realtime_event_store: Option<Arc<dyn webx_core::realtime::IRealtimeEventStore>>,
+    /// Presence observers registered through `use_presence_observer`.
+    presence_observers: Vec<Arc<dyn webx_core::realtime::IPresenceObserver>>,
+    /// Explicit rate-limit store for the pre-authentication middleware.
+    rate_limit_limiter: Option<Arc<dyn webx_core::rate_limit::IRateLimiter>>,
+    /// Per-route/subject rate-limit policy installed after authentication.
+    rate_limit_policy: Option<webx_core::rate_limit::RateLimitPolicy>,
+    /// Explicit idempotency store (overrides the `Idempotency` section).
+    idempotency: Option<(
+        Arc<dyn webx_core::idempotency::IIdempotencyStore>,
+        std::time::Duration,
+    )>,
     /// Opt back into the pre-1.0 lenient root-scope behavior (rust-dix 0.7).
     /// Migration-only: 1.0 defaults to strict scope validation.
     lenient_scope_validation: bool,
@@ -332,6 +346,11 @@ impl HostBuilder {
             inventory_routes: true,
             websockets: Vec::new(),
             websocket_limits: webx_core::realtime::WebSocketLimits::default(),
+            realtime_event_store: None,
+            presence_observers: Vec::new(),
+            rate_limit_limiter: None,
+            rate_limit_policy: None,
+            idempotency: None,
             lenient_scope_validation: false,
         }
     }
@@ -727,6 +746,139 @@ impl HostBuilder {
                 Arc::clone(&registry)
             })
         }));
+        self
+    }
+
+    /// Replace the process-local real-time replay log.
+    ///
+    /// The default is an [`InMemoryRealtimeEventStore`](webx_core::realtime::InMemoryRealtimeEventStore)
+    /// (1024 events per subscription), registered when the host has WebSocket
+    /// routes. A durable/shared store implements
+    /// [`IRealtimeEventStore`](webx_core::realtime::IRealtimeEventStore) so
+    /// replay also works across instances.
+    pub fn use_realtime_event_store(
+        mut self,
+        store: Arc<dyn webx_core::realtime::IRealtimeEventStore>,
+    ) -> Self {
+        self.realtime_event_store = Some(store);
+        self
+    }
+
+    /// Observe user-level presence transitions (first/last connection).
+    ///
+    /// Every authenticated WebSocket connection reports its atomic transition:
+    /// `Connected` after registration (before `on_connect`), `Disconnected`
+    /// after unregistration. Use [`PresenceTransition::is_first`] /
+    /// [`PresenceTransition::is_last`](webx_core::realtime::PresenceTransition::is_last)
+    /// to broadcast online/offline exactly once without counting connections in
+    /// business code. Calling this several times registers several observers.
+    pub fn use_presence_observer(
+        mut self,
+        observer: Arc<dyn webx_core::realtime::IPresenceObserver>,
+    ) -> Self {
+        self.presence_observers.push(observer);
+        self
+    }
+
+    /// Register the email delivery port.
+    ///
+    /// No sender is registered by default: a missing adapter fails at DI
+    /// resolution instead of silently dropping mail. Production passes an
+    /// SMTP/API adapter; tests and local development pass
+    /// [`InMemoryEmailSender`](crate::notifications::InMemoryEmailSender).
+    pub fn use_email_sender(
+        mut self,
+        sender: Arc<dyn webx_core::notifications::IEmailSender>,
+    ) -> Self {
+        self.service_configs.push(Box::new(move |svc, _options| {
+            svc.instance::<dyn webx_core::notifications::IEmailSender>(sender)
+        }));
+        self
+    }
+
+    /// Register the SMS delivery port.
+    ///
+    /// No sender is registered by default; see [`Self::use_email_sender`].
+    pub fn use_sms_sender(mut self, sender: Arc<dyn webx_core::notifications::ISmsSender>) -> Self {
+        self.service_configs.push(Box::new(move |svc, _options| {
+            svc.instance::<dyn webx_core::notifications::ISmsSender>(sender)
+        }));
+        self
+    }
+
+    /// Register the at-rest secret protection port.
+    ///
+    /// No protector is registered by default: code that needs one fails at DI
+    /// resolution instead of silently storing plaintext. Production builds an
+    /// [`AesGcmSecretProtector`](crate::secret_protector::AesGcmSecretProtector)
+    /// from the secret store at startup (key material never in
+    /// `appsettings.json`); tests pass a fixed-key ring.
+    pub fn use_secret_protector(
+        mut self,
+        protector: Arc<dyn webx_core::secrets::ISecretProtector>,
+    ) -> Self {
+        self.service_configs.push(Box::new(move |svc, _options| {
+            svc.instance::<dyn webx_core::secrets::ISecretProtector>(protector)
+        }));
+        self
+    }
+
+    /// Register the advisory-lock port.
+    ///
+    /// No lock is registered by default (a process-local default would silently
+    /// stop coordinating across instances). Tests/single-node deployments pass
+    /// [`InMemoryAdvisoryLock`](crate::advisory_lock::InMemoryAdvisoryLock);
+    /// multi-instance deployments pass a shared backend such as
+    /// `rust-webx-redis`'s `RedisAdvisoryLock`.
+    pub fn use_advisory_lock(mut self, lock: Arc<dyn webx_core::locking::IAdvisoryLock>) -> Self {
+        self.service_configs.push(Box::new(move |svc, _options| {
+            svc.instance::<dyn webx_core::locking::IAdvisoryLock>(lock)
+        }));
+        self
+    }
+
+    /// Replace the pre-authentication rate-limit store.
+    ///
+    /// The store applies to every request keyed by client IP, matching the
+    /// built-in middleware position (before authentication). Use a distributed
+    /// `IRateLimiter` (Redis) for multi-instance deployments. An explicit store
+    /// wins over the `RateLimit` configuration section.
+    pub fn use_rate_limiter(
+        mut self,
+        limiter: Arc<dyn webx_core::rate_limit::IRateLimiter>,
+    ) -> Self {
+        self.rate_limit_limiter = Some(limiter);
+        self
+    }
+
+    /// Install a per-route/subject rate-limit policy.
+    ///
+    /// Installed **after** authentication so `User`/`Tenant`/`ApiKey` subjects
+    /// resolve; rules match the request path (`Exact` > longest `Prefix` >
+    /// `Any`). Each rule owns its limiter, so different areas can have different
+    /// budgets. A policy wins over both `use_rate_limiter` and the `RateLimit`
+    /// configuration section.
+    pub fn use_rate_limit_policy(mut self, policy: webx_core::rate_limit::RateLimitPolicy) -> Self {
+        self.rate_limit_policy = Some(policy);
+        self
+    }
+
+    /// Install request-level idempotency (`Idempotency-Key`).
+    ///
+    /// Runs after authentication: state-changing requests (`POST`/`PUT`/`PATCH`/
+    /// `DELETE`) with the header are executed at most once per principal, route
+    /// and key; a successful response is replayed for retries and a concurrent
+    /// duplicate gets `409`. Multi-instance deployments pass a shared store; the
+    /// process-local
+    /// [`InMemoryIdempotencyStore`](crate::idempotency::InMemoryIdempotencyStore)
+    /// is enough for one node. Without this call, the `Idempotency` configuration
+    /// section can enable the default store.
+    pub fn use_idempotency(
+        mut self,
+        store: Arc<dyn webx_core::idempotency::IIdempotencyStore>,
+        ttl: std::time::Duration,
+    ) -> Self {
+        self.idempotency = Some((store, ttl));
         self
     }
 
@@ -1423,8 +1575,37 @@ impl HostBuilder {
         if let Some(turn) = turn_config {
             svc = svc.instance(Arc::new(turn));
         }
+        // Realtime replay log: an explicit store always wins; otherwise the
+        // process-local default is registered when the host has WebSocket
+        // routes. Registered before application configs so `try_add_*` and
+        // factory resolution see it.
+        let realtime_event_store = self.realtime_event_store.take().or_else(|| {
+            (!self.websockets.is_empty()).then(|| {
+                Arc::new(webx_core::realtime::InMemoryRealtimeEventStore::default())
+                    as Arc<dyn webx_core::realtime::IRealtimeEventStore>
+            })
+        });
+        if let Some(store) = realtime_event_store {
+            svc = svc.instance::<dyn webx_core::realtime::IRealtimeEventStore>(store);
+        }
+        // Presence observers are singletons; the WebSocket session resolves all
+        // of them and reports every authenticated connection's transition.
+        for observer in std::mem::take(&mut self.presence_observers) {
+            svc = svc.instance::<dyn webx_core::realtime::IPresenceObserver>(observer);
+        }
         for cfg in std::mem::take(&mut self.service_configs) {
             svc = cfg(svc, &options);
+        }
+
+        // `/metrics` bridge: with metrics enabled, a bounded in-memory meter is
+        // the default factory so business metrics emitted through `IMeter` show
+        // up without extra wiring. An application `use_meter` registration wins
+        // (`try_add` keeps the existing one).
+        if options.metrics.enabled {
+            let max_series = options.metrics.max_series;
+            svc = svc.try_add_singleton::<dyn webx_core::metrics::IMeter>(move |_| {
+                Arc::new(webx_core::metrics::MemoryMeter::new().with_max_series(max_series))
+            });
         }
 
         // Named outbound clients collected by `HostBuilder::add_http_client`.
@@ -1539,7 +1720,7 @@ impl HostBuilder {
 
     #[allow(clippy::too_many_arguments)]
     fn assemble(
-        self,
+        mut self,
         provider: Arc<ServiceProvider>,
         handler_cache: Arc<webx_core::route::scan::HandlerCache>,
         options: AppOptions,
@@ -1586,6 +1767,20 @@ impl HostBuilder {
         // pipelines, but the host does not add it a second time.
         pipeline.add_middleware(Arc::new(crate::request_id::RequestIdMiddleware::new()));
 
+        // Trusted client information (`X-Forwarded-For`) runs before everything
+        // that may read the client address (rate limiting, auth, binding).
+        if options.client_info.trust_forwarded_headers {
+            if options.client_info.trusted_proxies.is_empty() {
+                tracing::warn!(
+                    "ClientInfo.TrustForwardedHeaders is enabled but TrustedProxies is \
+                     empty; forwarded headers are ignored (a client could otherwise spoof them)"
+                );
+            }
+            pipeline.add_middleware(Arc::new(
+                crate::client_info::ClientInfoMiddleware::from_section(&options.client_info),
+            ));
+        }
+
         // Metrics wrap CORS so preflight responses (which short-circuit in the
         // CORS stage) are observable, and wrap rate limiting/auth so rejected
         // requests are counted with their real status.
@@ -1626,7 +1821,10 @@ impl HostBuilder {
             pipeline.add_middleware(Arc::new(CorsMiddleware::new(cors)));
         }
 
-        if options.rate_limit.enabled {
+        if let Some(limiter) = self.rate_limit_limiter.take() {
+            tracing::info!("[Host] RateLimit uses an explicitly registered IRateLimiter");
+            pipeline.add_middleware(Arc::new(RateLimitMiddleware::with_limiter(limiter)));
+        } else if options.rate_limit.enabled {
             tracing::info!(
                 "[Host] RateLimit enabled: {} req/s, burst {}, max_ips {}",
                 options.rate_limit.requests_per_second,
@@ -1734,6 +1932,35 @@ impl HostBuilder {
             pipeline.add_middleware(Arc::new(middleware));
         }
 
+        // Per-route/subject rate limiting runs after authentication so
+        // `User`/`Tenant`/`ApiKey` subjects can be resolved.
+        if let Some(policy) = self.rate_limit_policy.take() {
+            tracing::info!(
+                rules = policy.rule_count(),
+                "[Host] rate limit policy installed (per-route/subject)"
+            );
+            pipeline.add_middleware(Arc::new(RateLimitMiddleware::from_policy(policy)));
+        }
+
+        // Request-level idempotency: an explicit store wins, otherwise the
+        // `Idempotency` section enables the bounded in-memory default.
+        let idempotency = match self.idempotency.take() {
+            Some(custom) => Some(custom),
+            None if options.idempotency.enabled => Some((
+                Arc::new(crate::idempotency::InMemoryIdempotencyStore::with_max_keys(
+                    options.idempotency.max_tracked_keys,
+                )) as Arc<dyn webx_core::idempotency::IIdempotencyStore>,
+                std::time::Duration::from_secs(options.idempotency.ttl_seconds.max(1)),
+            )),
+            None => None,
+        };
+        if let Some((store, ttl)) = idempotency {
+            tracing::info!("[Host] Idempotency enabled (Idempotency-Key middleware)");
+            let middleware = crate::idempotency::IdempotencyMiddleware::new(store, ttl)
+                .with_max_body_bytes(options.idempotency.max_body_bytes);
+            pipeline.add_middleware(Arc::new(middleware));
+        }
+
         // User middlewares in the default slot: after authentication, so
         // `ctx.claims()` is populated. Middlewares registered directly on the
         // DI container join the same slot, after the builder-registered ones.
@@ -1765,6 +1992,9 @@ impl HostBuilder {
                 routes,
                 Arc::clone(&provider),
                 self.websocket_limits.clone(),
+                provider
+                    .get_all::<dyn webx_core::realtime::IPresenceObserver>()
+                    .into(),
             )));
         }
 

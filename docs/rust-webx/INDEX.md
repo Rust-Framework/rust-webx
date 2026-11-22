@@ -122,6 +122,7 @@
 - [自定义 Endpoint](13-extensibility/custom-endpoints.md)
 - [样式与约定封装](13-extensibility/style-patterns.md)
 - [第三方库集成](13-extensibility/third-party-integration.md)
+- [支付](13-extensibility/payments.md)
 
 ### [第十四章 最佳实践](14-best-practices/INDEX.md)
 

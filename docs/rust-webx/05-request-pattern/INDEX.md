@@ -10,7 +10,8 @@
 | [路由宏详解](route-macros.md) | get/post/put/delete、端点名称/分类、端点目录 |
 | [Handler 注册策略](handler-registration.md) | handler 宏、手动注册、inject |
 | [参数绑定与序列化](parameter-binding.md) | 路径、Query、Body、表单、Header、Claim 的来源声明与错误聚合 |
-| [统一分页](pagination.md) | `PagedRequest` / `PagedResult`、`from_parts` 归一、稳定排序与 count 同条件 |
+| [声明式校验](validation.md) | `#[validate]` 长度/范围/邮箱/自定义规则、400 聚合与 OpenAPI 同步 |
+| [统一分页](pagination.md) | offset（`PagedRequest`/`PagedResult`）与 keyset（`KeysetRequest`/`CursorPage`）、稳定排序与 count 同条件 |
 | [用户身份与多租户](user-identity.md) | 用 `IdentityUser` 直接携带身份：登录、匿名、角色、租户隔离 |
 | [文件上传与下载](file-upload-download.md) | multipart 表单、FormFile、文件响应与 Range |
 | [流式响应（SSE）](streaming-sse.md) | SseResult、逐帧推送、断连回调与长流停机 |

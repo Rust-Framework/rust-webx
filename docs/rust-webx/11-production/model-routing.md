@@ -33,12 +33,14 @@ impl ChatProvider for MyProvider {
 
     async fn complete(&self, req: CanonicalRequest) -> Result<CanonicalResponse, ProviderError> {
         // 把 CanonicalRequest 编码成厂商 JSON，调用上游，再解码回 CanonicalResponse
-        todo!()
+        let _ = req;
+        Err(ProviderError::Unsupported("custom provider codec".into()))
     }
 
     async fn stream(&self, req: CanonicalRequest) -> Result<CanonicalStream, ProviderError> {
         // 上游 SSE → StreamEvent::{Start, Delta, Usage, Done}
-        todo!()
+        let _ = req;
+        Err(ProviderError::Unsupported("custom provider stream".into()))
     }
 }
 ```

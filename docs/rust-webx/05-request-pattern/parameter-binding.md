@@ -61,6 +61,9 @@ pub struct UpdateUserRequest {
   单个元素非法即 400。
 - `FormFile` 系列：见[文件上传与下载](file-upload-download.md)。
 
+业务约束（长度、范围、邮箱、自定义规则）用 `#[validate(...)]` 声明，和绑定错误共用同一个
+`400` `errors` 信封，并同步进 OpenAPI schema，见[声明式校验](validation.md)。
+
 ```rust
 #[derive(WebxRequestMeta)]
 pub struct SearchRequest {

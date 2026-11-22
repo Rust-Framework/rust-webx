@@ -13,6 +13,24 @@ use crate::routing::HttpMethod;
 use std::any::Any;
 use std::collections::HashMap;
 
+/// One declared request-field constraint, reflected into OpenAPI.
+///
+/// The request derive emits these next to the runtime validation checks, so the
+/// document and the runtime behavior cannot disagree.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ParamConstraint {
+    /// Minimum string length (characters) or collection length (items).
+    MinLength(u64),
+    /// Maximum string length (characters) or collection length (items).
+    MaxLength(u64),
+    /// Inclusive numeric lower bound.
+    Minimum(f64),
+    /// Inclusive numeric upper bound.
+    Maximum(f64),
+    /// Semantic format (`"email"`).
+    Format(&'static str),
+}
+
 /// Metadata about a request parameter for OpenAPI generation.
 #[derive(Debug, Clone)]
 pub struct ParamMeta {
@@ -29,6 +47,9 @@ pub struct ParamMeta {
     /// Whether the parameter must be present (`Option<T>` and `Vec<T>` are
     /// not required; path parameters always are).
     pub required: bool,
+
+    /// Declared `#[validate(...)]` constraints (empty when none).
+    pub constraints: &'static [ParamConstraint],
 
     /// The JSON object key this parameter binds from, when it can bind from a
     /// JSON body: an explicit `#[frombody]` field, a composite field, or an

@@ -7,7 +7,7 @@
 use serde_json::{json, Value as JsonValue};
 use std::collections::{BTreeSet, HashMap};
 use webx_core::localization::IStringLocalizer;
-use webx_core::route::scan::{ParamMeta, RequestParamEntry, RouteEntry};
+use webx_core::route::scan::{ParamConstraint, ParamMeta, RequestParamEntry, RouteEntry};
 use webx_core::routing::HttpMethod;
 
 /// Generate an OpenAPI 3.0.3 specification from registered routes.
@@ -69,11 +69,13 @@ pub fn generate_openapi_spec(
                 "claim" => {}
                 _ => {
                     let required = param.required || source == "path";
+                    let mut schema = json!({ "type": param.type_hint });
+                    apply_constraints(&mut schema, param.constraints);
                     parameters.push(json!({
                         "name": param.name,
                         "in": source,
                         "required": required,
-                        "schema": { "type": param.type_hint },
+                        "schema": schema,
                     }));
                 }
             }
@@ -254,7 +256,7 @@ fn form_schema(params: &[ParamMeta]) -> JsonValue {
     let mut required = Vec::new();
 
     for param in params {
-        let schema = match param.type_hint {
+        let mut schema = match param.type_hint {
             "binary" => json!({ "type": "string", "format": "binary" }),
             "binary[]" => json!({
                 "type": "array",
@@ -262,6 +264,7 @@ fn form_schema(params: &[ParamMeta]) -> JsonValue {
             }),
             other => json!({ "type": other }),
         };
+        apply_constraints(&mut schema, param.constraints);
         properties.insert(param.name.to_string(), schema);
         if param.required {
             required.push(json!(param.name));
@@ -290,7 +293,7 @@ fn body_schema(params: &[ParamMeta]) -> JsonValue {
     for param in params {
         match param.json_key {
             Some(key) => {
-                properties.insert(key.to_string(), body_property_schema(param.type_hint));
+                properties.insert(key.to_string(), body_property_schema(param));
                 if param.required {
                     required.push(json!(key));
                 }
@@ -310,12 +313,44 @@ fn body_schema(params: &[ParamMeta]) -> JsonValue {
     schema
 }
 
-/// The schema of one JSON body property, from its type hint.
-fn body_property_schema(type_hint: &str) -> JsonValue {
-    match type_hint {
+/// The schema of one JSON body property, from its type hint and constraints.
+fn body_property_schema(param: &ParamMeta) -> JsonValue {
+    let mut schema = match param.type_hint {
         "binary" => json!({ "type": "string", "format": "binary" }),
         "array" => json!({ "type": "array" }),
         other => json!({ "type": other }),
+    };
+    apply_constraints(&mut schema, param.constraints);
+    schema
+}
+
+/// Reflect `#[validate]` constraints into one schema object.
+///
+/// String limits use `minLength`/`maxLength`; array limits use
+/// `minItems`/`maxItems` (the runtime rule counts items); `email` becomes
+/// `format: "email"`.
+fn apply_constraints(schema: &mut JsonValue, constraints: &[ParamConstraint]) {
+    let is_array = schema.get("type").and_then(JsonValue::as_str) == Some("array");
+    for constraint in constraints {
+        match constraint {
+            ParamConstraint::MinLength(value) => {
+                if is_array {
+                    schema["minItems"] = json!(value);
+                } else {
+                    schema["minLength"] = json!(value);
+                }
+            }
+            ParamConstraint::MaxLength(value) => {
+                if is_array {
+                    schema["maxItems"] = json!(value);
+                } else {
+                    schema["maxLength"] = json!(value);
+                }
+            }
+            ParamConstraint::Minimum(value) => schema["minimum"] = json!(value),
+            ParamConstraint::Maximum(value) => schema["maximum"] = json!(value),
+            ParamConstraint::Format(format) => schema["format"] = json!(format),
+        }
     }
 }
 
@@ -447,5 +482,49 @@ fn titlecase(s: &str) -> String {
     match chars.next() {
         None => String::new(),
         Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_constraints_become_openapi_keywords() {
+        let mut schema = json!({ "type": "string" });
+        apply_constraints(
+            &mut schema,
+            &[
+                ParamConstraint::MinLength(3),
+                ParamConstraint::MaxLength(64),
+                ParamConstraint::Format("email"),
+            ],
+        );
+        assert_eq!(schema["minLength"], 3);
+        assert_eq!(schema["maxLength"], 64);
+        assert_eq!(schema["format"], "email");
+
+        // Collection limits use minItems/maxItems, because `length` counts items.
+        let mut array = json!({ "type": "array" });
+        apply_constraints(
+            &mut array,
+            &[
+                ParamConstraint::MinLength(1),
+                ParamConstraint::MaxLength(10),
+            ],
+        );
+        assert_eq!(array["minItems"], 1);
+        assert_eq!(array["maxItems"], 10);
+
+        let mut number = json!({ "type": "integer" });
+        apply_constraints(
+            &mut number,
+            &[
+                ParamConstraint::Minimum(18.0),
+                ParamConstraint::Maximum(120.0),
+            ],
+        );
+        assert_eq!(number["minimum"], 18.0);
+        assert_eq!(number["maximum"], 120.0);
     }
 }

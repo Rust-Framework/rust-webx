@@ -117,6 +117,7 @@ pub use webx_core::route::diagnostics::{
     duplicate_handlers, format_route_diagnostics, orphan_handlers, orphan_route_details,
     orphan_routes, route_snapshots,
 };
+pub use webx_core::route::scan::ParamConstraint;
 pub use webx_core::routing::{HttpMethod, IEndpoint, IRouter, RouteMeta};
 pub use webx_core::secrets::{
     ChainSecretStore, EnvSecretStore, FileSecretStore, ISecretProtector, ISecretStore, SecretError,
@@ -134,6 +135,7 @@ pub use webx_core::storage::{
 };
 pub use webx_core::stream::{SseEvent, SseResult, StreamEnd};
 pub use webx_core::time::{IClock, SystemClock, TestClock};
+pub use webx_core::validation::{char_len, email_is_valid};
 
 // --- DI extensions ---
 pub use webx_core::route::binding;

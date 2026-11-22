@@ -168,6 +168,7 @@ inventory::submit! {
             source: "query",
             type_hint: "string",
             required: true,
+            constraints: &[],
             json_key: None,
         }],
     }
@@ -182,6 +183,7 @@ inventory::submit! {
             source: "query",
             type_hint: "string",
             required: false,
+            constraints: &[],
             json_key: None,
         }],
     }
@@ -196,6 +198,7 @@ inventory::submit! {
             source: "query",
             type_hint: "string",
             required: false,
+            constraints: &[],
             json_key: None,
         }],
     }
@@ -212,6 +215,7 @@ inventory::submit! {
                 source: "query",
                 type_hint: "string",
                 required: false,
+                constraints: &[],
                 json_key: None,
             },
             ParamMeta {
@@ -219,6 +223,7 @@ inventory::submit! {
                 source: "query",
                 type_hint: "integer",
                 required: false,
+                constraints: &[],
                 json_key: None,
             },
         ],
@@ -235,6 +240,7 @@ inventory::submit! {
                 source: "body",
                 type_hint: "string",
                 required: true,
+                constraints: &[],
                 json_key: Some("title"),
             },
             ParamMeta {
@@ -242,6 +248,7 @@ inventory::submit! {
                 source: "body",
                 type_hint: "boolean",
                 required: false,
+                constraints: &[],
                 json_key: Some("published"),
             },
             ParamMeta {
@@ -249,6 +256,7 @@ inventory::submit! {
                 source: "body",
                 type_hint: "array",
                 required: false,
+                constraints: &[],
                 json_key: Some("tags"),
             },
             // The struct field is `display_name`; the JSON key is renamed.
@@ -257,6 +265,7 @@ inventory::submit! {
                 source: "body",
                 type_hint: "string",
                 required: true,
+                constraints: &[],
                 json_key: Some("displayName"),
             },
             // An unmarked field: the route method (POST) resolves it to the body.
@@ -265,6 +274,7 @@ inventory::submit! {
                 source: "",
                 type_hint: "string",
                 required: false,
+                constraints: &[],
                 json_key: Some("slug"),
             },
             // A `#[serde(flatten)]` field: no key of its own.
@@ -273,6 +283,7 @@ inventory::submit! {
                 source: "body",
                 type_hint: "object",
                 required: false,
+                constraints: &[],
                 json_key: None,
             },
         ],
@@ -289,6 +300,7 @@ inventory::submit! {
                 source: "body",
                 type_hint: "string",
                 required: false,
+                constraints: &[],
                 json_key: Some("theme"),
             },
             ParamMeta {
@@ -296,6 +308,7 @@ inventory::submit! {
                 source: "body",
                 type_hint: "boolean",
                 required: false,
+                constraints: &[],
                 json_key: Some("notify"),
             },
         ],
@@ -311,6 +324,7 @@ inventory::submit! {
             source: "body",
             type_hint: "object",
             required: true,
+            constraints: &[],
             json_key: None,
         }],
     }

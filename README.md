@@ -68,6 +68,9 @@ rust-webx is **not** a full-stack UI framework (pair it with any frontend), **no
 - **Zero-config handler registration** — the `#[handler]` attribute macro registers a handler with the DI container automatically.
 - **Authentication & authorization** — JWT Bearer (HS256/RS256/ES256 + JWKS/kid), OIDC, cookie sessions + CSRF, refresh-token rotation, TOTP/WebAuthn passkeys, mTLS, DPoP, HTTP Basic, RFC 7662/7009, OAuth 2.0 social login (GitHub/Google/Microsoft/GitLab/Gitee/DingTalk/Feishu/WeChat/Weibo/QQ/Douyin/Alipay/Facebook), and declarative `#[authorize]`. Start with the [10-minute auth quickstart](docs/rust-webx/09-auth-security/quickstart.md).
 - **Identity on the request** — `#[fromclaim] user: IdentityUser` binds the authenticated identity (id, name, email, tenant, roles) as a plain request field; handlers stop parsing tokens. `#[fromclaim(optional)] viewer: Option<IdentityUser>` covers anonymous endpoints (anonymous access must be declared explicitly).
+- **Declarative validation** — `#[validate(length/range/email/custom)]` on request fields runs after binding, merges failures into the same `400 problem+json` `errors` map, and reflects the constraints into OpenAPI (`minLength`/`minItems`/`minimum`/`format`).
+- **Keyset pagination, client info, instance checks** — `KeysetRequest`/`CursorPage` complement offset `PagedRequest`/`PagedResult`; `#[fromclient] ClientInfo` binds the listener peer plus trusted `X-Forwarded-For` resolution; `RequestUser::require_owner`/`require_same_tenant` centralize instance-level 401/403 decisions.
+- **Transactional outbox** — opt-in `rust-webx-outbox-ef`: same-transaction enqueue, lease-based dispatch through `EventDispatcher`, backoff, dead-letter and retention, registered with `add_outbox`.
 - **Endpoint metadata service** — `IEndpointCatalog` exposes every endpoint at runtime (`all()` / `localized()`), so permission sync, admin navigation and OpenAPI share one source.
 - **Localization** — `#[display]` / `#[description]` / `#[category]` store resource keys; a host-wide `Culture.Default` selects the language, with `.json` resources or `include_str!` embedding.
 - **Production capabilities out of the box** — graceful shutdown, live health checks, security headers, request IDs, CORS, TLS, rate limiting, compression, OpenAPI + SPA hosting.
@@ -157,8 +160,17 @@ rust-webx/
 │   │   └── kafka/             #   rust-webx-kafka
 │   ├── ef/                    # ORM boundary adapters
 │   │   └── webx/              #   rust-webx-ef — sanitized EFError → webx::Error mapping
-│   └── outbox/                # transactional-outbox starters
-│       └── ef/                #   rust-webx-outbox-ef — same-transaction enqueue + dispatch
+│   ├── outbox/                # transactional-outbox starters
+│   │   └── ef/                #   rust-webx-outbox-ef — same-transaction enqueue + dispatch
+│   └── payment/               # payment domain group (opt-in)
+│       ├── core/              #   rust-webx-pay — ports, models, Payments runtime
+│       ├── stripe/            #   rust-webx-pay-stripe
+│       ├── alipay/            #   rust-webx-pay-alipay
+│       ├── wechatpay/         #   rust-webx-pay-wechatpay
+│       ├── paypal/            #   rust-webx-pay-paypal
+│       ├── adyen/             #   rust-webx-pay-adyen
+│       ├── square/            #   rust-webx-pay-square
+│       └── ef/                #   rust-webx-pay-ef — durable webhook inbox
 ├── docbit/                    # reference app: portfolio + blog + RBAC + docs
 ├── dmbit/                     # reference app: device & inventory management
 └── imbit/                     # reference app: real-time IM (WS + signaling)
@@ -176,7 +188,11 @@ rust-webx/
 > `rust-webx-webauthn` → `webx_webauthn`, `rust-webx-redis` → `webx_redis`,
 > `rust-webx-nats` → `webx_nats`, `rust-webx-rabbitmq` → `webx_rabbitmq`,
 > `rust-webx-kafka` → `webx_kafka`, `rust-webx-ef` → `webx_ef`,
-> `rust-webx-outbox-ef` → `webx_outbox_ef`.
+> `rust-webx-outbox-ef` → `webx_outbox_ef`, `rust-webx-pay` → `webx_pay`,
+> `rust-webx-pay-stripe` → `webx_pay_stripe`, `rust-webx-pay-alipay` → `webx_pay_alipay`,
+> `rust-webx-pay-wechatpay` → `webx_pay_wechatpay`, `rust-webx-pay-paypal` → `webx_pay_paypal`,
+> `rust-webx-pay-adyen` → `webx_pay_adyen`, `rust-webx-pay-square` → `webx_pay_square`,
+> `rust-webx-pay-ef` → `webx_pay_ef`.
 
 ## Request-as-Endpoint: Hello World
 

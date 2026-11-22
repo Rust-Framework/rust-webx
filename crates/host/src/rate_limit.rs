@@ -498,6 +498,11 @@ fn extract_client_ip(
 ///
 /// Proxies append, so the right-most entries are the ones closest to the
 /// server; skipping trusted proxies from the right yields the real client.
+///
+/// Returns `None` when no hop is outside the trusted proxy ranges: such a chain
+/// is either incomplete or forged (a client inside the trusted network could
+/// prepend arbitrary addresses), so callers must fall back to the peer address
+/// instead of trusting the left-most hop.
 pub(crate) fn client_from_forwarded_for(value: &str, trusted_proxies: &[IpCidr]) -> Option<IpAddr> {
     let hops: Vec<IpAddr> = value
         .split(',')
@@ -508,7 +513,6 @@ pub(crate) fn client_from_forwarded_for(value: &str, trusted_proxies: &[IpCidr])
         .rev()
         .find(|ip| !trusted_proxies.iter().any(|cidr| cidr.contains(**ip)))
         .copied()
-        .or_else(|| hops.first().copied())
 }
 
 #[cfg(test)]
@@ -629,8 +633,8 @@ mod tests {
         );
         assert_eq!(
             client_from_forwarded_for("10.0.0.1, 10.0.0.3", &proxies),
-            Some("10.0.0.1".parse().unwrap()),
-            "when every hop is a trusted proxy fall back to the left-most"
+            None,
+            "a chain of trusted proxies only is incomplete or forged: fall back to the peer"
         );
     }
 }

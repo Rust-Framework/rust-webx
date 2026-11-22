@@ -66,6 +66,9 @@ rust-webx **不是** 全栈 UI 框架（可搭配任意前端）、**不是** OR
 - **零配置 Handler 注册** — `#[handler]` 属性宏自动向 DI 容器注册 Handler。
 - **认证与授权** — JWT Bearer（HS256/RS256/ES256 + JWKS/kid）、OIDC、Cookie 会话 + CSRF、刷新令牌轮换、TOTP/WebAuthn、mTLS、DPoP、HTTP Basic、RFC 7662/7009、OAuth 2.0 社交登录（GitHub/Google/Microsoft/GitLab/Gitee/钉钉/飞书/微信/微博/QQ/抖音/支付宝/Facebook），以及声明式 `#[authorize]`。见 [10 分钟认证快速上手](docs/rust-webx/09-auth-security/quickstart.md)。
 - **身份即请求字段** — `#[fromclaim] user: IdentityUser` 把认证身份（id、名称、邮箱、租户、角色）绑定为普通字段；Handler 不再解析 token。`#[fromclaim(optional)] viewer: Option<IdentityUser>` 覆盖匿名端点（匿名访问必须显式声明）。
+- **声明式校验** — 请求字段上的 `#[validate(length/range/email/custom)]` 在绑定后执行，失败汇入同一个 `400 problem+json` `errors`，并把约束同步进 OpenAPI（`minLength`/`minItems`/`minimum`/`format`）。
+- **Keyset 分页、客户端信息、实例级校验** — `KeysetRequest`/`CursorPage` 与 offset `PagedRequest`/`PagedResult` 并存；`#[fromclient] ClientInfo` 绑定对端地址与受信 `X-Forwarded-For`；`RequestUser::require_owner`/`require_same_tenant` 收敛实例级 401/403。
+- **事务性 outbox** — 按需引入 `rust-webx-outbox-ef`：同事务入队、`EventDispatcher` 租约派发、退避/死信/保留期，`add_outbox` 注册。
 - **端点元数据服务** — `IEndpointCatalog` 在运行时暴露全部端点（`all()` / `localized()`），权限同步、管理导航与 OpenAPI 共用一份元数据。
 - **本地化** — `#[display]` / `#[description]` / `#[category]` 存资源键，全局 `Culture.Default` 决定语言；支持 JSON 资源文件或 `include_str!` 嵌入。
 - **开箱即用的生产能力** — 优雅关闭、动态健康检查、安全响应头、请求 ID、CORS、TLS、速率限制、压缩、OpenAPI + SPA 托管。
@@ -154,8 +157,17 @@ rust-webx/
 │   │   └── kafka/             #   rust-webx-kafka
 │   ├── ef/                    # ORM 边界适配器
 │   │   └── webx/              #   rust-webx-ef — EFError → webx::Error 脱敏映射
-│   └── outbox/                # 事务性 outbox starter
-│       └── ef/                #   rust-webx-outbox-ef — 同事务入队 + 租约派发
+│   ├── outbox/                # 事务性 outbox starter
+│   │   └── ef/                #   rust-webx-outbox-ef — 同事务入队 + 租约派发
+│   └── payment/               # 支付领域组（按需引入）
+│       ├── core/              #   rust-webx-pay — 统一模型/端口/Payments 运行时
+│       ├── stripe/            #   rust-webx-pay-stripe
+│       ├── alipay/            #   rust-webx-pay-alipay
+│       ├── wechatpay/         #   rust-webx-pay-wechatpay
+│       ├── paypal/            #   rust-webx-pay-paypal
+│       ├── adyen/             #   rust-webx-pay-adyen
+│       ├── square/            #   rust-webx-pay-square
+│       └── ef/                #   rust-webx-pay-ef — 回调 inbox（rust-ef）
 ├── docbit/                    # 参考应用：作品集 + 博客 + RBAC + 文档
 ├── dmbit/                     # 参考应用：设备与库存管理
 └── imbit/                     # 参考应用：实时 IM（WS + 信令）
@@ -171,7 +183,11 @@ rust-webx/
 > `rust-webx-mfa` → `webx_mfa`、`rust-webx-webauthn` → `webx_webauthn`、
 > `rust-webx-redis` → `webx_redis`、`rust-webx-nats` → `webx_nats`、
 > `rust-webx-rabbitmq` → `webx_rabbitmq`、`rust-webx-kafka` → `webx_kafka`、
-> `rust-webx-ef` → `webx_ef`、`rust-webx-outbox-ef` → `webx_outbox_ef`。
+> `rust-webx-ef` → `webx_ef`、`rust-webx-outbox-ef` → `webx_outbox_ef`、
+> `rust-webx-pay` → `webx_pay`、`rust-webx-pay-stripe` → `webx_pay_stripe`、
+> `rust-webx-pay-alipay` → `webx_pay_alipay`、`rust-webx-pay-wechatpay` → `webx_pay_wechatpay`、
+> `rust-webx-pay-paypal` → `webx_pay_paypal`、`rust-webx-pay-adyen` → `webx_pay_adyen`、
+> `rust-webx-pay-square` → `webx_pay_square`、`rust-webx-pay-ef` → `webx_pay_ef`。
 
 ## 请求即端点：Hello World
 

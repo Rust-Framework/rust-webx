@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 # 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 # rust-webx crate publish script
 #
@@ -15,31 +15,33 @@
 #   2. rust-webx-core     (no internal deps)
 #   3. rust-webx-engine   (depends on rust-webx-core)
 #   4. rust-webx-client   (depends on rust-webx-core; outbound HTTP)
-#   5. rust-webx-ai       (AI domain kit; depends on core/client)
-#   6. rust-webx-ai-ef    (rust-ef usage ledger)
-#   7. rust-webx-build    (no internal deps; build-dependency of apps)
-#   8. rust-webx-spa      (depends on rust-webx-core)
-#   9. rust-webx-openapi  (depends on rust-webx-core)
-#  10. rust-webx-host     (depends on core/engine/client/macros/spa/openapi)
-#  11. rust-webx-auth-ef  (durable auth stores; depends on core)
-#  12. rust-webx-mfa      (TOTP/recovery codes; depends on core)
-#  13. rust-webx-webauthn (passkey verification; depends on core)
-#  14. rust-webx          (umbrella crate; depends on all framework crates above)
-#  15. rust-webx-oauth2   (social login; depends on core/client; dev-dep on webx)
-#  16. rust-webx-oidc     (OIDC client; depends on core/host/client)
-#  17. rust-webx-redis    (event transport + distributed cache; depends on core/host)
-#  18. rust-webx-nats     (event transport; depends on core/host)
-#  19. rust-webx-rabbitmq (event transport; depends on core/host)
-#  20. rust-webx-kafka    (event transport; depends on core/host)
-#  21. rust-webx-ai-gateway (OpenAI-compatible surface; depends on webx + webx-ai)
-#  22. rust-webx-pay       (payment ports/models; depends on core/host/client)
-#  23. rust-webx-pay-stripe
-#  24. rust-webx-pay-alipay
-#  25. rust-webx-pay-wechatpay
-#  26. rust-webx-pay-paypal
-#  27. rust-webx-pay-adyen
-#  28. rust-webx-pay-square
-#  29. rust-webx-pay-ef    (durable webhook inbox; depends on rust-webx-pay + rust-ef)
+#   5. rust-webx-ef       (EFError -> webx::Error boundary; depends on core)
+#   6. rust-webx-ai       (AI domain kit; depends on core/client)
+#   7. rust-webx-ai-ef    (rust-ef usage ledger)
+#   8. rust-webx-build    (no internal deps; build-dependency of apps)
+#   9. rust-webx-spa      (depends on rust-webx-core)
+#  10. rust-webx-openapi  (depends on rust-webx-core)
+#  11. rust-webx-host     (depends on core/engine/client/macros/spa/openapi)
+#  12. rust-webx-auth-ef  (durable auth stores; depends on core)
+#  13. rust-webx-mfa      (TOTP/recovery codes; depends on core)
+#  14. rust-webx-webauthn (passkey verification; depends on core)
+#  15. rust-webx          (umbrella crate; depends on all framework crates above)
+#  16. rust-webx-outbox-ef (transactional outbox starter; depends on core/host)
+#  17. rust-webx-oauth2   (social login; depends on core/client; dev-dep on webx)
+#  18. rust-webx-oidc     (OIDC client; depends on core/host/client)
+#  19. rust-webx-redis    (event transport + distributed cache; depends on core/host)
+#  20. rust-webx-nats     (event transport; depends on core/host)
+#  21. rust-webx-rabbitmq (event transport; depends on core/host)
+#  22. rust-webx-kafka    (event transport; depends on core/host)
+#  23. rust-webx-ai-gateway (OpenAI-compatible surface; depends on webx + webx-ai)
+#  24. rust-webx-pay      (payment ports/models; depends on core/host/client)
+#  25. rust-webx-pay-stripe
+#  26. rust-webx-pay-alipay
+#  27. rust-webx-pay-wechatpay
+#  28. rust-webx-pay-paypal
+#  29. rust-webx-pay-adyen
+#  30. rust-webx-pay-square
+#  31. rust-webx-pay-ef   (durable webhook inbox; depends on rust-webx-pay + rust-ef)
 # 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 # `pipefail` is required: the gate commands below pipe into `tail`, and without
@@ -95,15 +97,19 @@ internal_deps() {
         rust-webx-core|rust-webx-macros|rust-webx-build) ;;
         rust-webx-engine) echo "rust-webx-core" ;;
         rust-webx-client) echo "rust-webx-core" ;;
+        rust-webx-ef) echo "rust-webx-core" ;;
         rust-webx-ai) echo "rust-webx-core rust-webx-client" ;;
         rust-webx-ai-ef) echo "rust-webx-ai rust-webx-core" ;;
         rust-webx-ai-gateway) echo "rust-webx rust-webx-ai" ;;
         rust-webx-spa|rust-webx-openapi) echo "rust-webx-core" ;;
         rust-webx-host) echo "rust-webx-core rust-webx-engine rust-webx-client rust-webx-macros rust-webx-spa rust-webx-openapi" ;;
         rust-webx-auth-ef|rust-webx-mfa|rust-webx-webauthn) echo "rust-webx-core" ;;
+        rust-webx-outbox-ef) echo "rust-webx-core rust-webx-host" ;;
         rust-webx-oauth2) echo "rust-webx-core rust-webx-client rust-webx" ;;
         rust-webx-oidc) echo "rust-webx-core rust-webx-host rust-webx-client" ;;
         rust-webx-redis|rust-webx-nats|rust-webx-rabbitmq|rust-webx-kafka) echo "rust-webx-core rust-webx-host" ;;
+        rust-webx-pay) echo "rust-webx-core rust-webx-host rust-webx-client" ;;
+        rust-webx-pay-stripe|rust-webx-pay-alipay|rust-webx-pay-wechatpay|rust-webx-pay-paypal|rust-webx-pay-adyen|rust-webx-pay-square|rust-webx-pay-ef) echo "rust-webx-pay" ;;
         rust-webx) echo "rust-webx-core rust-webx-engine rust-webx-host rust-webx-client rust-webx-macros rust-webx-spa rust-webx-openapi" ;;
     esac
 }

@@ -152,6 +152,7 @@ fn expand_endpoint(
                     source: "path",
                     type_hint: "string",
                     required: true,
+                    constraints: &[],
                     json_key: ::core::option::Option::None,
                 }
             }

@@ -385,6 +385,21 @@ presence 判断不再由业务自己数连接。
 - 事件日志有界（默认每 subscription 1024 条），回放 O(保留条数)，`next_cursor` 支持增量拉取；
 - presence 观察者只在真实转移时调用（每连接最多两次：上线/下线）。
 
+### 多实例 presence 配方
+
+框架不新增第二套 pub/sub：跨节点在线数二选一，都由应用在适配器层落地。
+
+1. **共享注册表（推荐，计数权威）**：`IPresenceObserver` 的 first/last 转移在应用层写共享
+   store——Redis 用 `SADD presence:room:<id> <conn>` / 断开 `SREM`，查询 `SCARD`；连接键带实例
+   id 与心跳 TTL，节点崩溃后自动过期。节点内 `IConnectionRegistry` 仍负责本节点扇出。
+2. **事件回传（最终一致）**：把 `PresenceTransition` 经 `IEventPublisher` 发布成
+   `RealtimeFanoutEvent`（或业务事件），各节点按 `conn_id + joined/left` 幂等更新聚合计数。
+   只适合展示型 presence，不能用于计费或写权限判断。
+
+两者都复用现有的唯一事件传输：`crates/queue/*` 的 broker 适配或 `crates/cache/redis`。
+`RealtimeMetrics.realtime_connections_active` 始终是**本节点**计数；全局数字由共享 store 提供，
+或在监控端按实例求和。
+
 ## 实时观测
 
 存在 WebSocket 路由时，host 注册进程级 `RealtimeMetrics`（`IConnection::stats()` 的聚合版），

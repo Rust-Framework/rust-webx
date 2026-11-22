@@ -66,7 +66,52 @@ let issued = token_issuer.issue(claims).await?;
 - 恢复码登录使用 `MfaAssurance::recovery_code()`，`amr` 标记 `recovery_code` 便于审计。
 - 密码 + TOTP 的 `amr` 顺序固定为 `pwd,totp`；自定义流程用 `MfaAssurance::new`。
 
-## 5. 边界
+## 5. 登录流配方（两步签发）
+
+账号模型（用户表、`mfa_enabled`、`last_accepted_step`、恢复码记录）由应用持久化，框架原语按下面
+顺序组合：
+
+```rust
+use webx::security::{ISessionStore, ITokenIssuer, TokenClaims};
+use webx_mfa::{MfaAssurance, TotpConfig, AMR_PASSWORD};
+
+// 1) 密码步：验证密码后看账号是否启用 MFA
+if !hasher.verify(&password, &account.password_hash)? {
+    return Err(Error::Unauthorized("invalid credentials".to_string()));
+}
+if account.mfa_enabled {
+    // 受限 token：只有 amr=pwd、没有 acr、短 TTL；或返回 mfa_required + OneTimeSecret challenge
+    let claims = TokenClaims::new(&account.id).with_claim("amr", AMR_PASSWORD);
+    let limited = token_issuer.issue(claims).await?;
+    return Ok(LoginStep::MfaRequired { limited_token: limited.token });
+}
+let full = token_issuer.issue(TokenClaims::new(&account.id)).await?; // 未启用 MFA 的账号
+
+// 2) 第二因子步：用受限 token 定位用户，TOTP 与恢复码二选一
+let verification = account.totp_secret.verify(
+    &submitted_code, now_unix_secs, TotpConfig::default(), account.last_accepted_step,
+)?;
+account.last_accepted_step = Some(verification.matched_step); // 条件更新 last_step < matched_step
+
+// 3) 升级签发：amr=pwd,totp、acr=urn:webx:acr:mfa
+let claims = MfaAssurance::totp().apply_to_claims(TokenClaims::new(&account.id));
+let full = token_issuer.issue(claims).await?;
+session_store.revoke(&limited_jti).await?; // 撤销第 1 步的受限会话
+
+// 4) step-up 端点：敏感操作要求第二次验证
+if !MfaAssurance::satisfies_step_up(claims.extra.get("acr").map(String::as_str)) {
+    return Err(Error::Forbidden("mfa step-up required".to_string()));
+}
+```
+
+- 密码步的 token **不能**满足 step-up（`satisfies_step_up(None) == false`）：这是"限制 token"的
+  关键性质，`crates/auth/mfa/tests/login_flow_test.rs` 覆盖了它。
+- 第二因子失败统一 `401`，不要区分"码错/过期/未启用"，避免枚举；接 `ILoginThrottle` 防在线爆破。
+- TOTP 与恢复码成功后都升级到同一 `ACR_MFA`，用 `amr` 区分方法便于审计；恢复码用尽提醒重新生成。
+- 多实例部署时 `last_accepted_step` 与恢复码 `used` 必须走条件更新（`last_step < ?` / `used = 0`），
+  由数据库唯一性/行锁保证跨节点单次使用。
+
+## 6. 边界
 
 - 不做短信/邮件 OTP、推送、WebAuthn（WebAuthn 属 M3）；不做二维码渲染。
 - 恢复码的持久化与并发原子更新由应用/存储层负责；框架给出 hash 契约与单次语义。

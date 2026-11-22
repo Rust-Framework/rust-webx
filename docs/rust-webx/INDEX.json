@@ -209,6 +209,13 @@
               "difficulty": "intermediate"
             },
             {
+              "id": "validation",
+              "title": "声明式校验（#[validate]）",
+              "summary": "长度/范围/邮箱/自定义规则与 OpenAPI 同步",
+              "readingTime": 10,
+              "difficulty": "intermediate"
+            },
+            {
               "id": "user-identity",
               "title": "用户身份与多租户",
               "summary": "IdentityUser、登录/匿名/角色/租户隔离场景",
@@ -231,9 +238,9 @@
             },
             {
               "id": "pagination",
-              "title": "统一分页（PagedRequest / PagedResult）",
-              "summary": "列表端点分页契约与 from_parts 便利构造",
-              "readingTime": 8,
+              "title": "统一分页（offset / keyset）",
+              "summary": "PagedRequest/PagedResult 与 KeysetRequest/CursorPage",
+              "readingTime": 10,
               "difficulty": "beginner"
             },
             {

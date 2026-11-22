@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
-use quote::{format_ident, quote};
+use quote::{format_ident, quote, ToTokens};
 use syn::{
     parenthesized, parse_macro_input, Attribute, Data, DeriveInput, Field, Fields, GenericArgument,
     Ident, LitStr, Meta, PathArguments, Token, Type,
@@ -703,6 +703,236 @@ enum BodyKind {
     Custom,
 }
 
+/// One `#[validate(...)]` rule compiled into the request binder.
+#[derive(Clone)]
+enum ValidationRule {
+    /// `length(min = .., max = ..)` for strings (characters) / collections (items).
+    Length { min: Option<u64>, max: Option<u64> },
+    /// `range(min = .., max = ..)` for numeric scalars.
+    Range {
+        min: Option<NumberBound>,
+        max: Option<NumberBound>,
+    },
+    /// `email` for strings.
+    Email,
+    /// `custom = "path::to::fn"` (`fn(&T) -> Result<(), String>`).
+    Custom(syn::Path),
+}
+
+/// One numeric bound: the literal for the comparison and its value for OpenAPI.
+#[derive(Clone)]
+struct NumberBound {
+    literal: TokenStream2,
+    value: f64,
+    /// Whether the literal was written as a float (`3.5` vs `3`).
+    float: bool,
+}
+
+/// Parse every `#[validate(...)]` attribute on `field`.
+///
+/// Rules are validated against the field's shape here (compile-time error instead
+/// of a runtime surprise), and repeated attributes compose.
+fn parse_validation(field: &Field, shape: &Shape) -> syn::Result<Vec<ValidationRule>> {
+    let mut rules = Vec::new();
+    for attr in &field.attrs {
+        if !attr.path().is_ident("validate") {
+            continue;
+        }
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("email") {
+                if !is_string_shape(shape) {
+                    return Err(meta.error("`email` applies to a `String` field"));
+                }
+                rules.push(ValidationRule::Email);
+                return Ok(());
+            }
+            if meta.path.is_ident("length") {
+                let (min, max) = parse_length_bounds(&meta)?;
+                if min.is_none() && max.is_none() {
+                    return Err(meta.error("`length` needs `min` and/or `max`"));
+                }
+                if !(is_string_shape(shape) || is_collection_shape(shape)) {
+                    return Err(meta.error("`length` applies to a `String` or collection field"));
+                }
+                rules.push(ValidationRule::Length { min, max });
+                return Ok(());
+            }
+            if meta.path.is_ident("range") {
+                let (min, max) = parse_range_bounds(&meta)?;
+                if min.is_none() && max.is_none() {
+                    return Err(meta.error("`range` needs `min` and/or `max`"));
+                }
+                if !is_numeric_shape(shape) {
+                    return Err(meta.error("`range` applies to a numeric field"));
+                }
+                if is_unsigned_shape(shape)
+                    && (min.as_ref().is_some_and(|bound| bound.value < 0.0)
+                        || max.as_ref().is_some_and(|bound| bound.value < 0.0))
+                {
+                    return Err(
+                        meta.error("`range` bounds must be non-negative for an unsigned field")
+                    );
+                }
+                if is_integer_shape(shape)
+                    && (min.as_ref().is_some_and(|bound| bound.float)
+                        || max.as_ref().is_some_and(|bound| bound.float))
+                {
+                    return Err(meta.error("`range` bounds must be integers for an integer field"));
+                }
+                rules.push(ValidationRule::Range { min, max });
+                return Ok(());
+            }
+            if meta.path.is_ident("custom") {
+                let value = meta.value()?;
+                let lit: LitStr = value.parse()?;
+                let path: syn::Path = lit
+                    .parse()
+                    .map_err(|_| syn::Error::new_spanned(&lit, "`custom` needs a function path"))?;
+                rules.push(ValidationRule::Custom(path));
+                return Ok(());
+            }
+            Err(meta
+                .error("unknown validation rule; expected `length`, `range`, `email` or `custom`"))
+        })?;
+    }
+    Ok(rules)
+}
+
+fn parse_length_bounds(
+    meta: &syn::meta::ParseNestedMeta<'_>,
+) -> syn::Result<(Option<u64>, Option<u64>)> {
+    let mut min = None;
+    let mut max = None;
+    meta.parse_nested_meta(|inner| {
+        let target = if inner.path.is_ident("min") {
+            &mut min
+        } else if inner.path.is_ident("max") {
+            &mut max
+        } else {
+            return Err(inner.error("`length` takes `min` and/or `max`"));
+        };
+        let value = inner.value()?;
+        let literal: syn::LitInt = value.parse()?;
+        *target = Some(literal.base10_parse::<u64>()?);
+        Ok(())
+    })?;
+    Ok((min, max))
+}
+
+fn parse_range_bounds(
+    meta: &syn::meta::ParseNestedMeta<'_>,
+) -> syn::Result<(Option<NumberBound>, Option<NumberBound>)> {
+    let mut min = None;
+    let mut max = None;
+    meta.parse_nested_meta(|inner| {
+        let target = if inner.path.is_ident("min") {
+            &mut min
+        } else if inner.path.is_ident("max") {
+            &mut max
+        } else {
+            return Err(inner.error("`range` takes `min` and/or `max`"));
+        };
+        let value = inner.value()?;
+        let expr: syn::Expr = value.parse()?;
+        let Some((literal, number, float)) = eval_number(&expr) else {
+            return Err(syn::Error::new_spanned(
+                &expr,
+                "`range` bounds must be integer or float literals",
+            ));
+        };
+        *target = Some(NumberBound {
+            literal,
+            value: number,
+            float,
+        });
+        Ok(())
+    })?;
+    Ok((min, max))
+}
+
+/// Evaluate a numeric expression (`5`, `3.5`, `-1`) for a range bound.
+///
+/// Returns the comparison literal, the OpenAPI value and whether the literal is
+/// a float.
+fn eval_number(expr: &syn::Expr) -> Option<(TokenStream2, f64, bool)> {
+    match expr {
+        syn::Expr::Lit(lit) => match &lit.lit {
+            syn::Lit::Int(int) => Some((
+                int.to_token_stream(),
+                int.base10_parse::<f64>().ok()?,
+                false,
+            )),
+            syn::Lit::Float(float) => Some((
+                float.to_token_stream(),
+                float.base10_parse::<f64>().ok()?,
+                true,
+            )),
+            _ => None,
+        },
+        syn::Expr::Unary(unary) if matches!(unary.op, syn::UnOp::Neg(_)) => {
+            let (inner, value, float) = eval_number(&unary.expr)?;
+            Some((quote! { - #inner }, -value, float))
+        }
+        _ => None,
+    }
+}
+
+fn is_string_shape(shape: &Shape) -> bool {
+    match shape {
+        Shape::Scalar(ty) | Shape::Optional(ty) => {
+            path_ends_with(ty, "String") || path_ends_with(ty, "str")
+        }
+        _ => false,
+    }
+}
+
+fn is_collection_shape(shape: &Shape) -> bool {
+    matches!(shape, Shape::Many(_) | Shape::OptionalMany(_))
+}
+
+fn is_numeric_shape(shape: &Shape) -> bool {
+    let ty = match shape {
+        Shape::Scalar(ty) | Shape::Optional(ty) => ty,
+        _ => return false,
+    };
+    const NUMERIC: &[&str] = &[
+        "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize",
+        "f32", "f64",
+    ];
+    NUMERIC.iter().any(|name| path_ends_with(ty, name))
+}
+
+fn is_unsigned_shape(shape: &Shape) -> bool {
+    let ty = match shape {
+        Shape::Scalar(ty) | Shape::Optional(ty) => ty,
+        _ => return false,
+    };
+    const UNSIGNED: &[&str] = &["u8", "u16", "u32", "u64", "u128", "usize"];
+    UNSIGNED.iter().any(|name| path_ends_with(ty, name))
+}
+
+fn is_float_shape(shape: &Shape) -> bool {
+    let ty = match shape {
+        Shape::Scalar(ty) | Shape::Optional(ty) => ty,
+        _ => return false,
+    };
+    path_ends_with(ty, "f32") || path_ends_with(ty, "f64")
+}
+
+fn is_integer_shape(shape: &Shape) -> bool {
+    is_numeric_shape(shape) && !is_float_shape(shape)
+}
+
+/// "1 character" vs "2 characters"; "1 item" vs "2 items".
+fn unit_for(string: bool, count: u64) -> &'static str {
+    match (string, count) {
+        (true, 1) => "character",
+        (true, _) => "characters",
+        (false, 1) => "item",
+        (false, _) => "items",
+    }
+}
+
 struct FieldSpec {
     ident: Ident,
     ty: Type,
@@ -724,7 +954,9 @@ struct FieldSpec {
     required: bool,
     hint: &'static str,
     custom: Option<CustomKind>,
-    /// Name of the hidden helper struct for latten / custom deserializers.
+    /// Declarative `#[validate(...)]` rules (checked after binding).
+    validation: Vec<ValidationRule>,
+    /// Name of the hidden helper struct for flatten / custom deserializers.
     helper: Ident,
 }
 
@@ -795,6 +1027,7 @@ fn build_fields(
         let shape = shape_of(&field.ty);
         let serde = field_serde(&field.attrs)?;
         let declared = declared_source(field)?;
+        let validation = parse_validation(field, &shape)?;
 
         let has_declared = declared.is_some();
         let (src, extra) = match &declared {
@@ -888,6 +1121,16 @@ fn build_fields(
             return Err(syn::Error::new_spanned(
                 field,
                 "`#[fromclient]` requires a `ClientInfo` field",
+            ));
+        }
+
+        if !validation.is_empty()
+            && (skipped || is_current_user(&field.ty) || is_client_info(&field.ty))
+        {
+            return Err(syn::Error::new_spanned(
+                field,
+                "`#[validate]` applies to values supplied by the caller; it cannot be used on \
+                 skipped fields, the identity or `ClientInfo`",
             ));
         }
 
@@ -986,6 +1229,7 @@ fn build_fields(
             flattened: serde.flatten,
             hint,
             custom: serde.custom,
+            validation,
             helper,
         });
     }
@@ -1181,6 +1425,39 @@ fn body_type_hint(field: &FieldSpec) -> &'static str {
     }
 }
 
+/// Compile-time OpenAPI constraints for one field's `#[validate]` rules.
+fn param_constraints(f: &FieldSpec) -> TokenStream2 {
+    let mut items = Vec::new();
+    for rule in &f.validation {
+        match rule {
+            ValidationRule::Length { min, max } => {
+                if let Some(min) = min {
+                    items.push(quote! { ::webx::ParamConstraint::MinLength(#min) });
+                }
+                if let Some(max) = max {
+                    items.push(quote! { ::webx::ParamConstraint::MaxLength(#max) });
+                }
+            }
+            ValidationRule::Range { min, max } => {
+                if let Some(bound) = min {
+                    let value = proc_macro2::Literal::f64_unsuffixed(bound.value);
+                    items.push(quote! { ::webx::ParamConstraint::Minimum(#value) });
+                }
+                if let Some(bound) = max {
+                    let value = proc_macro2::Literal::f64_unsuffixed(bound.value);
+                    items.push(quote! { ::webx::ParamConstraint::Maximum(#value) });
+                }
+            }
+            ValidationRule::Email => {
+                items.push(quote! { ::webx::ParamConstraint::Format("email") })
+            }
+            // A custom rule has no declarative shape to advertise.
+            ValidationRule::Custom(_) => {}
+        }
+    }
+    quote! { &[#(#items),*] }
+}
+
 /// OpenAPI parameter metadata.
 ///
 /// Every bindable field becomes one `ParamMeta`. A body field carries its
@@ -1214,6 +1491,7 @@ fn param_meta(fields: &[FieldSpec], has_form: bool) -> Vec<TokenStream2> {
             };
             let hint = body_type_hint(f);
             let required = f.required;
+            let constraints = param_constraints(f);
             let json_key = if f.flattened {
                 quote! { ::core::option::Option::None }
             } else {
@@ -1226,6 +1504,7 @@ fn param_meta(fields: &[FieldSpec], has_form: bool) -> Vec<TokenStream2> {
                     source: "body",
                     type_hint: #hint,
                     required: #required,
+                    constraints: #constraints,
                     json_key: #json_key,
                 }
             });
@@ -1247,6 +1526,7 @@ fn param_meta(fields: &[FieldSpec], has_form: bool) -> Vec<TokenStream2> {
             f.hint
         };
         let required = f.required;
+        let constraints = param_constraints(f);
         let json_key = if f.src == Src::Auto && !has_form {
             let key = LitStr::new(&f.json_key, f.ident.span());
             quote! { ::core::option::Option::Some(#key) }
@@ -1259,6 +1539,7 @@ fn param_meta(fields: &[FieldSpec], has_form: bool) -> Vec<TokenStream2> {
                 source: #source,
                 type_hint: #hint,
                 required: #required,
+                constraints: #constraints,
                 json_key: #json_key,
             }
         });
@@ -1516,6 +1797,130 @@ enum Read {
     Claim(String),
 }
 
+/// Declarative `#[validate]` checks for one bound field.
+///
+/// Runs after the field's local value is bound, records failures into `__binder`
+/// (same `400 errors` map as binding), and skips optional fields that are absent.
+fn validation_checks(f: &FieldSpec) -> TokenStream2 {
+    if f.validation.is_empty() {
+        return quote! {};
+    }
+    let local = format_ident!("__f_{}", f.ident);
+    let field = LitStr::new(&f.name, f.ident.span());
+    let string = is_string_shape(&f.shape);
+    let mut checks = TokenStream2::new();
+
+    for rule in &f.validation {
+        match rule {
+            ValidationRule::Length { min, max } => {
+                let len = if string {
+                    quote! { ::webx::char_len(::core::convert::AsRef::<str>::as_ref(__value)) }
+                } else {
+                    quote! { __value.len() }
+                };
+                if let Some(min) = min {
+                    let message = LitStr::new(
+                        &format!(
+                            "The `{}` field must be at least {} {}.",
+                            f.name,
+                            min,
+                            unit_for(string, *min)
+                        ),
+                        f.ident.span(),
+                    );
+                    checks.extend(quote! {
+                        if #len < (#min as usize) {
+                            __binder.validation(#field, #message);
+                        }
+                    });
+                }
+                if let Some(max) = max {
+                    let message = LitStr::new(
+                        &format!(
+                            "The `{}` field must be at most {} {}.",
+                            f.name,
+                            max,
+                            unit_for(string, *max)
+                        ),
+                        f.ident.span(),
+                    );
+                    checks.extend(quote! {
+                        if #len > (#max as usize) {
+                            __binder.validation(#field, #message);
+                        }
+                    });
+                }
+            }
+            ValidationRule::Range { min, max } => {
+                let value_ty = f.shape.value_ty().expect("numeric shape");
+                // Float fields accept integer bounds (`18` means `18.0`); integer
+                // fields compare against the literal directly so an out-of-range
+                // bound is a compile-time error instead of a wrapping cast.
+                let cast = if is_float_shape(&f.shape) {
+                    quote! { as #value_ty }
+                } else {
+                    quote! {}
+                };
+                if let Some(bound) = min {
+                    let literal = &bound.literal;
+                    let message = LitStr::new(
+                        &format!("The `{}` field must be at least {}.", f.name, bound.value),
+                        f.ident.span(),
+                    );
+                    checks.extend(quote! {
+                        if *__value < (#literal #cast) {
+                            __binder.validation(#field, #message);
+                        }
+                    });
+                }
+                if let Some(bound) = max {
+                    let literal = &bound.literal;
+                    let message = LitStr::new(
+                        &format!("The `{}` field must be at most {}.", f.name, bound.value),
+                        f.ident.span(),
+                    );
+                    checks.extend(quote! {
+                        if *__value > (#literal #cast) {
+                            __binder.validation(#field, #message);
+                        }
+                    });
+                }
+            }
+            ValidationRule::Email => {
+                let message = LitStr::new(
+                    &format!("The `{}` field must be a valid email address.", f.name),
+                    f.ident.span(),
+                );
+                checks.extend(quote! {
+                    if !::webx::email_is_valid(::core::convert::AsRef::<str>::as_ref(__value)) {
+                        __binder.validation(#field, #message);
+                    }
+                });
+            }
+            ValidationRule::Custom(path) => {
+                checks.extend(quote! {
+                    if let ::core::result::Result::Err(__message) = #path(__value) {
+                        __binder.validation(#field, __message);
+                    }
+                });
+            }
+        }
+    }
+
+    match f.shape {
+        Shape::Scalar(_) | Shape::Optional(_) | Shape::OptionalMany(_) => quote! {
+            if let ::core::option::Option::Some(__value) = &#local {
+                #checks
+            }
+        },
+        Shape::Many(_) => quote! {
+            let __value = &#local;
+            #checks
+        },
+        Shape::File | Shape::OptionalFile | Shape::Files => quote! {},
+    }
+}
+
 fn bind_field(f: &FieldSpec, plan: &BindingPlan) -> TokenStream2 {
     let ident = &f.ident;
     let local = format_ident!("__f_{}", ident);
@@ -1528,6 +1933,7 @@ fn bind_field(f: &FieldSpec, plan: &BindingPlan) -> TokenStream2 {
         Shape::File | Shape::OptionalFile => quote! { ::core::option::Option<::webx::FormFile> },
         Shape::Files => quote! { ::std::vec::Vec<::webx::FormFile> },
     };
+    let checks = validation_checks(f);
 
     if is_client_info(&f.ty) {
         // The host resolves the client address before the endpoint runs; the
@@ -1608,6 +2014,7 @@ fn bind_field(f: &FieldSpec, plan: &BindingPlan) -> TokenStream2 {
                         } else {
                             #safe
                         };
+                        #checks
                     };
                 }
             };
@@ -1617,6 +2024,7 @@ fn bind_field(f: &FieldSpec, plan: &BindingPlan) -> TokenStream2 {
 
     quote! {
         let #local: #local_ty = #expr;
+        #checks
     }
 }
 
@@ -2330,5 +2738,75 @@ mod tests {
             title.contains("json_key : :: core :: option :: Option :: None"),
             "{title}"
         );
+    }
+
+    #[test]
+    fn validation_rules_generate_post_bind_checks() {
+        let generated = code(
+            r#"struct Req {
+                #[validate(length(min = 3, max = 8))]
+                name: String,
+                #[validate(email)]
+                email: String,
+                #[validate(range(min = 18, max = 120))]
+                age: u8,
+                #[validate(range(min = -1, max = 5.5))]
+                score: f32,
+                #[validate(custom = "validate_code")]
+                code: String,
+            }"#,
+        );
+
+        assert!(generated.contains("char_len"), "{generated}");
+        assert!(generated.contains("email_is_valid"), "{generated}");
+        assert!(generated.contains("validation"), "{generated}");
+        assert!(generated.contains("validate_code"), "{generated}");
+        // Length compares against `usize` (char count / collection len); range
+        // literals are cast to the field type so a float field accepts `-1`.
+        assert!(
+            generated.contains("3u64 as usize") || generated.contains("3 u64 as usize"),
+            "{generated}"
+        );
+        assert!(generated.contains("as f32"), "{generated}");
+    }
+
+    #[test]
+    fn negative_bounds_are_rejected_for_unsigned_fields() {
+        let input: DeriveInput =
+            syn::parse_str(r#"struct Req { #[validate(range(min = -1))] age: u8 }"#)
+                .expect("parse");
+        let error = expand(&input).expect_err("unsigned range bound must be rejected");
+        assert!(error.to_string().contains("non-negative"), "{error}");
+    }
+
+    #[test]
+    fn validation_rules_are_reflected_in_param_meta() {
+        let entries = param_entries(
+            r#"struct Req {
+                #[frombody] #[validate(length(min = 3, max = 8))]
+                name: String,
+                #[frombody] #[validate(email)]
+                email: String,
+                #[frombody] #[validate(range(min = 18, max = 120))]
+                age: u8,
+            }"#,
+        );
+
+        let name = entry_with(&entries, "\"name\"");
+        assert!(name.contains("ParamConstraint :: MinLength"), "{name}");
+        assert!(name.contains("ParamConstraint :: MaxLength"), "{name}");
+
+        let email = entry_with(&entries, "\"email\"");
+        assert!(email.contains("ParamConstraint :: Format"), "{email}");
+        assert!(email.contains("\"email\""), "{email}");
+
+        let age = entry_with(&entries, "\"age\"");
+        assert!(age.contains("ParamConstraint :: Minimum"), "{age}");
+        assert!(age.contains("ParamConstraint :: Maximum"), "{age}");
+
+        // A field without rules advertises no constraints.
+        let entries = param_entries(r#"struct Req { #[frombody] plain: String }"#);
+        let plain = entry_with(&entries, "\"plain\"");
+        assert!(plain.contains("constraints : & []"), "{plain}");
     }
 }

@@ -119,6 +119,24 @@ HTTP stack is introduced.
   and `CursorPage<T>` (`items` / `cursor` / `has_more`; `from_rows` derives an
   exact `has_more` from one extra fetched row). Offset `PagedRequest` /
   `PagedResult` remain unchanged.
+- **Declarative request validation** — `#[validate(...)]` on `WebxRequestMeta`
+  fields (`length`, `range`, `email`, `custom`) is expanded at compile time and
+  runs after binding; failures land in the same `400 problem+json` `errors` map
+  as binding errors. The same rules emit `ParamMeta::constraints`, so generated
+  OpenAPI schemas carry `minLength` / `maxLength` / `minItems` / `maxItems` /
+  `minimum` / `maximum` / `format: "email"`.
+- **Instance-level authorization helpers** — `RequestUser::require_owner(owner_id)`
+  and `require_same_tenant(tenant_id)` turn the authenticated identity into the
+  401/403 decision (anonymous → 401; mismatch → 403 with a message that does not
+  disclose the owner/tenant), while the resource lookup and ownership check stay
+  in the handler.
+- **MFA login-flow recipe** — `crates/auth/mfa/tests/login_flow_test.rs` pins the
+  documented two-step issuance: a password-only token cannot satisfy a step-up,
+  a replayed TOTP step is rejected, and recovery codes are single use.
+- **Multi-instance presence recipe** — the WebSocket handbook now spells out the
+  two supported patterns (shared presence store for authoritative counts, or
+  `PresenceTransition` events for eventually-consistent counts) without
+  introducing a second pub/sub.
 
 #### Changed
 
@@ -210,6 +228,17 @@ umbrella 均不链接支付适配器；不引入服务商 SDK，也不引入第�
   `decoded()`）与不透明 `Cursor` 编解码（base64url JSON 排序键分量、4 KiB 上限、
   `CursorError` → 400），以及 `CursorPage<T>`（`items`/`cursor`/`has_more`；`from_rows` 用多取的
   一行给出精确 `has_more`）。offset `PagedRequest`/`PagedResult` 保持不变。
+- **声明式校验** — `WebxRequestMeta` 字段上的 `#[validate(...)]`（`length`、`range`、`email`、
+  `custom`）在编译期展开并在绑定后执行；失败进入与绑定错误相同的 `400 problem+json`
+  `errors`。同一份规则写入 `ParamMeta::constraints`，生成的 OpenAPI schema 带
+  `minLength`/`maxLength`/`minItems`/`maxItems`/`minimum`/`maximum`/`format: "email"`。
+- **实例级授权 helper** — `RequestUser::require_owner(owner_id)` 与
+  `require_same_tenant(tenant_id)` 把身份收敛成 401/403 判定（匿名 401；不匹配 403，
+  文案不泄露 owner/tenant）；资源加载与归属校验仍留在 Handler。
+- **MFA 登录流配方** — `crates/auth/mfa/tests/login_flow_test.rs` 固化两步签发：仅密码的 token
+  不能满足 step-up、TOTP 重放被拒、恢复码单次使用。
+- **多实例 presence 配方** — WebSocket 手册明确两种支持形态（共享 presence store 作为权威计数，
+  或 `PresenceTransition` 事件做最终一致计数），不引入第二套 pub/sub。
 
 #### 变更
 

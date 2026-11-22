@@ -238,3 +238,20 @@ async fn a_duplicate_id_is_a_unique_violation() {
         "expected a unique violation, got {error}"
     );
 }
+
+#[tokio::test]
+async fn an_oversized_payload_is_rejected_before_the_insert() {
+    let options = in_memory_options().await;
+    prepare(&options).await;
+    let provider = provider(options).await;
+
+    let mut ctx = own_context(&provider).await;
+    let payload = format!("{{\"blob\":\"{}\"}}", "x".repeat(1 << 20));
+    let error = ctx
+        .enqueue_outbox_wire("big-1", "order.placed", &payload)
+        .expect_err("payloads above 1 MiB are rejected");
+    assert!(
+        matches!(error, EFError::ModelValidation(ref message, _) if message.contains("at most")),
+        "expected a model validation error, got {error}"
+    );
+}

@@ -36,7 +36,7 @@
    `IPaymentServiceFactory`（应用级运行时源）、`IPaymentProviderFactory`（适配器级
    provider 源，内部扩展点）。`IPaymentProviderBuilder` 只给自定义工厂复用协议实现，
    普通用户不接触。
-4. **精确的 `.add_stripe()` 可行且必须现在定**：支付 crate 是 2.7 新增、尚未发布；
+4. **精确的 `.add_stripe()` 可行且已在 2.7 定稿**：支付 crate 是 2.7 新增；
    直接改为 `.add_stripe()`（运行时）＋ `.add_stripe_with(options)`（静态）。
    Rust 不支持同名方法按参数个数重载；两个扩展 trait 同时引入会 `E0034`（已用 rustc 验证）。
 5. **账户选择只能有一个入口**：放进 `PaymentScope`，从 `CreatePayment`/`RefundCommand`
@@ -536,7 +536,7 @@ add_*_with / payment_webhook!**；`IPaymentProviderFactory`/`IPaymentProviderBui
 - 手册、设计、CHANGELOG、lib.rs/adapters 文档同步；`add_payments` 只作为历史说明出现。
 - 新增：scope 租户隔离、缓存 TTL/单飞/失效、工厂错误不进缓存、静态/运行时同路径、
   provider factory/builder 测试、回调 account 可选、自动运行时装配 e2e。
-- 版本：2.7 预发布期完成 API 改名。
+- 版本：2.7 定稿 API 改名。
 
 ### 验收
 
@@ -561,7 +561,7 @@ add_*_with / payment_webhook!**；`IPaymentProviderFactory`/`IPaymentProviderBui
 | 工厂异步/DB 依赖 | 热路径 p99 | 缓存/单飞；DB 只在 miss |
 | 多实例不一致 | 部分节点旧配置 | TTL 保底；事件广播可选 |
 | 默认工厂忽略 tenant 凭证 | 误以为租户自动隔离 | 文档明确：默认工厂 tenant 只参与缓存键；按租户切换凭证必须自定义工厂 |
-| API 改名 | 预发布期改动 | 支付 crate 未发布；同批文档/CHANGELOG |
+| API 改名 | 2.7 发布前定稿 | 支付 crate 2.7 首发；同批文档/CHANGELOG |
 | host 依赖 | 编译体积 | 接受（redis 先例）；需要时拆 `pay/host` |
 
 已拍板：

@@ -439,6 +439,14 @@ impl Binder {
         ));
     }
 
+    /// Record a declarative `#[validate(...)]` failure for `field`.
+    ///
+    /// The message is user-facing prose produced by the derive (it already names
+    /// the field), and it lands in the same `errors` map as binding failures.
+    pub fn validation(&mut self, field: &str, message: impl Into<String>) {
+        self.errors.push(FieldError::new(field, message));
+    }
+
     /// Parse a required scalar.
     ///
     /// Returns `None` (and records an error) when the value is absent or

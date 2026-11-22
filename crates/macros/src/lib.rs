@@ -210,7 +210,7 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
     WebxRequestMeta,
     attributes(
         frompath, fromquery, frombody, fromform, fromfile, fromheader, fromclaim, fromclient,
-        request
+        validate, request
     )
 )]
 pub fn webx_request_meta(input: TokenStream) -> TokenStream {

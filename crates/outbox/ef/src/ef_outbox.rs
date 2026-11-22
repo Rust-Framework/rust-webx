@@ -24,6 +24,12 @@ use crate::port::{store_error, IOutbox, OutboxEntry};
 /// Longest `last_error` text persisted on a row.
 const MAX_ERROR_CHARS: usize = 500;
 
+/// Largest accepted event payload.
+///
+/// The outbox row is copied inside the producer's transaction, so it must stay
+/// small: put large blobs in object storage and enqueue a reference instead.
+const MAX_PAYLOAD_BYTES: usize = 1 << 20;
+
 /// Maximum backoff exponent (delay is capped at `base * 2^10`).
 const MAX_BACKOFF_EXPONENT: u32 = 10;
 
@@ -95,6 +101,12 @@ impl OutboxDbContextExt for DbContext {
             return Err(EFError::model_validation(
                 "outbox event name must be 1-128 characters",
             ));
+        }
+        if payload_json.len() > MAX_PAYLOAD_BYTES {
+            return Err(EFError::model_validation(format!(
+                "outbox payload must be at most {MAX_PAYLOAD_BYTES} bytes; store large data \
+                 elsewhere and enqueue a reference"
+            )));
         }
         let now = unix_now_secs();
         self.add(OutboxMessage {

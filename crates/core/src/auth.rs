@@ -519,6 +519,45 @@ pub trait RequestUser {
     fn require_tenant(&self) -> Result<&str> {
         self.require_user()?.require_tenant()
     }
+
+    /// Require that the authenticated principal is the resource owner.
+    ///
+    /// * anonymous → `401 Unauthorized`
+    /// * authenticated but `sub` differs from `owner_id` → `403 Forbidden`
+    ///
+    /// The 403 detail is deliberately generic (`resource owner required`) so it
+    /// does not disclose the owner's id. Instance ownership stays in the handler
+    /// (the framework cannot know a resource's shape); this helper centralizes
+    /// only the 401/403 decision.
+    fn require_owner(&self, owner_id: &str) -> Result<()> {
+        let user = self.require_user()?;
+        if user.id == owner_id {
+            Ok(())
+        } else {
+            Err(Error::Forbidden("resource owner required".to_string()))
+        }
+    }
+
+    /// Require that a resource belongs to the caller's tenant.
+    ///
+    /// * anonymous → `401 Unauthorized`
+    /// * authenticated without a tenant claim → `403 Forbidden`
+    ///   (delegates to [`Self::require_tenant`])
+    /// * a different tenant → `403 Forbidden` (`cross-tenant access is not
+    ///   allowed`)
+    ///
+    /// `tenant_id` must come from the loaded resource, never from the request
+    /// body/query — otherwise a caller could claim another tenant.
+    fn require_same_tenant(&self, tenant_id: &str) -> Result<()> {
+        let scope = self.require_tenant()?;
+        if scope == tenant_id {
+            Ok(())
+        } else {
+            Err(Error::Forbidden(
+                "cross-tenant access is not allowed".to_string(),
+            ))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -785,6 +824,53 @@ mod tests {
             authorizer.seen.lock().unwrap().as_slice(),
             TWO_RULES,
             "the raw declaration reaches the legacy method unchanged, AND structure included"
+        );
+    }
+
+    #[test]
+    fn owner_and_tenant_helpers_split_401_from_403() {
+        let admin = multi_tenant_admin();
+        let request = TestRequest(Some(&admin));
+
+        assert!(request.require_owner("user-1").is_ok());
+        let err = request.require_owner("user-2").unwrap_err();
+        assert_eq!(err.status_code(), 403);
+        assert!(
+            matches!(&err, Error::Forbidden(detail) if detail == "resource owner required"),
+            "{err:?}"
+        );
+
+        assert!(request.require_same_tenant("acme").is_ok());
+        let err = request.require_same_tenant("other").unwrap_err();
+        assert_eq!(err.status_code(), 403);
+        assert!(
+            matches!(&err, Error::Forbidden(detail) if detail.contains("cross-tenant")),
+            "{err:?}"
+        );
+
+        // Authenticated but without a tenant claim: still 403, not 401.
+        let single = single_tenant_user();
+        let request = TestRequest(Some(&single));
+        assert_eq!(
+            request
+                .require_same_tenant("acme")
+                .unwrap_err()
+                .status_code(),
+            403
+        );
+
+        // Anonymous: authentication is the missing piece, so both are 401.
+        let anonymous = TestRequest(None);
+        assert_eq!(
+            anonymous.require_owner("user-1").unwrap_err().status_code(),
+            401
+        );
+        assert_eq!(
+            anonymous
+                .require_same_tenant("acme")
+                .unwrap_err()
+                .status_code(),
+            401
         );
     }
 }

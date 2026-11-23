@@ -109,13 +109,17 @@ appsettings.Development.json        # 开发环境覆盖（Development 模式）
 - **反向代理之后**：开启 `ClientInfo.TrustForwardedHeaders` 并填写 `ClientInfo.TrustedProxies`。只有直连
   对端落在网段内才采信转发头；否则按对端地址计。`TrustForwardedHeaders=true` 但 `TrustedProxies` 为空时
   框架忽略转发头并打 `warn`（否则客户端可以轮换 `X-Forwarded-For` 绕过限流）。
-- **`RateLimit.TrustProxy` / `RateLimit.TrustedProxies` 成为 legacy**（2.8.0 起不再生效，计划 3.0 移除）：serde 仍
-  接受旧配置（不会启动失败），但限流器忽略它们并在启动时打 `warn`。迁移方式与示例见
-  [缓存与速率限制](../11-production/caching-rate-limit.md)。
-- **环境变量**：`APP__ClientInfo__TrustForwardedHeaders=true`；数组元素按索引覆盖，例如
-  `APP__ClientInfo__TrustedProxies__0=10.0.0.0/8`。
+- **`RateLimit.TrustProxy` / `RateLimit.TrustedProxies` 成为 legacy**（2.8.0 起不再生效，计划 3.0 移除）：
+  `Development`/`Test` 模式下 serde 仍接受旧配置、限流器忽略并打 `warn`；**`Production` 模式下
+  检测到这两个旧键会启动失败**（避免静默塌缩为「代理 IP 一个全局桶」），迁移到
+  `ClientInfo.TrustForwardedHeaders` / `ClientInfo.TrustedProxies` 后即可启动。
+  迁移方式与示例见 [缓存与速率限制](../11-production/caching-rate-limit.md)。
+- **环境变量**：`APP__ClientInfo__TrustForwardedHeaders=true` 这类标量可覆盖；**数组不能**用
+  `APP__ClientInfo__TrustedProxies__0=...` 按索引覆盖（当前实现只递归 JSON 对象，索引段会静默
+  不生效或让严格绑定启动失败）。数组请在 `appsettings*.json` 或代码里配置。
 - 代码构造 `RateLimitSection` 时用 `..Default::default()` 即可跳过这两个 legacy 字段（字段仍保留以兼容
-  `appsettings.json`）。
+  `appsettings.json`）。`Idempotency.AllowAnonymous`（默认 `true`）控制匿名请求是否启用幂等；
+  对外服务建议设为 `false`，见 [请求级幂等](../11-production/idempotency.md)。
 
 ### Culture
 

@@ -20,10 +20,15 @@ POST /api/orders        Idempotency-Key: 3f9c2b1e-…
     "Enabled": true,
     "TtlSeconds": 86400,
     "MaxTrackedKeys": 10000,
-    "MaxBodyBytes": 1048576
+    "MaxBodyBytes": 1048576,
+    "AllowAnonymous": false
   }
 }
 ```
+
+> `AllowAnonymous`（默认 `true`，兼容既有部署）：匿名请求按解析后的客户端 IP 分键。若匿名接口的
+> `Idempotency-Key` 由请求体确定性推导，同一 NAT/反代 IP 下的不同客户端可能互相重放响应
+> （最危险的是登录类接口把 A 的令牌重放给 B）——对外部署建议显式设为 `false`，只对已认证主体启用幂等。
 
 或显式注入存储（多实例/自建存储时必须用这个）：
 
@@ -42,7 +47,11 @@ Host::builder()
 
 多实例部署用数据库持久化实现（`rust-webx-ef`），见「数据库持久化（多实例）」一节。
 
-显式调用优先于配置节；存储键由「主体 + 方法 + 路径 + 请求头」组成：
+显式调用优先于配置节；存储键由「租户 + 主体 + 方法 + 路径 + 查询串 + 请求头」组成
+（查询串按 key/value 排序后入键，`POST /items?mode=a` 与 `?mode=b` 不会互相重放）：
+已认证请求的主体是 `tenant:<tenant>:user:<sub>`（无租户 claim 时为 `user:<sub>`），
+匿名请求用 `ClientInfo` 解析后的客户端 IP（`ip:<client>`，未安装 `ClientInfo` 中间件时
+为对端地址）——同一用户在两个租户下的相同方法/路径/键不会互相重放。
 
 | 请求头 | 行为 |
 |---|---|
@@ -52,10 +61,18 @@ Host::builder()
 | 首次请求 | 执行；2xx 且非 `text/event-stream`、body ≤ `MaxBodyBytes` 时缓存响应 |
 | 同键重试 | 重放状态码、`content-type`、`content-encoding`、body，附 `Idempotency-Replayed: true` |
 | 同键并发 | `409 Conflict` + `Retry-After: 1` |
-| Handler 返回错误 / 非 2xx / body 过大 / 流式响应 | 释放键，允许重试重新执行 |
+| Handler 返回错误 / 非 2xx / body 过大 / 流式（SSE）/ 文件下载响应 | 释放键，允许重试重新执行 |
 | 主体不同 | 键空间隔离（用户 A 的键不会命中用户 B 的响应） |
+| 租户不同 | 键空间隔离（`tenant_id` 进入键；同一 sub 跨租户不重放） |
 
-匿名请求以客户端 IP 作为主体；没有 IP 也没有身份时不启用幂等（无法区分调用方）。
+匿名请求以 `ClientInfo` 解析后的客户端 IP 作为主体（反代后是真实客户端而不是代理地址）；
+没有 IP 也没有身份时不启用幂等（无法区分调用方）。匿名主体只按 IP 隔离，配置
+`AllowAnonymous=false` 可完全关闭匿名幂等（见上）。
+
+| 场景 | 行为 |
+|---|---|
+| Handler 成功但存储 `complete` 失败（DB 瞬断/列溢出） | 中间件再尝试 `release` 释放预约并记 warn/error，客户端可立即重试 |
+| 重放响应 | 只重放状态码/`content-type`/`content-encoding`/body（与 TTL 语义一致，不恢复 `Location`/`ETag` 等头） |
 
 ## 实现端口
 
@@ -99,9 +116,15 @@ register_idempotency_model(&mut ctx); // 把 webx_idempotency 加进模型
 ctx.migrate("Migrations").await?;     // 已有库升级；新库首装用 ctx.bootstrap()
 ```
 
-主键是完整协议键的 SHA-256 摘要（`key_hash`，64 hex）：中间件的协议键 = 主体 + 方法 + 路径 +
-客户端 `Idempotency-Key`（≤255 字符），路径没有长度上限，所以固定宽度的摘要才是安全的索引列；
-完整键另存在 `key` 列（TEXT，仅供排障，不加索引）。`expires_at` 上的 `#[index]` 服务于清理扫描。
+主键是完整协议键的 SHA-256 摘要（`key_hash`，64 hex）：中间件的协议键 = 租户 + 主体 + 方法 +
+路径 + 查询串 + 客户端 `Idempotency-Key`（≤255 字符），路径/查询串没有长度上限，所以固定宽度的
+摘要才是安全的索引列；完整键另存在 `key` 列（TEXT，仅排障，截断到 1024 字符，不加索引）。
+`expires_at` 上的 `#[index]` 服务于清理扫描。
+
+> 该表含业务响应 body（可能包含订单/报表数据）与协议键（含主体与路径），属于敏感数据面：
+> 生产环境按最小权限授予读写，不要导出/外共享；不要在缓存响应里放 Set-Cookie /
+> Authorization 等敏感头。
+
 
 ### 装配
 
@@ -145,13 +168,22 @@ Host::builder()
 `WHERE expires_at < now - grace` 的索引 `DELETE`；多个实例同时清理是安全的
 （同一条过期行删两次是 no-op）。
 
-### TTL 与 lease 语义
+### 租约与保留期（lease / retention）
 
-- **TTL 是租约**：Handler 必须在 TTL 内完成并 `complete`，否则租约到期后重试可以抢占该键，
-  两个 Handler 可能并发执行。TTL 取值参考最慢 Handler 的 P99（要留余量）。
-- 实例被杀 → 预约行到期 → 下一次重试 `begin` 用条件 UPDATE 抢占
+`EfIdempotencyStore` 把「预约租约」与「重放保留期」分开：
+
+- **租约**（`begin` 的 `expires_at`，默认 60s，`EfIdempotencyStore::with_lease` 可调）：
+  Handler 必须在租约内完成并 `complete`；实例崩溃后下一次重试在约 60s 后即可抢占并重新执行，
+  不必等完整 TTL。租约应大于 Handler 的最坏耗时（`with_lease` 只是修正崩溃恢复速度）。
+- **保留期**（`complete` 的 `expires_at`，由 `use_idempotency(..., ttl)` / `TtlSeconds` 决定）：
+  已完成响应在保留期内重放；过期后同一键会重新执行。
+- 实例被杀 → 租约到期 → 下一次重试 `begin` 用条件 UPDATE 抢占
   （`WHERE key_hash = ? AND expires_at <= ?`，只有一个赢家），并清空旧响应。
-- 已完成的键在 `expires_at` 前重放响应；过期后按上面的通用语义重新执行。
+- 迟到 `complete`/`release` 的 CAS 都带 `expires_at > now`：对已过期预约 affected = 0，
+  不会复活过期行。端口没有 per-attempt token，因此「租约过期后被别的实例抢占」与
+  「旧 owner 迟到完成/release」在极小窗口内仍可能命中新租约；把租约设为大于 Handler
+  最坏耗时即可规避，彻底修复需要 3.0 的带 token 端口。
+- 多实例机器时钟偏差会放大该窗口：部署需启用 NTP，租约保留余量。
 
 ### 并发正确性
 
@@ -167,8 +199,16 @@ Host::builder()
 
 ### 边界
 
-- 表行数由「TTL + grace + 清理频率」约束；响应 body 另受中间件 `MaxBodyBytes` 限制
-  （默认 1 MiB，超限的响应释放键而不入库）。
+- 表行数由「保留期 + grace + 清理频率」约束；响应 body 受中间件 `MaxBodyBytes` 与
+  store 的列容量双重限制。`EfIdempotencyStore` 在 MySQL 上把上限压到约 60 KiB（MySQL
+  `Vec<u8>` → `BLOB` 只有 64 KiB），超限时释放预约并允许重试（不缓存该响应）；
+  PostgreSQL/SQLite 由 `MaxBodyBytes` 决定。用 `EfIdempotencyStore::with_max_body_bytes`
+  显式对齐两者。
+- 未注册 `IdempotencyHousekeeping` 时过期行不会自动清理，DB 会随请求量无限增长：
+  多实例/生产部署必须注册清理服务（见上）。
+- 幂等中间件在**路由匹配之前**执行（鉴权之后）：未匹配路由的带键请求也会先产生一次
+  `begin`（随后 `release`）。如只需要保护少数写接口，等框架提供路由 allowlist 前应把
+  中间件范围控制在应用层（例如只在特定 Host/路由前缀启用），并关注匿名可达接口的存储放大。
 - body 与 `content-encoding` 原样入库、原样重放，所以不要把敏感头/Cookie 放进缓存响应。
 - 多实例之间只共享数据库，不共享进程内状态；`EfIdempotencyStore` 不写本地磁盘。
 

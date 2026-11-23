@@ -16,6 +16,16 @@ consumes. Additive APIs; the only behavior change is that the legacy `RateLimit.
 
 #### Added
 
+- **`Idempotency.AllowAnonymous`** (default `true`): opt out of idempotency for
+  anonymous requests. Anonymous keys are scoped by client IP, so a body-derived
+  client key on a public endpoint could replay another client's response from the
+  same NAT/proxy; public deployments should set it to `false`.
+- **`EfIdempotencyStore::{with_lease, with_max_body_bytes}`** (and
+  `DEFAULT_LEASE` = 60s): the reservation lease is separate from the replay
+  retention TTL, so a crashed handler becomes retryable after ~60s instead of
+  after the full retention period. The store caps response bodies to its column
+  capacity (≈60 KiB on MySQL `BLOB`, unbounded on PostgreSQL/SQLite) and releases
+  the reservation for larger bodies instead of failing.
 - **`rust-webx-ef::idempotency` — durable request idempotency over rust-ef.**
   `IdempotencyRecord` (table `webx_idempotency`, registered with
   `register_idempotency_model`), `EfIdempotencyStore` implementing the existing
@@ -57,12 +67,52 @@ consumes. Additive APIs; the only behavior change is that the legacy `RateLimit.
   policy no new `#[deprecated]` attributes are added (downstreams build with
   `-D warnings`); the items are registered in `docs/design/deprecations.md` for the 3.0
   window, and `RateLimiter::with_trust_proxy` remains as a no-op compatibility shell.
+- **Idempotency scope now includes the tenant, the query string and the
+  `ClientInfo` client address; the reservation lease is independent of the
+  retention TTL.** The scope segment is `tenant:<tenant>:user:<sub>` when the
+  request carries a tenant claim (`user:<sub>` otherwise); anonymous requests use
+  the resolved client IP (not the raw peer). The canonical query string
+  (`k=v&...`, sorted) is part of the scope, so `POST /x?mode=a` and `?mode=b` no
+  longer replay each other. `begin` reserves a ~60s lease while `complete` uses
+  the caller's TTL as retention, so a killed instance is retried quickly. A
+  request without a tenant claim and without a query string computes the same
+  scope as 2.7, so keys already in flight keep matching; tenant-scoped or
+  query-bearing requests use a new scope. No configuration change is required.
+- **Legacy `RateLimit.TrustProxy` / `RateLimit.TrustedProxies` fail the startup
+  in `Production`** (they are still ignored with a warning in
+  Development/Test). Silently ignoring them behind a reverse proxy would collapse
+  every client into the proxy address's bucket, which an attacker can drain.
+  Migrate to `ClientInfo.TrustForwardedHeaders` / `ClientInfo.TrustedProxies`.
+- **Idempotency keys are tenant-scoped and use the `ClientInfo` client address.**
+  The scope segment is now `tenant:<tenant>:user:<sub>` when the request carries a
+  tenant claim (`user:<sub>` otherwise), and anonymous requests use the
+  `ClientInfo`-resolved client IP instead of the raw peer address. This closes a
+  cross-tenant replay window when the same subject exists in several tenants and
+  makes proxied anonymous traffic scope by real client rather than by proxy. Keys
+  stored by a previous 2.7 instance are not reused after the upgrade (they expire
+  with the configured TTL); no configuration change is required.
 - **`ClientInfoMiddleware` delegates to `webx_core::client_info::resolve_client_info`.**
   Behavior (trusted proxy gate, forwarded chain, fallback to the peer) is unchanged.
 - **docbit production sample** now configures `ClientInfo.TrustForwardedHeaders` /
   `ClientInfo.TrustedProxies` (loopback Nginx) instead of `RateLimit.TrustProxy`.
 - **Documentation toolchain**: CI and `docs/rust-webx/book.toml` moved to mdBook v0.5.4
   (the `multilingual` key was removed; it defaulted to `false`).
+
+#### Fixed
+
+- **A failed `complete` releases the reservation.** If storing the response fails
+  (database hiccup, column limit), the middleware now attempts `release` so the
+  client can retry immediately instead of receiving `409` until the TTL expires.
+- **File/stream responses are no longer cached as empty bodies.** A `200` with
+  `FileResult`/streaming content reports `has_body() == true` but exposes no
+  bytes; caching it would replay `200` + `0` bytes. Such responses now release
+  the key (SSE was already excluded).
+- **IPv4-mapped IPv6 peers/hops are normalized to IPv4 for trusted-proxy resolution.**
+  A dual-stack listener reports IPv4 peers as `::ffff:a.b.c.d`; that form is now
+  compared in its IPv4 shape, so an IPv4 `ClientInfo.TrustedProxies` range keeps
+  matching (previously forwarded headers were ignored and every client behind the
+  proxy shared the proxy's rate-limit bucket), and `ClientInfo::from_peer` reports
+  the canonical IPv4 client address. Covered by client_info unit tests.
 
 #### Verification
 
@@ -89,6 +139,13 @@ consumes. Additive APIs; the only behavior change is that the legacy `RateLimit.
 
 #### 新增
 
+- **`Idempotency.AllowAnonymous`**（默认 `true`）：按需关闭匿名请求的幂等。匿名键按客户端 IP
+  分域，公开接口上由 body 确定性推导的客户端键可能在同一 NAT/反代 IP 下互相重放，对外部署
+  建议设为 `false`。
+- **`EfIdempotencyStore::{with_lease, with_max_body_bytes}`**（`DEFAULT_LEASE` = 60s）：
+  预约租约与重放保留期分离——崩溃的 Handler 约 60s 后即可被重试抢占，而不是等完整保留期；
+  store 按列容量限制响应 body（MySQL `BLOB` 约 60 KiB，PG/SQLite 由中间件 `MaxBodyBytes`
+  决定），超限时释放预约而不是失败。
 - **`rust-webx-ef::idempotency` — 基于 rust-ef 的持久化请求幂等。**
   `IdempotencyRecord` 实体（表 `webx_idempotency`，用 `register_idempotency_model` 注册到
   应用模型，建表/迁移走官方 rust-ef 工具）；`EfIdempotencyStore` 实现既有
@@ -122,12 +179,38 @@ consumes. Additive APIs; the only behavior change is that the legacy `RateLimit.
   按仓库 2.x 政策不新增 `#[deprecated]` 属性（下游常以 `-D warnings` 构建）；两项登记在
   `docs/design/deprecations.md` 的 3.0 窗口，`RateLimiter::with_trust_proxy` 保留为
   no-op 兼容壳。
+- **幂等 scope 进入租户、查询串与 `ClientInfo` 客户端地址；预约租约与保留期分离。**
+  请求带 tenant claim 时 scope 为 `tenant:<tenant>:user:<sub>`（否则 `user:<sub>`）；匿名请求用
+  解析后的客户端 IP（不再用原始对端地址）。规范化查询串（`k=v&...`，排序）进入 scope，
+  `POST /x?mode=a` 与 `?mode=b` 不再互相重放。`begin` 使用约 60s 租约，`complete` 使用调用方
+  TTL 作为保留期，被杀实例可快速重试。无 tenant claim 且无查询串的请求计算出的 scope 与 2.7
+  相同，升级时在途的旧键继续命中；带租户/查询串的请求使用新 scope，无需改配置。
+- **`RateLimit.TrustProxy` / `RateLimit.TrustedProxies` 在 Production 模式启动失败**
+  （Development/Test 仍忽略并 warn）。反代后静默忽略会把所有客户端塌缩到代理地址的
+  一个桶，攻击者可轻松打满；请迁移到 `ClientInfo.TrustForwardedHeaders` /
+  `ClientInfo.TrustedProxies`。
+- **幂等键按租户隔离，匿名主体使用 `ClientInfo` 解析后的客户端地址。**
+  请求带 tenant claim 时 scope 段为 `tenant:<tenant>:user:<sub>`（否则 `user:<sub>`）；
+  匿名请求用 `ClientInfo` 解析出的客户端 IP（替代原始对端地址）。这修掉了「同一用户
+  存在于多个租户时按 sub 跨租户重放」的窗口，也让反代后的匿名流量按真实客户端而不是
+  代理地址隔离。升级前 2.7 实例写入的键不会被复用（按配置 TTL 自然过期），无需改配置。
 - **`ClientInfoMiddleware` 改为调用 `webx_core::client_info::resolve_client_info`。**
   行为（可信代理门控、转发链、回退对端）不变。
 - **docbit 生产示例**改用 `ClientInfo.TrustForwardedHeaders` /
   `ClientInfo.TrustedProxies`（本机 Nginx），不再使用 `RateLimit.TrustProxy`。
 - **文档工具链**：CI 与 `docs/rust-webx/book.toml` 升到 mdBook v0.5.4（移除
   `multilingual` 键，其原值即默认 false）。
+
+#### 修复
+
+- **`complete` 失败时释放预约。** 存储响应失败（DB 抖动/列上限）时，中间件会再尝试 `release`，
+  客户端可立即重试，而不是在 TTL 内一直收到 409。
+- **文件/流式响应不再被当作空 body 缓存。** `FileResult`/流式内容 `has_body() == true` 但
+  `body_bytes()` 为空，缓存会重放 `200` + 0 字节；现在释放键（SSE 此前已排除）。
+- **IPv4-mapped IPv6 对端/hop 在可信代理解析中归一为 IPv4。** 双栈监听会把 IPv4 对端
+  报告为 `::ffff:a.b.c.d`；现在按 IPv4 形态比较，IPv4 的 `ClientInfo.TrustedProxies`
+  网段继续命中（此前会忽略转发头，导致代理后所有客户端共享代理地址的限流桶），
+  `ClientInfo::from_peer` 也报告归一后的 IPv4 客户端地址。有 client_info 单元测试覆盖。
 
 #### 验证
 

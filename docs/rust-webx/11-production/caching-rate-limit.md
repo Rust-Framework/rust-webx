@@ -95,6 +95,12 @@ TTL）。
 | ~~`TrustProxy`~~ | **legacy（2.8.0 起被忽略）**：转发头信任统一由 `ClientInfo.TrustForwardedHeaders` 控制，限流器不再读取该键 | `false` |
 | ~~`TrustedProxies`~~ | **legacy（2.8.0 起被忽略）**：可信代理 CIDR 统一由 `ClientInfo.TrustedProxies` 控制，限流器不再读取该键 | `[]` |
 
+> **Production 启动保护**：`Production` 模式下检测到 `RateLimit.TrustProxy` 或
+> `RateLimit.TrustedProxies` 非默认值会直接启动失败，而不是静默忽略——反代部署下若按
+> 代理对端地址计桶，所有客户端会塌缩到一个桶，攻击者打满后全站持续 429。请先迁移到
+> `ClientInfo.TrustForwardedHeaders` / `ClientInfo.TrustedProxies`；`Development` /
+> `Test` 模式仍只打 `warn` 继续启动。
+
 桶的键来自请求的**已解析客户端地址**（`IHttpContext::client_info().client_ip`）：默认是对端地址
 （`IHttpRequest::remote_addr`，由 host 在 accept 时记录）；配置了 `ClientInfo` 的可信转发头解析后，
 则是中间件解析出的可信客户端地址。限流中间件**不再自己解析** `X-Forwarded-For` —— 转发头只有

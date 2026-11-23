@@ -201,7 +201,14 @@ pub fn register_idempotency_model(ctx: &mut DbContext) {
 /// so a request never shares a context across `.await` points.
 pub struct EfIdempotencyStore {
     options: Arc<DbContextOptions>,
+    lease: Duration,
+    max_body_bytes: usize,
 }
+
+/// Default reservation lease. `begin` uses this (never the caller's retention
+/// TTL) so a crashed handler is retried quickly while a completed response
+/// still uses the caller's TTL as its replay-retention period.
+pub const DEFAULT_LEASE: Duration = Duration::from_secs(60);
 
 impl EfIdempotencyStore {
     /// Build a store over the application's database options.
@@ -209,7 +216,36 @@ impl EfIdempotencyStore {
     /// The options must be the ones the host resolves `DbContext` from, so both
     /// use the same provider/connection pool and metadata cache.
     pub fn new(options: Arc<DbContextOptions>) -> Self {
-        Self { options }
+        let max_body_bytes = default_body_budget(&options);
+        Self {
+            options,
+            lease: DEFAULT_LEASE,
+            max_body_bytes,
+        }
+    }
+
+    /// Reservation lease used by `begin` (default [`DEFAULT_LEASE`], 60s).
+    ///
+    /// The lease must exceed the handler's worst-case duration; it is separate
+    /// from the caller's TTL, which only controls how long a *completed*
+    /// response is replayed. A shorter lease recovers from crashed handlers
+    /// faster; `begin` still clamps it to the caller's TTL.
+    pub fn with_lease(mut self, lease: Duration) -> Self {
+        self.lease = lease;
+        self
+    }
+
+    /// Largest response body stored in the table (default: provider-dependent).
+    ///
+    /// MySQL maps `Vec<u8>` to `BLOB` (65,535 bytes), so the default budget is
+    /// ~60 KiB there and effectively unlimited on PostgreSQL (`BYTEA`) / SQLite
+    /// (`BLOB`). Larger bodies are not cached: the reservation is released so a
+    /// retry re-executes instead of receiving 409 until the TTL expires. Keep
+    /// the middleware's `MaxBodyBytes` at or below this value for the same
+    /// semantics end-to-end.
+    pub fn with_max_body_bytes(mut self, max_body_bytes: usize) -> Self {
+        self.max_body_bytes = max_body_bytes.max(1);
+        self
     }
 
     /// Delete rows that expired before `now - older_than` (Unix seconds).
@@ -324,7 +360,9 @@ fn stored_response(record: &IdempotencyRecord) -> IdempotentResponse {
 impl IIdempotencyStore for EfIdempotencyStore {
     async fn begin(&self, key: &str, ttl: Duration) -> Result<IdempotencyBegin> {
         let now = unix_now_secs();
-        let expires_at = now.saturating_add(lease_seconds(ttl));
+        // The reservation is a lease, not the replay-retention TTL: a crashed
+        // handler must be retryable after ~`lease`, not after the full TTL.
+        let expires_at = now.saturating_add(lease_seconds(self.lease.min(ttl)));
         let mut ctx = self.context()?;
 
         if let Some(record) = find_record(&mut ctx, key).await.map_err(map_ef_error)? {
@@ -333,7 +371,7 @@ impl IIdempotencyStore for EfIdempotencyStore {
 
         ctx.add(IdempotencyRecord {
             key_hash: key_hash(key),
-            key: key.to_string(),
+            key: debug_key(key),
             state: STATE_IN_PROGRESS.to_string(),
             status: None,
             content_type: None,
@@ -362,6 +400,17 @@ impl IIdempotencyStore for EfIdempotencyStore {
     }
 
     async fn complete(&self, key: &str, response: IdempotentResponse, ttl: Duration) -> Result<()> {
+        if response.body.len() > self.max_body_bytes {
+            // The table column cannot hold this body (MySQL BLOB is 64 KiB).
+            // Free the reservation so the client's retry re-executes instead of
+            // receiving 409 until the retention TTL; do not fail the request.
+            tracing::warn!(
+                body_bytes = response.body.len(),
+                max_bytes = self.max_body_bytes,
+                "idempotency: response body exceeds the store column limit; re-execution allowed"
+            );
+            return self.release(key).await;
+        }
         let now = unix_now_secs();
         let expires_at = now.saturating_add(lease_seconds(ttl));
         let target = key_hash(key);
@@ -508,6 +557,28 @@ pub fn key_hash(key: &str) -> String {
 ///
 /// The column is Unix seconds, so a sub-second TTL would create a row that is
 /// already expired; one second is the shortest meaningful lease.
+/// Truncated protocol key stored for operators (the lookup uses the digest).
+///
+/// The full protocol key includes the client header and the request path; only
+/// the first 1024 characters are kept so a pathological path can never overflow
+/// the MySQL `TEXT` column. The digest remains the identity.
+fn debug_key(key: &str) -> String {
+    const MAX_DEBUG_KEY_CHARS: usize = 1024;
+    key.chars().take(MAX_DEBUG_KEY_CHARS).collect()
+}
+
+/// Largest body the provider's `Vec<u8>` column can hold without truncation.
+fn default_body_budget(options: &DbContextOptions) -> usize {
+    // MySQL maps Vec<u8> to BLOB (65,535 bytes); PostgreSQL BYTEA and SQLite
+    // BLOB are effectively unbounded, so the middleware's MaxBodyBytes caps
+    // them. A provider that cannot be constructed falls back to the safe value.
+    const MYSQL_BLOB_LIMIT: usize = 60_000;
+    match options.create_provider() {
+        Ok(provider) if provider.name().eq_ignore_ascii_case("MySQL") => MYSQL_BLOB_LIMIT,
+        _ => usize::MAX,
+    }
+}
+
 fn lease_seconds(ttl: Duration) -> i64 {
     i64::try_from(ttl.as_secs()).unwrap_or(i64::MAX).max(1)
 }

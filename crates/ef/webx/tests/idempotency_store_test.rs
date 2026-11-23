@@ -46,10 +46,11 @@ async fn rows(options: &Arc<DbContextOptions>) -> Vec<IdempotencyRecord> {
 }
 
 async fn row(options: &Arc<DbContextOptions>, key: &str) -> Option<IdempotencyRecord> {
+    let digest = key_hash(key);
     rows(options)
         .await
         .into_iter()
-        .find(|record| record.key == key)
+        .find(|record| record.key_hash == digest)
 }
 
 async fn seed_rows(options: &Arc<DbContextOptions>, records: Vec<IdempotencyRecord>) {
@@ -63,10 +64,10 @@ async fn seed_rows(options: &Arc<DbContextOptions>, records: Vec<IdempotencyReco
 /// Move a key's lease into the past (simulates the TTL running out).
 async fn expire_row(options: &Arc<DbContextOptions>, key: &str) {
     let mut ctx = DbContext::from_options(options).expect("context");
-    let target = key.to_string();
+    let target = key_hash(key);
     let affected = linq!(
         ctx.set::<IdempotencyRecord>(),
-        |record: IdempotencyRecord| record.key == target
+        |record: IdempotencyRecord| record.key_hash == target
     )
     .execute_update()
     .set_column(IdempotencyRecord::COLUMN_EXPIRES_AT, 0i64)
@@ -506,5 +507,91 @@ async fn a_late_release_for_an_expired_reservation_keeps_the_row() {
     assert_eq!(
         store.begin("late-2", TTL).await.expect("reclaim"),
         IdempotencyBegin::Started
+    );
+}
+
+#[tokio::test]
+async fn an_oversized_body_releases_the_reservation_instead_of_failing() {
+    let options = in_memory_options().await;
+    prepare(&options).await;
+    // MySQL BLOB cannot hold more than ~60 KiB; simulate a tiny column budget.
+    let store = store(&options).with_max_body_bytes(8);
+
+    assert_eq!(
+        store.begin("big-body", TTL).await.expect("begin"),
+        IdempotencyBegin::Started
+    );
+    store
+        .complete("big-body", response(200, None, b"0123456789"), TTL)
+        .await
+        .expect("an oversized body must not fail the request");
+
+    assert!(
+        row(&options, "big-body").await.is_none(),
+        "the reservation must be released instead of staying in_progress"
+    );
+    assert_eq!(
+        store.begin("big-body", TTL).await.expect("retry"),
+        IdempotencyBegin::Started,
+        "the client can retry immediately"
+    );
+}
+
+#[tokio::test]
+async fn a_long_protocol_key_is_truncated_only_in_the_debug_column() {
+    let options = in_memory_options().await;
+    prepare(&options).await;
+    let store = store(&options);
+
+    let key = format!("idem:user:u1:POST:/api/x:{}", "k".repeat(2000));
+    assert_eq!(
+        store.begin(&key, TTL).await.expect("begin"),
+        IdempotencyBegin::Started
+    );
+    store
+        .complete(&key, response(200, None, b"ok"), TTL)
+        .await
+        .expect("complete");
+
+    let stored = row(&options, &key).await.expect("row");
+    assert_eq!(stored.key.chars().count(), 1024, "debug key is truncated");
+    assert_eq!(
+        stored.key_hash,
+        key_hash(&key),
+        "the digest is the identity"
+    );
+    assert!(matches!(
+        store.begin(&key, TTL).await.expect("replay"),
+        IdempotencyBegin::Replay(_)
+    ));
+}
+
+#[tokio::test]
+async fn the_reservation_lease_is_shorter_than_the_replay_retention() {
+    let options = in_memory_options().await;
+    prepare(&options).await;
+    let store = store(&options).with_lease(Duration::from_secs(2));
+    let retention = Duration::from_secs(3_600);
+
+    assert_eq!(
+        store.begin("lease-1", retention).await.expect("begin"),
+        IdempotencyBegin::Started
+    );
+    let reserved = row(&options, "lease-1").await.expect("row");
+    assert!(
+        reserved.expires_at - now_secs() <= 3,
+        "begin must use the lease, not the 1h retention TTL: {}",
+        reserved.expires_at
+    );
+
+    store
+        .complete("lease-1", response(200, None, b"ok"), retention)
+        .await
+        .expect("complete");
+    let completed = row(&options, "lease-1").await.expect("row");
+    assert!(
+        completed.expires_at - now_secs() >= 3_000,
+        "complete must use the retention TTL: {}",
+        completed.expires_at
     );
 }

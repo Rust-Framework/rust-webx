@@ -39,13 +39,28 @@ pub struct ClientInfo {
 impl ClientInfo {
     /// Info for a request that did not go through forwarded-header resolution.
     ///
-    /// The peer is the client; the forwarded chain is deliberately empty.
+    /// The peer is the client; the forwarded chain is deliberately empty. An
+    /// IPv4-mapped IPv6 peer (`::ffff:a.b.c.d`, reported by dual-stack
+    /// listeners) is reported in its IPv4 form so it matches IPv4 trusted-proxy
+    /// ranges and rate-limit keys consistently.
     pub fn from_peer(peer_addr: Option<SocketAddr>) -> Self {
         Self {
             peer_addr,
-            client_ip: peer_addr.map(|peer| peer.ip()),
+            client_ip: peer_addr.map(|peer| canonical_ip(peer.ip())),
             forwarded_for: Vec::new(),
         }
+    }
+}
+
+/// Canonical form of an address for trusted-proxy and client-key comparisons.
+///
+/// `Ipv6Addr::to_ipv4_mapped` covers the `::ffff:a.b.c.d` form that dual-stack
+/// sockets report for IPv4 peers; treating it as IPv4 keeps a configured
+/// `10.0.0.0/8` trusted proxy (and therefore forwarded-header trust) working.
+fn canonical_ip(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V6(v6) => v6.to_ipv4_mapped().map(IpAddr::V4).unwrap_or(ip),
+        IpAddr::V4(_) => ip,
     }
 }
 
@@ -77,10 +92,12 @@ impl IpCidr {
 
     /// Whether `ip` belongs to the range.
     ///
-    /// An address of a different family is never contained; a `/0` range
-    /// contains every address of its own family.
+    /// An IPv4-mapped IPv6 address (`::ffff:a.b.c.d`) is compared in its IPv4
+    /// form, so a dual-stack listener peer matches an IPv4 trusted-proxy range.
+    /// Otherwise an address of a different family is never contained; a `/0`
+    /// range contains every address of its own family.
     pub fn contains(&self, ip: IpAddr) -> bool {
-        match (self.network, ip) {
+        match (canonical_ip(self.network), canonical_ip(ip)) {
             (IpAddr::V4(network), IpAddr::V4(ip)) => {
                 let mask = if self.prefix == 0 {
                     0
@@ -103,10 +120,13 @@ impl IpCidr {
 }
 
 /// Parse a comma-separated `X-Forwarded-For` value into hops (left to right).
+///
+/// Hops are canonicalised (IPv4-mapped IPv6 becomes IPv4) so trusted-range
+/// checks and the reported client address are family-consistent.
 fn parse_forwarded_for(value: &str) -> Vec<IpAddr> {
     value
         .split(',')
-        .filter_map(|part| part.trim().parse::<IpAddr>().ok())
+        .filter_map(|part| part.trim().parse::<IpAddr>().ok().map(canonical_ip))
         .collect()
 }
 
@@ -154,7 +174,8 @@ pub fn resolve_client_info(
     let Some(peer) = peer else {
         return info;
     };
-    if !trusted.iter().any(|cidr| cidr.contains(peer.ip())) {
+    let peer_ip = canonical_ip(peer.ip());
+    if !trusted.iter().any(|cidr| cidr.contains(peer_ip)) {
         return info;
     }
 
@@ -165,12 +186,12 @@ pub fn resolve_client_info(
         }
         info.forwarded_for = hops;
     }
-    if info.client_ip == Some(peer.ip()) {
+    if info.client_ip == Some(peer_ip) {
         // No usable forwarded address: fall back to `X-Real-IP` when the direct
         // peer is a trusted proxy.
         if let Some(real) = real_ip {
             if let Ok(client) = real.trim().parse::<IpAddr>() {
-                info.client_ip = Some(client);
+                info.client_ip = Some(canonical_ip(client));
             }
         }
     }
@@ -191,6 +212,31 @@ mod tests {
             .iter()
             .map(|value| IpCidr::parse(value).expect("valid cidr"))
             .collect()
+    }
+
+    #[test]
+    fn an_ipv4_mapped_peer_is_trusted_and_resolved_as_ipv4() {
+        // Dual-stack listener: the trusted proxy connects as ::ffff:10.0.0.5.
+        let peer = SocketAddr::new("::ffff:10.0.0.5".parse().expect("peer"), 4433);
+        let info = resolve_client_info(
+            Some(peer),
+            Some("203.0.113.7"),
+            None,
+            &trusted(&["10.0.0.0/8"]),
+        );
+        assert_eq!(
+            info.client_ip,
+            Some("203.0.113.7".parse().unwrap()),
+            "the forwarded client must be trusted for an IPv4-mapped proxy peer"
+        );
+        // A trusted chain only (no untrusted hop) keeps the canonical peer.
+        let chain_only = resolve_client_info(
+            Some(peer),
+            Some("10.0.0.9, ::ffff:10.0.0.5"),
+            None,
+            &trusted(&["10.0.0.0/8"]),
+        );
+        assert_eq!(chain_only.client_ip, Some("10.0.0.5".parse().unwrap()));
     }
 
     #[test]
@@ -227,6 +273,13 @@ mod tests {
         assert!(IpCidr::parse("::/0")
             .unwrap()
             .contains("2001:db8::1".parse().unwrap()));
+
+        // A dual-stack listener reports IPv4 peers as IPv4-mapped IPv6; those
+        // are compared in their IPv4 form so IPv4 trusted ranges keep working.
+        let mapped: IpAddr = "::ffff:10.1.2.3".parse().expect("mapped ipv4");
+        assert!(IpCidr::parse("10.0.0.0/8").unwrap().contains(mapped));
+        assert!(!IpCidr::parse("2001:db8::/32").unwrap().contains(mapped));
+        assert!(!IpCidr::parse("::/0").unwrap().contains(mapped));
 
         assert!(IpCidr::parse("not-a-cidr").is_none());
         assert!(

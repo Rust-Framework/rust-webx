@@ -288,8 +288,9 @@ impl RateLimitMiddleware {
 
     /// Use a custom store (for example a Redis-backed distributed limiter).
     ///
-    /// The store becomes one global rule keyed by the client IP, matching the
-    /// pre-authentication middleware position where no claims are available.
+    /// The store becomes one global rule with the `Ip` subject (the host itself
+    /// installs this middleware after authentication, but the subject only needs
+    /// the resolved client address).
     pub fn with_limiter(limiter: Arc<dyn IRateLimiter>) -> Self {
         Self::from_policy(RateLimitPolicy::new().with_rule(RateLimitRule::new(
             RateLimitRoute::Any,

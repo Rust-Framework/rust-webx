@@ -1828,6 +1828,18 @@ impl HostBuilder {
         let legacy_rate_limit_proxy_config =
             options.rate_limit.trust_proxy || !options.rate_limit.trusted_proxies.is_empty();
         if legacy_rate_limit_proxy_config {
+            if self.mode == AppMode::Production {
+                // Fail closed: silently ignoring the keys would limit every
+                // client by the reverse-proxy address (one global bucket an
+                // attacker can drain). Force the one-line migration instead.
+                return Err(Error::Di(
+                    "RateLimit.TrustProxy / RateLimit.TrustedProxies are legacy and ignored since \
+                     2.8.0. Move the trust configuration to ClientInfo.TrustForwardedHeaders / \
+                     ClientInfo.TrustedProxies (see docs/rust-webx/10-configuration/appsettings.md). \
+                     Development/Test hosts keep starting with a warning."
+                        .to_string(),
+                ));
+            }
             tracing::warn!(
                 "RateLimit.TrustProxy / RateLimit.TrustedProxies are ignored (legacy since 2.8.0); \
                  configure ClientInfo.TrustForwardedHeaders / ClientInfo.TrustedProxies instead"
@@ -1970,7 +1982,8 @@ impl HostBuilder {
         if let Some((store, ttl)) = idempotency {
             tracing::info!("[Host] Idempotency enabled (Idempotency-Key middleware)");
             let middleware = crate::idempotency::IdempotencyMiddleware::new(store, ttl)
-                .with_max_body_bytes(options.idempotency.max_body_bytes);
+                .with_max_body_bytes(options.idempotency.max_body_bytes)
+                .with_anonymous_allowed(options.idempotency.allow_anonymous);
             pipeline.add_middleware(Arc::new(middleware));
         }
 

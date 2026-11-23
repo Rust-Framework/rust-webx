@@ -420,7 +420,9 @@ pub struct RateLimitSection {
     ///
     /// The field is retained only so existing `appsettings.json` files keep
     /// parsing; the rate limiter ignores it and reads the resolved
-    /// [`ClientInfo`](crate::client_info::ClientInfo) instead. To migrate, move
+    /// [`ClientInfo`](crate::client_info::ClientInfo) instead. A non-default
+    /// value makes a `Production` host fail to start (silently falling back to
+    /// proxy-address limiting would hand an attacker a global bucket); migrate
     /// the value to `ClientInfo.TrustForwardedHeaders` (planned removal in 3.0).
     #[serde(default, rename = "TrustProxy")]
     pub trust_proxy: bool,
@@ -523,6 +525,19 @@ pub struct IdempotencySection {
         rename = "MaxBodyBytes"
     )]
     pub max_body_bytes: usize,
+    /// Permit idempotency for anonymous requests. Default: true (a framework
+    /// default that keeps existing deployments working).
+    ///
+    /// Anonymous requests are scoped by the resolved client IP. Requests whose
+    /// client key is deterministically derived from the body (a common pattern)
+    /// can then replay another user's response from the same NAT/proxy address,
+    /// so set this to `false` unless every anonymous state-changing endpoint is
+    /// safe to replay across clients. Authenticated requests are unaffected.
+    #[serde(
+        default = "default_idempotency_allow_anonymous",
+        rename = "AllowAnonymous"
+    )]
+    pub allow_anonymous: bool,
 }
 
 impl Default for IdempotencySection {
@@ -532,6 +547,7 @@ impl Default for IdempotencySection {
             ttl_seconds: default_idempotency_ttl_seconds(),
             max_tracked_keys: default_idempotency_max_keys(),
             max_body_bytes: default_idempotency_max_body_bytes(),
+            allow_anonymous: default_idempotency_allow_anonymous(),
         }
     }
 }
@@ -546,6 +562,10 @@ fn default_idempotency_max_keys() -> usize {
 
 fn default_idempotency_max_body_bytes() -> usize {
     1024 * 1024
+}
+
+fn default_idempotency_allow_anonymous() -> bool {
+    true
 }
 
 /// Client-certificate policy for the TLS listener.

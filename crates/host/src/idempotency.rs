@@ -18,6 +18,7 @@
 //! `HostBuilder::use_idempotency`; the middleware only speaks the port.
 
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -156,6 +157,7 @@ pub struct IdempotencyMiddleware {
     store: std::sync::Arc<dyn IIdempotencyStore>,
     ttl: Duration,
     max_body_bytes: usize,
+    allow_anonymous: bool,
 }
 
 impl IdempotencyMiddleware {
@@ -165,7 +167,20 @@ impl IdempotencyMiddleware {
             store,
             ttl,
             max_body_bytes: 1024 * 1024,
+            allow_anonymous: true,
         }
+    }
+
+    /// Allow or reject idempotency for anonymous requests (default: allow).
+    ///
+    /// Anonymous requests are scoped by the resolved client IP; when the
+    /// client's `Idempotency-Key` is derived deterministically from the request
+    /// body, two different clients behind one NAT/proxy could replay each
+    /// other's response. Set this to `false` unless every anonymous
+    /// state-changing endpoint is safe to replay across clients.
+    pub fn with_anonymous_allowed(mut self, allow_anonymous: bool) -> Self {
+        self.allow_anonymous = allow_anonymous;
+        self
     }
 
     /// Change the largest response body that is cached (larger ones release the key).
@@ -186,6 +201,9 @@ impl IMiddleware for IdempotencyMiddleware {
     }
 
     async fn invoke_next(&self, ctx: &mut dyn IHttpContext, next: NextStage) -> Result<()> {
+        if !is_state_changing(ctx.request().method()) {
+            return next.run(ctx).await;
+        }
         let Some(presented) = ctx.request().header(IDEMPOTENCY_KEY_HEADER) else {
             return next.run(ctx).await;
         };
@@ -202,7 +220,7 @@ impl IMiddleware for IdempotencyMiddleware {
             .await;
             return Ok(());
         }
-        if !is_state_changing(ctx.request().method()) {
+        if !self.allow_anonymous && !is_authenticated(ctx) {
             return next.run(ctx).await;
         }
         let Some(scope) = request_scope(ctx) else {
@@ -219,9 +237,14 @@ impl IMiddleware for IdempotencyMiddleware {
                     .response()
                     .header("content-type")
                     .is_some_and(|content_type| content_type.starts_with("text/event-stream"));
+                // File/stream responses report `has_body() == true` but expose no
+                // bytes; caching them would replay 200 + empty body. A body-less
+                // 204/304 is fine to cache (no bytes to lose).
+                let bodyless_stream = ctx.response().has_body() && body.is_empty();
                 let cacheable = result.is_ok()
                     && (200..300).contains(&status)
                     && !stream
+                    && !bodyless_stream
                     && body.len() <= self.max_body_bytes;
                 if cacheable {
                     let response = IdempotentResponse {
@@ -235,6 +258,17 @@ impl IMiddleware for IdempotencyMiddleware {
                     };
                     if let Err(error) = self.store.complete(&key, response, self.ttl).await {
                         tracing::warn!(%error, "idempotency: storing the response failed");
+                        // Drop the reservation so the client can retry instead of
+                        // receiving 409 until the TTL expires.
+                        match self.store.release(&key).await {
+                            Ok(()) => tracing::warn!(
+                                "idempotency: reservation released after a store failure"
+                            ),
+                            Err(release_error) => tracing::error!(
+                                %release_error,
+                                "idempotency: releasing the reservation after a store failure failed"
+                            ),
+                        }
                     }
                 } else if let Err(error) = self.store.release(&key).await {
                     tracing::warn!(%error, "idempotency: releasing the reservation failed");
@@ -274,24 +308,105 @@ fn is_state_changing(method: &str) -> bool {
     )
 }
 
-/// Principal + method + path, so two clients cannot collide on one key and a
-/// retry to a different route is not replayed.
+/// Principal + tenant + method + path + query, so two clients cannot collide
+/// on one key and a retry to a different route/query is not replayed.
+///
+/// The identity comes from the request claims and the client address from
+/// `ClientInfo` (the peer address when the `ClientInfo` middleware is not
+/// installed), so a deployment behind a reverse proxy scopes anonymous keys by
+/// the real client instead of the proxy address.
 fn request_scope(ctx: &dyn IHttpContext) -> Option<String> {
-    let subject = ctx
-        .claims()
-        .map(|claims| claims.subject().to_string())
-        .filter(|subject| !subject.is_empty())
-        .map(|subject| format!("user:{subject}"))
-        .or_else(|| {
-            ctx.request()
-                .remote_addr()
-                .map(|addr| format!("ip:{}", addr.ip()))
-        })?;
-    Some(format!(
-        "{subject}:{}:{}",
-        ctx.request().method().to_ascii_uppercase(),
-        ctx.request().path()
-    ))
+    let (subject, tenant) = match ctx.claims() {
+        Some(claims) => {
+            let subject = claims.subject();
+            if subject.is_empty() {
+                (None, None)
+            } else {
+                (Some(subject), claims.get_tenantid())
+            }
+        }
+        None => (None, None),
+    };
+    let client_ip = ctx
+        .client_info()
+        .client_ip
+        .or_else(|| ctx.request().remote_addr().map(|addr| addr.ip()));
+    let query = canonical_query(ctx);
+    scope_from_parts(
+        subject,
+        tenant,
+        client_ip,
+        ctx.request().method(),
+        ctx.request().path(),
+        query.as_deref(),
+    )
+}
+
+/// Whether the request carries an authenticated principal.
+fn is_authenticated(ctx: &dyn IHttpContext) -> bool {
+    ctx.claims()
+        .is_some_and(|claims| !claims.subject().is_empty())
+}
+
+/// Canonical query string (`k=v&k2=v2` with sorted keys/values).
+///
+/// Included in the idempotency scope so `POST /items?mode=a` and
+/// `POST /items?mode=b` do not replay each other. Sorting makes the key stable
+/// when a client reorders query parameters.
+fn canonical_query(ctx: &dyn IHttpContext) -> Option<String> {
+    let mut pairs: Vec<(String, String)> = match ctx.request().query_all() {
+        Some(all) => all
+            .iter()
+            .flat_map(|(key, values)| values.iter().map(move |value| (key.clone(), value.clone())))
+            .collect(),
+        None => ctx
+            .request()
+            .query()
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect(),
+    };
+    if pairs.is_empty() {
+        return None;
+    }
+    pairs.sort();
+    Some(
+        pairs
+            .into_iter()
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect::<Vec<_>>()
+            .join("&"),
+    )
+}
+
+/// Build the scope segment from already-resolved request facts.
+///
+/// The principal is `tenant:<tenant>:user:<sub>` for authenticated
+/// tenant-scoped requests, `user:<sub>` for other authenticated requests and
+/// `ip:<client>` for anonymous traffic. The tenant segment is a security
+/// boundary: the same subject in two tenants must never replay each other's
+/// responses (user ids are not guaranteed to be globally unique).
+fn scope_from_parts(
+    subject: Option<&str>,
+    tenant: Option<&str>,
+    client_ip: Option<IpAddr>,
+    method: &str,
+    path: &str,
+    query: Option<&str>,
+) -> Option<String> {
+    let principal = match subject {
+        Some(subject) => match tenant.filter(|tenant| !tenant.is_empty()) {
+            Some(tenant) => format!("tenant:{tenant}:user:{subject}"),
+            None => format!("user:{subject}"),
+        },
+        None => format!("ip:{}", client_ip?),
+    };
+    let mut scope = format!("{principal}:{}:{path}", method.to_ascii_uppercase());
+    if let Some(query) = query {
+        scope.push('?');
+        scope.push_str(query);
+    }
+    Some(scope)
 }
 
 #[cfg(test)]
@@ -378,6 +493,83 @@ mod tests {
                 .await
                 .expect("reclaim"),
             IdempotencyBegin::Started
+        );
+    }
+
+    #[test]
+    fn request_scope_isolates_tenants_and_uses_the_client_info_address() {
+        let ip = Some(std::net::IpAddr::V4(std::net::Ipv4Addr::new(
+            203, 0, 113, 9,
+        )));
+
+        // The same subject in two tenants must not share a response cache.
+        let tenant_a = scope_from_parts(
+            Some("u-1"),
+            Some("tenant-a"),
+            ip,
+            "post",
+            "/api/orders",
+            None,
+        );
+        let tenant_b = scope_from_parts(
+            Some("u-1"),
+            Some("tenant-b"),
+            ip,
+            "post",
+            "/api/orders",
+            None,
+        );
+        assert_ne!(tenant_a, tenant_b);
+        assert_eq!(
+            tenant_a.as_deref(),
+            Some("tenant:tenant-a:user:u-1:POST:/api/orders")
+        );
+
+        // Same principal + method + path is stable (that is what replays).
+        assert_eq!(
+            tenant_a,
+            scope_from_parts(
+                Some("u-1"),
+                Some("tenant-a"),
+                ip,
+                "POST",
+                "/api/orders",
+                None
+            )
+        );
+
+        // A subject without a tenant claim stays user-scoped.
+        assert_eq!(
+            scope_from_parts(Some("u-1"), None, ip, "POST", "/api/x", None).as_deref(),
+            Some("user:u-1:POST:/api/x")
+        );
+        // An empty tenant claim is not a tenant.
+        assert_eq!(
+            scope_from_parts(Some("u-1"), Some(""), ip, "POST", "/api/x", None).as_deref(),
+            Some("user:u-1:POST:/api/x")
+        );
+
+        // Anonymous traffic is scoped by the resolved client address, never by
+        // a missing/forged header. No address means no idempotency.
+        assert_eq!(
+            scope_from_parts(None, None, ip, "POST", "/api/x", None).as_deref(),
+            Some("ip:203.0.113.9:POST:/api/x")
+        );
+        assert_eq!(
+            scope_from_parts(None, None, None, "POST", "/api/x", None),
+            None
+        );
+
+        // The query string is part of the scope: `?mode=a` and `?mode=b` are
+        // different operations and must not replay each other.
+        assert_eq!(
+            scope_from_parts(Some("u-1"), Some("t"), ip, "POST", "/api/x", Some("mode=a"))
+                .as_deref(),
+            Some("tenant:t:user:u-1:POST:/api/x?mode=a")
+        );
+        assert_ne!(
+            scope_from_parts(Some("u-1"), Some("t"), ip, "POST", "/api/x", Some("mode=a")),
+            scope_from_parts(Some("u-1"), Some("t"), ip, "POST", "/api/x", Some("mode=b"))
         );
     }
 

@@ -318,3 +318,30 @@ fn legacy_rate_limit_trust_keys_only_warn_during_assembly() {
         "expected the legacy-trust migration warning pointing at ClientInfo, got: {warnings}"
     );
 }
+
+#[test]
+fn legacy_rate_limit_trust_keys_fail_production_startup() {
+    // Silently ignoring the legacy keys in Production would limit every client
+    // by the reverse-proxy address (one global bucket an attacker can drain), so
+    // the host must fail closed and point at the replacement configuration.
+    let error = match webx_host::server::Host::builder()
+        .mode(webx_core::mode::AppMode::Production)
+        .no_spa()
+        .configure(|app| {
+            app.use_options(|options| {
+                options.rate_limit.trust_proxy = true;
+                options.rate_limit.trusted_proxies = vec!["10.0.0.0/8".into()];
+            });
+        })
+        .try_build()
+    {
+        Ok(_) => panic!("Production must reject the legacy RateLimit trust keys"),
+        Err(error) => error,
+    };
+    let message = error.to_string();
+    assert!(
+        message.contains("ClientInfo.TrustForwardedHeaders")
+            && message.contains("ClientInfo.TrustedProxies"),
+        "the startup error must name the replacement configuration, got: {message}"
+    );
+}

@@ -28,3 +28,5 @@
 | 配置 section 的 `#[non_exhaustive]`（字段字面量构造） | 3.0.0 | —（一次性破坏） | `Default` + 配置绑定 | `planned` |
 | `Pipeline { stages }` 结构体字面量构造 | 3.0.0 | — | `Pipeline::new(stages)` | `planned` |
 | `authz::resource_auth_middleware` | 1.5.0 | 3.0 | `#[authorize]` + `IDynamicAuthorizer` | `planned` |
+| `RateLimitSection.trust_proxy` / `trusted_proxies`（`RateLimit.TrustProxy` / `RateLimit.TrustedProxies`） | 2.8.0 legacy（不加 `#[deprecated]`） | 3.0 | `ClientInfo.TrustForwardedHeaders` / `ClientInfo.TrustedProxies`（转发头解析唯一入口） | `planned` |
+| `webx_host::rate_limit::RateLimiter::with_trust_proxy`（兼容壳，no-op） | 2.8.0 legacy（不加 `#[deprecated]`） | 3.0 | 删除调用；信任配置归 `ClientInfo` 节 | `planned` |

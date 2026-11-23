@@ -10,7 +10,9 @@
 | `JWT_SECRET` | 是 | ≥32 字符强密钥；也可使用 `APP__Jwt__Secret`（文件内为空，禁止占位符） |
 | `APP__App__Urls` | 否 | 监听地址 JSON 数组，默认 `http://0.0.0.0:8100`（TLS 由前置 Nginx 终结） |
 | `APP__Cors__Origins` | 否 | 覆盖 CORS；默认含 `https://www.lusida.net` 与 `https://lusida.net`（勿用 `*`） |
-| `APP__RateLimit__Enabled` | 建议 | 生产启用速率限制（docbit 默认 true；`TrustProxy` 默认 true） |
+| `APP__RateLimit__Enabled` | 建议 | 生产启用速率限制（docbit 默认 true）；客户端地址取自 `ClientInfo` 解析结果 |
+| `APP__ClientInfo__TrustForwardedHeaders` | 建议（有反向代理时） | 采信 `X-Forwarded-For` / `X-Real-IP`；只有直连对端落在 `TrustedProxies` 内才生效（docbit 默认信任本机 Nginx：`127.0.0.1/32`、`::1/128`） |
+| `APP__ClientInfo__TrustedProxies` | 建议（有反向代理时） | 可信代理 CIDR JSON 数组；代理不在本机时按实际网段覆盖 |
 | `APP__Metrics__Enabled` | 建议 | 启用 `GET /metrics` Prometheus 指标 |
 
 开发与生产均使用 SQLite（`<app_base>/app.db`），无需 `DATABASE_URL` 或外部数据库服务。

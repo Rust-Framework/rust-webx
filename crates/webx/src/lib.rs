@@ -32,7 +32,9 @@ pub use webx_core::cache::{
     options::DistributedCacheEntryOptions,
     trait_def::{CacheError, IDistributedCache},
 };
-pub use webx_core::client_info::ClientInfo;
+pub use webx_core::client_info::{
+    client_from_forwarded_for, resolve_client_info, ClientInfo, IpCidr,
+};
 pub use webx_core::config::{
     bind_config, bind_root, load_appsettings, try_bind_config, try_bind_root, try_load_appsettings,
     AppOptions, AppSection, ClientInfoSection, ConfigError, ConfigSources, CorsSection,

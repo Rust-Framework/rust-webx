@@ -395,6 +395,12 @@ fn default_culture() -> String {
 }
 
 /// Per-IP rate limiting (token bucket).
+///
+/// The limiter keys by the request's resolved
+/// [`ClientInfo`](crate::client_info::ClientInfo) — the peer address, or the
+/// trusted forwarded client when the `ClientInfo` middleware ran. Forwarded
+/// header trust is configured in [`ClientInfoSection`]; the legacy
+/// `TrustProxy` / `TrustedProxies` keys below are accepted but ignored.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RateLimitSection {
     /// Enable rate-limit middleware. Default: false (enable in Production appsettings).
@@ -409,18 +415,19 @@ pub struct RateLimitSection {
     /// Maximum distinct client IPs tracked (LRU eviction when exceeded).
     #[serde(default = "default_rate_limit_max_ips", rename = "MaxTrackedIps")]
     pub max_tracked_ips: usize,
-    /// Trust X-Forwarded-For / X-Real-IP headers for client IP extraction.
-    /// Only enable when behind a trusted reverse proxy. Default: false.
+    /// Legacy since 2.8.0: trust for `X-Forwarded-For` / `X-Real-IP` moved to the
+    /// `ClientInfo` section (`TrustForwardedHeaders` / `TrustedProxies`).
+    ///
+    /// The field is retained only so existing `appsettings.json` files keep
+    /// parsing; the rate limiter ignores it and reads the resolved
+    /// [`ClientInfo`](crate::client_info::ClientInfo) instead. To migrate, move
+    /// the value to `ClientInfo.TrustForwardedHeaders` (planned removal in 3.0).
     #[serde(default, rename = "TrustProxy")]
     pub trust_proxy: bool,
-    /// CIDR ranges of the trusted proxies. When `TrustProxy` is enabled, the
-    /// forwarded headers are only consulted if the direct peer address belongs
-    /// to one of these ranges; the client IP is then the right-most address in
-    /// `X-Forwarded-For` that is not itself a trusted proxy.
+    /// Legacy since 2.8.0: trusted proxy CIDRs moved to the `ClientInfo` section
+    /// (`ClientInfo.TrustedProxies`); ignored by the rate limiter.
     ///
-    /// An empty list with `TrustProxy = true` is treated as "trust nothing":
-    /// the headers are ignored (a client can otherwise rotate
-    /// `X-Forwarded-For` to bypass the limiter).
+    /// Kept for configuration compatibility only (planned removal in 3.0).
     #[serde(default, rename = "TrustedProxies")]
     pub trusted_proxies: Vec<String>,
 }
@@ -478,6 +485,12 @@ fn default_metrics_max_series() -> usize {
 }
 
 /// Trusted client information (`X-Forwarded-For` resolution).
+///
+/// This is the framework's **single** forwarded-header configuration: the host
+/// installs the `ClientInfo` middleware from it, and every consumer (rate
+/// limiting included) reads the resolved value instead of parsing the headers
+/// again. The legacy `RateLimit.TrustProxy` / `RateLimit.TrustedProxies` keys
+/// migrate here.
 ///
 /// Forwarded headers are only honoured when both `TrustForwardedHeaders` is on
 /// **and** the direct peer belongs to `TrustedProxies`; a directly reachable

@@ -1,7 +1,7 @@
-# 下游能力缺口处置结论（2.7.0）
+# 下游能力缺口处置结论（2.8.0）
 
 > 来源：下游 RXStudio 的 `docs/design/upstream-framework-gaps.md`（基于 rust-webx 2.6.0 /
-> rust-ef 2.6.0 / rust-dix 1.0.0 的落地反馈）。处置基线：rust-webx 2.7.0 / rust-ef 2.6.0 /
+> rust-ef 2.6.0 / rust-dix 1.0.0 的落地反馈）。处置基线：rust-webx 2.8.0 / rust-ef 2.7.0 /
 > rust-dix 1.0.0。
 >
 > 本页是**处置结论**，不是手册：每项只保留判定、落点与边界；实现细节在代码、rustdoc 与
@@ -42,9 +42,9 @@
 | 11 | 版本化迁移基线与历史 | **已覆盖** | rust-ef `ctx.migrate(dir)` + `MigrationStore` + `__ef_migrations_history`；`bootstrap`；`MigrationEngine::diff/apply_diff`；`has_drift` | 下游删 `sys_schema_migration`；readiness 用 `has_drift()` 接 `IHealthCheck` |
 | 12 | 分布式锁 / 配额原子性 | **已覆盖（2.7.0）** | `IAdvisoryLock`/`AdvisoryLease`（`try_acquire`/`release`/`renew`，冲突 `None`、过期可回收）；`InMemoryAdvisoryLock`；Redis `RedisAdvisoryLock` + `add_redis_advisory_lock`；`HostBuilder::use_advisory_lock` | 配额优先原子 SQL；多步读改写用租约；PG advisory lock 归 rust-ef 侧实现同一 trait |
 | 13 | 应用级 EF→webx 错误映射 | **已覆盖（2.7.0）** | `rust-webx-ef`（`crates/ef/webx`）：`map_ef_error` + `EfResultExt`；参考应用 re-export 同一映射 | core/umbrella 不链接 rust-ef |
-| 14 | 分布式限流策略层 | **已覆盖（2.7.0）** | `RateLimitPolicy`/`RateLimitRule`（exact > 最长 prefix > Any；Ip/User/Tenant/ApiKey + 匿名回退 IP）+ `use_rate_limit_policy`；`use_rate_limiter` 正式入口；`IRateLimiter` 端口与 429 契约不变 | 多实例把每条规则的 limiter 换成共享实现 |
+| 14 | 分布式限流策略层 | **已覆盖（2.7.0；2.8 统一转发头）** | `RateLimitPolicy`/`RateLimitRule`（exact > 最长 prefix > Any；Ip/User/Tenant/ApiKey + 匿名回退 IP）+ `use_rate_limit_policy`；`use_rate_limiter` 正式入口；`IRateLimiter` 端口与 429 契约不变；**2.8 起客户端地址统一取自 `ClientInfo` 解析结果（policy 与配置节行为一致，旧 `RateLimit.TrustProxy/TrustedProxies` 被忽略）** | 多实例把每条规则的 limiter 换成共享实现 |
 | 15 | 指标 / SLO 导出 | **已覆盖（2.7.0）** | `IMeter::snapshot()` + `MetricSample`/`MetricKind`；`MemoryMeter` 结构化存储 + 基数上限（`Metrics.MaxSeries`、`with_max_series`、`dropped_series`）；`/metrics` 渲染业务 counter/gauge/histogram（summary） | OTel 实现补 `snapshot()` 或继续自带 exporter；SLO 保留为 PromQL 配方 |
-| 16 | 请求级幂等 | **已覆盖（2.7.0）** | `IIdempotencyStore`（`begin`/`complete`/`release`）+ `InMemoryIdempotencyStore` + `Idempotency-Key` 中间件（主体+方法+路径+键；并发 409；2xx 重放）；`use_idempotency` 与 `Idempotency` 配置节 | 多实例换共享 store；请求体一致性校验仍归应用 |
+| 16 | 请求级幂等 | **已覆盖（2.8.0 持久化）** | `IIdempotencyStore`（`begin`/`complete`/`release`）+ `InMemoryIdempotencyStore` + `Idempotency-Key` 中间件（主体+方法+路径+键；并发 409；2xx 重放）；**多实例用 `rust-webx-ef::idempotency::EfIdempotencyStore`（rust-ef 表 + 唯一键 + CAS 租约 + TTL 清理）**；`use_idempotency` 与 `Idempotency` 配置节 | 请求体一致性校验仍归应用；跨实例无共享库时仍用内存实现（仅单实例正确） |
 | 17 | 事务性 outbox | **已覆盖（2.7.0）** | `rust-webx-outbox-ef`（`crates/outbox/ef`）：`OutboxMessage` + 同事务 `enqueue_outbox`、`IOutbox` 租约领取、`OutboxDispatcher`（`PeriodicBackgroundService` + `EventDispatcher`）指数退避/死信/保留期；`add_outbox` | 多实例共享 DB；跨进程投递仍走 `IEventPublisher` |
 | 18 | Handler 访问客户端信息 | **已覆盖（2.7.0）** | `#[fromclient] ClientInfo`（`peer_addr`/`client_ip`/`forwarded_for`）+ `ClientInfo` 配置节（`TrustForwardedHeaders`/`TrustedProxies`，最右侧非可信 hop）；host 中间件在鉴权/绑定前解析 | 登录 IP 维度限流直接读该字段 |
 | 19 | keyset / cursor 分页 | **已覆盖（2.7.0）** | `KeysetRequest`（cursor + page_size、`from_parts`/`decoded`）+ `Cursor` 编解码（4 KiB 上限、typed 400）+ `CursorPage<T>`（`from_rows` 多取一行精确 `has_more`）；与 offset 并存 | 排序键与租户作用域仍由 Handler 校验 |

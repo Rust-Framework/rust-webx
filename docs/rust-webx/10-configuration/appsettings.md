@@ -1,4 +1,4 @@
-# appsettings.json 配置体系
+﻿# appsettings.json 配置体系
 
 ## 自动加载
 
@@ -37,8 +37,7 @@ appsettings.Development.json        # 开发环境覆盖（Development 模式）
     "Enabled": false,
     "RequestsPerSecond": 100,
     "BurstSize": 200,
-    "MaxTrackedIps": 10000,
-    "TrustProxy": false
+    "MaxTrackedIps": 10000
   },
   "Metrics": {
     "Enabled": false,
@@ -90,6 +89,33 @@ appsettings.Development.json        # 开发环境覆盖（Development 模式）
 | `Culture` | `CultureSection` |
 
 合并后为 `AppOptions` 结构体。
+
+### RateLimit 与 ClientInfo（转发头唯一入口）
+
+`RateLimit` 节做鉴权前按客户端 IP 限流；`ClientInfo` 节决定“客户端 IP 是怎么解析出来的”。可信代理的
+`X-Forwarded-For` / `X-Real-IP` 只由 `ClientInfo` 中间件解析一次（在限流、鉴权、绑定之前），限流桶、
+审计与 Handler 的 `#[fromclient] ClientInfo` 读同一份结果：
+
+```json
+{
+  "RateLimit": { "Enabled": true, "RequestsPerSecond": 20, "BurstSize": 40 },
+  "ClientInfo": {
+    "TrustForwardedHeaders": true,
+    "TrustedProxies": ["10.0.0.0/8"]
+  }
+}
+```
+
+- **反向代理之后**：开启 `ClientInfo.TrustForwardedHeaders` 并填写 `ClientInfo.TrustedProxies`。只有直连
+  对端落在网段内才采信转发头；否则按对端地址计。`TrustForwardedHeaders=true` 但 `TrustedProxies` 为空时
+  框架忽略转发头并打 `warn`（否则客户端可以轮换 `X-Forwarded-For` 绕过限流）。
+- **`RateLimit.TrustProxy` / `RateLimit.TrustedProxies` 成为 legacy**（2.8.0 起不再生效，计划 3.0 移除）：serde 仍
+  接受旧配置（不会启动失败），但限流器忽略它们并在启动时打 `warn`。迁移方式与示例见
+  [缓存与速率限制](../11-production/caching-rate-limit.md)。
+- **环境变量**：`APP__ClientInfo__TrustForwardedHeaders=true`；数组元素按索引覆盖，例如
+  `APP__ClientInfo__TrustedProxies__0=10.0.0.0/8`。
+- 代码构造 `RateLimitSection` 时用 `..Default::default()` 即可跳过这两个 legacy 字段（字段仍保留以兼容
+  `appsettings.json`）。
 
 ### Culture
 

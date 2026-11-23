@@ -1,4 +1,4 @@
-//! Token-bucket rate-limiting middleware with a pluggable counter store.
+﻿//! Token-bucket rate-limiting middleware with a pluggable counter store.
 //!
 //! The default store is an in-process, **sharded** token bucket keyed by client
 //! IP: sharding removes the single global mutex from the hot path while
@@ -15,6 +15,12 @@
 //!     Arc::new(RateLimitMiddleware::from_config(&options.rate_limit))
 //! })
 //! ```
+//!
+//! The client address is **never** parsed from forwarded headers here. Trusted
+//! proxy ranges are configured once in the `ClientInfo` section, resolved once by
+//! the `ClientInfo` middleware (installed before this one), and this middleware
+//! only reads [`IHttpContext::client_info`] — so the configuration-section path
+//! and the `RateLimitPolicy` path always limit the same client.
 
 use crate::problem_response::write_problem;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -25,7 +31,6 @@ use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
 use std::ops::ControlFlow;
-use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use webx_core::config::RateLimitSection;
@@ -212,6 +217,10 @@ fn retry_after_seconds(rate: f64) -> u64 {
 /// New code should depend on [`IRateLimiter`] / [`InMemoryRateLimiter`].
 pub struct RateLimiter {
     inner: InMemoryRateLimiter,
+    /// Retained only by the legacy [`RateLimiter::with_trust_proxy`]
+    /// compatibility shell; the limiter keys by the address it is handed and
+    /// never reads this flag.
+    #[allow(dead_code)]
     trust_proxy: bool,
 }
 
@@ -223,6 +232,13 @@ impl RateLimiter {
         }
     }
 
+    /// Legacy compatibility shell (since 2.8.0 it is a no-op).
+    ///
+    /// Forwarded-header trust is configured once in the `ClientInfo` section
+    /// (`TrustForwardedHeaders` / `TrustedProxies`) and resolved by the
+    /// `ClientInfo` middleware; [`RateLimitMiddleware`] always reads
+    /// [`IHttpContext::client_info`] and this flag is ignored. Kept so existing
+    /// call sites keep compiling; planned removal in 3.0.
     pub fn with_trust_proxy(mut self, trust: bool) -> Self {
         self.trust_proxy = trust;
         self
@@ -242,11 +258,15 @@ impl RateLimiter {
     }
 }
 
+/// Rate-limiting middleware over a [`RateLimitPolicy`].
+///
+/// The IP subject is read from [`IHttpContext::client_info`]: without a
+/// `ClientInfo` middleware that is the peer address, with one it is the resolved
+/// trusted client address. Both construction paths ([`Self::from_policy`] and
+/// [`Self::from_config`]) therefore behave identically; the legacy
+/// `RateLimit.TrustProxy` / `RateLimit.TrustedProxies` keys are not consulted.
 pub struct RateLimitMiddleware {
     policy: RateLimitPolicy,
-    trust_proxy: bool,
-    /// CIDR ranges whose peer addresses may supply `X-Forwarded-For`.
-    trusted_proxies: Vec<IpCidr>,
 }
 
 impl RateLimitMiddleware {
@@ -283,11 +303,7 @@ impl RateLimitMiddleware {
     /// The host installs this after authentication (so `User`/`Tenant`/`ApiKey`
     /// subjects resolve); rule routes match the raw request path.
     pub fn from_policy(policy: RateLimitPolicy) -> Self {
-        Self {
-            policy,
-            trust_proxy: false,
-            trusted_proxies: Vec::new(),
-        }
+        Self { policy }
     }
 
     /// Whether the policy has no rules (the middleware then always passes).
@@ -295,83 +311,22 @@ impl RateLimitMiddleware {
         self.policy.is_empty()
     }
 
+    /// Build the default IP rule from the `RateLimit` configuration section.
+    ///
+    /// The legacy `TrustProxy` / `TrustedProxies` keys are ignored: the IP
+    /// subject reads the resolved [`IHttpContext::client_info`], whose trusted
+    /// proxy ranges come from the `ClientInfo` section.
     pub fn from_config(cfg: &RateLimitSection) -> Self {
-        let trusted_proxies: Vec<IpCidr> = cfg
-            .trusted_proxies
-            .iter()
-            .filter_map(|value| match IpCidr::parse(value) {
-                Some(cidr) => Some(cidr),
-                None => {
-                    tracing::warn!(
-                        value,
-                        "RateLimit.TrustedProxies entry is not a valid CIDR; ignoring it"
-                    );
-                    None
-                }
-            })
-            .collect();
-        if cfg.trust_proxy && trusted_proxies.is_empty() {
-            tracing::warn!(
-                "RateLimit.TrustProxy is enabled but TrustedProxies is empty; \
-                 forwarded headers are ignored (a client could otherwise spoof them)"
-            );
-        }
         let limiter: Arc<dyn IRateLimiter> = Arc::new(InMemoryRateLimiter::new(
             cfg.requests_per_second,
             cfg.burst_size,
             cfg.max_tracked_ips,
         ));
-        Self {
-            policy: RateLimitPolicy::new().with_rule(RateLimitRule::new(
-                RateLimitRoute::Any,
-                RateLimitSubject::Ip,
-                limiter,
-            )),
-            trust_proxy: cfg.trust_proxy,
-            trusted_proxies,
-        }
-    }
-}
-
-/// A parsed CIDR range used to identify trusted reverse proxies.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct IpCidr {
-    network: IpAddr,
-    prefix: u8,
-}
-
-impl IpCidr {
-    pub(crate) fn parse(value: &str) -> Option<Self> {
-        let (addr, prefix) = value.split_once('/')?;
-        let network = IpAddr::from_str(addr.trim()).ok()?;
-        let prefix: u8 = prefix.trim().parse().ok()?;
-        let max_prefix = match network {
-            IpAddr::V4(_) => 32,
-            IpAddr::V6(_) => 128,
-        };
-        (prefix <= max_prefix).then_some(Self { network, prefix })
-    }
-
-    pub(crate) fn contains(&self, ip: IpAddr) -> bool {
-        match (self.network, ip) {
-            (IpAddr::V4(network), IpAddr::V4(ip)) => {
-                let mask = if self.prefix == 0 {
-                    0
-                } else {
-                    u32::MAX << (32 - self.prefix)
-                };
-                (u32::from(network) & mask) == (u32::from(ip) & mask)
-            }
-            (IpAddr::V6(network), IpAddr::V6(ip)) => {
-                let mask = if self.prefix == 0 {
-                    0
-                } else {
-                    u128::MAX << (128 - self.prefix)
-                };
-                (u128::from(network) & mask) == (u128::from(ip) & mask)
-            }
-            _ => false,
-        }
+        Self::from_policy(RateLimitPolicy::new().with_rule(RateLimitRule::new(
+            RateLimitRoute::Any,
+            RateLimitSubject::Ip,
+            limiter,
+        )))
     }
 }
 
@@ -384,9 +339,7 @@ impl IMiddleware for RateLimitMiddleware {
         // No usable subject means the host cannot tell clients apart. Falling
         // back to a constant would turn per-client limiting into one global
         // bucket, so the limiter passes the request through.
-        let Some(key) =
-            resolve_subject_key(ctx, rule.subject, self.trust_proxy, &self.trusted_proxies)
-        else {
+        let Some(key) = resolve_subject_key(ctx, rule.subject) else {
             tracing::debug!("rate limit skipped: request has no usable subject");
             return Ok(ControlFlow::Continue(()));
         };
@@ -406,14 +359,12 @@ impl IMiddleware for RateLimitMiddleware {
 /// Resolve the budget key for `subject`, falling back to the client IP when the
 /// principal/credential is absent (fail-closed: anonymous traffic still gets
 /// limited, just per address instead of per user).
-fn resolve_subject_key(
-    ctx: &dyn IHttpContext,
-    subject: RateLimitSubject,
-    trust_proxy: bool,
-    trusted_proxies: &[IpCidr],
-) -> Option<String> {
-    let ip_key =
-        || extract_client_ip(ctx, trust_proxy, trusted_proxies).map(|ip| format!("ip:{ip}"));
+///
+/// The client address is the resolved [`IHttpContext::client_info`] value — the
+/// peer address by default, or the trusted forwarded client when the `ClientInfo`
+/// middleware ran. This function never parses forwarded headers itself.
+fn resolve_subject_key(ctx: &dyn IHttpContext, subject: RateLimitSubject) -> Option<String> {
+    let ip_key = || ctx.client_info().client_ip.map(|ip| format!("ip:{ip}"));
     match subject {
         RateLimitSubject::Ip => ip_key(),
         RateLimitSubject::User => claims_subject(ctx)
@@ -459,60 +410,6 @@ fn presented_credential(ctx: &dyn IHttpContext) -> Option<&str> {
 /// Hash the credential so the raw API key never becomes a store key.
 fn hash_credential(credential: &str) -> String {
     URL_SAFE_NO_PAD.encode(Sha256::digest(credential.as_bytes()))
-}
-
-/// Resolve the client IP the token bucket is keyed by.
-///
-/// The connection's peer address is authoritative. When `trust_proxy` is on,
-/// forwarded headers are honoured **only if the direct peer address belongs to
-/// one of `trusted_proxies`**; the client is then the right-most
-/// `X-Forwarded-For` entry that is not itself a trusted proxy (a client can
-/// otherwise prepend arbitrary addresses to spoof the key).
-fn extract_client_ip(
-    ctx: &dyn IHttpContext,
-    trust_proxy: bool,
-    trusted_proxies: &[IpCidr],
-) -> Option<IpAddr> {
-    let peer = ctx.request().remote_addr().map(|addr| addr.ip());
-
-    if trust_proxy && !trusted_proxies.is_empty() {
-        let peer_is_trusted = peer.is_some_and(|ip| trusted_proxies.iter().any(|c| c.contains(ip)));
-        if peer_is_trusted {
-            if let Some(forwarded) = ctx.request().header("x-forwarded-for") {
-                if let Some(client) = client_from_forwarded_for(forwarded, trusted_proxies) {
-                    return Some(client);
-                }
-            }
-            if let Some(real) = ctx.request().header("x-real-ip") {
-                if let Ok(ip) = IpAddr::from_str(real.trim()) {
-                    return Some(ip);
-                }
-            }
-        }
-    }
-
-    peer
-}
-
-/// The right-most address in `X-Forwarded-For` that is not a trusted proxy.
-///
-/// Proxies append, so the right-most entries are the ones closest to the
-/// server; skipping trusted proxies from the right yields the real client.
-///
-/// Returns `None` when no hop is outside the trusted proxy ranges: such a chain
-/// is either incomplete or forged (a client inside the trusted network could
-/// prepend arbitrary addresses), so callers must fall back to the peer address
-/// instead of trusting the left-most hop.
-pub(crate) fn client_from_forwarded_for(value: &str, trusted_proxies: &[IpCidr]) -> Option<IpAddr> {
-    let hops: Vec<IpAddr> = value
-        .split(',')
-        .filter_map(|part| IpAddr::from_str(part.trim()).ok())
-        .collect();
-
-    hops.iter()
-        .rev()
-        .find(|ip| !trusted_proxies.iter().any(|cidr| cidr.contains(**ip)))
-        .copied()
 }
 
 #[cfg(test)]
@@ -602,39 +499,15 @@ mod tests {
         let _middleware = RateLimitMiddleware::with_limiter(limiter);
     }
 
-    #[test]
-    fn cidr_matches_only_inside_the_range() {
-        let cidr = IpCidr::parse("10.0.0.0/8").expect("valid cidr");
-        assert!(cidr.contains("10.1.2.3".parse().unwrap()));
-        assert!(!cidr.contains("11.0.0.1".parse().unwrap()));
-        assert!(IpCidr::parse("0.0.0.0/0")
-            .unwrap()
-            .contains("203.0.113.9".parse().unwrap()));
-        assert!(IpCidr::parse("not-a-cidr").is_none());
-        assert!(IpCidr::parse("10.0.0.0/33").is_none());
-
-        let v6 = IpCidr::parse("2001:db8::/32").expect("valid v6 cidr");
-        assert!(v6.contains("2001:db8::1".parse().unwrap()));
-        assert!(!v6.contains("2001:db9::1".parse().unwrap()));
-    }
-
-    #[test]
-    fn forwarded_for_skips_trusted_proxies_from_the_right() {
-        let proxies = vec![IpCidr::parse("10.0.0.0/8").unwrap()];
-        assert_eq!(
-            client_from_forwarded_for("203.0.113.7, 10.0.0.2, 10.0.0.3", &proxies),
-            Some("203.0.113.7".parse().unwrap()),
-            "the right-most untrusted hop is the client"
-        );
-        assert_eq!(
-            client_from_forwarded_for("1.1.1.1, 203.0.113.7, 10.0.0.3", &proxies),
-            Some("203.0.113.7".parse().unwrap()),
-            "a spoofed left-most entry must not win"
-        );
-        assert_eq!(
-            client_from_forwarded_for("10.0.0.1, 10.0.0.3", &proxies),
-            None,
-            "a chain of trusted proxies only is incomplete or forged: fall back to the peer"
-        );
+    #[tokio::test]
+    async fn trust_proxy_compat_shell_is_accepted_and_ignored() {
+        // The pre-2.8 compatibility shell still compiles and limits; the flag it
+        // stores is never read (the middleware keys by `ctx.client_info()`).
+        let trusted = RateLimiter::new(100.0, 10, 10).with_trust_proxy(true);
+        let plain = RateLimiter::new(100.0, 10, 10);
+        let ip = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7));
+        assert!(trusted.allow(ip).await);
+        assert!(plain.allow(ip).await);
+        assert_eq!(trusted.retry_after_secs(), plain.retry_after_secs());
     }
 }

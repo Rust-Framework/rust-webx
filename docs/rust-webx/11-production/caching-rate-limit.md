@@ -1,4 +1,4 @@
-# 缓存与速率限制
+﻿# 缓存与速率限制
 
 ## 内存缓存
 
@@ -92,15 +92,51 @@ TTL）。
 | `RequestsPerSecond` | 每个客户端 IP 的 sustained 速率 | `100` |
 | `BurstSize` | 突发容量 | `200` |
 | `MaxTrackedIps` | 最大跟踪 IP 数（最旧淘汰） | `10000` |
-| `TrustProxy` | 采信 `X-Forwarded-For` / `X-Real-IP`，仅在反向代理会覆盖这两个头时开启 | `false` |
-| `TrustedProxies` | 可信代理的 CIDR 列表（如 `["10.0.0.0/8", "192.168.1.0/24"]`）；只有直连对端落在此列表内才采信转发头，客户端 IP 取 `X-Forwarded-For` 中最右侧的**非可信代理** hop | `[]` |
+| ~~`TrustProxy`~~ | **legacy（2.8.0 起被忽略）**：转发头信任统一由 `ClientInfo.TrustForwardedHeaders` 控制，限流器不再读取该键 | `false` |
+| ~~`TrustedProxies`~~ | **legacy（2.8.0 起被忽略）**：可信代理 CIDR 统一由 `ClientInfo.TrustedProxies` 控制，限流器不再读取该键 | `[]` |
 
-桶的键来自连接的**对端地址**（`IHttpRequest::remote_addr`，由 host 在 accept 时记录）。
-`TrustProxy=true` 但 `TrustedProxies` 为空时框架会忽略转发头并打 `warn`——否则客户端可以轮换
-`X-Forwarded-For` 绕过限流；反之 `false` 且框架拿不到对端地址时，框架不会把所有人放进
-同一个桶，而是跳过限流并打 `debug` 日志。
+桶的键来自请求的**已解析客户端地址**（`IHttpContext::client_info().client_ip`）：默认是对端地址
+（`IHttpRequest::remote_addr`，由 host 在 accept 时记录）；配置了 `ClientInfo` 的可信转发头解析后，
+则是中间件解析出的可信客户端地址。限流中间件**不再自己解析** `X-Forwarded-For` —— 转发头只有
+`ClientInfo` 中间件一个解析入口，所以 `RateLimit` 配置节路径与 `use_rate_limit_policy` 路径的桶键
+始终一致。框架既拿不到对端地址、也没有解析出的可信客户端时，不会把所有人放进同一个桶，而是跳过限流
+并打 `debug` 日志。
 
 环境变量示例：`APP__RateLimit__Enabled=true`
+
+#### 迁移：转发头信任改由 `ClientInfo` 控制
+
+2.8.0 起 `RateLimit.TrustProxy` / `RateLimit.TrustedProxies` 成为 legacy（不再生效，计划 3.0 移除）：旧配置仍能被
+serde 解析（不会启动失败），但限流器忽略它们，并在启动时打一条 `warn` 指向新位置。把两个键搬到
+`ClientInfo` 节即可。
+
+2.7 及更早（legacy）：
+
+```json
+{
+  "RateLimit": {
+    "Enabled": true,
+    "TrustProxy": true,
+    "TrustedProxies": ["10.0.0.0/8"]
+  }
+}
+```
+
+2.8 起：
+
+```json
+{
+  "RateLimit": { "Enabled": true },
+  "ClientInfo": {
+    "TrustForwardedHeaders": true,
+    "TrustedProxies": ["10.0.0.0/8"]
+  }
+}
+```
+
+`ClientInfo` 节驱动 `ClientInfo` 中间件在鉴权与绑定前解析一次；限流、审计与 Handler 的
+`#[fromclient] ClientInfo` 读同一份结果。解析规则见
+[客户端信息](../05-request-pattern/parameter-binding.md#客户端信息)。
 
 ### 代码注册（可选）
 
@@ -109,8 +145,9 @@ TTL）。
 Host::builder().use_rate_limiter(Arc::new(MyDistributedLimiter::new(/* ... */)));
 ```
 
-显式 limiter 优先于 `RateLimit` 配置节。超限返回 RFC 9457 `429` +
-`application/problem+json`，并携带 `Retry-After`。
+显式 limiter 优先于 `RateLimit` 配置节。客户端地址同样取自 `ClientInfo` 解析结果，所以
+`use_rate_limiter` / `use_rate_limit_policy` 与配置节路径对同一个请求用同一个桶键。超限返回 RFC 9457
+`429` + `application/problem+json`，并携带 `Retry-After`。
 
 ### 按路由 / 主体限流（RateLimitPolicy）
 
@@ -141,7 +178,7 @@ Host::builder().use_rate_limit_policy(policy).build();
 
 | 主体 | 桶键 | 缺失时 |
 |---|---|---|
-| `Ip` | 对端地址（按 `TrustProxy` 规则可采信代理头） | 跳过（无法区分客户端） |
+| `Ip` | `ClientInfo.client_ip`：对端地址，或 `ClientInfo` 可信转发解析出的客户端 | 跳过（无法区分客户端） |
 | `User` | `sub` | 回退 IP（匿名流量仍被限流） |
 | `Tenant` | `tenant_id` | 回退 IP |
 | `ApiKey` | `x-api-key` 或 `Authorization: Bearer`，SHA-256 后入桶 | 回退 IP |

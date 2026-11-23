@@ -6,7 +6,9 @@
 #![allow(dead_code)]
 
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use webx_core::auth::IClaims;
+use webx_core::client_info::ClientInfo;
 use webx_core::http::{IClaimsExt, IHttpContext, IHttpRequest, IHttpResponse};
 
 /// A minimal mock IHttpContext for tests.
@@ -14,6 +16,7 @@ pub struct TestHttpContext {
     req: TestHttpRequest,
     resp: TestHttpResponse,
     claims: Option<Box<dyn IClaims>>,
+    client_info: Option<ClientInfo>,
 }
 
 impl TestHttpContext {
@@ -27,6 +30,7 @@ impl TestHttpContext {
                 route_params: HashMap::new(),
                 route_pattern: None,
                 body_bytes: Vec::new(),
+                remote_addr: None,
             },
             resp: TestHttpResponse {
                 status: 200,
@@ -34,11 +38,25 @@ impl TestHttpContext {
                 body: None,
             },
             claims: None,
+            client_info: None,
         }
     }
 
     pub fn with_header(mut self, key: &str, value: &str) -> Self {
         self.req.headers.insert(key.to_string(), value.to_string());
+        self
+    }
+
+    /// Set the connection peer address (what `remote_addr` reports).
+    pub fn with_remote_addr(mut self, addr: SocketAddr) -> Self {
+        self.req.remote_addr = Some(addr);
+        self
+    }
+
+    /// Pre-set the resolved client information (normally the `ClientInfo`
+    /// middleware does this through `IHttpContext::set_client_info`).
+    pub fn with_client_info(mut self, info: ClientInfo) -> Self {
+        self.client_info = Some(info);
         self
     }
 
@@ -79,6 +97,16 @@ impl IHttpContext for TestHttpContext {
     fn response_mut(&mut self) -> &mut dyn IHttpResponse {
         &mut self.resp
     }
+
+    fn set_client_info(&mut self, info: ClientInfo) {
+        self.client_info = Some(info);
+    }
+
+    fn client_info(&self) -> ClientInfo {
+        self.client_info
+            .clone()
+            .unwrap_or_else(|| ClientInfo::from_peer(self.req.remote_addr))
+    }
 }
 
 // â”€â”€ TestHttpRequest â”€â”€
@@ -91,6 +119,7 @@ struct TestHttpRequest {
     route_params: HashMap<String, String>,
     route_pattern: Option<String>,
     body_bytes: Vec<u8>,
+    remote_addr: Option<SocketAddr>,
 }
 
 #[async_trait::async_trait]
@@ -105,6 +134,10 @@ impl IHttpRequest for TestHttpRequest {
 
     fn header(&self, name: &str) -> Option<&str> {
         self.headers.get(name).map(|s| s.as_str())
+    }
+
+    fn remote_addr(&self) -> Option<SocketAddr> {
+        self.remote_addr
     }
 
     fn query(&self) -> &HashMap<String, String> {

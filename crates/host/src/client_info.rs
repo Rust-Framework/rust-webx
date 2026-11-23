@@ -1,30 +1,31 @@
 //! Resolve trusted client information before the endpoint runs.
 //!
 //! Installed only when `ClientInfo.TrustForwardedHeaders` is enabled. It reads
-//! the listener peer address and, **only when that peer belongs to a configured
-//! trusted proxy**, the `X-Forwarded-For` / `X-Real-IP` headers:
+//! the listener peer address and the `X-Forwarded-For` / `X-Real-IP` headers,
+//! then delegates to the core resolver ([`webx_core::client_info`]) — the
+//! framework's single forwarded-header implementation:
 //!
 //! * `client_ip` becomes the right-most `X-Forwarded-For` hop that is not a
 //!   trusted proxy (a client cannot prepend a spoofed address and win);
 //! * `forwarded_for` exposes the parsed chain (left-to-right);
-//! * when forwarding is not trusted the forwarded chain stays empty, so business
-//!   code can never mistake attacker-controlled headers for the client address.
+//! * when forwarding is not trusted (the peer is not a configured proxy, or no
+//!   proxy is configured) the forwarded chain stays empty, so business code can
+//!   never mistake attacker-controlled headers for the client address.
 //!
-//! Handlers read the result through a `#[fromclient] client: ClientInfo` request
-//! field; the binder calls [`IHttpContext::client_info`].
+//! Middleware that needs the client address (rate limiting included) reads the
+//! resolved value through [`IHttpContext::client_info`] instead of parsing the
+//! headers again. Handlers read it through a `#[fromclient] client: ClientInfo`
+//! request field; the binder calls [`IHttpContext::client_info`].
 
-use std::net::IpAddr;
 use std::ops::ControlFlow;
 
 use async_trait::async_trait;
 
-use webx_core::client_info::ClientInfo;
+use webx_core::client_info::{resolve_client_info, ClientInfo, IpCidr};
 use webx_core::config::ClientInfoSection;
 use webx_core::error::Result;
 use webx_core::http::IHttpContext;
 use webx_core::middleware::IMiddleware;
-
-use crate::rate_limit::{client_from_forwarded_for, IpCidr};
 
 /// Client-info resolution middleware.
 pub struct ClientInfoMiddleware {
@@ -34,8 +35,8 @@ pub struct ClientInfoMiddleware {
 impl ClientInfoMiddleware {
     /// Build from the `ClientInfo` configuration section.
     ///
-    /// Invalid CIDRs are ignored with a warning (the same policy as the rate
-    /// limiter: a malformed entry must not disable the rest).
+    /// Invalid CIDRs are ignored with a warning: a malformed entry must not
+    /// disable the rest of the trusted proxy list.
     pub fn from_section(config: &ClientInfoSection) -> Self {
         let trusted_proxies = config
             .trusted_proxies
@@ -55,37 +56,12 @@ impl ClientInfoMiddleware {
     }
 
     fn resolve(&self, ctx: &dyn IHttpContext) -> ClientInfo {
-        let peer = ctx.request().remote_addr();
-        let mut info = ClientInfo::from_peer(peer);
-
-        let peer_trusted = peer.is_some_and(|peer| {
-            self.trusted_proxies
-                .iter()
-                .any(|cidr| cidr.contains(peer.ip()))
-        });
-        if !peer_trusted {
-            return info;
-        }
-
-        if let Some(forwarded) = ctx.request().header("x-forwarded-for") {
-            info.forwarded_for = forwarded
-                .split(',')
-                .filter_map(|part| part.trim().parse::<IpAddr>().ok())
-                .collect();
-            if let Some(client) = client_from_forwarded_for(forwarded, &self.trusted_proxies) {
-                info.client_ip = Some(client);
-            }
-        }
-        if info.client_ip == peer.map(|peer| peer.ip()) {
-            // No usable forwarded address: fall back to `X-Real-IP` when the
-            // direct peer is a trusted proxy.
-            if let Some(real) = ctx.request().header("x-real-ip") {
-                if let Ok(client) = real.trim().parse::<IpAddr>() {
-                    info.client_ip = Some(client);
-                }
-            }
-        }
-        info
+        resolve_client_info(
+            ctx.request().remote_addr(),
+            ctx.request().header("x-forwarded-for"),
+            ctx.request().header("x-real-ip"),
+            &self.trusted_proxies,
+        )
     }
 }
 

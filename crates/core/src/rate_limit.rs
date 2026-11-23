@@ -62,7 +62,9 @@ pub trait IRateLimiter: Send + Sync {
 /// header, so policy-based limiting runs after authentication.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RateLimitSubject {
-    /// Client peer address (proxy-aware when configured).
+    /// Client IP resolved by the `ClientInfo` middleware: the peer address, or
+    /// the trusted forwarded client when forwarding is configured. Consumers
+    /// read it through [`IHttpContext::client_info`](crate::http::IHttpContext::client_info).
     Ip,
     /// Authenticated subject (`sub` claim).
     User,

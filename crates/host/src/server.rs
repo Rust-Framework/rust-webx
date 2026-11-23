@@ -768,7 +768,7 @@ impl HostBuilder {
     ///
     /// Every authenticated WebSocket connection reports its atomic transition:
     /// `Connected` after registration (before `on_connect`), `Disconnected`
-    /// after unregistration. Use [`PresenceTransition::is_first`] /
+    /// after unregistration. Use [`PresenceTransition::is_first`](webx_core::realtime::PresenceTransition::is_first) /
     /// [`PresenceTransition::is_last`](webx_core::realtime::PresenceTransition::is_last)
     /// to broadcast online/offline exactly once without counting connections in
     /// business code. Calling this several times registers several observers.
@@ -1819,6 +1819,19 @@ impl HostBuilder {
         }
         if !cors.origins.is_empty() {
             pipeline.add_middleware(Arc::new(CorsMiddleware::new(cors)));
+        }
+
+        // WEBX-02: forwarded-header trust is resolved once by the `ClientInfo`
+        // middleware (installed above) and the rate limiter only reads the
+        // resolved value. Warn when the legacy `RateLimit` trust keys are still
+        // configured, pointing at their replacement.
+        let legacy_rate_limit_proxy_config =
+            options.rate_limit.trust_proxy || !options.rate_limit.trusted_proxies.is_empty();
+        if legacy_rate_limit_proxy_config {
+            tracing::warn!(
+                "RateLimit.TrustProxy / RateLimit.TrustedProxies are ignored (legacy since 2.8.0); \
+                 configure ClientInfo.TrustForwardedHeaders / ClientInfo.TrustedProxies instead"
+            );
         }
 
         if let Some(limiter) = self.rate_limit_limiter.take() {

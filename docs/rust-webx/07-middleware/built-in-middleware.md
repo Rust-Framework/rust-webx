@@ -63,7 +63,9 @@ Host::builder().use_middleware_with(|| {
 ```
 
 `RateLimitMiddleware` 没有 `Default`，必须用 `new(requests_per_second, burst_size)` 或
-`from_config(...)` 构造。基于 IP（可配 `trust_proxy`）限制请求频率。
+`from_config(...)` 构造。按客户端地址限流：地址取自 `ClientInfo` 中间件的解析结果（未安装
+`ClientInfo` 中间件时为连接对端地址）；是否采信 `X-Forwarded-For` 由 `ClientInfo` 配置节统一决定，
+`RateLimit` 节不再单独配置转发头。
 
 ## 小结
 

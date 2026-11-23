@@ -8,9 +8,9 @@ authors.workspace = true
 homepage.workspace = true
 repository.workspace = true
 documentation.workspace = true
-description = "rust-webx boundary for rust-ef: sanitized EFError -> webx::Error mapping"
+description = "rust-webx boundary for rust-ef: sanitized EFError mapping and a durable idempotency store"
 readme = "README.md"
-keywords = ["web", "orm", "error-handling", "rust-ef"]
+keywords = ["web", "orm", "idempotency", "rust-ef"]
 categories = ["web-programming", "database"]
 
 [lib]
@@ -19,6 +19,13 @@ name = "webx_ef"
 [dependencies]
 rust-webx-core.workspace = true
 rust-ef.workspace = true
+async-trait.workspace = true
+sha2.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+rust-ef-sqlite.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]
 workspace = true

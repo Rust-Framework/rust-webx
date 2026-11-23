@@ -28,6 +28,32 @@
 //! The mapper is stateless and allocation-free on the success path; the
 //! sanitized texts are constants and the operator detail (EF message + source
 //! chain) is only built for the 500 branch.
+//!
+//! # Durable idempotency store
+//!
+//! [`idempotency::EfIdempotencyStore`] is the rust-ef implementation of
+//! [`webx_core::idempotency::IIdempotencyStore`]. A single process can keep the
+//! `Idempotency-Key` reservations in memory; **multiple instances** must share
+//! them, so register the table entity once and hand the application's
+//! `Arc<DbContextOptions>` to the store:
+//!
+//! ```ignore
+//! use std::sync::Arc;
+//! use webx_ef::idempotency::{register_idempotency_model, EfIdempotencyStore};
+//!
+//! register_idempotency_model(&mut ctx); // before bootstrap/migrate
+//! let store = Arc::new(EfIdempotencyStore::new(Arc::clone(&db_options)));
+//! Host::builder().use_idempotency(store, ttl).build();
+//! ```
+//!
+//! See [`idempotency`] for the cleanup worker (`IdempotencyHousekeeping`), the
+//! TTL/lease semantics and the race handling.
+
+pub mod idempotency;
+
+pub use idempotency::{
+    register_idempotency_model, EfIdempotencyStore, IdempotencyHousekeeping, IdempotencyRecord,
+};
 
 use rust_ef::error::EFError;
 use webx_core::error::Error;

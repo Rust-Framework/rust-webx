@@ -72,6 +72,12 @@ rust-webx **不是** 全栈 UI 框架（可搭配任意前端）、**不是** OR
 - **端点元数据服务** — `IEndpointCatalog` 在运行时暴露全部端点（`all()` / `localized()`），权限同步、管理导航与 OpenAPI 共用一份元数据。
 - **本地化** — `#[display]` / `#[description]` / `#[category]` 存资源键，全局 `Culture.Default` 决定语言；支持 JSON 资源文件或 `include_str!` 嵌入。
 - **开箱即用的生产能力** — 优雅关闭、动态健康检查、安全响应头、请求 ID、CORS、TLS、速率限制、压缩、OpenAPI + SPA 托管。
+- **启动期聚合校验** — `HostBuilder::try_build` 一次性按 section+key 排序列出全部非法配置（保留 Production fail-closed 守卫），不再“报第一个错就退出”。
+- **Wire 级测试基座与 fuzz 语料** — `TestHost::connect_wire()` 用进程内双端管道直接跑真实 HTTP/1.1 keep-alive、h2c、SSE 字节与畸形请求（不绑端口）；独立 `fuzz/` cargo-fuzz workspace 覆盖 cursor/config/ClientInfo/ProblemDetails/密文解析。见 [test-host.md](docs/design/test-host.md) 与 [stability-gates.md](docs/design/stability-gates.md)。
+- **稳定的观测契约** — `webx.http` span 树（request/auth/route/handler/binding/response）与 `webx.connection` 打开/关闭事件；span/事件名与字段作为兼容性契约写入 [observability-contract.md](docs/design/observability-contract.md)。
+- **关闭原因与错误码注册表** — `CloseReason`、`IConnection::close_reason()`、`ShutdownToken::is_draining()` 统一 WebSocket/SSE 停机语义；22 条已登记错误码（`ERROR_CODES`）与关闭码表防止 `problem+json` 的 `code` 与 close frame 漂移。见 [close-codes.md](docs/design/close-codes.md) 与 [error-codes.md](docs/design/error-codes.md)。
+- **准入不变量指标** — `/metrics` 暴露 active/capacity 比例、不变量违规 gauge 与停机 gauge，permit/wait 记账泄漏无需调试器即可发现。
+
 - **文件上传与下载** — `multipart/form-data` 以类型化 `FormFile` 绑定（流式接收、按阈值落盘、大小受控）；下载提供对齐 ASP.NET Core 的结果类型（`FileResult::path` / `::stream` / `::seekable_stream`、`ContentResult`），自带 `Content-Disposition`、`ETag`、`Last-Modified` 与 `Range`。
 - **ORM 无关** — 框架不依赖 `rust-ef`；`docbit` 参考应用用极少量胶水代码接入。
 - **支付领域组** — 按需引入 `rust-webx-pay*`：Stripe、支付宝、微信支付 v3、PayPal、Adyen、Square 共用
@@ -90,7 +96,7 @@ rust-webx **不是** 全栈 UI 框架（可搭配任意前端）、**不是** OR
 | **性能不以正确性为代价** | allocation 计数、wire-level 正确性和稳定性套件都是发布门禁。见[分配预算](docs/design/alloc-budget.md)与[稳定性门禁](docs/design/stability-gates.md)。 |
 | **生产级准入与生命周期** | 所有 listener 共享一个全局连接 governor、首请求超时、HTTP/2 keepalive、优雅/立即关闭 guard、Host 单次运行状态、per-worker SSE drain。 |
 | **错误语义可信** | 错误响应在逆序 after hooks 之前写入，metrics/tracing/compression 看到真实状态；失败的成功路径不会残留 `cache-control`/`etag`/`content-encoding` 等表示头。 |
-| **原生优先的集成** | `rust-dix` 1.0 DI scope、`rust-ef` 2.5 ORM、JWT/session/password 端口、`rust-webx-client` 都是框架能力，而非应用层临时胶水。 |
+| **原生优先的集成** | `rust-dix` 1.0 DI scope、`rust-ef` 2.6+ ORM（已按 2.8.0 配对验证）、JWT/session/password 端口、`rust-webx-client` 都是框架能力，而非应用层临时胶水。 |
 | **HTTP 与进程内能力边界清晰** | 无路由的 `#[handler]` 自动是 mediator-only；有路由才增加响应 encoder。没有 `#[handler(in_process)]` 模式开关，也不会把 command handler 意外暴露成 HTTP 端点。 |
 
 以上性能数字是同一台主机同窗口的本地对比，不构成绝对容量承诺；allocation 计数和 wire-level 正确性测试才是发布回归信号。方法与预算见[分配预算](docs/design/alloc-budget.md)。

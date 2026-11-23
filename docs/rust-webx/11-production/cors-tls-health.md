@@ -29,6 +29,22 @@ Production 环境禁止使用 `Cors.Origins: ["*"]`：builder 会直接 panic �
 
 框架使用 `rustls` + `tokio-rustls` 提供 TLS 支持；`App.Urls` 含 `https://` 时自动启用 TLS。
 
+### TLS 抓包调试（`SSLKEYLOGFILE`，仅 Development）
+
+本机联调 TLS 时，设置标准环境变量 `SSLKEYLOGFILE` 并显式 `APP_ENV=Development`，框架会把
+rustls 的会话密钥写入该文件，供 Wireshark/`tcpdump` 解密：
+
+```text
+APP_ENV=Development SSLKEYLOGFILE=/tmp/webx-keys.log cargo run -p docbit-host
+```
+
+- **Production 忽略该变量**（即使设置也只打一次 warning）：密钥日志是调试设施，生产开启等于
+  把会话密钥落盘。宿主启动后再调用 `webx_engine::tls::with_key_log` 也不会改变已构建的 TLS 配置。
+- 该文件等同于凭据：不要放进共享卷/镜像层，调试结束删除；不要把它接入日志采集。
+- 单元测试可用 `webx_engine::tls::key_logging_allowed(mode)` 断言模式边界。
+- 实现入口：`crates/engine/src/tls.rs` 的 `with_key_log` / `key_logging_allowed`，宿主在装配
+  listener TLS 时统一经过它。
+
 ## 健康检查
 
 | 端点 | 说明 |

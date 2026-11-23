@@ -194,6 +194,69 @@ impl TestHost {
     pub fn shutdown(self) {
         self.host.server_handle().shutdown();
     }
+
+    /// Open one in-process wire connection served by the real HTTP pipeline.
+    ///
+    /// The test gets the client end of a duplex pipe; the server end is driven
+    /// by this host's engine (the same hyper connection loop, router,
+    /// middleware, error writers and drain handling as a TCP listener) on the
+    /// current runtime. No port is bound and no OS socket is involved, but
+    /// protocol bytes are decoded by hyper exactly as in production: use this
+    /// for keep-alive, h2c, SSE frame bytes and malformed-request tests that
+    /// [`TestHost::dispatch`] (handler/DI level) cannot express.
+    pub async fn connect_wire(&self) -> WireConnection {
+        let (client, server) = tokio::io::duplex(WIRE_PIPE_BYTES);
+        let engine = webx_engine::Server::new(self.host.engine_shared());
+        // A loopback peer with an ephemeral-looking port; handlers observe it
+        // through `ClientInfo` exactly as they would a real listener.
+        let peer = std::net::SocketAddr::from(([127, 0, 0, 1], 0));
+        let task = tokio::spawn(async move {
+            engine.serve_stream(server, peer).await;
+        });
+        WireConnection {
+            stream: client,
+            task,
+        }
+    }
+}
+
+/// Size of the in-process pipe used by [`TestHost::connect_wire`].
+const WIRE_PIPE_BYTES: usize = 64 * 1024;
+
+/// One in-process wire connection served by the real engine pipeline.
+///
+/// The client side is a duplex pipe into the host's engine; no TCP port is
+/// bound. Drop or [`Self::close`] the connection when the test is done so the
+/// server task is joined deterministically.
+pub struct WireConnection {
+    /// Client side of the pipe: raw HTTP/1.1 bytes or a hyper client transport.
+    pub stream: tokio::io::DuplexStream,
+    /// Server task; completes when the connection closes or drains.
+    pub task: tokio::task::JoinHandle<()>,
+}
+
+impl WireConnection {
+    /// Write raw request bytes.
+    pub async fn write(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        use tokio::io::AsyncWriteExt;
+        self.stream.write_all(bytes).await
+    }
+
+    /// Read at most `max` bytes; resolves when `max` is reached or the peer
+    /// closes the pipe.
+    pub async fn read_at_most(&mut self, max: usize) -> std::io::Result<Vec<u8>> {
+        use tokio::io::AsyncReadExt;
+        let mut out = Vec::with_capacity(max.min(8 * 1024));
+        let mut limited = (&mut self.stream).take(max as u64);
+        limited.read_to_end(&mut out).await?;
+        Ok(out)
+    }
+
+    /// Close the client end and wait for the server task to finish.
+    pub async fn close(self) {
+        drop(self.stream);
+        let _ = tokio::time::timeout(Duration::from_secs(5), self.task).await;
+    }
 }
 
 #[cfg(test)]

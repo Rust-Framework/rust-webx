@@ -96,6 +96,11 @@ Ok(Box::new(
 断连时框架会丢弃响应 body 并触发 `ClientDisconnected`，上游请求随之取消；计费/配额释放应在这个
 回调里完成，而不是在 Handler 返回之后（那时流还没有结束）。
 
+`StreamEnd` 与统一关闭语义 `CloseReason` 的映射（`Completed → SessionCompleted`、
+`ClientDisconnected → ClientClosed`、`Deadline → LifetimeExceeded`、
+`ServerShutdown → ServerShutdown`、`Failed → Internal/ProtocolError`）以及与 WebSocket
+close code 的对照见[关闭码与排空语义](../../design/close-codes.md)。
+
 ## 优雅停机：`server_shutdown` 事件
 
 默认的排空策略是"等连接自己结束，超时后再 abort"，长流会被截断。`SseResult::on_server_shutdown`

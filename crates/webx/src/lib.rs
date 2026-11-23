@@ -43,6 +43,7 @@ pub use webx_core::config::{
 };
 pub use webx_core::dispatch_runtime::DispatchRuntime;
 pub use webx_core::error::{ActionResult, Error, IErrorResponseWriter, Result};
+pub use webx_core::error_codes::{ErrorCodeSpec, ERROR_CODES, FALLBACK_STATUS};
 pub use webx_core::form::{
     sanitize_file_name, set_spool_root, spool_root, FormField, FormFile, FormFileBuilder,
     MultipartForm, SPOOL_FILE_PREFIX,
@@ -60,8 +61,8 @@ pub use webx_core::http::{
     RequestBodyStream, ResponseBody, SeekableReader, STREAM_BUF_SIZE,
 };
 pub use webx_core::idempotency::{
-    IIdempotencyStore, IdempotencyBegin, IdempotentResponse, IDEMPOTENCY_KEY_HEADER,
-    IDEMPOTENCY_REPLAYED_HEADER,
+    IIdempotencyStore, IdempotencyBegin, IdempotencyLease, IdempotentResponse, DEFAULT_LEASE,
+    IDEMPOTENCY_KEY_HEADER, IDEMPOTENCY_REPLAYED_HEADER, REPLAYABLE_RESPONSE_HEADERS,
 };
 pub use webx_core::json;
 pub use webx_core::keyset::{Cursor, CursorError, CursorPage, KeysetRequest, MAX_CURSOR_BYTES};
@@ -102,11 +103,11 @@ pub use webx_core::rate_limit::{
     RateLimitSubject,
 };
 pub use webx_core::realtime::{
-    BackpressurePolicy, ConnectionContext, ConnectionId, ConnectionMeta, ConnectionScope,
-    ConnectionStats, IConnection, IConnectionRegistry, IPresenceObserver, IRealtimeEventStore,
-    IUpgradeSession, IWebSocketHandler, InMemoryConnectionRegistry, InMemoryRealtimeEventStore,
-    Presence, PresenceDirection, PresenceStatus, PresenceTransition, RealtimeEvent,
-    RealtimeEventStoreLimits, RealtimeFanoutEvent, RealtimeMessage, RealtimeMetrics,
+    BackpressurePolicy, CloseReason, ConnectionContext, ConnectionId, ConnectionMeta,
+    ConnectionScope, ConnectionStats, IConnection, IConnectionRegistry, IPresenceObserver,
+    IRealtimeEventStore, IUpgradeSession, IWebSocketHandler, InMemoryConnectionRegistry,
+    InMemoryRealtimeEventStore, Presence, PresenceDirection, PresenceStatus, PresenceTransition,
+    RealtimeEvent, RealtimeEventStoreLimits, RealtimeFanoutEvent, RealtimeMessage, RealtimeMetrics,
     RealtimeMetricsSnapshot, ResumeFrame, ResumeRequest, SignalingKind, SignalingMessage,
     Transport, TransportKind, TurnCredentials, TurnRestConfig, UpgradedTransport, WebSocketLimits,
     DEFAULT_TURN_TTL_SECONDS, MAX_TURN_TTL_SECONDS,
@@ -187,6 +188,7 @@ pub use webx_host::authz::collect_authorizers;
 pub use webx_host::authz::resource_auth_middleware;
 pub use webx_host::authz::{AuthorizerSet, ResourceAuthorization};
 pub use webx_host::compression::{compress_gzip, CompressionConfig, CompressionMiddleware};
+pub use webx_host::config_validation::{format_violations, validate_options, ConfigViolation};
 pub use webx_host::cors::{CorsConfig, CorsMiddleware};
 pub use webx_host::csrf::{CsrfConfig, CsrfMiddleware};
 pub use webx_host::diagnostics::log_startup_diagnostics;
@@ -221,7 +223,7 @@ pub use webx_host::server::{Host, HostAppBuilder, HostBuilder, Server, ServerHan
 pub use webx_host::session_cache::CachedSessionStore;
 #[cfg(feature = "testing")]
 pub use webx_host::testing::{free_port, spawn, spawn_with_health, wait_until_ready, TestServer};
-pub use webx_host::testing::{ChaosControl, TestHost};
+pub use webx_host::testing::{ChaosControl, TestHost, WireConnection};
 pub use webx_host::timing::TimingMiddleware;
 
 // --- Mediator ---

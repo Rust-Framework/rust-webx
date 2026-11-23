@@ -26,9 +26,9 @@
 
 ```toml
 [dependencies]
-rust-webx = "2.7"
-rust-webx-pay = "2.7"
-rust-webx-pay-stripe = "2.7"
+rust-webx = "2.8"
+rust-webx-pay = "2.8"
+rust-webx-pay-stripe = "2.8"
 ```
 
 ```rust

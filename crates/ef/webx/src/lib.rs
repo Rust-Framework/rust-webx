@@ -46,6 +46,14 @@
 //! Host::builder().use_idempotency(store, ttl).build();
 //! ```
 //!
+//! `use_idempotency` is optional: register the store as a DI instance and set
+//! `Idempotency.Enabled = true` to have the host pick it up automatically. Every
+//! reservation carries a fencing token (`attempt` column) so a reclaimed lease's
+//! late completion/release cannot overwrite the new attempt; completed responses
+//! also persist the replayable `Location`/`ETag`/`Last-Modified`/`Cache-Control`
+//! headers (`headers` column). Both columns are nullable — see [`idempotency`]
+//! for the 2.8 schema upgrade note.
+//!
 //! See [`idempotency`] for the cleanup worker (`IdempotencyHousekeeping`), the
 //! TTL/lease semantics and the race handling.
 

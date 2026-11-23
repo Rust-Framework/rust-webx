@@ -30,3 +30,4 @@
 | `authz::resource_auth_middleware` | 1.5.0 | 3.0 | `#[authorize]` + `IDynamicAuthorizer` | `planned` |
 | `RateLimitSection.trust_proxy` / `trusted_proxies`（`RateLimit.TrustProxy` / `RateLimit.TrustedProxies`） | 2.8.0 legacy（不加 `#[deprecated]`） | 3.0 | `ClientInfo.TrustForwardedHeaders` / `ClientInfo.TrustedProxies`（转发头解析唯一入口） | `planned` |
 | `webx_host::rate_limit::RateLimiter::with_trust_proxy`（兼容壳，no-op） | 2.8.0 legacy（不加 `#[deprecated]`） | 3.0 | 删除调用；信任配置归 `ClientInfo` 节 | `planned` |
+| `IdempotentResponse` 结构体字面量构造（2.8.0 新增 `headers` 字段，见 CHANGELOG Breaking） | 2.8.0 | 3.0 | 迁移：补齐 `headers`；3.0 加 `#[non_exhaustive]` 收口 semver 例外（见 compatibility.md §3/§8） | `planned` |

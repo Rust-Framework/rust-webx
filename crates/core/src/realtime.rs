@@ -158,6 +158,69 @@ pub enum RealtimeMessage {
     },
 }
 
+/// Why the framework ended a real-time connection.
+///
+/// The framework records the reason on the connection before writing the
+/// closing frame, so application code, presence observers and tests can tell an
+/// idle timeout from a deploy without parsing the wire code:
+/// [`IConnection::close_reason`] returns it, and each variant maps to the RFC
+/// 6455 close code the server sends ([`CloseReason::code`]). The table of
+/// reasons, wire codes and SSE counterparts lives in `docs/design/close-codes.md`.
+///
+/// `#[non_exhaustive]`: new reasons are additive in 2.x.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CloseReason {
+    /// The peer closed the connection: it sent a close frame, ended the stream
+    /// or the transport failed. The peer's own close code is delivered to the
+    /// application as [`RealtimeMessage::Close`]; this reason only says who
+    /// initiated.
+    ClientClosed,
+    /// The host started graceful shutdown and the session ended proactively
+    /// with code `1001` ("going away") instead of being cut at the drain
+    /// deadline.
+    ServerShutdown,
+    /// The application handler returned; the framework closed normally (`1000`).
+    SessionCompleted,
+    /// No inbound frame arrived within [`WebSocketLimits::idle_timeout`]
+    /// (code `1001`, "going away").
+    IdleTimeout,
+    /// [`WebSocketLimits::max_connection_lifetime`] elapsed (code `1001`).
+    LifetimeExceeded,
+    /// The session outlived the `exp` of the token that authorized the upgrade
+    /// (code `1008`, policy violation). See
+    /// [`WebSocketLimits::close_at_token_expiry`].
+    TokenExpired,
+    /// A protocol or policy violation closed the connection with `code` (for
+    /// example the inbound rate limit, `1008`).
+    ProtocolError {
+        /// WebSocket close code the server sent.
+        code: u16,
+    },
+    /// The session ended on an internal framework or handler error.
+    Internal,
+}
+
+impl CloseReason {
+    /// The WebSocket close code the server sends for this reason.
+    ///
+    /// `Option` keeps the contract additive: a future reason that is only
+    /// observable in-process (no server-issued frame) can return `None` without
+    /// changing the signature. Every reason defined today has a wire code.
+    pub fn code(&self) -> Option<u16> {
+        match self {
+            Self::ClientClosed => Some(1000),
+            Self::ServerShutdown => Some(1001),
+            Self::SessionCompleted => Some(1000),
+            Self::IdleTimeout => Some(1001),
+            Self::LifetimeExceeded => Some(1001),
+            Self::TokenExpired => Some(1008),
+            Self::ProtocolError { code } => Some(*code),
+            Self::Internal => Some(1011),
+        }
+    }
+}
+
 /// Per-connection limits for a real-time session (2.3-5).
 ///
 /// Defaults are permissive (no rate limit, no idle timeout) so existing
@@ -176,18 +239,22 @@ pub struct WebSocketLimits {
     /// What to do when the outbound queue is full.
     pub on_queue_full: BackpressurePolicy,
     /// Close the connection when no inbound frame arrives within this duration.
+    ///
+    /// The session records [`CloseReason::IdleTimeout`] and closes with `1001`.
     pub idle_timeout: Option<std::time::Duration>,
     /// Absolute cap on how long one connection may live (`None` = unlimited).
     ///
     /// Unlike [`Self::idle_timeout`], traffic does not extend this deadline:
-    /// the session is closed at `opened_at + lifetime` with close code `1001`.
+    /// the session is closed at `opened_at + lifetime` with close code `1001`
+    /// and [`CloseReason::LifetimeExceeded`].
     pub max_connection_lifetime: Option<std::time::Duration>,
     /// Also close the session when the upgrade token's `exp` passes.
     ///
     /// Browser clients cannot refresh the credential used at upgrade time, so a
     /// session outliving its access token keeps an expired credential alive.
-    /// When enabled (default `false`), the session closes with code `1008` and
-    /// the earlier of this and [`Self::max_connection_lifetime`] wins.
+    /// When enabled (default `false`), the session closes with code `1008`,
+    /// [`CloseReason::TokenExpired`], and the earlier of this and
+    /// [`Self::max_connection_lifetime`] wins.
     pub close_at_token_expiry: bool,
 }
 
@@ -299,6 +366,21 @@ pub trait IConnection: Send + Sync {
     /// Per-connection counters (in/out, drops, rate limits).
     fn stats(&self) -> ConnectionStats {
         ConnectionStats::default()
+    }
+
+    /// Why the framework ended this connection, when it recorded a reason.
+    ///
+    /// The framework's WebSocket session records the reason before it writes
+    /// the close frame: lifetime cap, token expiry, idle timeout, server
+    /// shutdown, a rate-limit close or the client going away. It stays `None`
+    /// for an application-initiated [`Self::close`] (the wire code the
+    /// application chose is authoritative there) and for connections that are
+    /// still open.
+    ///
+    /// Default `None`: custom [`IConnection`] implementations do not need to
+    /// track a reason (2.x additive).
+    fn close_reason(&self) -> Option<CloseReason> {
+        None
     }
 
     /// Shorthand for `self.meta().id`.
@@ -466,5 +548,17 @@ mod tests {
             ConnectionMeta::new(TransportKind::Sse).transport,
             TransportKind::Sse
         ));
+    }
+
+    #[test]
+    fn close_reasons_expose_their_wire_codes() {
+        assert_eq!(CloseReason::ClientClosed.code(), Some(1000));
+        assert_eq!(CloseReason::ServerShutdown.code(), Some(1001));
+        assert_eq!(CloseReason::SessionCompleted.code(), Some(1000));
+        assert_eq!(CloseReason::IdleTimeout.code(), Some(1001));
+        assert_eq!(CloseReason::LifetimeExceeded.code(), Some(1001));
+        assert_eq!(CloseReason::TokenExpired.code(), Some(1008));
+        assert_eq!(CloseReason::ProtocolError { code: 1008 }.code(), Some(1008));
+        assert_eq!(CloseReason::Internal.code(), Some(1011));
     }
 }

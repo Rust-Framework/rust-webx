@@ -102,6 +102,22 @@ impl Server {
         }
     }
 
+    /// Serve one already-connected byte stream through the engine pipeline.
+    ///
+    /// Unlike [`Self::run`]/[`Self::run_listeners`], the caller owns accept and
+    /// TLS: this entry point takes any `AsyncRead + AsyncWrite` stream and runs
+    /// the production hyper connection loop, router, middleware and drain logic
+    /// on it. It backs the in-process wire test harness and custom transport
+    /// adapters (for example a future HTTP/3 listener); it does not consume
+    /// admission slots or set the single-run lifecycle flag, so a test may open
+    /// several streams against one assembled server.
+    pub async fn serve_stream<I>(&self, io: I, peer: SocketAddr)
+    where
+        I: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+    {
+        worker::serve_stream(Arc::clone(&self.shared), io, peer).await;
+    }
+
     /// Serve one listener until shutdown.
     ///
     /// This is the single-listener convenience wrapper. `config.tls` is
@@ -109,14 +125,17 @@ impl Server {
     /// `EngineConfig` cannot silently fall back to cleartext.
     pub async fn run(self, listener: std::net::TcpListener) -> Result<()> {
         let tls = match self.shared.tls.clone() {
-            Some(config) => Some(config),
+            Some(config) => Some(crate::tls::with_key_log(config, self.shared.config.mode)),
             None => match self.shared.config.tls.as_ref() {
-                Some(config) => Some(crate::tls::build_server_config_with_client_auth(
-                    &config.cert_path,
-                    &config.key_path,
-                    &config.client_ca_path,
-                    config.client_auth,
-                )?),
+                Some(config) => Some(crate::tls::with_key_log(
+                    crate::tls::build_server_config_with_client_auth(
+                        &config.cert_path,
+                        &config.key_path,
+                        &config.client_ca_path,
+                        config.client_auth,
+                    )?,
+                    self.shared.config.mode,
+                )),
                 None => None,
             },
         };

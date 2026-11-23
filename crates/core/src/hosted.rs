@@ -54,11 +54,15 @@ pub use tokio_util::sync::CancellationToken;
 /// The host's shutdown token, registered in DI for request handlers.
 ///
 /// Unlike the per-worker [`CancellationToken`] a background service receives,
-/// this one is cancelled when the **host** starts graceful shutdown. A long
-/// `SseResult` injects it and calls
-/// [`SseResult::on_server_shutdown`](crate::stream::SseResult::on_server_shutdown)
-/// so the stream ends with a `server_shutdown` event instead of being cut off at
-/// the drain deadline.
+/// this one is cancelled when the **host** starts graceful shutdown. Long-lived
+/// responses and connections use it to wind down before the drain deadline:
+///
+/// * a long `SseResult` injects it and calls
+///   [`SseResult::on_server_shutdown`](crate::stream::SseResult::on_server_shutdown)
+///   so the stream ends with a `server_shutdown` event;
+/// * the host's WebSocket session observes it and closes the connection with
+///   `1001` and [`CloseReason::ServerShutdown`](crate::realtime::CloseReason)
+///   instead of being cut at the drain deadline.
 ///
 /// The token is registered by `Host::build`; handlers inject the value itself
 /// (it is a cheap clone of the underlying cancellation token):
@@ -86,6 +90,20 @@ impl ShutdownToken {
 
     /// Whether shutdown has started.
     pub fn is_cancelled(&self) -> bool {
+        self.0.is_cancelled()
+    }
+
+    /// Whether the host is draining: shutdown has started and long-lived
+    /// connections should prepare to wind down.
+    ///
+    /// This observes the same event as [`Self::is_cancelled`]
+    /// (`is_draining() == is_cancelled()`), but names the **intent**:
+    /// `is_cancelled` answers "is the token cancelled?" for lifecycle code,
+    /// while `is_draining` answers "should I start finishing?" for connection
+    /// teardown. The host allows a drain budget after this point, not before,
+    /// so a connection that waits for `is_draining` still has time to flush a
+    /// final frame or close handshake.
+    pub fn is_draining(&self) -> bool {
         self.0.is_cancelled()
     }
 }
@@ -375,6 +393,19 @@ mod tests {
     async fn delay_waits_the_full_duration_without_cancellation() {
         let ct = CancellationToken::new();
         assert!(delay(&ct, Duration::from_millis(10)).await);
+    }
+
+    #[test]
+    fn shutdown_token_is_draining_exactly_after_cancellation() {
+        let token = ShutdownToken::new(CancellationToken::new());
+        assert!(!token.is_cancelled(), "a fresh host is not shutting down");
+        assert!(!token.is_draining());
+
+        token.token().cancel();
+
+        assert!(token.is_cancelled());
+        assert!(token.is_draining());
+        assert_eq!(token.is_draining(), token.is_cancelled());
     }
 
     struct Counting(Arc<AtomicBool>);

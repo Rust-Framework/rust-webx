@@ -15,7 +15,7 @@ Handler 通过 `Arc<MemoryCache>` 或 `IDistributedCache` trait 注入使用。
 
 ```toml
 [dependencies]
-rust-webx-redis = "2.7"
+rust-webx-redis = "2.8"
 ```
 
 ```rust

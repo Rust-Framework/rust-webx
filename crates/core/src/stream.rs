@@ -44,6 +44,24 @@
 //! An `Err` from the source stream ends the stream cleanly and is reported as
 //! [`StreamEnd::Failed`]. Convert provider errors into an [`SseEvent`] first if
 //! the client must see them as data.
+//!
+//! ## Close semantics
+//!
+//! SSE has no close code on the wire — the chunked body just ends (or the
+//! connection is dropped) — so [`StreamEnd`] is the SSE counterpart of the
+//! WebSocket [`CloseReason`](crate::realtime::CloseReason):
+//!
+//! | [`StreamEnd`] | [`CloseReason`](crate::realtime::CloseReason) | Meaning |
+//! |---|---|---|
+//! | [`Completed`](StreamEnd::Completed) | [`SessionCompleted`](crate::realtime::CloseReason::SessionCompleted) | the source stream ended on its own |
+//! | [`ClientDisconnected`](StreamEnd::ClientDisconnected) | [`ClientClosed`](crate::realtime::CloseReason::ClientClosed) | the client went away / the body was dropped |
+//! | [`Deadline`](StreamEnd::Deadline) | [`LifetimeExceeded`](crate::realtime::CloseReason::LifetimeExceeded) | [`SseResult::max_lifetime`] elapsed |
+//! | [`ServerShutdown`](StreamEnd::ServerShutdown) | [`ServerShutdown`](crate::realtime::CloseReason::ServerShutdown) | the host started draining; a final `server_shutdown` frame was written |
+//! | [`Failed`](StreamEnd::Failed) | [`Internal`](crate::realtime::CloseReason::Internal) / [`ProtocolError`](crate::realtime::CloseReason::ProtocolError) | the source stream or encoder failed |
+//!
+//! The hook stays the single observation point ([`SseResult::on_close`]); the
+//! framework never maps an SSE end onto a WebSocket close frame. The shared
+//! table lives in `docs/design/close-codes.md`.
 
 use crate::action::IActionResult;
 use crate::error::{Error, Result};

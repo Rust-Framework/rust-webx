@@ -1,4 +1,4 @@
-﻿# appsettings.json 配置体系
+# appsettings.json 配置体系
 
 ## 自动加载
 
@@ -46,8 +46,12 @@ appsettings.Development.json        # 开发环境覆盖（Development 模式）
   "Idempotency": {
     "Enabled": false,
     "TtlSeconds": 86400,
+    "LeaseSeconds": 60,
     "MaxTrackedKeys": 10000,
-    "MaxBodyBytes": 1048576
+    "MaxBodyBytes": 1048576,
+    "AllowAnonymous": true,
+    "Paths": [],
+    "SkipPaths": []
   },
   "ClientInfo": {
     "TrustForwardedHeaders": false,
@@ -90,6 +94,51 @@ appsettings.Development.json        # 开发环境覆盖（Development 模式）
 
 合并后为 `AppOptions` 结构体。
 
+### 启动期聚合校验
+
+`HostBuilder::try_build` 先收集**全部**启动期配置违规，再一次性以
+`webx::Error::Di` 返回；`HostBuilder::build` panic 同一条消息。列表按
+`section + key` 稳定排序，运维不再需要“改一个键、重启、再看下一个”。
+
+被聚合的既有规则（规则与默认值均未改变，只改报错方式）：
+
+| Key | 何时失败 |
+|-----|----------|
+| `Tls.ClientAuth` / `Tls.ClientCaPath` / `App.Urls` | mTLS 半配置：`ClientAuth` 开启但缺 CA 路径、CA 文件不存在、未配置 `https://` listener；或 `ClientAuth=Off` 却设置了 `ClientCaPath` |
+| `Server.RequestTimeoutSeconds` | `Production` 下为 `0`（关闭入站 deadline） |
+| `Server.AdmissionTimeoutMs` | `Production` 下为 `0`（无限等待准入） |
+| `App.MaxConnections` | 超出引擎信号量范围 `1..=MAX_SEMAPHORE_PERMITS`（`0` 仍按既有语义夹到 `1`，不是违规） |
+| `Cors.Origins` | `Production` 下为 `*`（校验中间件实际使用的列表，含 `use_cors` 显式覆盖） |
+| `Jwt.Secret` | `Production` + 启用认证 + HS256 + 空/弱密钥（不足 32 字节或占位符） |
+| `Jwt.*` | 启用认证时 `Jwt` 节本身非法（空算法列表、空 issuer/audience、JWKS 约束、超界的 ClockSkew/MaxTokenBytes 等） |
+| `RateLimit.TrustProxy` / `RateLimit.TrustedProxies` | `Production` 下检测到 legacy 键（迁移到 `ClientInfo`） |
+| `Turn.*` | `Turn` 节只配置了一部分，或 TTL 超界 |
+
+以下情况保持原行为，**不会**变成启动错误：
+
+- `Development`/`Test` 允许 `Server.RequestTimeoutSeconds=0`、`Server.AdmissionTimeoutMs=0`；
+- `Development` 下 legacy `RateLimit` 信任键只打 `warn`（见上一节）；
+- `Production` 下 `Idempotency.Enabled=true` + `AllowAnonymous=true` + 空 `Paths` 只打
+  `warn`（见[请求级幂等](../11-production/idempotency.md)）；
+- `ClientInfo.TrustedProxies` 中的非法 CIDR 只打 `warn` 并忽略该条。
+
+需要在启动前自行检查一份合并后的配置时（例如部署流水线），可复用同一套规则：
+
+```rust
+use webx_core::mode::AppMode;
+use webx_host::config_validation::{format_violations, validate_options};
+
+let violations = validate_options(&options, AppMode::Production);
+if !violations.is_empty() {
+    eprintln!("{}", format_violations(&violations)); // 一条消息列出全部违规
+}
+```
+
+`validate_options` 覆盖只依赖 `AppOptions` 与 `AppMode` 的规则；依赖
+`HostBuilder` 状态的检查（`use_cors` / `use_turn_config` / `JwtValidation`
+覆盖、是否启用认证）由 Host 在 `try_build` 内一并收集，`format_violations`
+负责稳定排序与汇总格式。
+
 ### RateLimit 与 ClientInfo（转发头唯一入口）
 
 `RateLimit` 节做鉴权前按客户端 IP 限流；`ClientInfo` 节决定“客户端 IP 是怎么解析出来的”。可信代理的
@@ -120,6 +169,33 @@ appsettings.Development.json        # 开发环境覆盖（Development 模式）
 - 代码构造 `RateLimitSection` 时用 `..Default::default()` 即可跳过这两个 legacy 字段（字段仍保留以兼容
   `appsettings.json`）。`Idempotency.AllowAnonymous`（默认 `true`）控制匿名请求是否启用幂等；
   对外服务建议设为 `false`，见 [请求级幂等](../11-production/idempotency.md)。
+
+### Idempotency 的路径过滤与自动装配
+
+`Idempotency.Paths` / `SkipPaths` 把幂等收敛到需要保护的写接口（空 `Paths` = 全部路径，保持兼容；
+`SkipPaths` 优先；按路径分段边界匹配，末尾 `/` 忽略）：
+
+```json
+{
+  "Idempotency": {
+    "Enabled": true,
+    "Paths": ["/api/orders", "/api/payments"],
+    "SkipPaths": ["/api/payments/webhook"]
+  }
+}
+```
+
+- `/api/orders` 命中 `/api/orders` 与 `/api/orders/123`，**不**命中 `/api/orders-archive`。
+- 不在范围内的请求不读 `Idempotency-Key`、不访问存储（无存储往返）。
+- `Enabled=true` 且未显式 `use_idempotency` 时，Host 自动使用 DI 中注册的
+  `dyn IIdempotencyStore`（如 `EfIdempotencyStore`），没有才退回有界内存存储；
+  显式 `use_idempotency(store, ttl)` 优先。
+- `Production` 下 `Enabled=true` + `AllowAnonymous=true` + 空 `Paths` 会在启动时打 `warn`
+  （所有路径的匿名写请求按 IP 分键，NAT/反代后可能互相重放），不改变行为。
+- `LeaseSeconds`（默认 60）是进行中预约的租约，下传时取 `min(LeaseSeconds, TtlSeconds)`；
+  `TtlSeconds` 是已完成响应的重放保留期。
+- 其余键（`TtlSeconds` / `MaxTrackedKeys` / `MaxBodyBytes` / `AllowAnonymous`）语义见
+  [请求级幂等](../11-production/idempotency.md)。
 
 ### Culture
 

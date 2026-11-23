@@ -26,13 +26,14 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 
 use webx_core::error::{Error, Result};
+use webx_core::hosted::{CancellationToken, ShutdownToken};
 use webx_core::http::IHttpContext;
 use webx_core::mediator::{IMediator, IRequest, Mediator};
 use webx_core::middleware::IMiddleware;
 use webx_core::realtime::{
-    websocket_meta, BackpressurePolicy, ConnectionContext, ConnectionMeta, ConnectionScope,
-    ConnectionStats, IConnection, IUpgradeSession, IWebSocketHandler, RealtimeMessage,
-    RealtimeMetrics, UpgradedTransport, WebSocketLimits,
+    websocket_meta, BackpressurePolicy, CloseReason, ConnectionContext, ConnectionMeta,
+    ConnectionScope, ConnectionStats, IConnection, IUpgradeSession, IWebSocketHandler,
+    RealtimeMessage, RealtimeMetrics, UpgradedTransport, WebSocketLimits,
 };
 use webx_core::request_context::RequestContext;
 
@@ -220,6 +221,7 @@ impl IUpgradeSession for WebSocketSession {
             metrics: realtime_metrics.clone(),
             close_recorded: AtomicBool::new(false),
             closed: AtomicBool::new(false),
+            close_reason: std::sync::Mutex::new(None),
             window: std::sync::Mutex::new(InboundWindow::new()),
         });
         // Register for fan-out/presence; the host registers the in-memory
@@ -237,33 +239,19 @@ impl IUpgradeSession for WebSocketSession {
                 }
             }
         }
-        let result = match session_deadline(&limits, self.token_expires_at_unix_secs) {
-            Some((at, code, reason)) => {
-                // Absolute deadline: the handler owns the receive loop, so the
-                // session races its future against the deadline. Traffic does
-                // not extend it.
-                let handler = Box::pin(
-                    self.handler
-                        .on_connect(Arc::clone(&connection) as Arc<dyn IConnection>),
-                );
-                tokio::select! {
-                    biased;
-                    result = handler => result,
-                    _ = tokio::time::sleep_until(at) => {
-                        // `close` records the close code in the session metrics
-                        // and marks the connection closed, which makes the
-                        // handler's next `recv` return `None`.
-                        let _ = connection.close(code, reason).await;
-                        Ok(())
-                    }
-                }
-            }
-            None => {
-                self.handler
-                    .on_connect(Arc::clone(&connection) as Arc<dyn IConnection>)
-                    .await
-            }
-        };
+        // The host shutdown token is registered in DI by `Host::build`: a
+        // draining host ends long-lived sessions proactively (close `1001`,
+        // "going away") instead of leaving them to the drain deadline.
+        let shutdown = context
+            .resolve::<ShutdownToken>()
+            .map(|token| token.token().clone());
+        let result = drive_session(
+            &*self.handler,
+            &connection,
+            session_deadline(&limits, self.token_expires_at_unix_secs),
+            shutdown,
+        )
+        .await;
         if let Some(registry) = &registry {
             if let Some(transition) = registry.unregister_observed(connection.id()) {
                 for observer in observers.iter() {
@@ -273,7 +261,19 @@ impl IUpgradeSession for WebSocketSession {
         }
         // Best-effort graceful close; dropping the last outbound sender lets the
         // writer flush and close the socket.
+        let already_closed = connection.is_closed();
         let _ = connection.close(1000, "server closed").await;
+        // A handler that returned on its own (rather than through one of the
+        // framework close paths above) ends a normally completed session. An
+        // application-initiated `IConnection::close` leaves the reason unset:
+        // the wire code the application chose is authoritative there.
+        if !already_closed && connection.recorded_close_reason().is_none() {
+            connection.record_close_reason(if result.is_err() {
+                CloseReason::Internal
+            } else {
+                CloseReason::SessionCompleted
+            });
+        }
         drop(connection);
         let _ = writer.await;
         if let Some(metrics) = &realtime_metrics {
@@ -283,24 +283,102 @@ impl IUpgradeSession for WebSocketSession {
     }
 }
 
+/// How a framework deadline or host shutdown ended the session.
+enum SessionEnd {
+    /// A [`session_deadline`] cap elapsed.
+    Deadline {
+        reason: CloseReason,
+        code: u16,
+        message: &'static str,
+    },
+    /// The host started graceful shutdown.
+    ServerShutdown,
+}
+
+/// Run the application handler until it returns or the framework ends the
+/// session.
+///
+/// The framework owns three ways a session can end: the handler returns, an
+/// absolute deadline elapses, or the host starts draining. A framework-initiated
+/// end records the [`CloseReason`] on the connection and writes the matching
+/// close frame before returning, so the peer and observers see *why* the
+/// session ended; the handler future is dropped at that point.
+async fn drive_session(
+    handler: &dyn IWebSocketHandler,
+    connection: &Arc<WebSocketConnection>,
+    deadline: Option<(tokio::time::Instant, CloseReason, u16, &'static str)>,
+    shutdown: Option<CancellationToken>,
+) -> Result<()> {
+    let mut on_connect = handler.on_connect(Arc::clone(connection) as Arc<dyn IConnection>);
+    // Both optional ends become always-pending futures when disabled, so the
+    // select below has one shape regardless of configuration.
+    let deadline_wait = async move {
+        match deadline {
+            Some((at, reason, code, message)) => {
+                tokio::time::sleep_until(at).await;
+                SessionEnd::Deadline {
+                    reason,
+                    code,
+                    message,
+                }
+            }
+            None => std::future::pending().await,
+        }
+    };
+    let shutdown_wait = async move {
+        match shutdown {
+            Some(token) => token.cancelled().await,
+            None => std::future::pending().await,
+        }
+    };
+    tokio::select! {
+        biased;
+        result = &mut on_connect => result,
+        end = deadline_wait => end_session(connection, end).await,
+        _ = shutdown_wait => end_session(connection, SessionEnd::ServerShutdown).await,
+    }
+}
+
+/// Record the framework reason and write the matching close frame.
+async fn end_session(connection: &WebSocketConnection, end: SessionEnd) -> Result<()> {
+    let (reason, code, message) = match end {
+        SessionEnd::Deadline {
+            reason,
+            code,
+            message,
+        } => (reason, code, message),
+        SessionEnd::ServerShutdown => (CloseReason::ServerShutdown, 1001, "server shutting down"),
+    };
+    connection.record_close_reason(reason);
+    let _ = connection.close(code, message).await;
+    Ok(())
+}
+
 /// Absolute server-side deadline for one accepted session.
 ///
 /// Returns the earlier of the lifetime cap (`1001`) and the upgrade token's
-/// `exp` (`1008`), plus the close reason the client should observe. `None`
-/// means the session is only bounded by the handler and the idle timeout.
+/// `exp` (`1008`), plus the [`CloseReason`] the session records and the close
+/// frame the client should observe. `None` means the session is only bounded by
+/// the handler and the idle timeout.
 fn session_deadline(
     limits: &WebSocketLimits,
     token_expires_at_unix_secs: Option<u64>,
-) -> Option<(tokio::time::Instant, u16, &'static str)> {
+) -> Option<(tokio::time::Instant, CloseReason, u16, &'static str)> {
     let now = tokio::time::Instant::now();
-    let lifetime = limits
-        .max_connection_lifetime
-        .map(|lifetime| (now + lifetime, 1001u16, "connection lifetime exceeded"));
+    let lifetime = limits.max_connection_lifetime.map(|lifetime| {
+        (
+            now + lifetime,
+            CloseReason::LifetimeExceeded,
+            1001u16,
+            "connection lifetime exceeded",
+        )
+    });
     let token = if limits.close_at_token_expiry {
         token_expires_at_unix_secs.map(|expires_at| {
             let remaining = expires_at.saturating_sub(unix_now_secs());
             (
                 now + Duration::from_secs(remaining),
+                CloseReason::TokenExpired,
                 1008u16,
                 "access token expired",
             )
@@ -464,12 +542,38 @@ pub(crate) struct WebSocketConnection {
     metrics: Option<Arc<RealtimeMetrics>>,
     close_recorded: AtomicBool,
     closed: AtomicBool,
+    /// Why the framework ended the session; first reason wins, `None` while the
+    /// session is open or when the application initiated the close.
+    close_reason: std::sync::Mutex<Option<CloseReason>>,
     window: std::sync::Mutex<InboundWindow>,
 }
 
 impl WebSocketConnection {
     fn mark_closed(&self) {
         self.closed.store(true, Ordering::SeqCst);
+    }
+
+    /// Record why the framework is ending the session.
+    ///
+    /// The first reason wins: the path that decided to close runs before any
+    /// teardown fallback, so a lifetime cap is not overwritten by the generic
+    /// "server closed".
+    fn record_close_reason(&self, reason: CloseReason) {
+        let mut slot = self
+            .close_reason
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if slot.is_none() {
+            *slot = Some(reason);
+        }
+    }
+
+    /// The reason recorded by the framework, if it ended the session itself.
+    fn recorded_close_reason(&self) -> Option<CloseReason> {
+        *self
+            .close_reason
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// Count one session close, exactly once per connection.
@@ -520,6 +624,7 @@ impl WebSocketConnection {
             metrics.record_rate_limited();
         }
         self.send_error_frame("rate_limited", "message rate limit exceeded");
+        self.record_close_reason(CloseReason::ProtocolError { code: 1008 });
         let _ = self.enqueue(Message::Close(Some(CloseFrame {
             code: CloseCode::from(1008),
             reason: "rate limit exceeded".into(),
@@ -544,6 +649,10 @@ impl IConnection for WebSocketConnection {
         self.stats.snapshot()
     }
 
+    fn close_reason(&self) -> Option<CloseReason> {
+        self.recorded_close_reason()
+    }
+
     async fn recv(&self) -> Option<Result<RealtimeMessage>> {
         let mut stream = self.stream.lock().await;
         loop {
@@ -554,6 +663,7 @@ impl IConnection for WebSocketConnection {
                 Some(timeout) => match tokio::time::timeout(timeout, stream.next()).await {
                     Ok(next) => next,
                     Err(_) => {
+                        self.record_close_reason(CloseReason::IdleTimeout);
                         self.mark_closed();
                         let _ = self.enqueue(Message::Close(Some(CloseFrame {
                             code: CloseCode::from(1001),
@@ -565,7 +675,14 @@ impl IConnection for WebSocketConnection {
                 },
                 None => stream.next().await,
             };
-            let message = match next? {
+            // The peer ended the stream (close handshake completed, or it
+            // dropped the connection): the session ends because the client went
+            // away, regardless of whether a close frame arrived first.
+            let Some(next) = next else {
+                self.record_close_reason(CloseReason::ClientClosed);
+                return None;
+            };
+            let message = match next {
                 Ok(message) => message,
                 Err(error) => {
                     return Some(Err(Error::Internal(format!(
@@ -613,6 +730,7 @@ impl IConnection for WebSocketConnection {
                     return Some(Ok(RealtimeMessage::Binary(bytes.to_vec())));
                 }
                 Message::Close(frame) => {
+                    self.record_close_reason(CloseReason::ClientClosed);
                     let (code, reason) = match frame {
                         Some(frame) => (u16::from(frame.code), frame.reason.to_string()),
                         None => (1005, String::new()),
@@ -870,8 +988,10 @@ mod tests {
     fn session_deadline_uses_the_lifetime_cap() {
         let limits =
             WebSocketLimits::default().with_max_connection_lifetime(Duration::from_secs(60));
-        let (at, code, reason) = session_deadline(&limits, None).expect("deadline");
-        assert_eq!(code, 1001);
+        let (at, close_reason, code, reason) = session_deadline(&limits, None).expect("deadline");
+        assert_eq!(close_reason, CloseReason::LifetimeExceeded);
+        assert_eq!(close_reason.code(), Some(1001));
+        assert_eq!(code, 1001, "the wire code must not change");
         assert_eq!(reason, "connection lifetime exceeded");
         let remaining = at.saturating_duration_since(tokio::time::Instant::now());
         assert!(remaining <= Duration::from_secs(60));
@@ -884,19 +1004,47 @@ mod tests {
             .with_max_connection_lifetime(Duration::from_secs(600))
             .close_at_token_expiry();
         let expiry = unix_now_secs() + 30;
-        let (at, code, reason) = session_deadline(&limits, Some(expiry)).expect("deadline");
-        assert_eq!(code, 1008);
+        let (at, close_reason, code, reason) =
+            session_deadline(&limits, Some(expiry)).expect("deadline");
+        assert_eq!(close_reason, CloseReason::TokenExpired);
+        assert_eq!(close_reason.code(), Some(1008));
+        assert_eq!(code, 1008, "the wire code must not change");
         assert_eq!(reason, "access token expired");
         let remaining = at.saturating_duration_since(tokio::time::Instant::now());
         assert!(remaining <= Duration::from_secs(30));
 
         // An already-expired token closes immediately.
-        let (_, code, _) = session_deadline(&limits, Some(unix_now_secs().saturating_sub(5)))
-            .expect("expired token deadline");
+        let (_, close_reason, code, _) =
+            session_deadline(&limits, Some(unix_now_secs().saturating_sub(5)))
+                .expect("expired token deadline");
+        assert_eq!(close_reason, CloseReason::TokenExpired);
         assert_eq!(code, 1008);
 
         // Without a token claim, the lifetime cap still applies.
-        let (_, code, _) = session_deadline(&limits, None).expect("lifetime only");
+        let (_, close_reason, code, _) = session_deadline(&limits, None).expect("lifetime only");
+        assert_eq!(close_reason, CloseReason::LifetimeExceeded);
         assert_eq!(code, 1001);
+    }
+
+    #[test]
+    fn session_deadline_reason_and_wire_code_agree() {
+        let limits = WebSocketLimits::default()
+            .with_max_connection_lifetime(Duration::from_secs(60))
+            .close_at_token_expiry();
+        for (limits, expiry) in [
+            (limits.clone(), Some(unix_now_secs() + 30)),
+            (limits.clone(), None),
+            (
+                WebSocketLimits::default().with_max_connection_lifetime(Duration::from_secs(60)),
+                None,
+            ),
+        ] {
+            let (_, reason, code, message) = session_deadline(&limits, expiry).expect("deadline");
+            assert_eq!(
+                reason.code(),
+                Some(code),
+                "CloseReason::code must be the wire code for `{message}`"
+            );
+        }
     }
 }

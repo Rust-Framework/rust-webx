@@ -22,15 +22,29 @@
 //!   idempotency key, so two nodes racing on the same key cannot both start the
 //!   handler: one INSERT wins and the other resolves the row (usually
 //!   `InProgress`). No shared cache / Redis lock is required.
-//! * **TTL and leases**: a reservation is a lease. A killed node's reservation
-//!   expires after the configured TTL and the client's next retry claims it with
-//!   a conditional `UPDATE ... WHERE key_hash = ? AND expires_at <= ?`.
-//!   `complete`/`release` are conditional on `expires_at > now`, so a late
-//!   completion for an already-expired reservation is discarded instead of
-//!   resurrecting it. The port carries no per-attempt token, so a completion
-//!   that races a reclaim can still overwrite the new lease; keep the TTL above
-//!   the handler's worst-case duration (the only execution guarantee outside a
-//!   lease is at-most-once *while* the key stays reserved).
+//! * **Leases and retention**: the middleware passes two durations —
+//!   `retention` (how long a completed response replays, `Idempotency.TtlSeconds`)
+//!   and `lease` (how long an in-flight reservation blocks retries,
+//!   `Idempotency.LeaseSeconds`, capped at the retention). A reservation row
+//!   expires after the lease, so a killed node's reservation becomes claimable
+//!   after ~60s and the client's next retry claims it with a conditional
+//!   `UPDATE ... WHERE key_hash = ? AND expires_at <= ?`; a completed row keeps
+//!   the retention `expires_at`. The store uses the lease it is given — it does
+//!   not impose its own correction. `complete`/`release` are conditional on
+//!   `expires_at > now`, so a late completion for an already-expired reservation
+//!   is discarded instead of resurrecting it.
+//! * **Fencing tokens**: every claim writes a fresh `attempt` token into the row
+//!   and returns it as an [`IdempotencyLease`] ([`IIdempotencyStore::begin_lease`]).
+//!   `complete_lease`/`release_lease` add `attempt = ?` to the compare-and-set and
+//!   clear the token when they win, so an attempt whose lease expired (and was
+//!   reclaimed) cannot overwrite the new owner's response or delete its row —
+//!   even while the new lease is live. Rows written before 2.8 have a `NULL`
+//!   `attempt`; they are reclaimed by inserting a token on the next claim, and
+//!   the token-less `complete`/`release` keep working for old callers.
+//! * **Replayable headers**: the stored response keeps the whitelisted response
+//!   headers (`Location`, `ETag`, `Last-Modified`, `Cache-Control`) as a JSON
+//!   column, so a replay is header-identical to the original response. Header
+//!   sets larger than 8 KiB are not stored (the body is still cached).
 //! * **Cleanup**: rows stay readable until `expires_at`; a row is deleted only
 //!   after it has been expired for the grace period. `IdempotencyHousekeeping`
 //!   does that on a periodic tick (default: hourly, grace 24h).
@@ -93,20 +107,37 @@
 //! `use_idempotency` runs before the DI provider exists, which is why the store
 //! is built from [`DbContextOptions`] rather than from a `ScopeFactory`: the
 //! options are the one database dependency the application owns at startup.
+//! As an alternative to `use_idempotency`, register the store as a DI instance
+//! and set `Idempotency.Enabled = true`; the host uses the registered
+//! `dyn IIdempotencyStore` when no explicit store is passed.
+//!
+//! # Schema changes
+//!
+//! 2.8 adds two **nullable** columns to `webx_idempotency`: `attempt`
+//! (`VARCHAR(64)`, the fencing token) and `headers` (`TEXT`, JSON replayable
+//! headers). Existing rows stay valid (`NULL` = written before the upgrade) and
+//! are claimed normally; upgrade an existing database with the official rust-ef
+//! migration tooling (snapshot diff → generated migration → `ctx.migrate`), never
+//! with hand-written `ALTER TABLE`.
 //!
 //! # Race semantics
 //!
-//! * `begin`: a missing row is INSERTed; a unique-key violation means another
-//!   node inserted it first, so the tracking state is dropped and the existing
-//!   row is resolved. A completed, unexpired row replays its stored response;
-//!   an expired row is claimed with one conditional UPDATE (exactly one winner),
-//!   which also clears the previous response; a live row is `InProgress`.
-//! * `complete`: a conditional UPDATE (`WHERE state = 'in_progress'`) stores the
-//!   response. An affected-row count of `0` is not an error — the reservation
-//!   expired or was released, so a retry may run the handler again (a late
-//!   completion must never resurrect a stale reservation).
-//! * `release`: deletes the row only while it is still `in_progress`, so
-//!   releasing a completed key does not drop its cached response.
+//! * `begin`/`begin_lease`: a missing row is INSERTed with a fresh `attempt`
+//!   token; a unique-key violation means another node inserted it first, so the
+//!   tracking state is dropped and the existing row is resolved. A completed,
+//!   unexpired row replays its stored response; an expired row is claimed with
+//!   one conditional UPDATE (exactly one winner) that writes the new `attempt`
+//!   token and clears the previous response; a live row is `InProgress`.
+//! * `complete`/`complete_lease`: a conditional UPDATE (`WHERE state =
+//!   'in_progress' AND expires_at > now` plus `attempt = ?` for the lease
+//!   variant) stores the response and clears `attempt`. An affected-row count of
+//!   `0` is not an error — the reservation expired, was reclaimed or was
+//!   released, so a retry may run the handler again (a late completion must never
+//!   resurrect a stale reservation or overwrite a newer attempt).
+//! * `release`/`release_lease`: deletes the row only while it is still
+//!   `in_progress` (and still owned by `attempt` for the lease variant), so
+//!   releasing a completed key does not drop its cached response and a stale
+//!   attempt cannot delete the new owner's row.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -118,7 +149,10 @@ use rust_ef::prelude::*;
 use sha2::{Digest, Sha256};
 use webx_core::error::{Error, Result};
 use webx_core::hosted::PeriodicBackgroundService;
-use webx_core::idempotency::{IIdempotencyStore, IdempotencyBegin, IdempotentResponse};
+use webx_core::idempotency::{
+    IIdempotencyStore, IdempotencyBegin, IdempotencyLease, IdempotentResponse,
+    REPLAYABLE_RESPONSE_HEADERS,
+};
 
 use crate::map_ef_error;
 
@@ -140,11 +174,13 @@ pub const DEFAULT_CLEANUP_GRACE: Duration = Duration::from_secs(24 * 3_600);
 
 /// One stored idempotency key.
 ///
-/// `key` is the primary key (unique across all instances), so a duplicate INSERT
-/// is a unique-constraint violation. `expires_at` is a Unix-seconds lease
+/// `key_hash` is the primary key (unique across all instances), so a duplicate
+/// INSERT is a unique-constraint violation. `expires_at` is a Unix-seconds lease
 /// deadline: after it the key can be claimed again, which is also what makes a
 /// killed instance recoverable. `body` is the raw response body (compressed
-/// bytes are stored as-is together with `content_encoding`).
+/// bytes are stored as-is together with `content_encoding`). `attempt` is the
+/// fencing token of the live attempt and `headers` the JSON-encoded replayable
+/// response headers (see [`REPLAYABLE_RESPONSE_HEADERS`]).
 #[derive(Debug, Clone, EntityType)]
 #[table("webx_idempotency")]
 pub struct IdempotencyRecord {
@@ -172,6 +208,20 @@ pub struct IdempotencyRecord {
     pub content_type: Option<String>,
     /// `content-encoding` of the stored response (bytes are replayed as-is).
     pub content_encoding: Option<String>,
+    /// Fencing token of the attempt that owns this reservation.
+    ///
+    /// `None` once the response is stored and on rows written before 2.8; a
+    /// claim always writes a fresh token (`begin_lease` returns it to the
+    /// middleware). `complete_lease`/`release_lease` add `attempt = ?` to their
+    /// compare-and-set, so a stale attempt cannot overwrite or delete a newer
+    /// owner's row.
+    #[max_length(64)]
+    pub attempt: Option<String>,
+    /// Replayable response headers as a JSON array of `[name, value]` pairs.
+    ///
+    /// `None` when the response carried none or the row predates 2.8. Only the
+    /// allowed names survive a replay; anything else is ignored.
+    pub headers: Option<String>,
     /// Raw body of the stored response.
     pub body: Option<Vec<u8>>,
     /// Unix-seconds time this reservation was created (or last claimed).
@@ -201,14 +251,8 @@ pub fn register_idempotency_model(ctx: &mut DbContext) {
 /// so a request never shares a context across `.await` points.
 pub struct EfIdempotencyStore {
     options: Arc<DbContextOptions>,
-    lease: Duration,
     max_body_bytes: usize,
 }
-
-/// Default reservation lease. `begin` uses this (never the caller's retention
-/// TTL) so a crashed handler is retried quickly while a completed response
-/// still uses the caller's TTL as its replay-retention period.
-pub const DEFAULT_LEASE: Duration = Duration::from_secs(60);
 
 impl EfIdempotencyStore {
     /// Build a store over the application's database options.
@@ -219,20 +263,8 @@ impl EfIdempotencyStore {
         let max_body_bytes = default_body_budget(&options);
         Self {
             options,
-            lease: DEFAULT_LEASE,
             max_body_bytes,
         }
-    }
-
-    /// Reservation lease used by `begin` (default [`DEFAULT_LEASE`], 60s).
-    ///
-    /// The lease must exceed the handler's worst-case duration; it is separate
-    /// from the caller's TTL, which only controls how long a *completed*
-    /// response is replayed. A shorter lease recovers from crashed handlers
-    /// faster; `begin` still clamps it to the caller's TTL.
-    pub fn with_lease(mut self, lease: Duration) -> Self {
-        self.lease = lease;
-        self
     }
 
     /// Largest response body stored in the table (default: provider-dependent).
@@ -300,16 +332,18 @@ async fn find_record(
 ///
 /// * completed and unexpired → replay the stored response;
 /// * expired (either state) → claim it with one conditional UPDATE so exactly one
-///   caller becomes the owner and the previous response is cleared;
+///   caller becomes the owner; the update writes `attempt` and clears the
+///   previous response;
 /// * otherwise → another request is still running.
 async fn resolve_existing(
     ctx: &mut DbContext,
     record: IdempotencyRecord,
     now: i64,
     expires_at: i64,
-) -> Result<IdempotencyBegin> {
+    attempt: String,
+) -> Result<(IdempotencyBegin, Option<IdempotencyLease>)> {
     if record.state == STATE_COMPLETED && record.expires_at > now {
-        return Ok(IdempotencyBegin::Replay(stored_response(&record)));
+        return Ok((IdempotencyBegin::Replay(stored_response(&record)), None));
     }
 
     if record.expires_at <= now {
@@ -320,9 +354,11 @@ async fn resolve_existing(
             && row.expires_at <= now)
         .execute_update()
         .set_column(IdempotencyRecord::COLUMN_STATE, STATE_IN_PROGRESS)
+        .set_column(IdempotencyRecord::COLUMN_ATTEMPT, Some(attempt.clone()))
         .set_column(IdempotencyRecord::COLUMN_STATUS, DbValue::Null)
         .set_column(IdempotencyRecord::COLUMN_CONTENT_TYPE, DbValue::Null)
         .set_column(IdempotencyRecord::COLUMN_CONTENT_ENCODING, DbValue::Null)
+        .set_column(IdempotencyRecord::COLUMN_HEADERS, DbValue::Null)
         .set_column(IdempotencyRecord::COLUMN_BODY, DbValue::Null)
         .set_column(IdempotencyRecord::COLUMN_CREATED_AT, now)
         .set_column(IdempotencyRecord::COLUMN_EXPIRES_AT, expires_at)
@@ -332,41 +368,60 @@ async fn resolve_existing(
         // The CAS re-checks the expiry: a concurrent owner that completed the
         // key between our SELECT and UPDATE wins and we report InProgress.
         return Ok(if affected == 1 {
-            IdempotencyBegin::Started
+            (
+                IdempotencyBegin::Started,
+                Some(IdempotencyLease::new(attempt)),
+            )
         } else {
-            IdempotencyBegin::InProgress
+            (IdempotencyBegin::InProgress, None)
         });
     }
 
-    Ok(IdempotencyBegin::InProgress)
+    Ok((IdempotencyBegin::InProgress, None))
 }
 
 /// Rebuild the stored response of a completed row.
 fn stored_response(record: &IdempotencyRecord) -> IdempotentResponse {
-    IdempotentResponse {
+    IdempotentResponse::new(
         // A completed row is written by `complete`, which always stores the
         // status; 200 is only a defensive fallback for a hand-edited row.
-        status: record
+        record
             .status
             .and_then(|status| u16::try_from(status).ok())
             .unwrap_or(200),
-        content_type: record.content_type.clone(),
-        content_encoding: record.content_encoding.clone(),
-        body: record.body.clone().unwrap_or_default(),
-    }
+        record.content_type.clone(),
+        record.content_encoding.clone(),
+        record.body.clone().unwrap_or_default(),
+    )
+    .with_headers(decode_headers(record))
 }
 
 #[async_trait]
 impl IIdempotencyStore for EfIdempotencyStore {
     async fn begin(&self, key: &str, ttl: Duration) -> Result<IdempotencyBegin> {
+        // Legacy token-less entry point: no separate lease, so the reservation
+        // and the stored response are both bounded by `ttl`.
+        let (begin, _lease) = self.begin_lease(key, ttl, ttl).await?;
+        Ok(begin)
+    }
+
+    async fn begin_lease(
+        &self,
+        key: &str,
+        _retention: Duration,
+        lease: Duration,
+    ) -> Result<(IdempotencyBegin, Option<IdempotencyLease>)> {
         let now = unix_now_secs();
-        // The reservation is a lease, not the replay-retention TTL: a crashed
-        // handler must be retryable after ~`lease`, not after the full TTL.
-        let expires_at = now.saturating_add(lease_seconds(self.lease.min(ttl)));
+        // The reservation row lives for the caller's lease, not for the replay
+        // retention: a crashed handler must be retryable after ~`lease`, not
+        // after the full retention period. The caller (the middleware) already
+        // caps `lease` at the retention; the store honours the value as given.
+        let expires_at = now.saturating_add(lease_seconds(lease));
+        let attempt = new_attempt_token();
         let mut ctx = self.context()?;
 
         if let Some(record) = find_record(&mut ctx, key).await.map_err(map_ef_error)? {
-            return resolve_existing(&mut ctx, record, now, expires_at).await;
+            return resolve_existing(&mut ctx, record, now, expires_at, attempt).await;
         }
 
         ctx.add(IdempotencyRecord {
@@ -376,12 +431,17 @@ impl IIdempotencyStore for EfIdempotencyStore {
             status: None,
             content_type: None,
             content_encoding: None,
+            attempt: Some(attempt.clone()),
+            headers: None,
             body: None,
             created_at: now,
             expires_at,
         });
         match ctx.save_changes().await {
-            Ok(_) => Ok(IdempotencyBegin::Started),
+            Ok(_) => Ok((
+                IdempotencyBegin::Started,
+                Some(IdempotencyLease::new(attempt)),
+            )),
             Err(EFError::UniqueViolation { .. }) => {
                 // Another instance inserted the same key between our SELECT and
                 // INSERT. The failed INSERT is rolled back; drop its tracking
@@ -391,15 +451,59 @@ impl IIdempotencyStore for EfIdempotencyStore {
                     // The winning row was purged before we could read it. Do not
                     // claim the key twice: report InProgress and let the client's
                     // next retry take the normal path.
-                    return Ok(IdempotencyBegin::InProgress);
+                    return Ok((IdempotencyBegin::InProgress, None));
                 };
-                resolve_existing(&mut ctx, record, now, expires_at).await
+                resolve_existing(&mut ctx, record, now, expires_at, attempt).await
             }
             Err(error) => Err(map_ef_error(error)),
         }
     }
 
     async fn complete(&self, key: &str, response: IdempotentResponse, ttl: Duration) -> Result<()> {
+        self.complete_attempt(key, None, response, ttl).await
+    }
+
+    async fn complete_lease(
+        &self,
+        key: &str,
+        lease: Option<&IdempotencyLease>,
+        response: IdempotentResponse,
+        retention: Duration,
+    ) -> Result<()> {
+        self.complete_attempt(
+            key,
+            lease.map(|lease| lease.token.as_str()),
+            response,
+            retention,
+        )
+        .await
+    }
+
+    async fn release(&self, key: &str) -> Result<()> {
+        self.release_attempt(key, None).await
+    }
+
+    async fn release_lease(&self, key: &str, lease: Option<&IdempotencyLease>) -> Result<()> {
+        self.release_attempt(key, lease.map(|lease| lease.token.as_str()))
+            .await
+    }
+}
+
+impl EfIdempotencyStore {
+    /// Store the response of one attempt.
+    ///
+    /// `attempt` is the fencing token of the lease variant (`None` for the
+    /// token-less `complete`, which keeps the pre-2.8 behavior). When set, the
+    /// compare-and-set also requires the row to still carry that token, so a
+    /// reclaimed reservation's late completion is a no-op. `retention` is how
+    /// long the stored response replays.
+    async fn complete_attempt(
+        &self,
+        key: &str,
+        attempt: Option<&str>,
+        response: IdempotentResponse,
+        retention: Duration,
+    ) -> Result<()> {
         if response.body.len() > self.max_body_bytes {
             // The table column cannot hold this body (MySQL BLOB is 64 KiB).
             // Free the reservation so the client's retry re-executes instead of
@@ -409,72 +513,100 @@ impl IIdempotencyStore for EfIdempotencyStore {
                 max_bytes = self.max_body_bytes,
                 "idempotency: response body exceeds the store column limit; re-execution allowed"
             );
-            return self.release(key).await;
+            return self.release_attempt(key, attempt).await;
         }
         let now = unix_now_secs();
-        let expires_at = now.saturating_add(lease_seconds(ttl));
+        let expires_at = now.saturating_add(lease_seconds(retention));
         let target = key_hash(key);
+        let target_for_log = target.clone();
+        let attempt_for_log = attempt.map(str::to_string);
         let mut ctx = self.context()?;
 
         // `expires_at > now` is part of the compare-and-set: a completion that
         // arrives after the reservation expired must be discarded instead of
-        // resurrecting a lease that a retry may already have reclaimed. (The
-        // port carries no per-attempt token, so a completion that races a
-        // reclaim can still land on the new lease - keep the TTL above the
-        // handler's worst-case duration; see the deployment notes.)
-        let affected = linq!(
+        // resurrecting a lease that a retry may already have reclaimed. With a
+        // lease token the CAS also requires the row to still be owned by this
+        // attempt, which fences out a late completion from a reclaimed attempt.
+        let mut query = linq!(
             ctx.set::<IdempotencyRecord>(),
             |record: IdempotencyRecord| record.key_hash == target
                 && record.state == STATE_IN_PROGRESS
                 && record.expires_at > now
-        )
-        .execute_update()
-        .set_column(
-            IdempotencyRecord::COLUMN_STATUS,
-            Some(i32::from(response.status)),
-        )
-        .set_column(
-            IdempotencyRecord::COLUMN_CONTENT_TYPE,
-            response.content_type,
-        )
-        .set_column(
-            IdempotencyRecord::COLUMN_CONTENT_ENCODING,
-            response.content_encoding,
-        )
-        .set_column(IdempotencyRecord::COLUMN_BODY, Some(response.body))
-        .set_column(IdempotencyRecord::COLUMN_STATE, STATE_COMPLETED)
-        .set_column(IdempotencyRecord::COLUMN_EXPIRES_AT, expires_at)
-        .execute()
-        .await
-        .map_err(map_ef_error)?;
+        );
+        if let Some(attempt) = attempt {
+            query = query.filter(linq!(
+                |record: IdempotencyRecord| record.attempt == Some(attempt.to_string())
+            ));
+        }
+        let affected = query
+            .execute_update()
+            .set_column(
+                IdempotencyRecord::COLUMN_STATUS,
+                Some(i32::from(response.status)),
+            )
+            .set_column(
+                IdempotencyRecord::COLUMN_CONTENT_TYPE,
+                response.content_type,
+            )
+            .set_column(
+                IdempotencyRecord::COLUMN_CONTENT_ENCODING,
+                response.content_encoding,
+            )
+            .set_column(
+                IdempotencyRecord::COLUMN_HEADERS,
+                encode_headers(&response.headers),
+            )
+            .set_column(IdempotencyRecord::COLUMN_BODY, Some(response.body))
+            .set_column(IdempotencyRecord::COLUMN_STATE, STATE_COMPLETED)
+            .set_column(IdempotencyRecord::COLUMN_ATTEMPT, DbValue::Null)
+            .set_column(IdempotencyRecord::COLUMN_EXPIRES_AT, expires_at)
+            .execute()
+            .await
+            .map_err(map_ef_error)?;
         if affected == 0 {
-            // The reservation expired or was released while the handler ran; a
-            // retry may already be executing again, so a late completion must
-            // not resurrect the old response. Not an error: the middleware
-            // still returns the handler's own response to this caller.
-            tracing::debug!(
-                "idempotency: the reservation is no longer in progress (expired or released); \
-                 response not stored"
+            // The reservation expired (outlived its lease), was released or was
+            // reclaimed by another attempt while the handler ran; a retry may
+            // already be executing again, so a late completion must not
+            // resurrect the old response or overwrite the new attempt. Not an
+            // error: the middleware still returns the handler's own response to
+            // this caller. Logged at `warn` because a pattern of these means the
+            // handler's worst case exceeds Idempotency.LeaseSeconds (the handler
+            // may now run twice for one key) or a clock skew is shortening the
+            // lease.
+            tracing::warn!(
+                key_hash = %target_for_log,
+                lease = ?attempt_for_log,
+                "idempotency: a completed response was not stored because the reservation is \
+                 no longer owned by this attempt (its lease expired, it was released, or a \
+                 retry reclaimed the key); a retry may execute the handler again — raise \
+                 Idempotency.LeaseSeconds above the handler's worst-case duration"
             );
         }
         Ok(())
     }
 
-    async fn release(&self, key: &str) -> Result<()> {
+    /// Delete the live reservation of one attempt.
+    ///
+    /// `attempt` is the fencing token of the lease variant; when set, the row is
+    /// only deleted while it still carries that token.
+    async fn release_attempt(&self, key: &str, attempt: Option<&str>) -> Result<()> {
         let now = unix_now_secs();
         let target = key_hash(key);
         let mut ctx = self.context()?;
         // Same expiry guard as `complete`: releasing an already-expired (and
         // possibly reclaimed) reservation must not delete another attempt's row.
-        let affected = linq!(
+        let mut query = linq!(
             ctx.set::<IdempotencyRecord>(),
             |record: IdempotencyRecord| record.key_hash == target
                 && record.state == STATE_IN_PROGRESS
                 && record.expires_at > now
-        )
-        .execute_delete()
-        .await
-        .map_err(map_ef_error)?;
+        );
+        if let Some(attempt) = attempt {
+            query = query.filter(linq!(
+                |record: IdempotencyRecord| record.attempt == Some(attempt.to_string())
+            ));
+        }
+        let affected = query.execute_delete().await.map_err(map_ef_error)?;
         if affected > 0 {
             tracing::debug!("idempotency: released an in-progress reservation");
         }
@@ -553,20 +685,6 @@ pub fn key_hash(key: &str) -> String {
     hex
 }
 
-/// Whole seconds of a lease `ttl`, clamped to at least one second.
-///
-/// The column is Unix seconds, so a sub-second TTL would create a row that is
-/// already expired; one second is the shortest meaningful lease.
-/// Truncated protocol key stored for operators (the lookup uses the digest).
-///
-/// The full protocol key includes the client header and the request path; only
-/// the first 1024 characters are kept so a pathological path can never overflow
-/// the MySQL `TEXT` column. The digest remains the identity.
-fn debug_key(key: &str) -> String {
-    const MAX_DEBUG_KEY_CHARS: usize = 1024;
-    key.chars().take(MAX_DEBUG_KEY_CHARS).collect()
-}
-
 /// Largest body the provider's `Vec<u8>` column can hold without truncation.
 fn default_body_budget(options: &DbContextOptions) -> usize {
     // MySQL maps Vec<u8> to BLOB (65,535 bytes); PostgreSQL BYTEA and SQLite
@@ -579,8 +697,94 @@ fn default_body_budget(options: &DbContextOptions) -> usize {
     }
 }
 
+/// Whole seconds of a lease `ttl`, clamped to at least one second.
+///
+/// The column is Unix seconds, so a sub-second TTL would create a row that is
+/// already expired; one second is the shortest meaningful lease.
 fn lease_seconds(ttl: Duration) -> i64 {
     i64::try_from(ttl.as_secs()).unwrap_or(i64::MAX).max(1)
+}
+
+/// Truncated protocol key stored for operators (the lookup uses the digest).
+///
+/// The full protocol key includes the client header and the request path; only
+/// the first 1024 characters are kept so a pathological path can never overflow
+/// the MySQL `TEXT` column. The digest remains the identity.
+fn debug_key(key: &str) -> String {
+    const MAX_DEBUG_KEY_CHARS: usize = 1024;
+    key.chars().take(MAX_DEBUG_KEY_CHARS).collect()
+}
+
+/// Largest JSON header set stored in the `headers` column (8 KiB).
+///
+/// The whitelist means at most four headers; the cap only guards against a
+/// pathological header value. A larger set is dropped (with a warning) instead
+/// of failing the response or overflowing a MySQL `TEXT` column; the body is
+/// cached normally.
+const MAX_HEADERS_BYTES: usize = 8 * 1024;
+
+/// A fresh opaque fencing token for one reservation attempt.
+fn new_attempt_token() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
+}
+
+/// Serialize the replayable response headers for storage.
+///
+/// An empty set is stored as `NULL` (same as rows written before 2.8), and a set
+/// that exceeds [`MAX_HEADERS_BYTES`] is dropped with a warning.
+fn encode_headers(headers: &[(String, String)]) -> Option<String> {
+    if headers.is_empty() {
+        return None;
+    }
+    match serde_json::to_string(headers) {
+        Ok(json) if json.len() <= MAX_HEADERS_BYTES => Some(json),
+        Ok(json) => {
+            tracing::warn!(
+                headers_bytes = json.len(),
+                max_bytes = MAX_HEADERS_BYTES,
+                "idempotency: replayable response headers exceed the store limit; not stored"
+            );
+            None
+        }
+        Err(error) => {
+            tracing::warn!(
+                %error,
+                "idempotency: replayable response headers could not be encoded; not stored"
+            );
+            None
+        }
+    }
+}
+
+/// Rebuild the replayable response headers of a completed row.
+///
+/// Only [`REPLAYABLE_RESPONSE_HEADERS`] are replayed (case-insensitively); a
+/// malformed JSON column is treated as "no headers" instead of failing the
+/// replay.
+fn decode_headers(record: &IdempotencyRecord) -> Vec<(String, String)> {
+    let Some(json) = record.headers.as_deref() else {
+        return Vec::new();
+    };
+    let decoded: Vec<(String, String)> = match serde_json::from_str(json) {
+        Ok(headers) => headers,
+        Err(error) => {
+            tracing::warn!(
+                %error,
+                key_hash = %record.key_hash,
+                "idempotency: stored replayable headers are not valid JSON; replaying none"
+            );
+            return Vec::new();
+        }
+    };
+    decoded
+        .into_iter()
+        .filter(|(name, _)| {
+            REPLAYABLE_RESPONSE_HEADERS
+                .iter()
+                .any(|allowed| name.eq_ignore_ascii_case(allowed))
+        })
+        .map(|(name, value)| (name.to_ascii_lowercase(), value))
+        .collect()
 }
 
 /// Current Unix time in whole seconds.
@@ -611,11 +815,14 @@ mod tests {
             status: None,
             content_type: None,
             content_encoding: None,
+            attempt: None,
+            headers: None,
             body: None,
             created_at: 1,
             expires_at: 2,
         };
         assert_eq!(record.state, STATE_IN_PROGRESS);
         assert!(record.body.is_none());
+        assert!(record.attempt.is_none(), "pre-2.8 rows carry no token");
     }
 }

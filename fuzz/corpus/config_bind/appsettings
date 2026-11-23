@@ -1,0 +1,1 @@
+{"App":{"Name":"fuzz","Urls":["http://127.0.0.1:5000"],"MaxBodySize":1024,"MaxConnections":64},"Jwt":{"ExpirationMinutes":15},"Server":{"Workers":2,"RequestTimeoutSeconds":5,"DrainTimeoutSeconds":10},"Cors":{"Origins":["https://example.com"]},"Culture":{"Default":"en-US"}}

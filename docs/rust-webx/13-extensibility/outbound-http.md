@@ -6,7 +6,7 @@
 
 ```toml
 [dependencies]
-rust-webx-client = "2.7"
+rust-webx-client = "2.8"
 ```
 
 ## 命名客户端

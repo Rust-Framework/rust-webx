@@ -45,6 +45,9 @@ rustls.workspace = true
 futures-util = { workspace = true, features = ["sink"] }
 proptest = "1"
 rust-webx-engine.workspace = true
+hyper-util.workspace = true
+http-body-util.workspace = true
+http.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "io-util", "rt-multi-thread", "time"] }
 tokio-tungstenite = { workspace = true, features = ["connect"] }
 trybuild = "1"

@@ -16,7 +16,7 @@ dispatcher tick   → 派发事件 → delivered_at  / 重试 / 死信
 
 ```toml
 [dependencies]
-rust-webx-outbox-ef = "2.7"
+rust-webx-outbox-ef = "2.8"
 ```
 
 1. 应用注册 DbContext（`add_dbcontext`）时把 outbox 表加进模型：

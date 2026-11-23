@@ -17,14 +17,46 @@ jobs:
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Resolve tag version
         id: tag
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       # A red commit must never reach crates.io: publication is irreversible
-      # (only yank is possible). This is intentionally a full workspace test,
-      # not just a version check.
+      # (only yank is possible). The preflight mirrors the CI `lint`/`docs`
+      # gates in addition to the full workspace test.
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Check docs consistency
+        run: bash scripts/check-docs.sh
+
+      - name: Check publish order
+        # Every publishable crate appears once in both publish paths, with
+        # dependencies before dependents; a dropped crate would publish nothing
+        # while the workflow stayed green.
+        run: python3 scripts/check-publish-order.py
+
+      - name: Internal version pins
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          echo "workspace version: $version"
+          if grep 'path = "crates/' Cargo.toml | grep -qv "version = \"=$version\""; then
+            echo "internal crates must be pinned to =$version:"
+            grep 'path = "crates/' Cargo.toml | grep -v "version = \"=$version\"" || true
+            exit 1
+          fi
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Build documentation (warnings as errors)
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --workspace --no-deps --locked
+
       - name: Verify the tagged commit
         run: cargo test --workspace --locked --no-fail-fast
 

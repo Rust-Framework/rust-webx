@@ -17,13 +17,14 @@
 ### semver（对上一发布）
 
 ```text
-cargo semver-checks --package rust-webx-core   --baseline-rev v2.1.0
-cargo semver-checks --package rust-webx-engine --baseline-rev v2.1.0
-cargo semver-checks --package rust-webx-host   --baseline-rev v2.1.0
-cargo semver-checks --package rust-webx        --baseline-rev v2.1.0
+cargo semver-checks --package rust-webx-core   --baseline-rev v2.7.0
+cargo semver-checks --package rust-webx-engine --baseline-rev v2.7.0
+cargo semver-checks --package rust-webx-host   --baseline-rev v2.7.0
+cargo semver-checks --package rust-webx        --baseline-rev v2.7.0
 ```
 
-唯一例外：`constructible_struct_adds_field = "allow"`（见 §3）。
+例外：`constructible_struct_adds_field = "allow"`（见 §3），以及 2.8.0 幂等值类型的
+`struct_marked_non_exhaustive` / `enum_marked_non_exhaustive = "allow"`（同见 §3）。
 
 ### upgrade（N-2 源码兼容）
 
@@ -39,14 +40,25 @@ compat/upgrade-smoke/current/Cargo.toml  → rust-webx = { path = "../../../crat
 工作区所有 `path = "crates/..."` 内部依赖的 `version` 必须等于
 `[workspace.package].version`；否则 CI 失败。
 
-## 3. 已知例外：配置 section 的新增字段
+## 3. 已知例外：幂等值类型的新增字段与 `#[non_exhaustive]`（配置 section / `IdempotentResponse`）
 
-配置 section（`ServerSection`、`JwtSection`、`TlsSection` …）是 serde DTO：
-文档化构造路径是 `Default` + `appsettings.json` / `APP__*`，不是结构体字面量。
-因此新增配置开关对文档化用法是加性的，`constructible_struct_adds_field` 设为 `allow`。
+`constructible_struct_adds_field`、`struct_marked_non_exhaustive` 与
+`enum_marked_non_exhaustive` 设为 `allow`，覆盖以下已文档化的 2.8.0 变更：
 
-3.0 的第一个 minor 一次性为配置 section 加 `#[non_exhaustive]`（配迁移指南），随后删除
-该例外。需要保持字面量构造的结构体（如 `ProblemDetails`）由
+1. **配置 section**（`ServerSection`、`JwtSection`、`IdempotencySection` …）是 serde DTO：
+   文档化构造路径是 `Default` + `appsettings.json` / `APP__*`，不是结构体字面量。
+   因此新增配置开关对文档化用法是加性的。3.0 的第一个 minor 一次性为配置 section 加
+   `#[non_exhaustive]`（配迁移指南），随后删除该部分例外。
+2. **2.8.0 的 `IdempotentResponse`** 新增 `headers`（缓存响应的可重放响应头），只破坏
+   结构体字面量构造；同时与 `IdempotencyLease`、`IdempotencyBegin` 一起标记
+   `#[non_exhaustive]`，以便 2.x 内继续加入状态/元数据而不再产生破坏性版本。
+   CHANGELOG `[2.8.0]` 的 Breaking 段给出迁移写法：`IdempotentResponse` 用
+   `::new(status, content_type, content_encoding, body)` + `.with_headers(..)` 构造，
+   `IdempotencyLease` 用 `::new(token)`，`match IdempotencyBegin` 补 `_` 通配分支。
+   `IIdempotencyStore` 仍保持对象安全，新增的租约方法都有默认实现。
+   该部分与配置 section 同窗口在 3.0 复核收口。
+
+需要保持字面量构造的结构体（如 `ProblemDetails`）由
 `crates/webx/tests/api_stability_test.rs` 锁定字段集合。
 
 ## 4. 边界约定：rust-ef 错误映射
@@ -54,6 +66,10 @@ compat/upgrade-smoke/current/Cargo.toml  → rust-webx = { path = "../../../crat
 `rust-ef` 是 Web 无关的 ORM：2.6 起它不再提供 `webx` feature，也不依赖
 `rust-webx`。持久层错误到 HTTP 的翻译属于**应用边界**，由单独的适配 crate
 `rust-webx-ef` 承担（应用按需依赖；core 与 umbrella 不链接它）：
+
+配对发布：先 rust-ef 2.8.0、后 rust-webx 2.8.0；workspace 依赖写 `rust-ef = "2.6"`
+（semver 范围，已含 2.8.x，本版按 2.8.0 验证），不收紧为精确 pin——否则在 ORM 发布前
+`Cargo.lock` 不可解析。
 
 - 不在 `rust-webx-core` / umbrella 增加 `ef` feature 或可选 `rust-ef` 依赖。即使
   默认关闭，也会把 ORM 概念带进 core 的 feature 图与发布清单，破坏“小核心”边界。
@@ -64,7 +80,7 @@ compat/upgrade-smoke/current/Cargo.toml  → rust-webx = { path = "../../../crat
 
 ```rust
 // Cargo.toml
-rust-webx-ef = "2.7"
+rust-webx-ef = "2.8"
 
 // handlers/src/db.rs
 pub use webx_ef::{map_ef_error, EfResultExt};
@@ -73,7 +89,7 @@ pub use webx_ef::{map_ef_error, EfResultExt};
 let blogs = ctx.set::<Blog>().query().to_list().await.map_ef()?;
 ```
 
-映射契约（与 rust-ef 2.6 迁移指南一致）：
+映射契约（与 rust-ef 2.6+ 迁移指南一致；本版按 2.8.0 配对验证）：
 
 | `EFError` | HTTP | `webx::Error` | 客户端可见 detail |
 |---|---|---|---|
@@ -92,6 +108,30 @@ host 写入日志。新增 rust-ef 变体走同一隐藏 500 分支，升级依�
 若未来确需框架级桥接，只能另立**独立集成 crate**（依赖方向
 rust-webx → rust-ef），单独评审；本仓 core/umbrella 始终零 ef 依赖，也不允许
 ORM → Web 框架。
+
+### 配对验证（pairing verified）的证据边界
+
+发布顺序是 **rust-ef 2.8.0 → rust-webx 2.8.0**（见上）。发布前用本地 rust-ef
+checkout 做编译级配对验证：
+
+```bash
+# 在 rust-webx 仓库根执行；RUST_EF_PATH 指向本地 rust-ef 仓库根。
+RUST_EF_PATH=/path/to/rust-ef bash scripts/check-pairing-rust-ef.sh
+```
+
+脚本在临时目录生成 `[patch.crates-io]`（只把 `rust-ef` / `rust-ef-sqlite` 指向
+本地源码树，其余依赖仍走 crates.io），先对齐 `Cargo.lock` 再执行
+`cargo check --workspace --locked` 与 `cargo test -p rust-webx-ef --locked`；
+退出时恢复原 `Cargo.lock`，不污染工作树。CI 的可选 `pairing` job 只在配置了
+`vars.RUST_EF_PATH`（自托管 runner 上已有 checkout）或
+`vars.RUST_EF_REPO`（+ `RUST_EF_REF` / `rust_ef_ref` dispatch 输入，由 job 自行
+checkout）时运行；未配置时打印 notice 并跳过，不阻塞普通 PR。
+
+**"pairing verified" 只证明**：给定的 rust-ef 源码树能让 rust-webx 工作区与其
+EF 适配层编译通过，并让 `rust-webx-ef` 的测试通过。**不证明**：crates.io 上已发布
+制品可下载/可解析、该 rust-ef 树自身的 semver 门禁、也不覆盖真 PostgreSQL/MySQL
+（由 CI 真库 job 覆盖）。发布记录里写证据时应同时记录 rust-ef 的 commit/tag 与
+rust-webx 的 commit，例如 "pairing verified: rust-ef@<sha> × rust-webx@<sha>"。
 
 ## 5. 弃用政策
 
@@ -127,6 +167,8 @@ ORM → Web 框架。
 ```text
 □ CI 全绿（tests/clippy/fmt/MSRV/audit/docs/coverage/benches/alloc/semver/upgrade）
 □ CHANGELOG 含迁移说明（弃用/行为变更）
+□ 配对 ORM 已先行发布（rust-ef x.y.z → rust-webx x.y.z；`rust-ef = "2.6"` 范围覆盖 2.8.x，不收紧为精确 pin）
+□ 配对验证已跑：`RUST_EF_PATH=… bash scripts/check-pairing-rust-ef.sh`（或 CI `pairing` job）通过，证据边界见 §4
 □ semver-checks 对上一发布通过（例外仅 §3）
 □ N-2 冒烟通过（compat/upgrade-smoke）
 □ cargo audit 0 漏洞 + 内部版本钉一致
@@ -139,7 +181,7 @@ ORM → Web 框架。
 `api_stability_test` 锁定文档化构造路径；指定负责人与移除检查项。
 
 ```text
-cargo semver-checks --package rust-webx-host --baseline-rev v2.1.0
+cargo semver-checks --package rust-webx-host --baseline-rev v2.7.0
 cargo build --manifest-path compat/upgrade-smoke/stable/Cargo.toml
 cargo build --manifest-path compat/upgrade-smoke/current/Cargo.toml
 ```

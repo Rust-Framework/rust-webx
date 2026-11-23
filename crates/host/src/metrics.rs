@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
@@ -334,6 +334,9 @@ pub struct MetricsEndpoint {
         Arc<dyn webx_core::realtime::IConnectionRegistry>,
     )>,
     events: Option<Arc<webx_core::mediator::EventMetrics>>,
+    /// Bounded logging for the internal admission invariants: warn once, keep
+    /// the gauge on every scrape.
+    admission_invariants: InvariantGate,
 }
 
 impl MetricsEndpoint {
@@ -344,6 +347,7 @@ impl MetricsEndpoint {
             meter: None,
             realtime: None,
             events: None,
+            admission_invariants: InvariantGate::default(),
         }
     }
 
@@ -375,21 +379,23 @@ impl MetricsEndpoint {
         self.events = Some(metrics);
         self
     }
-}
 
-// The endpoint is a read-only snapshot renderer: the registry and counters are
-// internally synchronized, so a panic mid-scrape cannot leave an observable
-// broken invariant. Keep the 2.1 auto-trait surface (removing an auto trait is
-// a semver-major change).
-impl std::panic::UnwindSafe for MetricsEndpoint {}
-impl std::panic::RefUnwindSafe for MetricsEndpoint {}
-
-#[async_trait::async_trait]
-impl IEndpoint for MetricsEndpoint {
-    async fn handle(&self, ctx: &mut dyn IHttpContext) -> Result<()> {
+    /// Render the current metrics as Prometheus text (0.0.4).
+    ///
+    /// Exposed as a method (not only through [`IEndpoint`]) so tests and custom
+    /// scrape paths can render a snapshot without building an HTTP context. It
+    /// has the same side effects as one scrape: one admission snapshot is taken
+    /// for gauges plus the invariant self-check, and the real-time counters are
+    /// mirrored into the app's [`IMeter`] (delta-based).
+    pub fn render(&self) -> String {
         let mut body = self.metrics.render_prometheus();
         if let Some(admission) = &self.admission {
-            body.push_str(&render_admission(admission));
+            let snapshot = admission.snapshot();
+            self.admission_invariants.observe(&snapshot);
+            body.push_str(&render_admission(
+                &snapshot,
+                self.admission_invariants.violations_seen(),
+            ));
         }
         if let Some((realtime, registry)) = &self.realtime {
             body.push_str(&render_realtime(realtime, registry.as_ref()));
@@ -403,6 +409,65 @@ impl IEndpoint for MetricsEndpoint {
         if let Some(meter) = &self.meter {
             body.push_str(&render_meter(meter.as_ref()));
         }
+        body
+    }
+}
+
+/// Bounded logging and cumulative accounting for the admission invariant
+/// self-check.
+///
+/// The gauges are rendered on every scrape; the warning fires **once** so a
+/// persistent inconsistency cannot flood the log while it is visible on
+/// `/metrics` the whole time. A recovered governor is not expected to fail
+/// again, so the latch does not need to reset. The counter keeps a violation
+/// observable even when it is transient between two scrapes.
+#[derive(Default)]
+struct InvariantGate {
+    warned: AtomicBool,
+    violations_seen: AtomicU64,
+}
+
+impl InvariantGate {
+    /// Account one snapshot; warn on the first violating one. Returns whether
+    /// this call emitted the warning.
+    fn observe(&self, snapshot: &webx_engine::shared::ServerStats) -> bool {
+        let violations = snapshot.invariant_violations();
+        if violations > 0 {
+            self.violations_seen
+                .fetch_add(violations, Ordering::Relaxed);
+        }
+        if violations == 0 || self.warned.swap(true, Ordering::Relaxed) {
+            return false;
+        }
+        tracing::warn!(
+            violations,
+            active = snapshot.active,
+            capacity = snapshot.capacity,
+            waiting = snapshot.waiting,
+            shutting_down = snapshot.shutting_down,
+            "engine admission invariant violated; see engine_admission_invariant_violations"
+        );
+        true
+    }
+
+    /// Cumulative number of invariant violations observed by scrapes.
+    fn violations_seen(&self) -> u64 {
+        self.violations_seen.load(Ordering::Relaxed)
+    }
+}
+
+// The endpoint is a snapshot renderer: the registry and counters are internally
+// synchronized, and the only endpoint-local state is the invariant self-check's
+// atomics, so a panic mid-scrape cannot leave an observable broken invariant.
+// Keep the 2.1 auto-trait surface (removing an auto trait is a semver-major
+// change).
+impl std::panic::UnwindSafe for MetricsEndpoint {}
+impl std::panic::RefUnwindSafe for MetricsEndpoint {}
+
+#[async_trait::async_trait]
+impl IEndpoint for MetricsEndpoint {
+    async fn handle(&self, ctx: &mut dyn IHttpContext) -> Result<()> {
+        let body = self.render();
         ctx.response_mut().set_status(200);
         ctx.response_mut()
             .set_header("content-type", "text/plain; version=0.0.4; charset=utf-8");
@@ -462,6 +527,17 @@ fn render_events(metrics: &webx_core::mediator::EventMetrics) -> String {
 }
 
 /// Prometheus text for the real-time (WebSocket) subsystem.
+///
+/// The registry gauge (`realtime_connections_active`, from
+/// [`IConnectionRegistry::len`]) and the session counters are rendered from one
+/// bridge, but deliberately **not** cross-checked: the registry is a port that
+/// may be remote/shared (`len()` can legitimately count connections opened on
+/// other nodes), and the two sources are sampled at different instants, so a
+/// derived "consistency" gauge would false-positive under normal connection
+/// churn. The gauges below are the authoritative signals; a race-free local
+/// invariant would need a combined snapshot on the registry port.
+///
+/// [`IConnectionRegistry::len`]: webx_core::realtime::IConnectionRegistry::len
 fn render_realtime(
     metrics: &webx_core::realtime::RealtimeMetrics,
     registry: &dyn webx_core::realtime::IConnectionRegistry,
@@ -577,8 +653,8 @@ fn render_realtime(
     out
 }
 
-fn render_admission(stats: &webx_engine::shared::AdmissionStats) -> String {
-    format!(
+fn render_admission(stats: &webx_engine::shared::ServerStats, violations_seen: u64) -> String {
+    let mut out = format!(
         "# HELP engine_connections_admitted_total Connections admitted by the global governor\n\
          # TYPE engine_connections_admitted_total counter\n\
          engine_connections_admitted_total {}\n\
@@ -594,12 +670,37 @@ fn render_admission(stats: &webx_engine::shared::AdmissionStats) -> String {
          # HELP engine_connections_capacity Configured admission capacity (App.MaxConnections)\n\
          # TYPE engine_connections_capacity gauge\n\
          engine_connections_capacity {}\n",
-        stats.admitted(),
-        stats.rejected(),
-        stats.waiting(),
-        stats.active(),
-        stats.capacity()
-    )
+        stats.admitted, stats.rejected, stats.waiting, stats.active, stats.capacity
+    );
+    if stats.capacity > 0 {
+        // A ratio only exists against a configured cap; capacity 0 means the
+        // host did not record one (the series is absent rather than `NaN`).
+        let ratio = stats.active as f64 / stats.capacity as f64;
+        let _ = writeln!(
+            out,
+            "# HELP engine_admission_active_ratio Open connections divided by the admission capacity\n\
+             # TYPE engine_admission_active_ratio gauge\n\
+             engine_admission_active_ratio {ratio}"
+        );
+    }
+    let _ = writeln!(
+        out,
+        "# HELP engine_admission_invariant_violations Internal admission invariants violated (0 = healthy)\n\
+         # TYPE engine_admission_invariant_violations gauge\n\
+         engine_admission_invariant_violations {}\n\
+         # HELP engine_admission_invariant_violations_total Invariant violations observed by /metrics scrapes\n\
+         # TYPE engine_admission_invariant_violations_total counter\n\
+         engine_admission_invariant_violations_total {violations_seen}",
+        stats.invariant_violations()
+    );
+    let _ = writeln!(
+        out,
+        "# HELP engine_admission_shutting_down 1 once the engine started graceful shutdown\n\
+         # TYPE engine_admission_shutting_down gauge\n\
+         engine_admission_shutting_down {}",
+        u8::from(stats.shutting_down)
+    );
+    out
 }
 
 /// Prometheus text for the application meter (`IMeter::snapshot`).
@@ -767,5 +868,107 @@ mod tests {
         metrics.record_request("/a\"b\\c", 200, None);
         let text = metrics.render_prometheus();
         assert!(text.contains("route=\"/a\\\"b\\\\c\""));
+    }
+
+    /// Build admission stats with `active` held permits and a configured cap.
+    fn admission_with_permits(
+        active: usize,
+        capacity: usize,
+    ) -> (
+        Arc<webx_engine::shared::AdmissionStats>,
+        Vec<webx_engine::shared::ConnectionPermit>,
+    ) {
+        let stats = Arc::new(webx_engine::shared::AdmissionStats::default());
+        stats.set_capacity(capacity);
+        let governor = Arc::new(tokio::sync::Semaphore::new(active));
+        let permits = (0..active)
+            .map(|_| {
+                webx_engine::shared::ConnectionPermit::new(
+                    Arc::clone(&governor).try_acquire_owned().expect("permit"),
+                    Arc::clone(&stats),
+                )
+            })
+            .collect();
+        (stats, permits)
+    }
+
+    #[test]
+    fn admission_gauges_include_ratio_and_the_invariant_self_check() {
+        let (stats, permits) = admission_with_permits(2, 1);
+        let text = render_admission(&stats.snapshot(), 0);
+        assert!(text.contains("engine_connections_active 2"), "{text}");
+        assert!(text.contains("engine_connections_capacity 1"), "{text}");
+        assert!(text.contains("engine_admission_active_ratio 2"), "{text}");
+        assert!(
+            text.contains("engine_admission_invariant_violations 1"),
+            "{text}"
+        );
+        assert!(
+            text.contains("engine_admission_invariant_violations_total 0"),
+            "{text}"
+        );
+        assert!(text.contains("engine_admission_shutting_down 0"), "{text}");
+        assert_eq!(permits.len(), 2);
+    }
+
+    #[test]
+    fn a_configured_zero_capacity_renders_no_ratio() {
+        let stats = webx_engine::shared::AdmissionStats::default();
+        let text = render_admission(&stats.snapshot(), 0);
+        assert!(!text.contains("engine_admission_active_ratio"), "{text}");
+        assert!(
+            text.contains("engine_admission_invariant_violations 0"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)] // `#[non_exhaustive]` blocks struct update syntax here
+    fn the_invariant_warning_and_counter_are_bounded() {
+        let gate = InvariantGate::default();
+        let healthy = webx_engine::shared::ServerStats::default();
+        assert!(!gate.observe(&healthy), "a healthy scrape never warns");
+        assert_eq!(gate.violations_seen(), 0);
+
+        let mut violating = webx_engine::shared::ServerStats::default();
+        violating.capacity = 1;
+        violating.active = 2;
+        assert!(gate.observe(&violating), "the first violation warns");
+        assert_eq!(gate.violations_seen(), 1);
+        assert!(!gate.observe(&violating), "later scrapes stay silent");
+        // The counter keeps counting the persistent inconsistency; only the log
+        // is bounded.
+        assert_eq!(gate.violations_seen(), 2);
+        assert!(!gate.observe(&healthy));
+        assert!(!gate.observe(&violating), "the latch never re-arms");
+        assert_eq!(gate.violations_seen(), 3);
+    }
+
+    #[test]
+    fn endpoint_render_exposes_the_admission_gauges() {
+        let (stats, permits) = admission_with_permits(2, 1);
+        let endpoint = MetricsEndpoint::new(HttpMetrics::new()).with_admission(Arc::clone(&stats));
+        let text = endpoint.render();
+        assert!(text.contains("http_requests_total"), "{text}");
+        assert!(
+            text.contains("engine_admission_invariant_violations 1"),
+            "{text}"
+        );
+        assert!(
+            text.contains("engine_admission_invariant_violations_total 1"),
+            "{text}"
+        );
+        // A repeated scrape re-renders the same gauge (the warning stays latched)
+        // and accumulates the observation counter.
+        let repeated = endpoint.render();
+        assert!(
+            repeated.contains("engine_admission_invariant_violations 1"),
+            "{repeated}"
+        );
+        assert!(
+            repeated.contains("engine_admission_invariant_violations_total 2"),
+            "{repeated}"
+        );
+        assert_eq!(permits.len(), 2);
     }
 }

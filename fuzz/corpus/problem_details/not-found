@@ -1,0 +1,1 @@
+{"type":"https://httpstatuses.com/404","title":"Resource Not Found","status":404,"detail":"thing 1 not found","instance":"/things/1","code":"not_found","retryable":false}

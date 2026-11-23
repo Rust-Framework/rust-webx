@@ -28,11 +28,63 @@ use std::ops::ControlFlow;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use tracing::Instrument;
 use webx_core::error::{Error, Result};
 use webx_core::http::IHttpContext;
 use webx_core::middleware::{BoxedNextFuture, IMiddleware, NextStage};
 
 use crate::context::EngineContext;
+
+/// The stable span contract lives in `docs/design/observability-contract.md`.
+///
+/// The root span covers the whole request: the middleware onion, routing, the
+/// handler and the reverse `after` pass. The trace id is only known after the
+/// tracing middleware ran, so it is declared empty here and recorded once the
+/// pipeline returns; `status` is recorded the same way.
+///
+/// Spans are DEBUG on purpose: the default host installs an INFO-level
+/// subscriber, so request spans are opt-in (`RUST_LOG=webx.http=debug` or a
+/// per-target filter) and the default hot path stays allocation-free — which is
+/// what the alloc-probe framework-tax gate measures.
+fn request_span(ctx: &dyn IHttpContext) -> tracing::Span {
+    tracing::debug_span!(
+        target: "webx.http",
+        "http.server.request",
+        method = %ctx.request().method(),
+        path = %ctx.request().path(),
+        trace_id = tracing::field::Empty,
+        status = tracing::field::Empty,
+    )
+}
+
+/// Router-terminal span: route match, endpoint dispatch and response write.
+///
+/// The matched template is not known when the span opens, so it is recorded
+/// from the context after the terminal returns.
+fn route_match_span(ctx: &dyn IHttpContext) -> tracing::Span {
+    tracing::debug_span!(
+        target: "webx.http",
+        "http.route_match",
+        method = %ctx.request().method(),
+        path = %ctx.request().path(),
+        pattern = tracing::field::Empty,
+        params = tracing::field::Empty,
+    )
+}
+
+fn finish_route_match_span(span: &tracing::Span, ctx: &dyn IHttpContext) {
+    if let Some(pattern) = ctx.request().route_pattern() {
+        span.record("pattern", pattern);
+    }
+    span.record("params", ctx.request().route_params().len() as u64);
+}
+
+fn record_request_outcome(span: &tracing::Span, ctx: &dyn IHttpContext) {
+    // Always record both fields so the root contract is deterministic: an empty
+    // `trace_id` means no trace-id middleware was installed for this request.
+    span.record("trace_id", ctx.trace_id().unwrap_or(""));
+    span.record("status", u64::from(ctx.response().status()));
+}
 
 /// Boxed terminal handler: the server's router entry point.
 ///
@@ -81,8 +133,11 @@ fn run_chain(
 ) -> BoxedNextFuture<'_> {
     Box::pin(async move {
         let Some(stage) = stages.get(index).cloned() else {
+            let span = route_match_span(&*ctx);
             let engine = engine_context(&mut *ctx)?;
-            return match terminal(engine).await {
+            let outcome = terminal(engine).instrument(span.clone()).await;
+            finish_route_match_span(&span, &*ctx);
+            return match outcome {
                 Ok(()) => Ok(()),
                 Err(error) => convert_error(&mut *ctx, error, on_error.as_ref()).await,
             };
@@ -189,6 +244,20 @@ impl Pipeline {
         ctx: &mut EngineContext,
         final_handler: FinalHandler,
     ) -> Result<()> {
+        let span = request_span(ctx);
+        let result = self
+            .execute_inner(ctx, final_handler)
+            .instrument(span.clone())
+            .await;
+        record_request_outcome(&span, ctx);
+        result
+    }
+
+    async fn execute_inner(
+        &self,
+        ctx: &mut EngineContext,
+        final_handler: FinalHandler,
+    ) -> Result<()> {
         if self.has_continuation {
             return self.run_continuation(ctx, final_handler).await;
         }
@@ -207,6 +276,21 @@ impl Pipeline {
     /// The error handler runs inside the same panic boundary as the middleware,
     /// so a broken custom `IErrorResponseWriter` is contained by the caller.
     pub async fn execute_with_error(
+        &self,
+        ctx: &mut EngineContext,
+        final_handler: FinalHandler,
+        on_error: ErrorHandler,
+    ) -> Result<()> {
+        let span = request_span(ctx);
+        let result = self
+            .execute_with_error_inner(ctx, final_handler, on_error)
+            .instrument(span.clone())
+            .await;
+        record_request_outcome(&span, ctx);
+        result
+    }
+
+    async fn execute_with_error_inner(
         &self,
         ctx: &mut EngineContext,
         final_handler: FinalHandler,
@@ -275,7 +359,10 @@ impl Pipeline {
         }
 
         if !short_circuited && failure.is_none() {
-            if let Err(error) = final_handler(ctx).await {
+            let span = route_match_span(ctx);
+            let outcome = final_handler(ctx).instrument(span.clone()).await;
+            finish_route_match_span(&span, ctx);
+            if let Err(error) = outcome {
                 failure = Some(error);
             }
         }
@@ -344,7 +431,10 @@ impl Pipeline {
 
         // Terminal handler: skipped on short-circuit or forward-pass failure.
         if !short_circuited && failure.is_none() {
-            if let Err(error) = final_handler(ctx).await {
+            let span = route_match_span(ctx);
+            let outcome = final_handler(ctx).instrument(span.clone()).await;
+            finish_route_match_span(&span, ctx);
+            if let Err(error) = outcome {
                 failure = Some(error);
             }
         }

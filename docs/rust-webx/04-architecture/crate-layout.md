@@ -145,7 +145,7 @@ core/伞 crate 不链接它：
 |---|---|---|
 | `rust-webx-ef` | `webx_ef` | `EFError → webx::Error` 脱敏映射（404/400/409/503/500）与 `EfResultExt::map_ef()` |
 
-- **应用按需依赖**：`rust-webx-ef = "2.7"`，调用点 `.map_ef()?`；参考应用在
+- **应用按需依赖**：`rust-webx-ef = "2.8"`，调用点 `.map_ef()?`；参考应用在
   `handlers/src/db.rs` re-export 它。
 - **无状态边界**：不建立连接、不读配置；多实例/容器语义与纯函数一致。
 - **性能**：成功路径零开销，固定文案是常量，5xx 仅在日志侧拼接 source 链。
@@ -158,7 +158,7 @@ core/伞 crate 不链接它：
 |---|---|---|
 | `rust-webx-outbox-ef` | `webx_outbox_ef` | 同事务入队（`enqueue_outbox`）、租约领取、事件派发、重试/死信、保留期清理 |
 
-- **应用按需依赖**：`rust-webx-outbox-ef = "2.7"`；core/umbrella 不链接 rust-ef。
+- **应用按需依赖**：`rust-webx-outbox-ef = "2.8"`；core/umbrella 不链接 rust-ef。
 - **表由实体声明**：`webx_outbox` 由官方 rust-ef 迁移生成，`bootstrap` 仅测试。
 - **与事件传输分工**：outbox 保证本地事务与事件同生共死；跨进程投递交给 `IEventPublisher`。
 

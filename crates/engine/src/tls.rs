@@ -15,6 +15,60 @@ use rustls::server::WebPkiClientVerifier;
 use rustls::{RootCertStore, ServerConfig};
 use webx_core::config::TlsClientAuth;
 use webx_core::error::{Error, Result};
+use webx_core::mode::AppMode;
+
+/// Whether TLS key logging (`SSLKEYLOGFILE`) may be enabled for `mode`.
+///
+/// Key logging writes TLS traffic secrets to a file (Wireshark/`tcpdump`
+/// decryption): it is a local debugging facility, never a production
+/// capability. `Production` ignores the standard environment variable even
+/// when it is set, so a leaked environment cannot silently expose session
+/// secrets on a production host.
+pub fn key_logging_allowed(mode: AppMode) -> bool {
+    mode == AppMode::Development
+}
+
+/// Attach rustls' standard `SSLKEYLOGFILE` key logger to a server config.
+///
+/// Returns the input unchanged when key logging is disabled for `mode`, when
+/// `SSLKEYLOGFILE` is unset/empty, or in `Production` (with a one-time warning).
+/// Callers can therefore always pass their built config through this helper
+/// without branching:
+///
+/// ```ignore
+/// let tls = webx_engine::tls::with_key_log(tls, mode);
+/// ```
+///
+/// The file may contain TLS session secrets: treat it like a credential, keep
+/// it out of shared volumes and delete it after the debugging session.
+pub fn with_key_log(config: Arc<ServerConfig>, mode: AppMode) -> Arc<ServerConfig> {
+    let path = match std::env::var("SSLKEYLOGFILE") {
+        Ok(path) if !path.trim().is_empty() => path,
+        _ => return config,
+    };
+    if !key_logging_allowed(mode) {
+        warn_key_log_ignored();
+        return config;
+    }
+    let mut unlocked = (*config).clone();
+    unlocked.key_log = Arc::new(rustls::KeyLogFile::new());
+    tracing::info!(
+        path = %path,
+        "TLS key logging enabled (SSLKEYLOGFILE); Development only"
+    );
+    Arc::new(unlocked)
+}
+
+/// Warn once when `SSLKEYLOGFILE` is set in `Production` and therefore ignored.
+fn warn_key_log_ignored() {
+    static WARNED: std::sync::Once = std::sync::Once::new();
+    WARNED.call_once(|| {
+        tracing::warn!(
+            "SSLKEYLOGFILE is set but ignored in Production mode (TLS key logging is a \
+             Development-only debugging facility); set APP_ENV=Development to enable it"
+        );
+    });
+}
 
 /// Protocols advertised during the TLS handshake, HTTP/2 first.
 ///
@@ -262,6 +316,23 @@ mod tests {
     #[test]
     fn alpn_advertises_h2_before_http1() {
         assert_eq!(ALPN_PROTOCOLS, [&b"h2"[..], &b"http/1.1"[..]]);
+    }
+
+    #[test]
+    fn key_logging_is_development_only() {
+        assert!(key_logging_allowed(AppMode::Development));
+        assert!(!key_logging_allowed(AppMode::Production));
+    }
+
+    #[test]
+    fn production_never_attaches_a_key_log() {
+        let (cert, key) = self_signed_files();
+        let config =
+            build_server_config(cert.path().to_str().unwrap(), key.path().to_str().unwrap())
+                .expect("config builds");
+        // Production returns the exact same Arc: no clone, no key logger.
+        let same = with_key_log(Arc::clone(&config), AppMode::Production);
+        assert!(Arc::ptr_eq(&config, &same));
     }
 
     fn self_signed_files() -> (tempfile::NamedTempFile, tempfile::NamedTempFile) {

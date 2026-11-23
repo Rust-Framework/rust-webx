@@ -58,9 +58,9 @@
 | 路由注册 | 编译期 inventory + 启动期确定性排序；重复/冲突启动失败 | 路由冲突测试、trybuild |
 | 生命周期作用域 | 请求 scope + 连接 scope（实时）；root 不解析 Scoped | 严格作用域测试 |
 | 执行引擎 | 每 worker current-thread runtime + 全局准入；阻塞代码必须出 runtime | 准入/排空/过载测试 |
-| 错误模型 | 统一 `Error` + RFC 9457 `problem+json`（`code`/`retryable`/`traceId`） | 错误映射测试 |
-| 长连接 | 一个容器两种生命周期：HTTP 请求 + WebSocket 连接；SSE 仍是一等响应 | WS/SSE 端到端测试 |
-| 观测 | 框架自带 RED 指标（按路由标签计数/直方图/inflight/连接 gauge），默认 noop | `/metrics` 契约测试 |
+| 错误模型 | 统一 `Error` + RFC 9457 `problem+json`（`code`/`retryable`/`traceId`）；`code` 必须登记进 `ERROR_CODES` | 错误映射/注册表测试 |
+| 长连接 | 一个容器两种生命周期：HTTP 请求 + WebSocket 连接；SSE 仍是一等响应；关闭原因统一为 `CloseReason` | WS/SSE 端到端与关闭语义测试 |
+| 观测 | 框架自带 RED 指标（按路由标签计数/直方图/inflight/连接 gauge，默认 noop）；`webx.http` DEBUG span 树与 `webx.connection` 事件是兼容契约，默认路径零分配 | `/metrics` 契约测试、`observability_test`、alloc 门禁 |
 | 中间件 | 只有一种 `Next` 语义；旧式 `invoke/after` 由默认桥接保持兼容 | `middleware-next.md` |
 | 参考实现 | docbit/dmbit/imbit 必须使用框架端口，禁止手写 JWT/口令哈希/错误映射 | CI 反模式检查 |
 | 发布 | 21 个 `rust-webx*` crate 精确钉版本、依赖序发布、可重入 | `scripts/check-publish-order.py` |
@@ -95,9 +95,10 @@
 | 测试 | `ci.yml` test | `cargo test --workspace --no-fail-fast`（三平台） |
 | MSRV | `ci.yml` msrv | `cargo +1.95.0 check --workspace --locked` |
 | 安全 | `ci.yml` audit | `cargo audit`（0 漏洞） |
-| 兼容 | `ci.yml` semver/upgrade | 公开 API 对 `v2.1.0`；N-2 源码同编译 |
+| 兼容 | `ci.yml` semver/upgrade | 公开 API 对 `v2.7.0`；N-2 源码同编译 |
 | 分配 | `ci.yml` alloc | `alloc-probe compare 500 12` |
-| 稳定性 | `stability.yml` | soak / chaos / fuzz-lite / wire p99 / broker-integration |
+| 稳定性 | `stability.yml` | soak / chaos / wire p99 / broker-integration / conformance（HTTP 互操作矩阵） |
+| Fuzz | `fuzz.yml` | 独立 `fuzz/` workspace 的 nightly cargo-fuzz（6 个解析 target）+ 稳定工具链不变量测试 |
 
 任何能力/API 变更必须同批更新：实现 + 测试 + 手册 + 能力矩阵 + 门禁；不允许只改文档或只改代码。
 

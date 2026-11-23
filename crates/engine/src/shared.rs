@@ -84,6 +84,53 @@ pub struct AdmissionStats {
     waiting: AtomicU64,
     active: AtomicUsize,
     capacity: AtomicUsize,
+    shutting_down: AtomicBool,
+}
+
+/// Read-only sample of the process-wide admission state.
+///
+/// Returned by [`AdmissionStats::snapshot`]; a renderer or diagnostics hook
+/// reads each atomic once instead of issuing a separate load per rendered field.
+///
+/// The type is `#[non_exhaustive]` and all fields are public: a later gauge can
+/// be added without a breaking change, and tests may start from
+/// [`ServerStats::default`] and set the fields they need.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ServerStats {
+    /// Connections admitted by the global governor.
+    pub admitted: u64,
+    /// Connections rejected after the admission timeout.
+    pub rejected: u64,
+    /// Connections currently open (holding an admission permit).
+    pub active: usize,
+    /// Accepted sockets currently waiting for an admission slot.
+    pub waiting: u64,
+    /// Configured admission capacity (`0` until the host records it).
+    pub capacity: usize,
+    /// `true` once graceful shutdown started.
+    pub shutting_down: bool,
+}
+
+impl ServerStats {
+    /// Number of internal admission invariants this sample violates.
+    ///
+    /// Two invariants define a healthy governor:
+    ///
+    /// * `active <= capacity` whenever a capacity is configured — a permit can
+    ///   only be held after the global governor granted it, so more open
+    ///   connections than the configured cap means the permit accounting leaked;
+    /// * `waiting == 0` after graceful shutdown — the acceptor ends every
+    ///   admission wait before it stops, so a leftover waiter means a wait
+    ///   reached the engine without a matching release.
+    ///
+    /// `0` is healthy. A non-zero value is a framework bug: `/metrics` renders
+    /// it as `engine_admission_invariant_violations` and the host logs it once.
+    pub fn invariant_violations(&self) -> u64 {
+        let over_capacity = self.capacity > 0 && self.active > self.capacity;
+        let waiting_after_shutdown = self.shutting_down && self.waiting != 0;
+        u64::from(over_capacity) + u64::from(waiting_after_shutdown)
+    }
 }
 
 impl AdmissionStats {
@@ -113,6 +160,31 @@ impl AdmissionStats {
     /// Record the configured admission capacity (host startup).
     pub fn set_capacity(&self, capacity: usize) {
         self.capacity.store(capacity, Ordering::Relaxed);
+    }
+
+    /// Whether graceful shutdown already started.
+    ///
+    /// Stored by [`Shared::trigger_shutdown`], i.e. the same path the host uses
+    /// to stop the engine; the flag lets `/metrics` tell "no waiters because
+    /// nobody is connecting" apart from "no waiters after shutdown".
+    pub fn is_shutting_down(&self) -> bool {
+        self.shutting_down.load(Ordering::Relaxed)
+    }
+
+    /// One read-only sample of every counter and gauge.
+    pub fn snapshot(&self) -> ServerStats {
+        ServerStats {
+            admitted: self.admitted(),
+            rejected: self.rejected(),
+            active: self.active(),
+            waiting: self.waiting(),
+            capacity: self.capacity(),
+            shutting_down: self.is_shutting_down(),
+        }
+    }
+
+    pub(crate) fn record_shutdown(&self) {
+        self.shutting_down.store(true, Ordering::Release);
     }
 
     pub(crate) fn record_connection_open(&self) {
@@ -204,6 +276,7 @@ impl Shared {
     /// Idempotent; every later call only re-stores `true` and re-cancels an
     /// already-cancelled token.
     pub fn trigger_shutdown(&self) {
+        self.admission.record_shutdown();
         self.shutdown.send_replace(true);
         self.shutdown_token.cancel();
     }
@@ -346,5 +419,76 @@ mod tests {
         let counter = Arc::new(AtomicUsize::new(0));
         drop(ActiveStreamGuard::new(Arc::clone(&counter)));
         assert_eq!(counter.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn snapshot_reads_every_counter_and_tracks_shutdown() {
+        let stats = AdmissionStats::default();
+        assert_eq!(stats.snapshot(), ServerStats::default());
+
+        stats.record_admitted();
+        stats.record_admitted();
+        stats.record_rejected();
+        stats.begin_wait();
+        stats.set_capacity(4);
+
+        let sample = stats.snapshot();
+        assert_eq!(sample.admitted, 2);
+        assert_eq!(sample.rejected, 1);
+        assert_eq!(sample.waiting, 1);
+        assert_eq!(sample.active, 0);
+        assert_eq!(sample.capacity, 4);
+        assert!(!sample.shutting_down);
+        assert_eq!(sample.invariant_violations(), 0);
+
+        stats.end_wait();
+        stats.record_shutdown();
+        let after = stats.snapshot();
+        assert!(after.shutting_down);
+        assert_eq!(after.waiting, 0);
+        assert_eq!(after.invariant_violations(), 0);
+    }
+
+    #[test]
+    fn invariant_violations_flag_over_capacity_and_stuck_waiters() {
+        let healthy = ServerStats {
+            capacity: 2,
+            active: 2,
+            ..ServerStats::default()
+        };
+        assert_eq!(healthy.invariant_violations(), 0);
+
+        // A permit leak: more open connections than the governor can grant.
+        let over_capacity = ServerStats {
+            capacity: 2,
+            active: 3,
+            ..ServerStats::default()
+        };
+        assert_eq!(over_capacity.invariant_violations(), 1);
+
+        // Capacity 0 means "not configured": the gauge has no reference, so the
+        // capacity invariant is not observable (and must not false-positive).
+        let unknown_capacity = ServerStats {
+            active: 3,
+            ..ServerStats::default()
+        };
+        assert_eq!(unknown_capacity.invariant_violations(), 0);
+
+        // An admission wait that outlived graceful shutdown.
+        let stuck_waiter = ServerStats {
+            waiting: 1,
+            shutting_down: true,
+            ..ServerStats::default()
+        };
+        assert_eq!(stuck_waiter.invariant_violations(), 1);
+
+        let both = ServerStats {
+            capacity: 1,
+            active: 2,
+            waiting: 1,
+            shutting_down: true,
+            ..ServerStats::default()
+        };
+        assert_eq!(both.invariant_violations(), 2);
     }
 }

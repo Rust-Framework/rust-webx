@@ -21,11 +21,22 @@ rust-webx-core.workspace = true
 rust-ef.workspace = true
 async-trait.workspace = true
 sha2.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
 tracing.workspace = true
+# Optional real-database providers, only needed by the env-driven `#[ignore]`
+# tests (`cargo test -p rust-webx-ef --features postgres,mysql -- --ignored`).
+# Optional (not dev-dependencies) so the default build/test graph stays SQLite-only.
+rust-ef-postgres = { workspace = true, optional = true }
+rust-ef-mysql = { workspace = true, optional = true }
 
 [dev-dependencies]
 rust-ef-sqlite.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[features]
+postgres = ["dep:rust-ef-postgres"]
+mysql = ["dep:rust-ef-mysql"]
 
 [lints]
 workspace = true

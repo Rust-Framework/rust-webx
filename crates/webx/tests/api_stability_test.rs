@@ -64,4 +64,19 @@ fn documented_constructors_still_exist() {
     // In-memory limiter + port.
     let store = InMemoryRateLimiter::new(10.0, 20, 1_000);
     let _: &dyn IRateLimiter = &store;
+
+    // Idempotency (2.8): the value types are `#[non_exhaustive]`, so these
+    // constructors are the documented construction path for custom stores.
+    let response = IdempotentResponse::new(
+        201,
+        Some("application/json".to_string()),
+        None,
+        b"{}".to_vec(),
+    )
+    .with_headers(vec![("etag".to_string(), "\"v1\"".to_string())]);
+    assert_eq!(response.status, 201);
+    assert_eq!(response.headers.len(), 1);
+    assert_eq!(IdempotencyLease::new("token").token, "token");
+    let started = IdempotencyBegin::Started;
+    assert_eq!(started, IdempotencyBegin::Started);
 }

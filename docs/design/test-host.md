@@ -39,9 +39,41 @@ host.shutdown();                                  // 停止 hosted services 并 
 | `TestHost::from_builder_with_clock(builder, clock)` | 显式可控时钟 |
 | `TestHost::new(host)` | 包装已构建的 host（使用其注册时钟） |
 | `dispatch` / `dispatch_as` | 经 `Mediator::send` 分发，每次一个 DI scope（Scoped 服务按次新建） |
+| `connect_wire()` | 打开一条**无端口**的内存双端 wire 连接，由真实 engine/hyper 处理字节 |
 | `clock()` | 返回 handler 注入的同一个 `Arc<dyn IClock>` |
 | `chaos()` | `fail_next(n)` / `delay_next(d)` / `reset()` / `dispatched()` |
 | `shutdown(self)` | 同 `Host::shutdown` |
+
+## Wire 仿真（`connect_wire`，2.8.0）
+
+`dispatch` 覆盖 Handler/DI/Mediator 层，但无法表达 keep-alive、HTTP/2、SSE 帧字节、
+畸形请求这些**协议字节级**行为。`connect_wire` 用 `tokio::io::duplex` 在进程内打开一对
+管道，客户端拿到可读写的字节流，服务端交给当前 Host 的 engine `serve_stream`：走的仍是
+生产用的 hyper auto builder、路由、中间件、错误写入器和排空逻辑，但不 bind 端口、不经过
+内核 socket，因此可重复、可注入、无端口冲突。
+
+```rust
+let host = TestHost::from_builder(Host::builder().mode(AppMode::Development).no_spa());
+let mut conn = host.connect_wire().await;
+conn.write(b"GET /hello HTTP/1.1\r\nhost: test\r\nconnection: close\r\n\r\n").await?;
+let response = conn.read_at_most(64 * 1024).await?;
+assert_eq!(status_of(&response), 200);
+conn.close().await; // 等待 engine 连接任务结束
+```
+
+覆盖方式：
+
+| 测试目标 | 做法 |
+|---|---|
+| HTTP/1.1 keep-alive | 同一 `WireConnection` 连续写两个请求，按 `Content-Length` 读两个响应 |
+| h2c prior knowledge | `WireConnection { stream, task } = conn`，把 `stream` 交给 `hyper::client::conn::http2::handshake` |
+| 畸形请求/恢复 | 写非法字节，断言 400 或连接关闭；再开一条 wire 连接断言仍可服务 |
+| SSE 字节 | 带 `accept: text/event-stream` + `connection: close`，读到 EOF 断言行格式 |
+| 超时/排空 | 注入延迟后 `close()`/`shutdown()`，断言连接任务在预算内结束 |
+
+参考实现：`crates/webx/tests/wire_harness_test.rs`；engine 入口
+`crates/engine/src/server.rs` 的 `Server::serve_stream`。
+
 
 ## 时钟端口（`webx::IClock`）
 

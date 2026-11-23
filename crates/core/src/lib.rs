@@ -14,6 +14,7 @@ pub mod client_info;
 pub mod config;
 pub mod dispatch_runtime;
 pub mod error;
+pub mod error_codes;
 pub mod form;
 pub mod handler;
 pub mod hosted;
@@ -56,6 +57,7 @@ pub use cache::trait_def::{CacheError, IDistributedCache};
 pub use config::*;
 pub use dispatch_runtime::DispatchRuntime;
 pub use error::*;
+pub use error_codes::{ErrorCodeSpec, ERROR_CODES, FALLBACK_STATUS};
 pub use form::*;
 pub use handler::*;
 pub use hosted::{

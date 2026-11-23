@@ -7,9 +7,35 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use tracing::Instrument;
 use webx_core::error::{Error, Result};
 use webx_core::http::IHttpContext;
 use webx_core::middleware::IMiddleware;
+
+/// Root span of one request when this pipeline is driven directly (embedded
+/// use / tests). `Host::run` executes requests through the engine pipeline,
+/// which emits the same `http.server.request` span; exactly one of the two
+/// roots is created per request because only one pipeline runs it.
+///
+/// DEBUG level matches the engine pipeline: the host's default subscriber runs
+/// at INFO, so this is opt-in and does not allocate on the default path.
+fn request_span(ctx: &dyn IHttpContext) -> tracing::Span {
+    tracing::debug_span!(
+        target: "webx.http",
+        "http.server.request",
+        method = %ctx.request().method(),
+        path = %ctx.request().path(),
+        trace_id = tracing::field::Empty,
+        status = tracing::field::Empty,
+    )
+}
+
+fn record_request_outcome(span: &tracing::Span, ctx: &dyn IHttpContext) {
+    // Always record both fields so the root contract is deterministic: an empty
+    // `trace_id` means no trace-id middleware was installed for this request.
+    span.record("trace_id", ctx.trace_id().unwrap_or(""));
+    span.record("status", u64::from(ctx.response().status()));
+}
 
 /// Boxed final handler function type.
 pub type HandlerFn = Arc<
@@ -53,6 +79,20 @@ impl MiddlewarePipeline {
     /// failure inside an `after` hook is logged and never masks the original
     /// error.
     pub async fn execute(
+        &self,
+        ctx: &mut dyn IHttpContext,
+        final_handler: HandlerFn,
+    ) -> Result<()> {
+        let span = request_span(&*ctx);
+        let result = self
+            .execute_inner(ctx, final_handler)
+            .instrument(span.clone())
+            .await;
+        record_request_outcome(&span, &*ctx);
+        result
+    }
+
+    async fn execute_inner(
         &self,
         ctx: &mut dyn IHttpContext,
         final_handler: HandlerFn,

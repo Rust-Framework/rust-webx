@@ -95,6 +95,11 @@ Handler 注入 `Arc<ShutdownToken>` 并调用 `SseResult::on_server_shutdown` �
 `event:server_shutdown` 并正常结束（见[流式响应](../05-request-pattern/streaming-sse.md)），
 不再依赖排空超时。
 
+关闭原因（`CloseReason`：`ServerShutdown` / `LifetimeExceeded` / `TokenExpired` / `ClientClosed` …）
+与 WebSocket close code、SSE `StreamEnd` 的完整映射见
+[关闭码与排空语义](../../design/close-codes.md)；Handler 可通过
+`IConnection::close_reason()` 与 `ShutdownToken::is_draining()` 区分“客户端走了”和“主机在排空”。
+
 ## 可观测性
 
 ### 请求追踪

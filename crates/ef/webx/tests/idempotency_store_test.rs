@@ -78,12 +78,12 @@ async fn expire_row(options: &Arc<DbContextOptions>, key: &str) {
 }
 
 fn response(status: u16, content_type: Option<&str>, body: &[u8]) -> IdempotentResponse {
-    IdempotentResponse {
+    IdempotentResponse::new(
         status,
-        content_type: content_type.map(str::to_string),
-        content_encoding: None,
-        body: body.to_vec(),
-    }
+        content_type.map(str::to_string),
+        None,
+        body.to_vec(),
+    )
 }
 
 fn seed_record(key: &str, state: &str, created_at: i64, expires_at: i64) -> IdempotencyRecord {
@@ -94,6 +94,8 @@ fn seed_record(key: &str, state: &str, created_at: i64, expires_at: i64) -> Idem
         status: None,
         content_type: None,
         content_encoding: None,
+        attempt: None,
+        headers: None,
         body: None,
         created_at,
         expires_at,
@@ -570,28 +572,294 @@ async fn a_long_protocol_key_is_truncated_only_in_the_debug_column() {
 async fn the_reservation_lease_is_shorter_than_the_replay_retention() {
     let options = in_memory_options().await;
     prepare(&options).await;
-    let store = store(&options).with_lease(Duration::from_secs(2));
+    let store = store(&options);
     let retention = Duration::from_secs(3_600);
 
-    assert_eq!(
-        store.begin("lease-1", retention).await.expect("begin"),
-        IdempotencyBegin::Started
-    );
+    let (begin, _lease) = store
+        .begin_lease("lease-1", retention, Duration::from_secs(2))
+        .await
+        .expect("begin");
+    assert_eq!(begin, IdempotencyBegin::Started);
     let reserved = row(&options, "lease-1").await.expect("row");
     assert!(
         reserved.expires_at - now_secs() <= 3,
-        "begin must use the lease, not the 1h retention TTL: {}",
+        "begin_lease must use the explicit lease, not the 1h retention TTL: {}",
         reserved.expires_at
     );
 
     store
-        .complete("lease-1", response(200, None, b"ok"), retention)
+        .complete_lease("lease-1", None, response(200, None, b"ok"), retention)
         .await
         .expect("complete");
     let completed = row(&options, "lease-1").await.expect("row");
     assert!(
         completed.expires_at - now_secs() >= 3_000,
-        "complete must use the retention TTL: {}",
+        "complete_lease must use the retention TTL: {}",
         completed.expires_at
     );
+}
+
+/// The store honours the lease it is given, even when it is longer than the
+/// retention: there is no hidden `min(lease, ttl)` correction inside the store
+/// (the middleware is the component that caps the lease).
+#[tokio::test]
+async fn the_store_honours_the_explicit_lease_without_a_hidden_correction() {
+    let options = in_memory_options().await;
+    prepare(&options).await;
+    let store = store(&options);
+    let retention = Duration::from_secs(10);
+    let lease = Duration::from_secs(3_600);
+
+    let (begin, _lease) = store
+        .begin_lease("lease-long", retention, lease)
+        .await
+        .expect("begin");
+    assert_eq!(begin, IdempotencyBegin::Started);
+    let reserved = row(&options, "lease-long").await.expect("row");
+    assert!(
+        reserved.expires_at - now_secs() >= 3_000,
+        "the reservation must live for the passed lease, not be clamped to the \
+         10s retention: {}",
+        reserved.expires_at
+    );
+
+    store
+        .complete_lease("lease-long", None, response(200, None, b"ok"), retention)
+        .await
+        .expect("complete");
+    let completed = row(&options, "lease-long").await.expect("row");
+    assert!(
+        completed.expires_at - now_secs() <= 11,
+        "a completed response uses the retention: {}",
+        completed.expires_at
+    );
+}
+
+/// The legacy token-less `begin` keeps its single-duration contract: the
+/// reservation (and the stored response) are bounded by the given TTL.
+#[tokio::test]
+async fn the_legacy_begin_uses_the_ttl_for_the_reservation() {
+    let options = in_memory_options().await;
+    prepare(&options).await;
+    let store = store(&options);
+    let ttl = Duration::from_secs(120);
+
+    assert_eq!(
+        store.begin("legacy-begin", ttl).await.expect("begin"),
+        IdempotencyBegin::Started
+    );
+    let reserved = row(&options, "legacy-begin").await.expect("row");
+    let remaining = reserved.expires_at - now_secs();
+    assert!(
+        (115..=120).contains(&remaining),
+        "legacy begin reserves for the TTL, got {remaining}s"
+    );
+
+    store
+        .complete("legacy-begin", response(200, None, b"ok"), ttl)
+        .await
+        .expect("complete");
+    let completed = row(&options, "legacy-begin").await.expect("row");
+    assert!((115..=120).contains(&(completed.expires_at - now_secs())));
+}
+
+#[tokio::test]
+async fn a_reclaimed_lease_fences_out_the_stale_attempt() {
+    let options = in_memory_options().await;
+    prepare(&options).await;
+    let store = store(&options);
+
+    let (begin, lease) = store.begin_lease("fence-1", TTL, TTL).await.expect("begin");
+    assert_eq!(begin, IdempotencyBegin::Started);
+    let old_lease = lease.expect("a fencing token");
+    let reserved = row(&options, "fence-1").await.expect("row");
+    assert_eq!(reserved.attempt.as_deref(), Some(old_lease.token.as_str()));
+
+    // The handler outlived its lease: the row expires and a retry claims it
+    // with a fresh token.
+    expire_row(&options, "fence-1").await;
+    let (begin, lease) = store
+        .begin_lease("fence-1", TTL, TTL)
+        .await
+        .expect("reclaim");
+    assert_eq!(begin, IdempotencyBegin::Started);
+    let new_lease = lease.expect("a fencing token");
+    assert_ne!(old_lease.token, new_lease.token);
+    let reclaimed = row(&options, "fence-1").await.expect("row");
+    assert_eq!(reclaimed.state, STATE_IN_PROGRESS);
+    assert_eq!(reclaimed.attempt.as_deref(), Some(new_lease.token.as_str()));
+
+    // The stale attempt's late completion must not overwrite the live lease...
+    store
+        .complete_lease(
+            "fence-1",
+            Some(&old_lease),
+            response(201, None, b"stale"),
+            TTL,
+        )
+        .await
+        .expect("stale completion is silent");
+    let after = row(&options, "fence-1").await.expect("row");
+    assert_eq!(after.state, STATE_IN_PROGRESS);
+    assert!(after.body.is_none(), "the stale body must not be stored");
+
+    // ...and its late release must not delete the new owner's row.
+    store
+        .release_lease("fence-1", Some(&old_lease))
+        .await
+        .expect("stale release is silent");
+    assert!(
+        row(&options, "fence-1").await.is_some(),
+        "a stale release must not delete the new lease"
+    );
+
+    // The current attempt still completes normally and clears its token.
+    store
+        .complete_lease(
+            "fence-1",
+            Some(&new_lease),
+            response(202, None, b"fresh"),
+            TTL,
+        )
+        .await
+        .expect("complete");
+    let completed = row(&options, "fence-1").await.expect("row");
+    assert_eq!(completed.state, STATE_COMPLETED);
+    assert!(
+        completed.attempt.is_none(),
+        "the fencing token is cleared when the response is stored"
+    );
+    match store.begin("fence-1", TTL).await.expect("replay") {
+        IdempotencyBegin::Replay(stored) => {
+            assert_eq!(stored.status, 202);
+            assert_eq!(stored.body, b"fresh".to_vec());
+        }
+        other => panic!("expected a replay, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn replayable_headers_round_trip_in_order() {
+    let options = in_memory_options().await;
+    prepare(&options).await;
+    let store = store(&options);
+    let headers = vec![
+        ("location".to_string(), "/api/orders/7".to_string()),
+        ("etag".to_string(), "\"v1\"".to_string()),
+        (
+            "last-modified".to_string(),
+            "Wed, 21 Oct 2015 07:28:00 GMT".to_string(),
+        ),
+        (
+            "cache-control".to_string(),
+            "private, max-age=60".to_string(),
+        ),
+    ];
+    let mut stored = response(201, Some("application/json"), b"{}");
+    stored.headers = headers.clone();
+
+    let (begin, lease) = store
+        .begin_lease("headers-1", TTL, TTL)
+        .await
+        .expect("begin");
+    assert_eq!(begin, IdempotencyBegin::Started);
+    store
+        .complete_lease("headers-1", lease.as_ref(), stored, TTL)
+        .await
+        .expect("complete");
+
+    let stored_row = row(&options, "headers-1").await.expect("row");
+    assert!(
+        stored_row
+            .headers
+            .as_deref()
+            .is_some_and(|json| json.contains("\"location\"")),
+        "the replayable headers are persisted as JSON: {:?}",
+        stored_row.headers
+    );
+
+    match store.begin("headers-1", TTL).await.expect("replay") {
+        IdempotencyBegin::Replay(replayed) => assert_eq!(replayed.headers, headers),
+        other => panic!("expected a replay, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn only_whitelisted_headers_survive_a_replay() {
+    let options = in_memory_options().await;
+    prepare(&options).await;
+    let store = store(&options);
+    let now = now_secs();
+    let mut record = seed_record("filtered-headers", STATE_COMPLETED, now - 10, now + 3_600);
+    record.status = Some(201);
+    record.body = Some(b"ok".to_vec());
+    // A hand-edited row (or future store version) may contain anything; only the
+    // replay whitelist may reach a replayed response. Names are canonicalized.
+    record.headers = Some(
+        r#"[["set-cookie","session=secret"],["ETag","\"v2\""],["location","/api/x"]]"#.to_string(),
+    );
+    seed_rows(&options, vec![record]).await;
+
+    match store.begin("filtered-headers", TTL).await.expect("replay") {
+        IdempotencyBegin::Replay(replayed) => assert_eq!(
+            replayed.headers,
+            vec![
+                ("etag".to_string(), "\"v2\"".to_string()),
+                ("location".to_string(), "/api/x".to_string()),
+            ],
+            "Set-Cookie must never be replayed and names are lower-cased"
+        ),
+        other => panic!("expected a replay, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_reclaimed_row_written_before_2_8_gets_a_fresh_attempt_token() {
+    let options = in_memory_options().await;
+    prepare(&options).await;
+    let store = store(&options);
+    let now = now_secs();
+    // A pre-2.8 expired reservation: NULL attempt, NULL headers.
+    seed_rows(
+        &options,
+        vec![seed_record("legacy", STATE_IN_PROGRESS, now - 300, now - 1)],
+    )
+    .await;
+
+    let (begin, lease) = store
+        .begin_lease("legacy", TTL, TTL)
+        .await
+        .expect("claim legacy row");
+    assert_eq!(begin, IdempotencyBegin::Started);
+    let lease = lease.expect("a fencing token");
+    let claimed = row(&options, "legacy").await.expect("row");
+    assert_eq!(claimed.attempt.as_deref(), Some(lease.token.as_str()));
+    assert!(claimed.headers.is_none());
+}
+
+#[tokio::test]
+async fn a_pre_2_8_completed_row_replays_an_empty_response() {
+    let options = in_memory_options().await;
+    prepare(&options).await;
+    let store = store(&options);
+    let now = now_secs();
+    seed_rows(
+        &options,
+        vec![seed_record(
+            "legacy-done",
+            STATE_COMPLETED,
+            now - 10,
+            now + 3_600,
+        )],
+    )
+    .await;
+
+    match store.begin("legacy-done", TTL).await.expect("replay") {
+        IdempotencyBegin::Replay(stored) => {
+            assert_eq!(stored.status, 200, "defensive status fallback");
+            assert!(stored.headers.is_empty());
+            assert!(stored.body.is_empty());
+        }
+        other => panic!("expected a replay, got {other:?}"),
+    }
 }

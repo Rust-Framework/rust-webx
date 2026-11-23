@@ -19,6 +19,16 @@
 | `engine_admission_waiting` | gauge | — | 已 accept 但仍在等待准入槽的连接数（准入队列深度） |
 | `engine_connections_active` | gauge | — | 当前打开的连接数（每个连接持有一个准入 permit；含 keep-alive 与 SSE 长连接） |
 | `engine_connections_capacity` | gauge | — | 准入上限 `App.MaxConnections`，与 `active` 一起看容量水位 |
+| `engine_admission_active_ratio` | gauge | — | `active / capacity`（仅 `capacity > 0` 时出现），用于容量水位告警 |
+| `engine_admission_invariant_violations` | gauge | — | 当前被违反的准入不变量个数（0–2） |
+| `engine_admission_invariant_violations_total` | counter | — | 每次 scrape 观察到的违反数累计（瞬时违规也不丢） |
+| `engine_admission_shutting_down` | gauge | — | 引擎已进入优雅停机（0/1）；停机后 `waiting` 应回到 0 |
+
+准入不变量（不一致时框架只告警一次并累加 counter，不阻塞请求）：
+
+1. `capacity > 0` 时 `active <= capacity`：active 只能由全局准入 governor 授予，超出说明 permit 记账泄漏；
+2. `shutting_down` 后 `waiting == 0`：acceptor 结束等待前会配对 `end_wait`，残留说明等待计数泄漏。
+
 
 `route` 使用**匹配到的路由模板**（如 `/api/users/{id}`），未匹配请求统一为 `unmatched`；
 路径参数不会成为标签，因此不会因随机 URL 造成基数爆炸。被取消的请求同样进入延迟直方图

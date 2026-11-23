@@ -96,19 +96,25 @@ Host::builder()
     .build();
 ```
 
-租约到期后 `complete`/`release` 的 CAS 会拒绝写入，迟到的响应不会复活过期预约；
-`use_idempotency` 必须在 host build 之前拿到 store，所以 store 持有 `DbContextOptions`
-而不是 DI 的 `ScopeFactory`（options 是启动时唯一天然存在的数据库依赖）。`Idempotency`
-配置节仍只启用单进程内存存储；多实例必须显式注入本存储。
+每次抢占写入新的 `attempt` fencing token，`complete_lease`/`release_lease` 的 CAS 带
+`attempt = ?`：租约被抢占后旧 owner 迟到的 `complete`/`release` 是 no-op（即使新租约 live），
+不会覆盖或删除新尝试的状态。已完成响应还会持久化可重放响应头（`headers` 列，JSON，白名单
+`Location`/`ETag`/`Last-Modified`/`Cache-Control`）。`use_idempotency` 必须在 host build 之前
+拿到 store，所以 store 持有 `DbContextOptions` 而不是 DI 的 `ScopeFactory`（options 是启动时
+唯一天然存在的数据库依赖）；也可以把 store 注册到 DI 并设置 `Idempotency.Enabled = true`，
+由 host 自动发现（显式 `use_idempotency` 优先）。
 
 语义要点：
 
 - **跨实例正确性**依赖主键唯一 + 条件 UPDATE（CAS），不需要 Redis 锁：同一键只有一个
   实例能 INSERT 成功或抢占成功。
-- **TTL 是租约**：Handler 必须在 TTL 内完成，否则重试会抢占并可能并发执行；实例被杀后
-  预约到期，下一次重试自动接管。
-- **complete 只更新 `state = 'in_progress'` 的行**：预约已过期/被释放时静默丢弃迟到响应，
-  不会复活旧预约。
+- **TTL 与租约分离**：进行中的预约按中间件下传的 `lease`（`Idempotency.LeaseSeconds`，默认
+  60s，且 `min(LeaseSeconds, TtlSeconds)`）过期；已完成响应按 `retention`（`TtlSeconds`）重放。
+  Handler 必须在租约内完成，否则重试会抢占并可能并发执行；fencing token 保证旧尝试不会写入
+  新租约的状态。实例被杀后预约到期，下一次重试自动接管。store 完全按传入的 lease 写入预约，
+  不做内部纠偏；直接调用 `begin(key, ttl)` 的旧路径没有独立租约，预约期即 `ttl`。
+- **complete 只更新当前 token 持有的 `in_progress` 行**：预约已过期/被释放/被抢占时静默丢弃
+  迟到响应，不会复活旧预约或覆盖新尝试。
 - **清理**：`IdempotencyHousekeeping` 默认每小时 tick 一次，删除「过期超过 24h」的行
   （`with_interval` / `with_grace` 可调）；多个实例同时清理是安全的。
 - **不是唯一约束的替代**：业务唯一性仍靠唯一索引；键过期后同一键会重新执行。

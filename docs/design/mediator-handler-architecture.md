@@ -68,4 +68,4 @@ broker consumer ──EventMessage::to_wire/from_wire──▶ EventDispatcher �
 - `event_bus_test`：发布语义、Handler 隔离、broker 替换、consumer 路由；
 - 四个 broker 适配器的 `tests/integration.rs` 跑共享 `EventTransportContract`；
 - `websocket_*` / `realtime_*` / `test_host_test` 覆盖实时与进程内分发；
-- `cargo-semver-checks` 对 `v2.1.0` 通过（core/engine/host/webx）。
+- `cargo-semver-checks` 对 `v2.7.0` 通过（core/engine/host/webx）。

@@ -203,17 +203,7 @@ async fn worker_loop(
     // `serve_connection` borrows the builder and `into_owned` requires `Clone`.
     let terminal: FinalHandler = connection::final_handler(Arc::clone(&shared));
 
-    let mut builder = auto::Builder::new(TokioExecutor::new());
-    builder
-        .http1()
-        .timer(TokioTimer::new())
-        .header_read_timeout(shared.config.header_read_timeout)
-        .max_buf_size(shared.config.max_header_buf);
-    builder
-        .http2()
-        .timer(TokioTimer::new())
-        .keep_alive_interval(Some(shared.config.header_read_timeout))
-        .keep_alive_timeout(shared.config.header_read_timeout);
+    let builder = connection_builder(&shared);
 
     loop {
         tokio::select! {
@@ -367,6 +357,59 @@ async fn run_connection(
             .await;
         }
     }
+}
+
+/// Build the hyper auto (HTTP/1.1 + HTTP/2) server builder for this engine.
+///
+/// One builder is built per worker and cloned per connection. The in-process
+/// [`serve_stream`] path uses the same configuration, so a wire test exercises
+/// the production protocol settings (header read timeout, header buffer bound,
+/// HTTP/2 keepalive) instead of hyper defaults.
+pub(crate) fn connection_builder(shared: &Shared) -> auto::Builder<TokioExecutor> {
+    let mut builder = auto::Builder::new(TokioExecutor::new());
+    builder
+        .http1()
+        .timer(TokioTimer::new())
+        .header_read_timeout(shared.config.header_read_timeout)
+        .max_buf_size(shared.config.max_header_buf);
+    builder
+        .http2()
+        .timer(TokioTimer::new())
+        .keep_alive_interval(Some(shared.config.header_read_timeout))
+        .keep_alive_timeout(shared.config.header_read_timeout);
+    builder
+}
+
+/// Serve one already-connected transport through the engine pipeline.
+///
+/// This is the transport-neutral entry point used by the in-process wire test
+/// harness and by custom transport adapters: the caller owns accept and TLS and
+/// passes any `AsyncRead + AsyncWrite` stream. It runs the same hyper connection
+/// loop, router, middleware, error writers and graceful drain handling as a TCP
+/// connection, but without a socket, admission slot or TLS handshake. The
+/// returned future completes when the connection closes or a graceful shutdown
+/// drains it.
+pub(crate) async fn serve_stream<I>(shared: Arc<Shared>, io: I, peer: SocketAddr)
+where
+    I: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    let terminal: FinalHandler = connection::final_handler(Arc::clone(&shared));
+    let builder = connection_builder(&shared);
+    // Standalone stream accounting keeps the SSE drain budget meaningful for
+    // this connection without joining a worker's per-worker gauge.
+    let streams = Arc::new(ActiveStreamGuard::new(Arc::new(AtomicUsize::new(0))));
+    let shutdown = shared.subscribe_shutdown();
+    serve_io(
+        TokioIo::new(io),
+        shared,
+        terminal,
+        builder,
+        peer,
+        streams,
+        None,
+        shutdown,
+    )
+    .await;
 }
 
 /// Drive one hyper connection over a plain or TLS transport.

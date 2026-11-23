@@ -9,10 +9,15 @@ All notable changes to **rust-webx** are documented in this file.
 
 ### English
 
-Multi-instance hardening release: a durable `IIdempotencyStore` for `rust-webx-ef`, and a
-single source of truth for forwarded-header resolution (`ClientInfo`) that rate limiting now
-consumes. Additive APIs; the only behavior change is that the legacy `RateLimit.TrustProxy` /
-`RateLimit.TrustedProxies` keys are ignored (with a startup warning) — see **Changed**.
+Multi-instance hardening release: a durable `IIdempotencyStore` for `rust-webx-ef`, a complete
+request-idempotency protocol (fencing tokens, replayable response headers, route allow-list, DI
+auto-discovery), and a single source of truth for forwarded-header resolution (`ClientInfo`) that
+rate limiting now consumes. Additive APIs plus documented breaking changes confined to the
+idempotency value types and store protocol: `IdempotentResponse` gained a required `headers` field,
+`IdempotentResponse`/`IdempotencyLease`/`IdempotencyBegin` are `#[non_exhaustive]`, and the lease
+methods gained an explicit reservation-lease argument — see **Breaking**. The only other behavior
+changes are that the legacy `RateLimit.TrustProxy` / `RateLimit.TrustedProxies` keys are ignored
+(with a startup warning) and the idempotency scope encoding is now injective — see **Changed**.
 
 #### Added
 
@@ -20,38 +25,146 @@ consumes. Additive APIs; the only behavior change is that the legacy `RateLimit.
   anonymous requests. Anonymous keys are scoped by client IP, so a body-derived
   client key on a public endpoint could replay another client's response from the
   same NAT/proxy; public deployments should set it to `false`.
-- **`EfIdempotencyStore::{with_lease, with_max_body_bytes}`** (and
-  `DEFAULT_LEASE` = 60s): the reservation lease is separate from the replay
-  retention TTL, so a crashed handler becomes retryable after ~60s instead of
-  after the full retention period. The store caps response bodies to its column
-  capacity (≈60 KiB on MySQL `BLOB`, unbounded on PostgreSQL/SQLite) and releases
-  the reservation for larger bodies instead of failing.
+- **`Idempotency.Paths` / `Idempotency.SkipPaths`** (default empty): restrict the
+  `Idempotency-Key` middleware to path prefixes, matched on path-segment boundaries
+  (`/api/orders` covers `/api/orders/123`, not `/api/orders-archive`; trailing `/`
+  ignored; `SkipPaths` wins). Empty `Paths` keeps the pre-2.8 "every path" behavior;
+  requests outside the list pass through before the key header is read, with no
+  store round trip.
+- **Idempotency fencing tokens and an explicit reservation lease** —
+  `webx_core::idempotency::IdempotencyLease` plus three default-implemented
+  `IIdempotencyStore` methods: `begin_lease(key, retention, lease)` (returns the
+  attempt token with `Started`), `complete_lease(key, lease, response, retention)`
+  and `release_lease(key, lease)` (pass the token back). The middleware calls the
+  lease variants with `lease = min(Idempotency.LeaseSeconds, retention)`, so a
+  reservation that expired and was reclaimed by a retry can no longer be
+  completed/released by the old owner — the store's compare-and-set rejects the
+  stale token even while the new lease is live. The default implementations
+  delegate to `begin`/`complete`/`release` with the retention period and ignore
+  the shorter lease, so stores written for 2.7 keep compiling and working
+  unchanged (they keep the weaker "TTL must exceed the handler's worst case"
+  guarantee).
+- **`Idempotency.LeaseSeconds`** (default 60): the reservation lease is now a
+  framework configuration knob, separate from `Idempotency.TtlSeconds` (the
+  replay retention). A crashed handler becomes retryable after the lease instead
+  of after the full retention; the middleware caps it at the retention. The host
+  logs both effective durations at startup.
+- **`IdempotentResponse::{new, with_headers}`** — constructors for the now
+  `#[non_exhaustive]` idempotency value types, so custom stores can build the
+  response without a struct literal (see **Breaking**).
+- **`Idempotency` fail-open warning in `Production`**: with `Enabled=true`,
+  `AllowAnonymous=true` (the default) and an empty `Paths` list the host logs a
+  startup warning — every anonymous state-changing path is then replayed by
+  client IP, so clients behind one NAT/proxy can replay each other's responses.
+  Behavior is unchanged (unlike the CORS/legacy-RateLimit fail-closed guards):
+  authenticated-only deployments are safe with the defaults.
+- **`rust-webx-ef` real-database test coverage** — `idempotency_realdb_test.rs`
+  (opt-in `postgres` / `mysql` features, `#[ignore]`d, driven by
+  `RUST_EF_PG_URL` / `RUST_EF_MYSQL_URL`) exercises the store against a real
+  PostgreSQL/MySQL server; a new CI `realdb` job runs them with `postgres:16` +
+  `mysql:8` services. The two providers stay optional, so default builds/tests
+  remain SQLite-only.
+- **Replayable response headers** — `IdempotentResponse.headers` carries the
+  `Location`, `ETag`, `Last-Modified` and `Cache-Control` headers of the cached
+  response (case-insensitive whitelist, storage/replay order preserved); the
+  middleware captures them and writes them back on a replay. Credential-bearing
+  headers (`Set-Cookie`, `Authorization`, …) are never captured or replayed.
+- **Host idempotency auto-discovery from DI** — with `Idempotency.Enabled = true`
+  and no explicit `use_idempotency`, the host now uses the first
+  `dyn IIdempotencyStore` registered in DI (e.g. `EfIdempotencyStore`) and falls back
+  to the bounded in-memory store only when none is registered. An explicit
+  `use_idempotency(store, ttl)` still wins over both.
+- **`EfIdempotencyStore::with_max_body_bytes`**: the store caps response bodies
+  to its column capacity (≈60 KiB on MySQL `BLOB`, unbounded on
+  PostgreSQL/SQLite) and releases the reservation for larger bodies instead of
+  failing. The reservation lease is no longer a store option: it is passed by
+  the middleware (`Idempotency.LeaseSeconds`), so the store honours exactly the
+  lease it is given and applies the retention to completed responses.
 - **`rust-webx-ef::idempotency` — durable request idempotency over rust-ef.**
   `IdempotencyRecord` (table `webx_idempotency`, registered with
   `register_idempotency_model`), `EfIdempotencyStore` implementing the existing
-  `IIdempotencyStore` port (`begin` / `complete` / `release`), `purge_expired`, and
-  `IdempotencyHousekeeping` (`PeriodicBackgroundService`) for TTL cleanup. The store owns
-  the application's `Arc<DbContextOptions>` and opens a short-lived `DbContext` per
-  operation, so it is constructed before `HostBuilder::build()` and wired with
-  `use_idempotency(store, ttl)`. Cross-instance correctness uses the primary-key uniqueness
-  of the protocol key's SHA-256 digest (`key_hash`, fixed width; the full unbounded key
-  is kept in a non-indexed `key` column) plus a compare-and-set lease claim
-  (`UPDATE ... WHERE key_hash = ? AND expires_at <= ?`); a completed, unexpired key replays the stored status/content-type/
-  content-encoding/body (binary-safe), a live key returns `InProgress` (409), and an
-  expired key is reclaimed by exactly one instance. `complete` and `release` are
-  conditional on `state = 'in_progress' AND expires_at > now`, so a late completion for an
-  expired reservation is discarded. The port carries no per-attempt token: a completion
-  that races a reclaim can still land on the new lease, so keep the TTL above the
-  handler's worst-case duration (documented in the deployment notes). Schema comes from the official rust-ef migration tooling — no runtime DDL.
+  `IIdempotencyStore` port (`begin` / `complete` / `release` plus the lease variants),
+  `purge_expired`, and `IdempotencyHousekeeping` (`PeriodicBackgroundService`) for TTL
+  cleanup. The store owns the application's `Arc<DbContextOptions>` and opens a
+  short-lived `DbContext` per operation, so it is constructed before
+  `HostBuilder::build()` and wired with `use_idempotency(store, ttl)` — or registered
+  in DI and picked up automatically by `Idempotency.Enabled`. Cross-instance
+  correctness uses the primary-key uniqueness of the protocol key's SHA-256 digest
+  (`key_hash`, fixed width; the full unbounded key is kept in a non-indexed `key`
+  column) plus a compare-and-set lease claim
+  (`UPDATE ... WHERE key_hash = ? AND expires_at <= ?`); a completed, unexpired key
+  replays the stored status/content-type/content-encoding/replayable-headers/body
+  (binary-safe), a live key returns `InProgress` (409), and an expired key is
+  reclaimed by exactly one instance. Every claim writes a fresh `attempt` fencing
+  token; `complete_lease`/`release_lease` add `attempt = ?` to the compare-and-set and
+  clear it on success, so a late completion/release from a reclaimed attempt is
+  discarded instead of overwriting the new owner. Completed responses persist the
+  replayable headers as JSON in the `headers` column. Both columns are **nullable**
+  (old rows keep working; upgrade with the official rust-ef migration tooling — no
+  runtime/hand-written DDL).
   See `docs/rust-webx/11-production/idempotency.md` § 数据库持久化（多实例）.
 - **`webx_core::client_info` — shared trusted-proxy resolution.**
   `IpCidr` (`parse` / `contains`), `client_from_forwarded_for` (right-most hop that is not
   a trusted proxy), and `resolve_client_info` (peer + forwarded chain + `X-Real-IP` under
   the trusted-proxy policy) now live in core, so every middleware resolves the client
   address the same way.
+- **Aggregated startup configuration validation** (`webx_host::config_validation`):
+  `HostBuilder::try_build` now collects every `AppOptions`/Production-guard violation and
+  returns one sorted `Error::Di` listing all bad keys (`ConfigViolation { section, key,
+  message }`, `validate_options`, `format_violations`) instead of aborting at the first
+  invalid key. Existing rules and defaults are unchanged.
+- **In-process wire test harness** (`TestHost::connect_wire`): serves an already-connected
+  duplex stream through the real engine hyper/router/middleware/error/drain path without
+  binding a port — HTTP/1.1 keep-alive, h2c prior knowledge, SSE bytes and malformed
+  requests. The engine gains `Server::serve_stream` as the transport-neutral seam; tests
+  live in `crates/webx/tests/wire_harness_test.rs`.
+- **cargo-fuzz corpus** (`fuzz/`, a separate workspace that never enters the release):
+  six targets — keyset cursor decode, config JSON binding, ClientInfo/`X-Forwarded-For`
+  resolution, `ProblemDetails` JSON, file-name sanitization and event-wire framing — with
+  committed seed corpora, stable-toolchain invariant tests, and the nightly
+  `.github/workflows/fuzz.yml` job.
+- **Stable observability contract** (`webx.http` / `webx.connection`): a DEBUG span tree
+  (`http.server.request`, `auth.authenticate`, `http.route_match`, `http.handler`,
+  `http.binding`, `http.response_write`) plus INFO `connection.opened`/`connection.closed`
+  events; span/event names and fields are documented as a compatibility contract in
+  `docs/design/observability-contract.md` (DEBUG keeps the default path allocation-free).
+- **Unified close semantics**: `webx_core::realtime::CloseReason` (`ClientClosed`,
+  `ServerShutdown`, `SessionCompleted`, `IdleTimeout`, `LifetimeExceeded`, `TokenExpired`,
+  `ProtocolError`, `Internal`), `IConnection::close_reason()` and
+  `ShutdownToken::is_draining()`; WebSocket close paths and SSE `StreamEnd` map onto it;
+  the wire-code table is in `docs/design/close-codes.md`.
+- **Error-code registry** (`webx_core::error_codes`): `ErrorCodeSpec`/`ERROR_CODES`/
+  `FALLBACK_STATUS` register the 22 stable `problem+json` `code` values; a test ties every
+  `Error` variant and `default_code_for_status` to the registry so an unregistered code
+  fails CI. The `type` URI convention is in `docs/design/error-codes.md`.
+- **Admission invariant metrics** (`/metrics`): `engine_admission_active_ratio`,
+  `engine_admission_invariant_violations`, `engine_admission_invariant_violations_total`
+  and `engine_admission_shutting_down`; the engine exposes `ServerStats` /
+  `AdmissionStats::snapshot()` and warns once when permit/wait accounting invariants are
+  violated. See `docs/rust-webx/11-production/metrics.md`.
+- **Conformance gate** (`scripts/conformance.sh` and the `conformance` job in
+  `stability.yml`): an external-client matrix over HTTP/1.1 + HTTP/2 h2c
+  (200/400/401/413/415 and the problem+json envelope) plus optional bounded h2spec;
+  h2-over-TLS ALPN stays covered by `http2_test.rs`.
+- **Transport-port design** (`docs/design/transport-port.md`): an HTTP/3/WebTransport
+  port sketch (`IHttpTransport`), the `EngineContext::from_parts` / `serve_stream` seam,
+  quiche vs quinn trade-offs, and the explicit decision that a working H3 server is
+  requirement-driven 3.0 work (2.x is additive-only).
+- **Development-only TLS key logging**: setting `SSLKEYLOGFILE` with
+  `APP_ENV=Development` attaches rustls' standard key logger so Wireshark can decrypt
+  local TLS traffic (`webx_engine::tls::with_key_log` / `key_logging_allowed`).
+  `Production` ignores the variable (one-time warning); the file is a credential and
+  must not be shipped or collected. See `docs/rust-webx/11-production/cors-tls-health.md`.
 
 #### Changed
 
+- **WebSocket sessions end explicitly on host drain.** A WS session now selects on the
+  host `ShutdownToken` (next to its idle/lifetime/token-expiry deadlines) and sends close
+  code `1001` ("server shutting down") as soon as draining starts, instead of being
+  aborted at the drain deadline; the session handler future is dropped at that point
+  (matching SSE `on_server_shutdown`). `IConnection::close_reason()` reports why a session
+  ended, and `ShutdownToken::is_draining()` lets handlers distinguish drain from
+  cancellation. Every reason's wire code is in `docs/design/close-codes.md`.
 - **Rate limiting keys on the resolved client address, and both configuration paths agree.**
   `RateLimitMiddleware` no longer parses `X-Forwarded-For` itself: `RateLimitSubject::Ip`
   (and the IP fallback for `User` / `Tenant` / `ApiKey`) reads
@@ -68,16 +181,29 @@ consumes. Additive APIs; the only behavior change is that the legacy `RateLimit.
   `-D warnings`); the items are registered in `docs/design/deprecations.md` for the 3.0
   window, and `RateLimiter::with_trust_proxy` remains as a no-op compatibility shell.
 - **Idempotency scope now includes the tenant, the query string and the
-  `ClientInfo` client address; the reservation lease is independent of the
-  retention TTL.** The scope segment is `tenant:<tenant>:user:<sub>` when the
-  request carries a tenant claim (`user:<sub>` otherwise); anonymous requests use
-  the resolved client IP (not the raw peer). The canonical query string
-  (`k=v&...`, sorted) is part of the scope, so `POST /x?mode=a` and `?mode=b` no
-  longer replay each other. `begin` reserves a ~60s lease while `complete` uses
-  the caller's TTL as retention, so a killed instance is retried quickly. A
-  request without a tenant claim and without a query string computes the same
-  scope as 2.7, so keys already in flight keep matching; tenant-scoped or
-  query-bearing requests use a new scope. No configuration change is required.
+  `ClientInfo` client address; the scope encoding is injective.** The scope
+  segment is `tenant:<tenant>:user:<sub>` when the request carries a tenant claim
+  (`user:<sub>` otherwise); anonymous requests use the resolved client IP (not
+  the raw peer). The canonical query string (`k=v&...`, sorted) is part of the
+  scope, so `POST /x?mode=a` and `?mode=b` no longer replay each other. Every
+  dynamic component is now percent-escaped (`%`/`:`/`?`/`&`/`=`), so a subject,
+  tenant, path or query value containing a separator can no longer alias another
+  request's scope. Ordinary values (`u-1`, `/api/orders`, `mode=a`) produce the
+  same key as before, so keys in flight during the upgrade keep matching;
+  pathological values intentionally use a new key. The middleware reserves with
+  the explicit reservation lease (`Idempotency.LeaseSeconds`) while a completed
+  response is retained for the caller's TTL, so a killed instance is retried
+  quickly.
+- **In-memory idempotency eviction prefers completed keys.** At `MaxTrackedKeys`
+  the bounded store now evicts a completed entry first (its handler already ran; a
+  later retry simply re-executes), then an expired entry, and only as a last resort
+  an in-progress reservation. Previously the entry with the earliest expiry was
+  evicted regardless of state, so a burst of new keys could drop live reservations
+  before completed ones. Single-process semantics are unchanged.
+- **A replayed idempotent response now includes the whitelisted response headers**
+  (`Location`, `ETag`, `Last-Modified`, `Cache-Control`) captured with the stored
+  body; previously a replay restored only status/content-type/content-encoding/body
+  and dropped `Location`/`ETag`. See **Added** for the whitelist.
 - **Legacy `RateLimit.TrustProxy` / `RateLimit.TrustedProxies` fail the startup
   in `Production`** (they are still ignored with a warning in
   Development/Test). Silently ignoring them behind a reverse proxy would collapse
@@ -103,6 +229,16 @@ consumes. Additive APIs; the only behavior change is that the legacy `RateLimit.
 - **A failed `complete` releases the reservation.** If storing the response fails
   (database hiccup, column limit), the middleware now attempts `release` so the
   client can retry immediately instead of receiving `409` until the TTL expires.
+- **In-memory replays now filter stored response headers to the whitelist.** The
+  middleware only ever stores `Location`/`ETag`/`Last-Modified`/`Cache-Control`,
+  but a custom `complete` can supply anything; the in-memory store now filters
+  and lower-cases on replay exactly like the durable store, so a hand-written
+  `Set-Cookie`/`Authorization` can never reach a replayed response.
+- **A completion that lost its reservation is now logged at `warn` (EF store)**
+  instead of `debug`, with the `key_hash` and the attempt token. A pattern of
+  these means the handler outlived `Idempotency.LeaseSeconds` (the handler may
+  run twice for one key) or a clock skew shortened the lease; the documentation
+  explains the log meaning.
 - **File/stream responses are no longer cached as empty bodies.** A `200` with
   `FileResult`/streaming content reports `has_body() == true` but exposes no
   bytes; caching it would replay `200` + `0` bytes. Such responses now release
@@ -114,6 +250,50 @@ consumes. Additive APIs; the only behavior change is that the legacy `RateLimit.
   proxy shared the proxy's rate-limit bucket), and `ClientInfo::from_peer` reports
   the canonical IPv4 client address. Covered by client_info unit tests.
 
+#### Breaking
+
+Accepted under the documented 2.x policy (registered in the `cargo-semver-checks`
+allowlist and `docs/design/compatibility.md`); all items are mechanical to migrate.
+
+- **The idempotency value types are now `#[non_exhaustive]`.**
+  `IdempotentResponse` gained a required `headers` field *and* is now
+  `#[non_exhaustive]`; `IdempotencyLease` and `IdempotencyBegin` are
+  `#[non_exhaustive]` too (the lease type is new in 2.8). Migrate:
+  * construct a response with
+    `IdempotentResponse::new(status, content_type, content_encoding, body)` and add
+    replayable headers with `.with_headers(Vec<(String, String)>)` (previously a
+    struct literal with `headers: Vec::new()`);
+  * construct a fencing token with `IdempotencyLease::new(token)` (previously a
+    literal);
+  * add a wildcard arm (`_ =>`) to any `match` on `IdempotencyBegin`.
+
+  Reading fields is unaffected and `IIdempotencyStore` stays object-safe with
+  default methods. Custom store implementations should persist/round-trip
+  `headers` so a replay is header-identical; ignoring it is valid but silently
+  loses `Location`/`ETag`/`Last-Modified`/`Cache-Control` on replay. The
+  `#[non_exhaustive]` markers are what let 2.x keep adding state/metadata without
+  another breaking release.
+- **`IIdempotencyStore` lease methods take an explicit reservation lease.**
+  `begin_lease` is now
+  `begin_lease(&self, key, retention: Duration, lease: Duration)` and
+  `complete_lease` takes the response `retention` (parameter renames are not
+  breaking; the added `lease` argument is). Stores written against the pre-2.8
+  trait are unaffected: the provided defaults still delegate to
+  `begin`/`complete`/`release` with the retention period. The middleware always
+  calls the lease variants with `lease = min(Idempotency.LeaseSeconds, retention)`.
+- **`EfIdempotencyStore::with_lease` / `EfIdempotencyStore::DEFAULT_LEASE` were
+  removed** (both were introduced in this unreleased 2.8 cycle): the reservation
+  lease now comes from the caller (`Idempotency.LeaseSeconds`), so the store's
+  own option was redundant and could silently disagree with the middleware. Use
+  the `Idempotency.LeaseSeconds` configuration key (the constant lives in
+  `webx_core::idempotency::DEFAULT_LEASE`).
+- **`rust-webx-ef::idempotency::IdempotencyRecord` gained two nullable columns**
+  (`attempt: Option<String>`, `headers: Option<String>`) for fencing tokens and
+  replayable headers. Struct-literal constructions add `attempt: None, headers: None`;
+  existing databases upgrade with the official rust-ef migration tooling (generate a
+  migration from the new snapshot and run `ctx.migrate`). Both columns are nullable,
+  so the change is additive at the SQL level and pre-upgrade rows keep working.
+
 #### Verification
 
 - `cargo test --workspace` green; new host end-to-end tests assert (a) two forwarded
@@ -121,52 +301,167 @@ consumes. Additive APIs; the only behavior change is that the legacy `RateLimit.
   forging `X-Forwarded-For` is still limited by its peer address, (c) `from_policy` and
   `from_config` produce the same decisions and bucket keys, (d) without the `ClientInfo`
   middleware the limiter falls back to the peer, (e) legacy keys only produce a warning.
-- `rust-webx-ef` idempotency: 8 unit + 14 SQLite integration tests (replay, in-progress
+- Idempotency: 14 host unit tests (protocol, replayable-header whitelist filtering,
+  lease-vs-retention expiry, lease fencing/reclaim, eviction priority, route
+  allow-list boundaries, scope isolation/injective-encoding collision
+  counterexamples, canonical-query injectivity) + 9 host integration tests
+  (whitelisted response-header capture/replay order, lease token and
+  `(retention, lease)` passed to the store with the retention cap, route allow-list
+  passthrough, DI auto-discovery and explicit-wins ordering, legacy token-less
+  store fallback, Production scope warning not failing startup) + the 3 umbrella
+  end-to-end tests (replay, concurrent 409, invalid key).
+- `rust-webx-ef` idempotency: 8 unit + 24 SQLite integration tests (replay, in-progress
   conflict, TTL reclaim for both states, release, purge/grace, binary body round-trip,
-  failed-INSERT recovery, over-244-byte protocol key by digest, late completion/release
-  discarded after expiry).
+  failed-INSERT recovery, over-244-byte protocol key by digest, late
+  completion/release discarded after expiry, stale-lease fencing, explicit lease
+  honoured without an internal `min(ttl)` correction, legacy `begin` reservation,
+  replayable-header round-trip and whitelist filtering, pre-2.8 rows with NULL
+  `attempt`/`headers`) + 2 `#[ignore]` real-database tests (PostgreSQL/MySQL).
+- `cargo semver-checks --package {rust-webx-core,rust-webx-engine,rust-webx-host,rust-webx}
+  --baseline-rev v2.7.0` passes locally; the CI `semver` job now baselines v2.7.0
+  (previously v2.1.0) and the `docs/design/*` compatibility documents agree.
+- Real databases: the CI `realdb` job runs
+  `cargo test -p rust-webx-ef --features postgres,mysql --tests -- --ignored`
+  against `postgres:16` + `mysql:8` service containers (unique-key INSERT race
+  fallback, conditional UPDATE/DELETE, Unix-seconds TTL columns, binary bodies).
+  The providers are optional features, so default builds stay SQLite-only.
 - `cargo clippy --workspace --all-targets -D warnings`, rustdoc `-D warnings`, MSRV
   1.95 and both feature-matrix checks green; both mdBook sites build with mdBook v0.5.4.
 - `cargo audit`: no vulnerabilities (the committed lockfile refreshed `url` 2.5.8 ->
   2.5.9 for RUSTSEC-2026-0592); the remaining advisories are the allowed unmaintained
   warnings (chrono, rustls-pemfile).
+- **Cross-repo pairing with rust-ef 2.8.0.** `scripts/check-pairing-rust-ef.sh` builds
+  this workspace with `[patch.crates-io]` overrides that point `rust-ef` /
+  `rust-ef-sqlite` at a local rust-ef checkout (`RUST_EF_PATH`), then runs
+  `cargo test -p rust-webx-ef`; the optional CI `pairing` job runs the same script only
+  when configured (`vars.RUST_EF_PATH` / `vars.RUST_EF_REPO`, or the `rust_ef_ref`
+  dispatch input). Release order is **rust-ef 2.8.0 first, rust-webx 2.8.0 second**.
+  Evidence boundary: this proves the workspace and the EF adapter compile — and the EF
+  adapter's SQLite tests pass — against the provided rust-ef tree; it does not verify
+  the crates.io artifacts, that tree's semver gate, or real PostgreSQL/MySQL (covered
+  by the real-database job).
 
 ### 简体中文
 
-多实例加固版本：`rust-webx-ef` 新增持久化 `IIdempotencyStore`；转发头解析收敛为
-`ClientInfo` 唯一入口，限流改为读取其解析结果。API 为加法；唯一行为变化是
-`RateLimit.TrustProxy` / `RateLimit.TrustedProxies` 旧键被忽略（启动时 warn，见「变更」）。
+多实例加固版本：`rust-webx-ef` 新增持久化 `IIdempotencyStore`；请求幂等协议补齐（fencing token、
+可重放响应头、路由白名单、DI 自动装配、显式预约租约）；转发头解析收敛为 `ClientInfo` 唯一入口，
+限流改为读取其解析结果。API 以加法为主，破坏性变更收敛在幂等值类型与 store 协议：
+`IdempotentResponse` 新增必填 `headers` 字段、`IdempotentResponse`/`IdempotencyLease`/
+`IdempotencyBegin` 标记 `#[non_exhaustive]`、租约方法新增显式 lease 参数（见「破坏性变更」）。
+除此之外的行为变化是 `RateLimit.TrustProxy` / `RateLimit.TrustedProxies` 旧键被忽略（启动时 warn）
+与幂等 scope 改为单射转义（见「变更」）。
 
 #### 新增
 
 - **`Idempotency.AllowAnonymous`**（默认 `true`）：按需关闭匿名请求的幂等。匿名键按客户端 IP
   分域，公开接口上由 body 确定性推导的客户端键可能在同一 NAT/反代 IP 下互相重放，对外部署
   建议设为 `false`。
-- **`EfIdempotencyStore::{with_lease, with_max_body_bytes}`**（`DEFAULT_LEASE` = 60s）：
-  预约租约与重放保留期分离——崩溃的 Handler 约 60s 后即可被重试抢占，而不是等完整保留期；
-  store 按列容量限制响应 body（MySQL `BLOB` 约 60 KiB，PG/SQLite 由中间件 `MaxBodyBytes`
-  决定），超限时释放预约而不是失败。
+- **`Idempotency.Paths` / `Idempotency.SkipPaths`**（默认空）：把幂等中间件收敛到路径前缀，
+  按路径分段边界匹配（`/api/orders` 命中 `/api/orders/123`，不命中 `/api/orders-archive`；
+  末尾 `/` 忽略；`SkipPaths` 优先）。`Paths` 为空保持 2.8 之前「所有路径」的行为；范围外的
+  请求在读 `Idempotency-Key` 之前直接放行，不产生存储往返。
+- **幂等 fencing token 与显式预约租约** —— `webx_core::idempotency::IdempotencyLease`，以及三个
+  带默认实现的 `IIdempotencyStore` 方法：`begin_lease(key, retention, lease)`（`Started` 时返回
+  本次尝试的 token）、`complete_lease(key, lease, response, retention)` / `release_lease(key, lease)`
+  （把 token 传回）。中间件一律调用租约变体，并传
+  `lease = min(Idempotency.LeaseSeconds, retention)`，因此「租约过期后被重试抢占」的旧 owner
+  迟到 `complete`/`release` 会被存储的 CAS（`attempt = ?`）拒绝，即使新租约仍然 live 也不会互相
+  覆盖。默认实现退回无 token 的 `begin`/`complete`/`release` 并用 retention 作预约期，
+  2.7 时代的 store 不改代码即可继续编译与工作（保留「TTL 必须大于 Handler 最坏耗时」的较弱保证）。
+- **`Idempotency.LeaseSeconds`**（默认 60）：预约租约成为框架配置项，与 `Idempotency.TtlSeconds`
+  （已完成响应的重放保留期）分离。崩溃的 Handler 在租约到期后即可被重试抢占，不必等完整保留期；
+  中间件下传时以保留期为上限。宿主启动日志会同时打印两个生效时长。
+- **`IdempotentResponse::{new, with_headers}`** —— 为已标记 `#[non_exhaustive]` 的幂等值类型提供
+  构造器，自定义 store 无需结构体字面量即可构造响应（见「破坏性变更」）。
+- **`Production` 下的 `Idempotency` 启动 warn**：`Enabled=true` + `AllowAnonymous=true`（默认）
+  + 空 `Paths` 时，宿主打 warn——这时所有匿名写路径都按客户端 IP 重放，同一 NAT/反代后的客户端
+  可能互相重放响应。行为不变（与 CORS/旧限流键的 fail-closed 风格不同）：只启用已认证主体幂等
+  的部署可安全使用默认值。
+- **`rust-webx-ef` 真库测试覆盖** —— `idempotency_realdb_test.rs`（可选 `postgres` / `mysql`
+  feature，`#[ignore]`，由 `RUST_EF_PG_URL` / `RUST_EF_MYSQL_URL` 驱动）在真实 PostgreSQL/MySQL
+  上跑 store 协议；新增 CI `realdb` job 用 `postgres:16` + `mysql:8` service 执行。两个 provider
+  为可选依赖，默认构建/测试仍只用 SQLite。
+- **可重放响应头** —— `IdempotentResponse.headers` 保存缓存响应的 `Location`、`ETag`、
+  `Last-Modified`、`Cache-Control`（大小写不敏感白名单，保存/重放顺序一致），中间件在首次响应
+  时捕获、重放时写回。`Set-Cookie`、`Authorization` 等凭据头永不捕获、永不重放。
+- **Host 从 DI 自动发现幂等存储** —— `Idempotency.Enabled = true` 且未显式 `use_idempotency`
+  时，Host 使用 DI 中注册的第一个 `dyn IIdempotencyStore`（例如 `EfIdempotencyStore`），
+  都没注册才退回有界内存存储；显式 `use_idempotency(store, ttl)` 仍然优先。
+- **`EfIdempotencyStore::with_max_body_bytes`**：store 按列容量限制响应 body（MySQL `BLOB`
+  约 60 KiB，PG/SQLite 由中间件 `MaxBodyBytes` 决定），超限时释放预约而不是失败。预约租约不再是
+  store 选项，而由中间件（`Idempotency.LeaseSeconds`）下传：store 完全按收到的 lease 写预约、
+  按 retention 写已完成响应。
 - **`rust-webx-ef::idempotency` — 基于 rust-ef 的持久化请求幂等。**
   `IdempotencyRecord` 实体（表 `webx_idempotency`，用 `register_idempotency_model` 注册到
   应用模型，建表/迁移走官方 rust-ef 工具）；`EfIdempotencyStore` 实现既有
-  `IIdempotencyStore` 端口（`begin`/`complete`/`release`）；`purge_expired` 与
+  `IIdempotencyStore` 端口（`begin`/`complete`/`release` 以及租约变体）；`purge_expired` 与
   `IdempotencyHousekeeping`（`PeriodicBackgroundService`）负责 TTL 清理。store 持有应用的
   `Arc<DbContextOptions>`，每次操作开短生命周期 `DbContext`，因此在 `HostBuilder::build()`
-  之前即可构造并用 `use_idempotency(store, ttl)` 装配。跨实例正确性靠主键唯一 + CAS 租约
-  抢占（`UPDATE ... WHERE key = ? AND expires_at <= ?`）：已完成且未过期的键重放
-  status/content-type/content-encoding/body（二进制安全）；进行中的键返回 `InProgress`
-  （409）；过期键恰好一个实例抢占成功。`complete`/`release` 都以
-  `state = 'in_progress' AND expires_at > now` 为条件，过期后的迟到完成会被丢弃；端口没有
-  per-attempt token，与抢占同时发生的迟到完成仍可能落到新租约上，因此 TTL 应大于 Handler
-  最坏耗时（部署说明已写明）。无需运行时 DDL。
+  之前即可构造并用 `use_idempotency(store, ttl)` 装配，也可注册到 DI 后由
+  `Idempotency.Enabled` 自动发现。跨实例正确性靠主键唯一 + CAS 租约抢占
+  （`UPDATE ... WHERE key_hash = ? AND expires_at <= ?`）：已完成且未过期的键重放
+  status/content-type/content-encoding/可重放响应头/body（二进制安全）；进行中的键返回
+  `InProgress`（409）；过期键恰好一个实例抢占成功。每次抢占写入新的 `attempt` fencing
+  token；`complete_lease`/`release_lease` 的 CAS 增加 `attempt = ?` 并在成功后清空，
+  因此被回收的旧尝试迟到完成/release 是 no-op，不会覆盖新 owner。已完成响应把可重放响应头
+  以 JSON 存进 `headers` 列。两列都是**可空**列（旧行继续可用；升级走官方 rust-ef 迁移工具，
+  无需手写 DDL）。
   详见 `docs/rust-webx/11-production/idempotency.md`「数据库持久化（多实例）」。
 - **`webx_core::client_info` — 共享可信代理解析。**
   `IpCidr`（`parse`/`contains`）、`client_from_forwarded_for`（最右侧非可信代理 hop）、
   `resolve_client_info`（对端 + 转发链 + `X-Real-IP`，按可信代理策略）提升到 core，
   所有中间件用同一套解析。
+- **启动期配置聚合校验**（`webx_host::config_validation`）：`HostBuilder::try_build`
+  一次性收集全部 `AppOptions`/Production 守卫违规，按 section+key 排序后以一条
+  `Error::Di` 返回（`ConfigViolation { section, key, message }`、`validate_options`、
+  `format_violations`），不再“第一个非法键就退出”；既有规则与默认值不变。
+- **进程内 wire 测试基座**（`TestHost::connect_wire`）：把一条已连接的双端流交给真实
+  engine 的 hyper/路由/中间件/错误写入/排空路径，不绑定端口；覆盖 HTTP/1.1 keep-alive、
+  h2c prior knowledge、SSE 字节与畸形请求。engine 新增 `Server::serve_stream` 作为
+  传输无关接缝；验收见 `crates/webx/tests/wire_harness_test.rs`。
+- **cargo-fuzz 语料**（`fuzz/`，独立 workspace，不进入发布）：6 个 target——keyset
+  cursor 解码、配置 JSON 绑定、ClientInfo/`X-Forwarded-For` 解析、`ProblemDetails`
+  JSON、文件名净化、事件线格式——提交种子语料、稳定工具链不变量测试，以及 nightly
+  `.github/workflows/fuzz.yml`。
+- **稳定的观测契约**（`webx.http` / `webx.connection`）：DEBUG span 树
+  （`http.server.request`、`auth.authenticate`、`http.route_match`、`http.handler`、
+  `http.binding`、`http.response_write`）与 INFO `connection.opened`/
+  `connection.closed` 事件；span/事件名与字段作为兼容性契约写入
+  `docs/design/observability-contract.md`（DEBUG 级保证默认路径零分配增量）。
+- **统一关闭语义**：`webx_core::realtime::CloseReason`（`ClientClosed`/
+  `ServerShutdown`/`SessionCompleted`/`IdleTimeout`/`LifetimeExceeded`/`TokenExpired`/
+  `ProtocolError`/`Internal`）、`IConnection::close_reason()`、
+  `ShutdownToken::is_draining()`；WebSocket 关闭路径与 SSE `StreamEnd` 统一映射，
+  线协议码表见 `docs/design/close-codes.md`。
+- **错误码注册表**（`webx_core::error_codes`）：`ErrorCodeSpec`/`ERROR_CODES`/
+  `FALLBACK_STATUS` 登记 22 条稳定的 `problem+json` `code`；测试把每个 `Error`
+  变体与 `default_code_for_status` 绑定到注册表，未登记的新 code 会让 CI 失败；
+  `type` URI 约定见 `docs/design/error-codes.md`。
+- **准入不变量指标**（`/metrics`）：新增 `engine_admission_active_ratio`、
+  `engine_admission_invariant_violations`、`engine_admission_invariant_violations_total`、
+  `engine_admission_shutting_down`；engine 暴露 `ServerStats`/
+  `AdmissionStats::snapshot()`，permit/wait 记账不变量被违反时只告警一次。
+  见 `docs/rust-webx/11-production/metrics.md`。
+- **互操作门禁**（`scripts/conformance.sh` + `stability.yml` 的 `conformance` job）：
+  外部客户端矩阵覆盖 HTTP/1.1 + HTTP/2 h2c（200/400/401/413/415 + problem+json
+  信封）与可选、有界的 h2spec；h2-over-TLS ALPN 仍由 `http2_test.rs` 覆盖。
+- **传输端口设计**（`docs/design/transport-port.md`）：HTTP/3/WebTransport 端口草案
+  （`IHttpTransport`）、`EngineContext::from_parts`/`serve_stream` 接缝、quiche 与
+  quinn 取舍，以及“可运行 H3 server 属需求驱动的 3.0 工作、2.x 只加性”的明确决策。
+- **仅 Development 的 TLS 密钥日志**：`APP_ENV=Development` 且设置 `SSLKEYLOGFILE` 时，
+  框架给 rustls 挂上标准 key logger，便于 Wireshark 解密本机 TLS 流量
+  （`webx_engine::tls::with_key_log` / `key_logging_allowed`）。`Production` 忽略该变量
+  （只告警一次）；该文件等同凭据，不得随镜像发布或进日志采集。见
+  `docs/rust-webx/11-production/cors-tls-health.md`。
 
 #### 变更
 
+- **WebSocket 会话在主机排空时显式收尾。** WS 会话现在与自身 idle/lifetime/token 过期
+  截止时间一起 `select` 主机 `ShutdownToken`：排空一开始立即发送 close code `1001`
+  （"server shutting down"），而不是等到排空预算耗尽被 abort；此时 Handler future 会被
+  drop（与 SSE `on_server_shutdown` 对齐）。`IConnection::close_reason()` 报告会话结束原因，
+  `ShutdownToken::is_draining()` 让 Handler 区分“排空”与“取消”。每种原因的 wire code
+  见 `docs/design/close-codes.md`。
 - **限流按已解析客户端地址计桶，两条配置路径行为一致。**
   `RateLimitMiddleware` 不再自己解析 `X-Forwarded-For`：`RateLimitSubject::Ip`
   （以及 `User`/`Tenant`/`ApiKey` 的 IP 回退）读取
@@ -179,12 +474,19 @@ consumes. Additive APIs; the only behavior change is that the legacy `RateLimit.
   按仓库 2.x 政策不新增 `#[deprecated]` 属性（下游常以 `-D warnings` 构建）；两项登记在
   `docs/design/deprecations.md` 的 3.0 窗口，`RateLimiter::with_trust_proxy` 保留为
   no-op 兼容壳。
-- **幂等 scope 进入租户、查询串与 `ClientInfo` 客户端地址；预约租约与保留期分离。**
+- **幂等 scope 进入租户、查询串与 `ClientInfo` 客户端地址，且编码改为单射。**
   请求带 tenant claim 时 scope 为 `tenant:<tenant>:user:<sub>`（否则 `user:<sub>`）；匿名请求用
   解析后的客户端 IP（不再用原始对端地址）。规范化查询串（`k=v&...`，排序）进入 scope，
-  `POST /x?mode=a` 与 `?mode=b` 不再互相重放。`begin` 使用约 60s 租约，`complete` 使用调用方
-  TTL 作为保留期，被杀实例可快速重试。无 tenant claim 且无查询串的请求计算出的 scope 与 2.7
-  相同，升级时在途的旧键继续命中；带租户/查询串的请求使用新 scope，无需改配置。
+  `POST /x?mode=a` 与 `?mode=b` 不再互相重放。各动态段现在做百分号转义
+  （`%`/`:`/`?`/`&`/`=`），主体/租户/路径/查询值里带分隔符也不再可能与另一个请求产生相同键；
+  普通取值（`u-1`、`/api/orders`、`mode=a`）的键与升级前一致，在途键继续命中，异常取值会有意
+  使用新键。预约使用显式租约（`Idempotency.LeaseSeconds`），完成写入使用调用方 TTL 作为保留期。
+- **内存幂等存储在满额时优先淘汰已完成条目。** 达到 `MaxTrackedKeys` 时按优先级淘汰：先已
+  完成条目（Handler 已执行过，后续重试重新执行即可），其次过期条目，最后才淘汰进行中的预约。
+  此前的实现一律淘汰最早过期者，突发新键可能先丢掉仍 live 的预约。单进程语义不变。
+- **幂等响应重放现在包含白名单响应头**（`Location`、`ETag`、`Last-Modified`、
+  `Cache-Control`），此前只重放状态码/content-type/content-encoding/body 并丢弃
+  `Location`/`ETag`。白名单见「新增」。
 - **`RateLimit.TrustProxy` / `RateLimit.TrustedProxies` 在 Production 模式启动失败**
   （Development/Test 仍忽略并 warn）。反代后静默忽略会把所有客户端塌缩到代理地址的
   一个桶，攻击者可轻松打满；请迁移到 `ClientInfo.TrustForwardedHeaders` /
@@ -207,10 +509,49 @@ consumes. Additive APIs; the only behavior change is that the legacy `RateLimit.
   客户端可立即重试，而不是在 TTL 内一直收到 409。
 - **文件/流式响应不再被当作空 body 缓存。** `FileResult`/流式内容 `has_body() == true` 但
   `body_bytes()` 为空，缓存会重放 `200` + 0 字节；现在释放键（SSE 此前已排除）。
+- **内存 store 重放时也按白名单过滤响应头。** 中间件只会存
+  `Location`/`ETag`/`Last-Modified`/`Cache-Control`，但自定义 `complete` 可能写入任意头；
+  内存 store 现在与持久化 store 一致，在重放时过滤并把名字规范为小写，
+  `Set-Cookie`/`Authorization` 之类不会再出现在重放响应里。
+- **完成写入丢失预约时改为 warn（EF store）**（之前是 debug），日志带 `key_hash` 与本次
+  attempt token。频繁出现说明 Handler 超过 `Idempotency.LeaseSeconds`（同一键可能执行两次）
+  或时钟偏差缩短了租约；文档写明了日志含义与处置方式。
 - **IPv4-mapped IPv6 对端/hop 在可信代理解析中归一为 IPv4。** 双栈监听会把 IPv4 对端
   报告为 `::ffff:a.b.c.d`；现在按 IPv4 形态比较，IPv4 的 `ClientInfo.TrustedProxies`
   网段继续命中（此前会忽略转发头，导致代理后所有客户端共享代理地址的限流桶），
   `ClientInfo::from_peer` 也报告归一后的 IPv4 客户端地址。有 client_info 单元测试覆盖。
+
+#### 破坏性变更
+
+按仓库 2.x 已文档化破坏性变更政策接受（登记在 `cargo-semver-checks` allowlist 与
+`docs/design/compatibility.md`）；以下各项都是机械迁移。
+
+- **幂等值类型标记 `#[non_exhaustive]`。** `IdempotentResponse` 新增必填 `headers` 字段**并且**
+  标记 `#[non_exhaustive]`；`IdempotencyLease`（2.8 新增）与 `IdempotencyBegin` 同样标记。
+  迁移方式：
+  * 用 `IdempotentResponse::new(status, content_type, content_encoding, body)` 构造响应，
+    再用 `.with_headers(Vec<(String, String)>)` 附加可重放头（替代结构体字面量 +
+    `headers: Vec::new()`）；
+  * 用 `IdempotencyLease::new(token)` 构造围栏令牌（替代字面量）；
+  * `match IdempotencyBegin` 补 `_` 通配分支。
+
+  读取字段不受影响；`IIdempotencyStore` 仍对象安全且方法有默认实现。自定义 store 应持久化并
+  原样返回 `headers`，否则重放会静默丢失 `Location`/`ETag`/`Last-Modified`/`Cache-Control`
+  （仍可工作，只是不完整）。这些标记让 2.x 后续继续加状态/元数据时不再产生破坏性版本。
+- **`IIdempotencyStore` 租约方法新增显式预约租约参数。** `begin_lease` 变为
+  `begin_lease(&self, key, retention: Duration, lease: Duration)`，`complete_lease` 接收响应的
+  `retention`（参数改名不破坏；新增 `lease` 参数是破坏性变更）。按 2.7 之前 trait 编写的 store
+  不受影响：默认实现仍用 retention 委托 `begin`/`complete`/`release`。中间件始终以
+  `lease = min(Idempotency.LeaseSeconds, retention)` 调用租约变体。
+- **移除 `EfIdempotencyStore::with_lease` / `EfIdempotencyStore::DEFAULT_LEASE`**（二者都是本次
+  未发布的 2.8 周期新增）：预约租约改由调用方（`Idempotency.LeaseSeconds`）决定，store 自己的
+  选项既冗余又可能与中间件不一致。改用 `Idempotency.LeaseSeconds` 配置键；常量在
+  `webx_core::idempotency::DEFAULT_LEASE`。
+- **`rust-webx-ef::idempotency::IdempotencyRecord` 新增两个可空列**
+  （`attempt: Option<String>`、`headers: Option<String>`），分别用于 fencing token 与可重放
+  响应头。结构体字面量构造补 `attempt: None, headers: None`；已有数据库用官方 rust-ef 迁移
+  工具升级（从新快照生成迁移并执行 `ctx.migrate`）。两列均可空，SQL 层是加性变更，升级前的
+  行继续可用。
 
 #### 验证
 
@@ -218,13 +559,35 @@ consumes. Additive APIs; the only behavior change is that the legacy `RateLimit.
   客户端各自独立限流桶；(b) 直连客户端伪造 `X-Forwarded-For` 仍按对端地址限流；
   (c) `from_policy` 与 `from_config` 决策与桶键一致；(d) 无 `ClientInfo` 中间件时回退
   对端；(e) 旧配置键只产生 warn。
-- `rust-webx-ef` 幂等：8 个单元测试 + 14 个 SQLite 集成测试（重放、进行中冲突、两种状态
-  的 TTL 抢占、release、purge/grace、二进制 body 往返、失败 INSERT 恢复、>244 字节协议键
-  走摘要、过期后的迟到 complete/release 被丢弃）。
+- 幂等：14 个 host 单元测试（协议、重放头白名单过滤、租约/保留期过期、租约 fencing/抢占、
+  淘汰优先级、路由白名单边界、scope 隔离与单射编码碰撞反例、查询串单射）+ 9 个 host 集成测试
+  （白名单响应头捕获/重放顺序、传给 store 的 token 与 `(retention, lease)` 及 retention 截断、
+  路由白名单直通、DI 自动发现与显式优先、旧 token-less store 默认实现回落、Production scope
+  warn 不致启动失败）+ 3 个 umbrella 端到端测试（重放、并发 409、非法 key）。
+- `rust-webx-ef` 幂等：8 个单元测试 + 24 个 SQLite 集成测试（重放、进行中冲突、两种状态的 TTL
+  抢占、release、purge/grace、二进制 body 往返、失败 INSERT 恢复、>244 字节协议键走摘要、
+  过期后的迟到 complete/release 被丢弃、旧 token fencing、显式 lease 不被内部 `min(ttl)` 纠正、
+  旧 `begin` 预约期、可重放响应头往返与白名单过滤、2.8 之前 `attempt`/`headers` 为 NULL 的旧行）
+  + 2 个 `#[ignore]` 真库测试（PostgreSQL/MySQL）。
+- `cargo semver-checks --package {rust-webx-core,rust-webx-engine,rust-webx-host,rust-webx}
+  --baseline-rev v2.7.0` 本地通过；CI `semver` job 的基线由 v2.1.0 升为 v2.7.0，
+  `docs/design/*` 兼容性文档同步更新。
+- 真库：CI `realdb` job 用 `postgres:16` + `mysql:8` service 运行
+  `cargo test -p rust-webx-ef --features postgres,mysql --tests -- --ignored`
+  （唯一键 INSERT 竞争回落、条件 UPDATE/DELETE、Unix 秒 TTL 列、二进制 body）。
+  两个 provider 是可选 feature，默认构建仍只用 SQLite。
 - `cargo clippy --workspace --all-targets -D warnings`、rustdoc `-D warnings`、MSRV
   1.95 与 feature 矩阵检查全绿；两个 mdBook 站点均可用 mdBook v0.5.4 构建。
 - `cargo audit` 无漏洞（提交的 lockfile 把 `url` 2.5.8 升到 2.5.9，对应
   RUSTSEC-2026-0592）；剩余为允许的 unmaintained 告警（chrono、rustls-pemfile）。
+- **与 rust-ef 2.8.0 的跨仓配对**：`scripts/check-pairing-rust-ef.sh` 用
+  `[patch.crates-io]` 把 `rust-ef` / `rust-ef-sqlite` 指向本地 rust-ef checkout
+  （`RUST_EF_PATH`）后编译本工作区，并执行 `cargo test -p rust-webx-ef`；可选 CI
+  `pairing` job 仅在配置了 `vars.RUST_EF_PATH` / `vars.RUST_EF_REPO` 或
+  `rust_ef_ref` dispatch 输入时运行同一脚本。发布顺序为**先 rust-ef 2.8.0、
+  后 rust-webx 2.8.0**。证据边界：证明本工作区与 EF 适配层能针对给定 rust-ef
+  源码树编译、且适配层的 SQLite 测试通过；不证明 crates.io 已发布制品、该源码树
+  的 semver 门禁，也不覆盖真库 PostgreSQL/MySQL（由真库 job 覆盖）。
 
 ---
 

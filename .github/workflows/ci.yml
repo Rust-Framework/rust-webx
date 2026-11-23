@@ -5,6 +5,12 @@ on:
     branches: [main, master]
   pull_request:
     branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      rust_ef_ref:
+        description: "rust-ef git ref to pair against (empty = skip the pairing job)"
+        required: false
+        default: ""
 
 env:
   CARGO_TERM_COLOR: always
@@ -191,7 +197,7 @@ jobs:
         run: cargo run -p alloc-probe --release --locked -- compare 500 12
 
   semver:
-    name: SemVer (vs v2.1.0)
+    name: SemVer (vs v2.7.0)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -205,8 +211,59 @@ jobs:
       - name: Check the public API against the previous release
         run: |
           for package in rust-webx-core rust-webx-engine rust-webx-host rust-webx; do
-            cargo semver-checks --package "$package" --baseline-rev v2.1.0
+            cargo semver-checks --package "$package" --baseline-rev v2.7.0
           done
+
+  realdb:
+    name: Real databases (idempotency store)
+    runs-on: ubuntu-latest
+    # M6: the durable idempotency store's server-specific SQL (unique-key INSERT
+    # race fallback, conditional UPDATE/DELETE, Unix-seconds TTL columns, binary
+    # body) is only exercised against a real PostgreSQL/MySQL. The tests are
+    # `#[ignore]`d and opt-in through the providers' env URLs.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: rust_webx_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: rust_webx_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -ptest"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/
+            ~/.cargo/git/
+            target/
+          key: ${{ runner.os }}-cargo-realdb-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-realdb-
+      - name: Idempotency store against PostgreSQL 16 / MySQL 8
+        env:
+          RUST_EF_PG_URL: postgres://test:test@127.0.0.1:5432/rust_webx_test
+          RUST_EF_MYSQL_URL: mysql://root:test@127.0.0.1:3306/rust_webx_test
+        run: cargo test -p rust-webx-ef --features postgres,mysql --locked --tests -- --ignored
 
   upgrade:
     name: Upgrade smoke (N-2)
@@ -271,3 +328,52 @@ jobs:
             echo "reference apps must use ITokenIssuer/IPasswordHasher, not hand-written JWT/bcrypt"
             exit 1
           fi
+
+  # Optional cross-repo pairing gate (release order: rust-ef 2.8.0 first, then
+  # rust-webx 2.8.0). Hosted runners cannot see a developer's local checkout, so
+  # this job is inert unless explicitly configured:
+  #   * repository variable RUST_EF_PATH  — an existing rust-ef checkout on a
+  #     self-hosted runner;
+  #   * repository variable RUST_EF_REPO (+ optional RUST_EF_REF), or the
+  #     `rust_ef_ref` workflow_dispatch input — the job checks rust-ef out into
+  #     .pairing/rust-ef itself.
+  # Without configuration it prints a notice and skips the verification; a
+  # normal PR is never blocked. See scripts/check-pairing-rust-ef.sh and the
+  # evidence boundary in docs/design/compatibility.md.
+  pairing:
+    name: Pairing (rust-ef local)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain why pairing is skipped
+        if: vars.RUST_EF_PATH == '' && vars.RUST_EF_REPO == '' && github.event.inputs.rust_ef_ref == ''
+        run: |
+          echo "::notice::Cross-repo pairing is opt-in. Set repository variable RUST_EF_PATH (self-hosted rust-ef checkout) or RUST_EF_REPO (+ RUST_EF_REF), or dispatch this workflow with rust_ef_ref, to build rust-webx against local rust-ef via scripts/check-pairing-rust-ef.sh."
+
+      - name: Check out rust-webx
+        if: vars.RUST_EF_PATH != '' || vars.RUST_EF_REPO != '' || github.event.inputs.rust_ef_ref != ''
+        uses: actions/checkout@v4
+
+      - name: Check out paired rust-ef
+        if: vars.RUST_EF_PATH == '' && (vars.RUST_EF_REPO != '' || github.event.inputs.rust_ef_ref != '')
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.RUST_EF_REPO || 'Rust-Framework/rust-ef' }}
+          ref: ${{ github.event.inputs.rust_ef_ref || vars.RUST_EF_REF || 'main' }}
+          path: .pairing/rust-ef
+
+      - name: Install Rust toolchain
+        if: vars.RUST_EF_PATH != '' || vars.RUST_EF_REPO != '' || github.event.inputs.rust_ef_ref != ''
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Resolve pairing checkout
+        if: vars.RUST_EF_PATH != '' || vars.RUST_EF_REPO != '' || github.event.inputs.rust_ef_ref != ''
+        run: |
+          if [ -n "${{ vars.RUST_EF_PATH }}" ]; then
+            echo "RUST_EF_PATH=${{ vars.RUST_EF_PATH }}" >> "$GITHUB_ENV"
+          else
+            echo "RUST_EF_PATH=$GITHUB_WORKSPACE/.pairing/rust-ef" >> "$GITHUB_ENV"
+          fi
+
+      - name: Verify pairing (check --locked + rust-webx-ef tests)
+        if: vars.RUST_EF_PATH != '' || vars.RUST_EF_REPO != '' || github.event.inputs.rust_ef_ref != ''
+        run: bash scripts/check-pairing-rust-ef.sh

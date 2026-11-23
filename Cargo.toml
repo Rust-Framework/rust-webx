@@ -55,15 +55,37 @@ members = [
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
-# cargo-semver-checks policy (CI `semver` job).
+# cargo-semver-checks policy (CI `semver` job). Crates opt in with
+# `[lints] workspace = true` in their own Cargo.toml.
 #
-# Config sections are serde-bound DTOs: the documented construction path is
-# `Default` + appsettings/`APP__` overrides, so adding a knob is additive for
-# that usage. They become `#[non_exhaustive]` in the v2.4 breaking window, after
-# which this exception can be removed. Structs that must stay literal-
-# constructible (e.g. `ProblemDetails`) are pinned by `api_stability_test`.
+# `constructible_struct_adds_field` is allowed for two documented cases:
+#
+# 1. Config sections (`ServerSection`, `JwtSection`, `IdempotencySection`, …) are
+#    serde-bound DTOs: the documented construction path is `Default` +
+#    appsettings/`APP__` overrides, so adding a knob is additive for that usage.
+#    They become `#[non_exhaustive]` in the 3.0 breaking window, after which
+#    this part of the exception can be removed.
+# 2. 2.8.0: `IdempotentResponse` gains `headers` (the replayable response headers
+#    of a cached response), which breaks struct-literal construction only.
+#    CHANGELOG `[2.8.0]` -> Breaking documents the migration for custom
+#    `IIdempotencyStore` implementations; the response-store path is the only
+#    documented constructor. Revisit with the same 3.0 window.
+#
+# 2.8.0 also marks the idempotency value types `#[non_exhaustive]`
+# (`IdempotentResponse`, `IdempotencyLease`, `IdempotencyBegin`) so new state /
+# metadata can be added without another breaking release. That is flagged by
+# `struct_marked_non_exhaustive` / `enum_marked_non_exhaustive`; both are allowed
+# here for the same documented reason and reviewed with the 3.0 window. The
+# migration is mechanical: construct `IdempotentResponse` with `::new(..)` +
+# `.with_headers(..)`, `IdempotencyLease` with `::new(..)`, and add a wildcard
+# arm to `match` on `IdempotencyBegin`.
+#
+# Structs that must stay literal-constructible (e.g. `ProblemDetails`) are
+# pinned by `api_stability_test`.
 [workspace.metadata.cargo-semver-checks.lints]
 constructible_struct_adds_field = "allow"
+struct_marked_non_exhaustive = "allow"
+enum_marked_non_exhaustive = "allow"
 
 [workspace.package]
 version = "2.8.0"
@@ -128,11 +150,19 @@ dmbit-handlers = { version = "0.1.0", path = "dmbit/handlers" }
 rust-dix = "1.0"
 rust-dix-macros = "1.0"
 
-# rust-ef ORM (rust-ef 2.6 / rust-dix 1.0 integration via add_dbcontext + owned resolution).
+# rust-ef ORM (rust-ef 2.6+, paired/verified with rust-ef 2.8.0 in this release;
+# rust-dix 1.0 integration via add_dbcontext + owned resolution).
+# Keep the `"2.6"` semver range: it admits 2.8.x, and the release order is
+# rust-ef 2.8.0 first, then rust-webx 2.8.0. Do not tighten it to `=2.8`, which
+# would make the lockfile unresolvable before the ORM release is on crates.io.
 # rust-ef is Web-agnostic (no `webx` feature and no dependency on rust-webx);
 # applications map EFError at their boundary (reference apps: handlers/src/db.rs).
 rust-ef = "2.6"
 rust-ef-sqlite = "2.6"
+# Optional providers for rust-webx-ef's env-driven real-database idempotency
+# tests (`--features postgres,mysql`); never pulled into a default build.
+rust-ef-postgres = "2.6"
+rust-ef-mysql = "2.6"
 
 # External dependencies
 arc-swap = "1"

@@ -2,6 +2,7 @@
 
 use serde_json;
 use std::sync::Arc;
+use tracing::Instrument;
 use webx_core::error::Result;
 use webx_core::http::IHttpContext;
 use webx_core::routing::IEndpoint;
@@ -27,7 +28,15 @@ pub struct RequestEndpoint {
 #[async_trait::async_trait]
 impl IEndpoint for RequestEndpoint {
     async fn handle(&self, ctx: &mut dyn IHttpContext) -> Result<()> {
-        (self.handler)(ctx).await
+        let span = tracing::debug_span!(
+            target: "webx.http",
+            "http.handler",
+            kind = "request",
+            status = tracing::field::Empty,
+        );
+        let outcome = (self.handler)(ctx).instrument(span.clone()).await;
+        span.record("status", u64::from(ctx.response().status()));
+        outcome
     }
 }
 
@@ -172,26 +181,40 @@ impl StubEndpoint {
 #[async_trait::async_trait]
 impl IEndpoint for StubEndpoint {
     async fn handle(&self, ctx: &mut dyn IHttpContext) -> Result<()> {
-        if !self.authorize(ctx).await? {
-            return Ok(());
-        }
+        let span = tracing::debug_span!(
+            target: "webx.http",
+            "http.handler",
+            handler = self.handler_type,
+            method = self.method,
+            path = self.path,
+            status = tracing::field::Empty,
+        );
+        let outcome = async {
+            if !self.authorize(ctx).await? {
+                return Ok(());
+            }
 
-        if let Some(dispatch) = self.dispatch_fn {
-            let response = dispatch(&mut *ctx).await?;
-            response.execute(&mut *ctx).await?;
-            return Ok(());
-        }
+            if let Some(dispatch) = self.dispatch_fn {
+                let response = dispatch(&mut *ctx).await?;
+                response.execute(&mut *ctx).await?;
+                return Ok(());
+            }
 
-        write_problem(
-            ctx,
-            501,
-            &format!(
-                "Route handler not implemented: {} {} (request type: {})",
-                self.method, self.path, self.handler_type
-            ),
-        )
+            write_problem(
+                ctx,
+                501,
+                &format!(
+                    "Route handler not implemented: {} {} (request type: {})",
+                    self.method, self.path, self.handler_type
+                ),
+            )
+            .await;
+            Ok(())
+        }
+        .instrument(span.clone())
         .await;
-        Ok(())
+        span.record("status", u64::from(ctx.response().status()));
+        outcome
     }
 }
 
@@ -233,11 +256,25 @@ impl webx_engine::RouteTarget for DirectRouteTarget {
     }
 
     async fn handle(&self, ctx: &mut webx_engine::EngineContext) -> Result<()> {
-        if !self.auth.authorize(ctx).await? {
-            return Ok(());
+        let span = tracing::debug_span!(
+            target: "webx.http",
+            "http.handler",
+            handler = self.auth.handler_type,
+            method = self.auth.method,
+            path = self.auth.path,
+            status = tracing::field::Empty,
+        );
+        let outcome = async {
+            if !self.auth.authorize(ctx).await? {
+                return Ok(());
+            }
+            let result = (self.dispatch)(ctx as &mut dyn IHttpContext, self.encoder).await?;
+            ctx.write_endpoint_result(result).await
         }
-        let result = (self.dispatch)(ctx as &mut dyn IHttpContext, self.encoder).await?;
-        ctx.write_endpoint_result(result).await
+        .instrument(span.clone())
+        .await;
+        span.record("status", u64::from(ctx.response().status()));
+        outcome
     }
 }
 
@@ -257,7 +294,15 @@ pub struct ControllerEndpoint {
 #[async_trait::async_trait]
 impl IEndpoint for ControllerEndpoint {
     async fn handle(&self, ctx: &mut dyn IHttpContext) -> Result<()> {
-        (self.handler)(ctx).await
+        let span = tracing::debug_span!(
+            target: "webx.http",
+            "http.handler",
+            kind = "controller",
+            status = tracing::field::Empty,
+        );
+        let outcome = (self.handler)(ctx).instrument(span.clone()).await;
+        span.record("status", u64::from(ctx.response().status()));
+        outcome
     }
 }
 

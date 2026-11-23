@@ -1,7 +1,8 @@
 name: Stability
 
-# Nightly soak + chaos. The PR CI keeps the fast gates; these tests are
-# `#[ignore]`d there and only run here (or by hand).
+# Nightly soak + chaos + HTTP interop/conformance. The PR CI keeps the fast
+# gates; these tests are `#[ignore]`d there and only run here (or by hand).
+# Full cargo-fuzz corpus runs live in .github/workflows/fuzz.yml.
 on:
   schedule:
     - cron: "0 3 * * *"
@@ -48,6 +49,43 @@ jobs:
         env:
           WIRE_P99_BUDGET_MS: "5"
         run: cargo test --release -p rust-webx --test wire_p99_test -- --ignored --nocapture
+
+  conformance:
+    name: HTTP interop / conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install h2spec (optional)
+        # Pinned release binary. If the download ever breaks, the job stays
+        # meaningful: scripts/conformance.sh prints a SKIP and still enforces
+        # the curl HTTP/1.1 + HTTP/2 status/problem+json matrix.
+        run: |
+          H2SPEC_VERSION=2.6.0
+          if curl -fsSL "https://github.com/summerwind/h2spec/releases/download/v${H2SPEC_VERSION}/h2spec_linux_amd64.tar.gz" -o /tmp/h2spec.tgz; then
+            tar xzf /tmp/h2spec.tgz -C /tmp
+            sudo install -m755 /tmp/h2spec /usr/local/bin/h2spec
+            h2spec --version
+          else
+            echo "::warning::h2spec download failed; conformance falls back to the curl matrix"
+          fi
+      - name: h2c prior-knowledge and TLS ALPN regression tests
+        # scripts/conformance.sh covers HTTP/1.1 + h2c against a real process;
+        # this test covers h2-over-TLS ALPN (the example scenario has no TLS
+        # listener) and asserts the negotiation end to end.
+        run: cargo test -p rust-webx-host --test http2_test
+      - name: curl conformance matrix (HTTP/1.1 + HTTP/2 h2c)
+        env:
+          CONFORMANCE_LOG_DIR: ${{ runner.temp }}/conformance-logs
+        run: bash scripts/conformance.sh
+      - name: Upload conformance logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-logs
+          path: ${{ runner.temp }}/conformance-logs
+          if-no-files-found: ignore
 
   broker-integration:
     name: Broker adapters (redis/nats/rabbitmq/kafka)

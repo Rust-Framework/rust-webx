@@ -1,0 +1,5 @@
+# Build artifacts are never committed. The handwritten seed corpus IS committed
+# under corpus/<target>/ so nightly runs start from known-good inputs; inputs
+# evolved by local/CI runs and libFuzzer crash reproducers stay ignored.
+/target
+/artifacts

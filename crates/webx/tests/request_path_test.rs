@@ -24,19 +24,31 @@ fn find_free_port() -> u16 {
     }
 }
 
-async fn spawn_host(port: u16) {
-    let addr = format!("127.0.0.1:{}", port);
-    let host = Host::builder()
-        .mode(AppMode::Development)
-        .no_spa()
-        .configure(|b| {
-            b.useOptions(|o| {
-                o.app.max_body_size = 100;
-            });
-        })
-        .build();
-    tokio::spawn(async move { host.run_at(&addr).await.unwrap() });
-    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+/// Starts a host on a free port, retrying when another test process grabs the
+/// port between the probe and `run_at` (the port is not bound atomically).
+async fn spawn_host() -> u16 {
+    loop {
+        let port = find_free_port();
+        let addr = format!("127.0.0.1:{}", port);
+        let host = Host::builder()
+            .mode(AppMode::Development)
+            .no_spa()
+            .configure(|b| {
+                b.useOptions(|o| {
+                    o.app.max_body_size = 100;
+                });
+            })
+            .build();
+        tokio::spawn(async move { host.run_at(&addr).await });
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+        if tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .is_ok()
+        {
+            return port;
+        }
+        // Another process won the race; pick another port.
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -73,8 +85,7 @@ impl IRequestHandler<GetUserRequest, UserResponse> for GetUserHandler {
 
 #[tokio::test]
 async fn get_with_path_param_returns_200() {
-    let port = find_free_port();
-    spawn_host(port).await;
+    let port = spawn_host().await;
 
     let resp = reqwest::get(format!("http://127.0.0.1:{}/users/42", port))
         .await
@@ -123,8 +134,7 @@ impl IRequestHandler<CreateUserRequest, CreateUserResponse> for CreateUserHandle
 
 #[tokio::test]
 async fn post_with_json_body_returns_200() {
-    let port = find_free_port();
-    spawn_host(port).await;
+    let port = spawn_host().await;
 
     let resp = reqwest::Client::new()
         .post(format!("http://127.0.0.1:{}/users", port))
@@ -149,8 +159,7 @@ async fn post_with_json_body_returns_200() {
 
 #[tokio::test]
 async fn post_with_invalid_json_returns_400() {
-    let port = find_free_port();
-    spawn_host(port).await;
+    let port = spawn_host().await;
 
     let resp = reqwest::Client::new()
         .post(format!("http://127.0.0.1:{}/users", port))
@@ -202,8 +211,7 @@ impl IRequestHandler<UpdateUserRequest, UpdateUserResponse> for UpdateUserHandle
 
 #[tokio::test]
 async fn put_with_path_and_body_returns_200() {
-    let port = find_free_port();
-    spawn_host(port).await;
+    let port = spawn_host().await;
 
     let resp = reqwest::Client::new()
         .put(format!("http://127.0.0.1:{}/users/99", port))
@@ -244,8 +252,7 @@ impl IRequestHandler<DeleteUserRequest, ()> for DeleteUserHandler {
 
 #[tokio::test]
 async fn delete_returns_204_no_content() {
-    let port = find_free_port();
-    spawn_host(port).await;
+    let port = spawn_host().await;
 
     let resp = reqwest::Client::new()
         .delete(format!("http://127.0.0.1:{}/users/5", port))
@@ -280,8 +287,7 @@ impl IRequestHandler<StatusOnlyRequest, Response> for StatusOnlyHandler {
 
 #[tokio::test]
 async fn action_result_sets_the_status_code() {
-    let port = find_free_port();
-    spawn_host(port).await;
+    let port = spawn_host().await;
 
     let resp = reqwest::get(format!("http://127.0.0.1:{}/status-only", port))
         .await
@@ -296,8 +302,7 @@ async fn action_result_sets_the_status_code() {
 
 #[tokio::test]
 async fn method_not_allowed_returns_405() {
-    let port = find_free_port();
-    spawn_host(port).await;
+    let port = spawn_host().await;
 
     // /users/{id} has GET, PUT, DELETE but not POST
     let resp = reqwest::Client::new()
@@ -317,8 +322,7 @@ async fn method_not_allowed_returns_405() {
 
 #[tokio::test]
 async fn oversized_body_returns_413() {
-    let port = find_free_port();
-    spawn_host(port).await;
+    let port = spawn_host().await;
 
     let big_body = "x".repeat(200); // max_body_size is 100
 
@@ -370,8 +374,7 @@ impl IRequestHandler<GetPostRequest, PostResponse> for GetPostHandler {
 
 #[tokio::test]
 async fn multiple_path_params_parsed_correctly() {
-    let port = find_free_port();
-    spawn_host(port).await;
+    let port = spawn_host().await;
 
     let resp = reqwest::get(format!("http://127.0.0.1:{}/users/10/posts/20", port))
         .await
@@ -390,8 +393,7 @@ async fn multiple_path_params_parsed_correctly() {
 
 #[tokio::test]
 async fn upstream_request_id_is_propagated() {
-    let port = find_free_port();
-    spawn_host(port).await;
+    let port = spawn_host().await;
 
     let custom_id = "my-trace-id-12345";
     let resp = reqwest::Client::new()
@@ -411,8 +413,7 @@ async fn upstream_request_id_is_propagated() {
 
 #[tokio::test]
 async fn missing_request_id_generates_one() {
-    let port = find_free_port();
-    spawn_host(port).await;
+    let port = spawn_host().await;
 
     let resp = reqwest::get(format!("http://127.0.0.1:{}/health", port))
         .await
@@ -461,8 +462,7 @@ impl IRequestHandler<SearchRequest, SearchResponse> for SearchHandler {
 
 #[tokio::test]
 async fn get_with_query_params_returns_200() {
-    let port = find_free_port();
-    spawn_host(port).await;
+    let port = spawn_host().await;
 
     let resp = reqwest::get(format!("http://127.0.0.1:{}/search?q=hello&page=2", port))
         .await
@@ -512,8 +512,7 @@ impl IRequestHandler<FailRequest, FailResponse> for FailHandler {
 
 #[tokio::test]
 async fn error_unauthorized_maps_to_401() {
-    let port = find_free_port();
-    spawn_host(port).await;
+    let port = spawn_host().await;
 
     let resp = reqwest::get(format!("http://127.0.0.1:{}/fail/401", port))
         .await
@@ -530,8 +529,7 @@ async fn error_unauthorized_maps_to_401() {
 
 #[tokio::test]
 async fn error_forbidden_maps_to_403() {
-    let port = find_free_port();
-    spawn_host(port).await;
+    let port = spawn_host().await;
 
     let resp = reqwest::get(format!("http://127.0.0.1:{}/fail/403", port))
         .await
@@ -544,8 +542,7 @@ async fn error_forbidden_maps_to_403() {
 
 #[tokio::test]
 async fn error_status_custom_maps_correctly() {
-    let port = find_free_port();
-    spawn_host(port).await;
+    let port = spawn_host().await;
 
     let resp = reqwest::get(format!("http://127.0.0.1:{}/fail/422", port))
         .await
@@ -558,8 +555,7 @@ async fn error_status_custom_maps_correctly() {
 
 #[tokio::test]
 async fn error_internal_maps_to_500() {
-    let port = find_free_port();
-    spawn_host(port).await;
+    let port = spawn_host().await;
 
     let resp = reqwest::get(format!("http://127.0.0.1:{}/fail/500", port))
         .await
@@ -574,8 +570,7 @@ async fn error_internal_maps_to_500() {
 
 #[tokio::test]
 async fn unknown_route_returns_404_problem_json() {
-    let port = find_free_port();
-    spawn_host(port).await;
+    let port = spawn_host().await;
 
     let resp = reqwest::get(format!("http://127.0.0.1:{}/totally/unknown", port))
         .await
@@ -600,8 +595,7 @@ async fn unknown_route_returns_404_problem_json() {
 
 #[tokio::test]
 async fn json_response_has_correct_content_type() {
-    let port = find_free_port();
-    spawn_host(port).await;
+    let port = spawn_host().await;
 
     let resp = reqwest::get(format!("http://127.0.0.1:{}/users/1", port))
         .await
@@ -645,8 +639,7 @@ impl IRequestHandler<CreatedJsonRequest, Response> for CreatedJsonHandler {
 
 #[tokio::test]
 async fn json_result_can_override_the_status_code() {
-    let port = find_free_port();
-    spawn_host(port).await;
+    let port = spawn_host().await;
 
     let resp = reqwest::get(format!("http://127.0.0.1:{port}/created-json"))
         .await
@@ -685,8 +678,7 @@ impl IRequestHandler<QualifiedResponseRequest, webx::Response> for QualifiedResp
 
 #[tokio::test]
 async fn qualified_response_type_uses_the_raw_path() {
-    let port = find_free_port();
-    spawn_host(port).await;
+    let port = spawn_host().await;
 
     let resp = reqwest::get(format!("http://127.0.0.1:{port}/qualified-response"))
         .await

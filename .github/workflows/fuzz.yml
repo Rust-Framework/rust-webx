@@ -1,0 +1,77 @@
+name: Fuzz
+
+# Nightly coverage-guided fuzzing for rust-webx public parse entry points.
+#
+# The fuzz targets live in the standalone `fuzz/` workspace (its Cargo.toml
+# declares an empty `[workspace]`), so nothing here builds the published crates
+# with nightly/sanitizer flags, and the main `Cargo.lock`/MSRV/clippy gates are
+# untouched. All logic and invariants live in `fuzz/src/lib.rs`; the targets in
+# `fuzz/fuzz_targets/` only forward bytes into it.
+#
+# The fast per-PR fuzz gates stay in ci.yml (fuzz-lite + proptest); this
+# workflow is the full libFuzzer corpus run. Crash reproducers and the evolved
+# corpus are uploaded as artifacts.
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: "Seconds per fuzz target"
+        required: false
+        default: "60"
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Fuzz logic smoke (stable)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # Ordinary #[test]s: invariants, committed seed corpus and a deterministic
+      # randomized smoke run. Works on stable, so it also proves the target
+      # logic without the nightly libFuzzer build.
+      - name: Fuzz logic unit tests + seed corpus
+        run: cargo test --manifest-path fuzz/Cargo.toml --lib --locked
+
+  targets:
+    name: cargo-fuzz (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - cursor_decode
+          - config_bind
+          - client_ip
+          - problem_details
+          - file_name_sanitize
+          - event_wire
+    steps:
+      - uses: actions/checkout@v4
+      # libFuzzer requires a nightly toolchain (sanitizer/codegen flags).
+      - uses: dtolnay/rust-toolchain@nightly
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Fuzz ${{ matrix.target }}
+        working-directory: fuzz
+        env:
+          FUZZ_SECONDS: ${{ github.event.inputs.seconds || '60' }}
+        run: |
+          cargo fuzz run "${{ matrix.target }}" -- \
+            -max_total_time="${FUZZ_SECONDS}" -timeout=10 -rss_limit_mb=4096
+      - name: Upload corpus and crash artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-${{ matrix.target }}
+          path: |
+            fuzz/corpus/${{ matrix.target }}
+            fuzz/artifacts/${{ matrix.target }}
+          if-no-files-found: warn
+          compression-level: 9

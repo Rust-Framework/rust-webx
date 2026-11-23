@@ -22,12 +22,16 @@
 //! body method takes `&mut self`; there is no `Mutex` around it.
 
 use bytes::Bytes;
-use hyper::body::Incoming;
+use hyper::body::{Body, Frame, Incoming};
 use hyper::header::{HeaderMap, HeaderName};
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
+use std::task::{Context, Poll};
+use std::time::Instant;
 
+use tracing::Instrument;
 use webx_core::auth::IClaims;
 use webx_core::dispatch_runtime::DispatchRuntime;
 use webx_core::error::{Error, Result};
@@ -158,23 +162,40 @@ impl EngineContext {
     /// * [`EndpointResult::Action`] — the action result executes itself (files,
     ///   SSE, custom headers/status/body).
     pub async fn write_endpoint_result(&mut self, result: EndpointResult) -> Result<()> {
-        match result {
-            EndpointResult::Empty => {
-                self.resp.status = 204;
-                self.resp.body = ResponseBodyState::None;
+        let kind = match &result {
+            EndpointResult::Empty => "empty",
+            EndpointResult::Json { .. } => "json",
+            EndpointResult::Action(_) => "action",
+        };
+        let span = tracing::debug_span!(
+            target: "webx.http",
+            "http.response_write",
+            kind,
+            status = tracing::field::Empty,
+        );
+        let outcome = async {
+            match result {
+                EndpointResult::Empty => {
+                    self.resp.status = 204;
+                    self.resp.body = ResponseBodyState::None;
+                }
+                EndpointResult::Json { status, body } => {
+                    self.resp.status = status;
+                    response::insert_static_header(
+                        &mut self.resp.headers,
+                        "content-type",
+                        "application/json",
+                    );
+                    self.resp.body = ResponseBodyState::Bytes(body);
+                }
+                EndpointResult::Action(action) => action.execute(self).await?,
             }
-            EndpointResult::Json { status, body } => {
-                self.resp.status = status;
-                response::insert_static_header(
-                    &mut self.resp.headers,
-                    "content-type",
-                    "application/json",
-                );
-                self.resp.body = ResponseBodyState::Bytes(body);
-            }
-            EndpointResult::Action(action) => action.execute(self).await?,
+            Ok(())
         }
-        Ok(())
+        .instrument(span.clone())
+        .await;
+        span.record("status", u64::from(self.resp.status));
+        outcome
     }
 
     /// Finish the request and produce the hyper response.
@@ -182,16 +203,128 @@ impl EngineContext {
     /// Security headers, request ids and cache policy are middleware concerns;
     /// this applies only status, headers, content type and the body (including
     /// HEAD suppression and file/range semantics).
+    ///
+    /// An SSE response is a long connection: this is where `connection.opened`
+    /// is emitted and the body learns to emit `connection.closed` when hyper
+    /// finishes or drops it (see `docs/design/observability-contract.md`).
     pub async fn finalize(self) -> hyper::Response<RespBody> {
         let Self {
             mut req,
             resp,
             upgrade,
             upgrade_session,
+            trace_id,
             ..
         } = self;
         spawn_upgrade_session(upgrade, upgrade_session);
-        resp.finalize(&mut req).await
+        let response = resp.finalize(&mut req).await;
+        observe_sse_response(response, trace_id, req.path())
+    }
+}
+
+/// Whether `response` is a `text/event-stream` response (a long connection).
+fn is_sse_response(response: &hyper::Response<RespBody>) -> bool {
+    response
+        .headers()
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("text/event-stream"))
+}
+
+/// Emit the SSE connection lifecycle events around an assembled response.
+///
+/// SSE has no protocol upgrade, so the engine owns the connection observation:
+/// `connection.opened` fires here, right before hyper starts streaming the
+/// body, and the wrapped body emits `connection.closed` exactly once when the
+/// stream ends, errors, or is dropped (client disconnect / server abort). This
+/// costs one header lookup per request and one boxed body per SSE connection —
+/// regular responses are returned untouched.
+fn observe_sse_response(
+    response: hyper::Response<RespBody>,
+    trace_id: Option<String>,
+    path: &str,
+) -> hyper::Response<RespBody> {
+    if !is_sse_response(&response) {
+        return response;
+    }
+    let connection_id = webx_core::realtime::ConnectionId::next();
+    tracing::info!(
+        target: "webx.connection",
+        event = "connection.opened",
+        transport = "sse",
+        connection_id = %connection_id,
+        trace_id = trace_id.as_deref().unwrap_or(""),
+        path,
+        "connection.opened"
+    );
+    let (parts, body) = response.into_parts();
+    let body = http_body_util::BodyExt::boxed_unsync(SseLifecycleBody {
+        inner: body,
+        started: Instant::now(),
+        connection_id,
+        trace_id,
+        finished: false,
+    });
+    hyper::Response::from_parts(parts, body)
+}
+
+/// SSE response body wrapper that reports `connection.closed` once.
+struct SseLifecycleBody {
+    inner: RespBody,
+    started: Instant,
+    connection_id: webx_core::realtime::ConnectionId,
+    trace_id: Option<String>,
+    finished: bool,
+}
+
+impl SseLifecycleBody {
+    fn finish(&mut self, reason: &'static str) {
+        if self.finished {
+            return;
+        }
+        self.finished = true;
+        let duration_ms = u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        tracing::info!(
+            target: "webx.connection",
+            event = "connection.closed",
+            transport = "sse",
+            connection_id = %self.connection_id,
+            trace_id = self.trace_id.as_deref().unwrap_or(""),
+            reason,
+            duration_ms,
+            "connection.closed"
+        );
+    }
+}
+
+impl Body for SseLifecycleBody {
+    type Data = Bytes;
+    type Error = std::io::Error;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<std::result::Result<Frame<Self::Data>, Self::Error>>> {
+        let this = self.get_mut();
+        match Pin::new(&mut this.inner).poll_frame(cx) {
+            Poll::Ready(None) => {
+                this.finish("completed");
+                Poll::Ready(None)
+            }
+            Poll::Ready(Some(Err(error))) => {
+                this.finish("failed");
+                Poll::Ready(Some(Err(error)))
+            }
+            other => other,
+        }
+    }
+}
+
+impl Drop for SseLifecycleBody {
+    fn drop(&mut self) {
+        // Dropped before the framed stream finished: the client disconnected or
+        // the connection was aborted while the response body was still live.
+        self.finish("client_disconnected");
     }
 }
 
@@ -212,12 +345,46 @@ fn spawn_upgrade_session(
         return;
     };
     tokio::spawn(async move {
+        let transport_kind = meta.transport;
+        let connection_id = meta.id;
+        let trace_id = meta.trace_id.clone();
         match on_upgrade.await {
             Ok(upgraded) => {
                 let transport: webx_core::realtime::UpgradedTransport =
                     Box::new(hyper_util::rt::TokioIo::new(upgraded));
-                if let Err(error) = session.run(transport, meta).await {
-                    tracing::warn!(%error, "engine: upgraded session ended with an error");
+                let started = Instant::now();
+                tracing::info!(
+                    target: "webx.connection",
+                    event = "connection.opened",
+                    transport = transport_kind.as_str(),
+                    connection_id = %connection_id,
+                    trace_id = trace_id.as_deref().unwrap_or(""),
+                    "connection.opened"
+                );
+                let result = session.run(transport, meta).await;
+                let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+                match &result {
+                    Ok(()) => tracing::info!(
+                        target: "webx.connection",
+                        event = "connection.closed",
+                        transport = transport_kind.as_str(),
+                        connection_id = %connection_id,
+                        trace_id = trace_id.as_deref().unwrap_or(""),
+                        reason = "completed",
+                        duration_ms,
+                        "connection.closed"
+                    ),
+                    Err(error) => tracing::warn!(
+                        target: "webx.connection",
+                        event = "connection.closed",
+                        transport = transport_kind.as_str(),
+                        connection_id = %connection_id,
+                        trace_id = trace_id.as_deref().unwrap_or(""),
+                        reason = "error",
+                        duration_ms,
+                        error = %error,
+                        "connection.closed"
+                    ),
                 }
             }
             Err(error) => tracing::warn!(%error, "engine: protocol upgrade failed"),
@@ -476,42 +643,59 @@ impl IHttpRequest for EngineRequest {
     }
 
     async fn body_bytes_shared(&mut self) -> Result<Bytes> {
-        self.ensure_declared_within(self.body_limit as u64)?;
-        match &self.body {
-            BodyState::Buffered(bytes) => {
-                if bytes.len() > self.body_limit {
-                    return Err(Error::PayloadTooLarge(format!(
-                        "request body exceeds the {}-byte limit",
-                        self.body_limit
-                    )));
+        // The body read is the I/O half of model binding; the pure in-memory
+        // path/query mapping that follows is not a separate span.
+        let span = tracing::debug_span!(
+            target: "webx.http",
+            "http.binding",
+            kind = "bytes",
+            limit = self.body_limit as u64,
+            bytes = tracing::field::Empty,
+        );
+        let outcome = async {
+            self.ensure_declared_within(self.body_limit as u64)?;
+            match &self.body {
+                BodyState::Buffered(bytes) => {
+                    if bytes.len() > self.body_limit {
+                        return Err(Error::PayloadTooLarge(format!(
+                            "request body exceeds the {}-byte limit",
+                            self.body_limit
+                        )));
+                    }
+                    return Ok(bytes.clone());
                 }
-                return Ok(bytes.clone());
+                BodyState::Form(_) => {
+                    return Err(Error::State(
+                        "request body was already read as multipart/form-data".to_string(),
+                    ))
+                }
+                BodyState::Pending(_) => {}
             }
-            BodyState::Form(_) => {
-                return Err(Error::State(
-                    "request body was already read as multipart/form-data".to_string(),
-                ))
-            }
-            BodyState::Pending(_) => {}
-        }
 
-        let incoming = match &mut self.body {
-            BodyState::Pending(slot) => slot.take(),
-            _ => {
+            let incoming = match &mut self.body {
+                BodyState::Pending(slot) => slot.take(),
+                _ => {
+                    return Err(Error::State(
+                        "request body has already been consumed".to_string(),
+                    ))
+                }
+            };
+            let Some(incoming) = incoming else {
                 return Err(Error::State(
                     "request body has already been consumed".to_string(),
-                ))
-            }
-        };
-        let Some(incoming) = incoming else {
-            return Err(Error::State(
-                "request body has already been consumed".to_string(),
-            ));
-        };
+                ));
+            };
 
-        let bytes = body::read_body(incoming, self.body_limit).await?;
-        self.body = BodyState::Buffered(bytes.clone());
-        Ok(bytes)
+            let bytes = body::read_body(incoming, self.body_limit).await?;
+            self.body = BodyState::Buffered(bytes.clone());
+            Ok(bytes)
+        }
+        .instrument(span.clone())
+        .await;
+        if let Ok(bytes) = &outcome {
+            span.record("bytes", bytes.len() as u64);
+        }
+        outcome
     }
 
     async fn body_stream(&mut self) -> Result<RequestBodyStream> {
@@ -555,50 +739,60 @@ impl IHttpRequest for EngineRequest {
     }
 
     async fn multipart(&mut self) -> Result<Arc<MultipartForm>> {
-        self.ensure_declared_within(self.limits.multipart_body)?;
-        if let BodyState::Form(form) = &self.body {
-            return Ok(Arc::clone(form));
-        }
-        if let BodyState::Buffered(_) = &self.body {
-            return Err(Error::UnsupportedMediaType(
-                "request body was already read as a non-multipart body".to_string(),
-            ));
-        }
+        let span = tracing::debug_span!(
+            target: "webx.http",
+            "http.binding",
+            kind = "multipart",
+            limit = self.limits.multipart_body,
+        );
+        async {
+            self.ensure_declared_within(self.limits.multipart_body)?;
+            if let BodyState::Form(form) = &self.body {
+                return Ok(Arc::clone(form));
+            }
+            if let BodyState::Buffered(_) = &self.body {
+                return Err(Error::UnsupportedMediaType(
+                    "request body was already read as a non-multipart body".to_string(),
+                ));
+            }
 
-        let raw_content_type = self
-            .parts
-            .headers
-            .get("content-type")
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or("");
-        if !body::is_multipart_content_type(Some(raw_content_type)) {
-            return Err(Error::UnsupportedMediaType(
-                "expected Content-Type: multipart/form-data".to_string(),
-            ));
-        }
-        let boundary = body::multipart_boundary(raw_content_type).ok_or_else(|| {
-            Error::Validation(
-                "multipart/form-data request is missing its boundary parameter".to_string(),
-            )
-        })?;
+            let raw_content_type = self
+                .parts
+                .headers
+                .get("content-type")
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or("");
+            if !body::is_multipart_content_type(Some(raw_content_type)) {
+                return Err(Error::UnsupportedMediaType(
+                    "expected Content-Type: multipart/form-data".to_string(),
+                ));
+            }
+            let boundary = body::multipart_boundary(raw_content_type).ok_or_else(|| {
+                Error::Validation(
+                    "multipart/form-data request is missing its boundary parameter".to_string(),
+                )
+            })?;
 
-        let incoming = match &mut self.body {
-            BodyState::Pending(slot) => slot.take(),
-            _ => {
+            let incoming = match &mut self.body {
+                BodyState::Pending(slot) => slot.take(),
+                _ => {
+                    return Err(Error::State(
+                        "request body has already been consumed".to_string(),
+                    ))
+                }
+            };
+            let Some(incoming) = incoming else {
                 return Err(Error::State(
                     "request body has already been consumed".to_string(),
-                ))
-            }
-        };
-        let Some(incoming) = incoming else {
-            return Err(Error::State(
-                "request body has already been consumed".to_string(),
-            ));
-        };
+                ));
+            };
 
-        let form = Arc::new(body::parse_multipart(incoming, &boundary, &self.limits).await?);
-        self.body = BodyState::Form(Arc::clone(&form));
-        Ok(form)
+            let form = Arc::new(body::parse_multipart(incoming, &boundary, &self.limits).await?);
+            self.body = BodyState::Form(Arc::clone(&form));
+            Ok(form)
+        }
+        .instrument(span)
+        .await
     }
 }
 

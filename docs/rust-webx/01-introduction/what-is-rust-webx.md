@@ -157,7 +157,7 @@ let user = req.require_user()?;
 | **生产级准入** | 所有 listener 共享一个全局 `MaxConnections` governor；首请求超时关闭静默连接；HTTP/2 keepalive；per-worker SSE drain。 |
 | **可取消的生命周期** | Host 单次运行状态机、run drop guard、优雅/立即关闭、join 超时保护 DI dispose；重复/并发 run 返回 typed error。 |
 | **可信错误语义** | 错误在逆序 after hooks 前写入；metrics/tracing/compression 看到真实 4xx/5xx；失败成功路径的表示头被清理，416 `Content-Range` 保留。 |
-| **原生优先的集成** | rust-dix 1.0 DI scope、rust-ef 2.5 ORM、JWT/session/password 端口、rust-webx-client；应用层不重复造轮子。 |
+| **原生优先的集成** | rust-dix 1.0 DI scope、rust-ef 2.6+ ORM（2.8.0 配对验证）、JWT/session/password 端口、rust-webx-client；应用层不重复造轮子。 |
 | **可验证的质量** | workspace 测试、TLS/h2/admission wire-level 测试、clippy / rustdoc / MSRV 1.95 / audit / bench smoke 全部纳入发布门禁。 |
 
 ## 框架边界：它不是什么

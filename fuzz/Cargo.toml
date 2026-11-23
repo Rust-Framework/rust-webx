@@ -1,0 +1,76 @@
+# Standalone cargo-fuzz workspace.
+#
+# This package is deliberately NOT a member of the repository workspace: fuzz
+# builds need nightly + sanitizer/codegen flags that must not leak into the
+# published crates or the main Cargo.lock. The empty `[workspace]` table below
+# makes this directory its own workspace root (the exclusion mechanism this
+# repo chose); the root Cargo.toml is not touched. See fuzz/README.md and
+# docs/design/stability-gates.md.
+[workspace]
+
+[package]
+name = "rust-webx-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# `cargo fuzz` discovers targets from this marker.
+[package.metadata]
+cargo-fuzz = true
+
+[lib]
+name = "rust_webx_fuzz"
+path = "src/lib.rs"
+
+# Only the parsing/invariant logic lives here; see src/lib.rs. This crate is a
+# normal safe-Rust library so `cargo test` exercises it on any stable toolchain.
+[dependencies]
+serde_json = "1"
+rust-webx-core = { path = "../crates/core" }
+
+# A thin `#![no_main]` wrapper per target in fuzz_targets/ owns the libFuzzer
+# entry point. libfuzzer-sys is only needed by those binaries.
+[dependencies.libfuzzer-sys]
+version = "0.4"
+
+[[bin]]
+name = "cursor_decode"
+path = "fuzz_targets/cursor_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "config_bind"
+path = "fuzz_targets/config_bind.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "client_ip"
+path = "fuzz_targets/client_ip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "problem_details"
+path = "fuzz_targets/problem_details.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "file_name_sanitize"
+path = "fuzz_targets/file_name_sanitize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "event_wire"
+path = "fuzz_targets/event_wire.rs"
+test = false
+doc = false
+bench = false

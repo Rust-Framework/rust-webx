@@ -23,6 +23,7 @@ use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tracing::Instrument;
 use webx_core::auth::{IAuthenticationHandler, IAuthenticationScheme, IClaims};
 use webx_core::error::{Error, Result};
 use webx_core::http::IHttpContext;
@@ -573,7 +574,7 @@ impl AuthenticationMiddleware {
         error: &Error,
         elapsed: Duration,
         trace_id: Option<&str>,
-    ) {
+    ) -> AuthOutcome {
         let outcome = match error.status_code() {
             401 => AuthOutcome::Unauthorized,
             403 => AuthOutcome::Forbidden,
@@ -597,70 +598,97 @@ impl AuthenticationMiddleware {
                 "authentication rejected"
             ),
         }
+        outcome
     }
 }
 
 #[async_trait]
 impl IMiddleware for AuthenticationMiddleware {
     async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
-        let started = Instant::now();
-        let allowed = self.allowed_schemes(ctx.request().path());
-        for scheme in &self.schemes {
-            if allowed.is_some_and(|allowed| !allowed.contains(&scheme.name())) {
-                continue;
-            }
-            if !scheme.matches(ctx) {
-                continue;
-            }
-            let scheme_started = Instant::now();
-            match scheme.authenticate(ctx).await {
-                Ok(Some(claims)) => {
-                    ctx.set_claims(claims);
-                    if let Some(metrics) = &self.metrics {
-                        metrics.record(
-                            scheme.name(),
-                            AuthOutcome::Authenticated,
-                            scheme_started.elapsed(),
+        // One `auth.authenticate` span per request, even for anonymous ones:
+        // the `outcome` field (ok/anonymous/unauthorized/forbidden/rate_limited/
+        // error) is the stable contract. Scheme metrics and logs stay as they
+        // are; the span is the trace-side view of the same decision.
+        let span = tracing::debug_span!(
+            target: "webx.http",
+            "auth.authenticate",
+            scheme = tracing::field::Empty,
+            outcome = tracing::field::Empty,
+        );
+        async {
+            let started = Instant::now();
+            let allowed = self.allowed_schemes(ctx.request().path());
+            for scheme in &self.schemes {
+                if allowed.is_some_and(|allowed| !allowed.contains(&scheme.name())) {
+                    continue;
+                }
+                if !scheme.matches(ctx) {
+                    continue;
+                }
+                let scheme_started = Instant::now();
+                match scheme.authenticate(ctx).await {
+                    Ok(Some(claims)) => {
+                        ctx.set_claims(claims);
+                        if let Some(metrics) = &self.metrics {
+                            metrics.record(
+                                scheme.name(),
+                                AuthOutcome::Authenticated,
+                                scheme_started.elapsed(),
+                            );
+                        }
+                        tracing::debug!(
+                            scheme = scheme.name(),
+                            outcome = "ok",
+                            trace_id = ?ctx.trace_id(),
+                            "authentication"
                         );
+                        let span = tracing::Span::current();
+                        span.record("scheme", scheme.name());
+                        span.record("outcome", AuthOutcome::Authenticated.as_str());
                     }
-                    tracing::debug!(
-                        scheme = scheme.name(),
-                        outcome = "ok",
-                        trace_id = ?ctx.trace_id(),
-                        "authentication"
-                    );
-                }
-                Ok(None) => {
-                    if let Some(metrics) = &self.metrics {
-                        metrics.record(
-                            scheme.name(),
-                            AuthOutcome::Anonymous,
-                            scheme_started.elapsed(),
+                    Ok(None) => {
+                        if let Some(metrics) = &self.metrics {
+                            metrics.record(
+                                scheme.name(),
+                                AuthOutcome::Anonymous,
+                                scheme_started.elapsed(),
+                            );
+                        }
+                        tracing::debug!(
+                            scheme = scheme.name(),
+                            outcome = "anonymous",
+                            trace_id = ?ctx.trace_id(),
+                            "authentication"
                         );
+                        let span = tracing::Span::current();
+                        span.record("scheme", scheme.name());
+                        span.record("outcome", AuthOutcome::Anonymous.as_str());
                     }
-                    tracing::debug!(
-                        scheme = scheme.name(),
-                        outcome = "anonymous",
-                        trace_id = ?ctx.trace_id(),
-                        "authentication"
-                    );
+                    Err(error) => {
+                        let outcome = self.record_error(
+                            scheme.name(),
+                            &error,
+                            scheme_started.elapsed(),
+                            ctx.trace_id(),
+                        );
+                        let span = tracing::Span::current();
+                        span.record("scheme", scheme.name());
+                        span.record("outcome", outcome.as_str());
+                        return Err(error);
+                    }
                 }
-                Err(error) => {
-                    self.record_error(
-                        scheme.name(),
-                        &error,
-                        scheme_started.elapsed(),
-                        ctx.trace_id(),
-                    );
-                    return Err(error);
-                }
+                return Ok(ControlFlow::Continue(()));
             }
-            return Ok(ControlFlow::Continue(()));
+            if let Some(metrics) = &self.metrics {
+                metrics.record_no_scheme(started.elapsed());
+            }
+            let span = tracing::Span::current();
+            span.record("scheme", "none");
+            span.record("outcome", AuthOutcome::Anonymous.as_str());
+            Ok(ControlFlow::Continue(()))
         }
-        if let Some(metrics) = &self.metrics {
-            metrics.record_no_scheme(started.elapsed());
-        }
-        Ok(ControlFlow::Continue(()))
+        .instrument(span)
+        .await
     }
 }
 

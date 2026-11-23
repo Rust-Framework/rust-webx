@@ -516,6 +516,16 @@ pub struct IdempotencySection {
     /// How long a stored response (or in-flight reservation) is retained.
     #[serde(default = "default_idempotency_ttl_seconds", rename = "TtlSeconds")]
     pub ttl_seconds: u64,
+    /// How long an in-flight reservation blocks concurrent retries before a
+    /// retry may reclaim the key (`Idempotency.LeaseSeconds`, default 60s).
+    ///
+    /// This is the reservation lease, not the replay retention: a crashed
+    /// handler becomes retryable after the lease, while a completed response
+    /// replays for [`Self::ttl_seconds`]. The middleware caps it at
+    /// `TtlSeconds`, so a lease longer than the retention never reaches the
+    /// store. Keep it above the handler's worst-case duration.
+    #[serde(default = "default_idempotency_lease_seconds", rename = "LeaseSeconds")]
+    pub lease_seconds: u64,
     /// Maximum retained keys for the default in-memory store.
     #[serde(default = "default_idempotency_max_keys", rename = "MaxTrackedKeys")]
     pub max_tracked_keys: usize,
@@ -538,6 +548,20 @@ pub struct IdempotencySection {
         rename = "AllowAnonymous"
     )]
     pub allow_anonymous: bool,
+    /// Only requests whose path starts with one of these prefixes are
+    /// idempotent. Empty = every path (the pre-2.8 behavior).
+    ///
+    /// Entries must start with `/` and match on path-segment boundaries:
+    /// `/api/orders` covers `/api/orders` and `/api/orders/123` but not
+    /// `/api/orders-archive`; a trailing slash is ignored. Requests outside the
+    /// list pass through without reading the key header or touching the store.
+    #[serde(default, rename = "Paths")]
+    pub paths: Vec<String>,
+    /// Requests whose path starts with one of these prefixes are never
+    /// idempotent. Takes precedence over `Paths`; same matching rules.
+    /// Default: empty.
+    #[serde(default, rename = "SkipPaths")]
+    pub skip_paths: Vec<String>,
 }
 
 impl Default for IdempotencySection {
@@ -545,15 +569,22 @@ impl Default for IdempotencySection {
         Self {
             enabled: false,
             ttl_seconds: default_idempotency_ttl_seconds(),
+            lease_seconds: default_idempotency_lease_seconds(),
             max_tracked_keys: default_idempotency_max_keys(),
             max_body_bytes: default_idempotency_max_body_bytes(),
             allow_anonymous: default_idempotency_allow_anonymous(),
+            paths: Vec::new(),
+            skip_paths: Vec::new(),
         }
     }
 }
 
 fn default_idempotency_ttl_seconds() -> u64 {
     24 * 60 * 60
+}
+
+fn default_idempotency_lease_seconds() -> u64 {
+    60
 }
 
 fn default_idempotency_max_keys() -> usize {
@@ -1306,6 +1337,46 @@ mod tests {
         }))
         .expect("partial turn config parse");
         assert!(partial.turn.is_configured());
+    }
+
+    #[test]
+    fn idempotency_section_defaults_and_parses_lease_seconds() {
+        let defaults = IdempotencySection::default();
+        assert_eq!(defaults.ttl_seconds, 24 * 60 * 60);
+        assert_eq!(defaults.lease_seconds, 60, "reservation lease default");
+        assert!(defaults.allow_anonymous);
+        assert!(defaults.paths.is_empty());
+        assert!(defaults.skip_paths.is_empty());
+
+        let options: AppOptions = serde_json::from_value(serde_json::json!({
+            "Idempotency": {
+                "Enabled": true,
+                "TtlSeconds": 3600,
+                "LeaseSeconds": 30,
+                "AllowAnonymous": false,
+                "Paths": ["/api/orders"],
+                "SkipPaths": ["/api/orders/internal"]
+            }
+        }))
+        .expect("idempotency config parse");
+        assert!(options.idempotency.enabled);
+        assert_eq!(options.idempotency.ttl_seconds, 3600);
+        assert_eq!(options.idempotency.lease_seconds, 30);
+        assert!(!options.idempotency.allow_anonymous);
+        assert_eq!(options.idempotency.paths, vec!["/api/orders".to_string()]);
+        assert_eq!(
+            options.idempotency.skip_paths,
+            vec!["/api/orders/internal".to_string()]
+        );
+
+        // The lease default is independent of the retention: setting only
+        // `TtlSeconds` keeps `LeaseSeconds` at 60.
+        let options: AppOptions = serde_json::from_value(serde_json::json!({
+            "Idempotency": { "TtlSeconds": 7200 }
+        }))
+        .expect("idempotency parse");
+        assert_eq!(options.idempotency.ttl_seconds, 7_200);
+        assert_eq!(options.idempotency.lease_seconds, 60);
     }
 
     #[test]

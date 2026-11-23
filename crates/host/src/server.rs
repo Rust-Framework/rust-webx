@@ -871,8 +871,15 @@ impl HostBuilder {
     /// duplicate gets `409`. Multi-instance deployments pass a shared store; the
     /// process-local
     /// [`InMemoryIdempotencyStore`](crate::idempotency::InMemoryIdempotencyStore)
-    /// is enough for one node. Without this call, the `Idempotency` configuration
-    /// section can enable the default store.
+    /// is enough for one node.
+    ///
+    /// Without this call, `Idempotency.Enabled = true` in configuration: (1)
+    /// uses a `dyn IIdempotencyStore` already registered in DI (for example
+    /// `svc.instance::<dyn IIdempotencyStore>(store)`), otherwise (2) enables the
+    /// bounded in-memory store. An explicit `use_idempotency` always wins over
+    /// both. The explicit call supplies the store and the replay-retention TTL;
+    /// the reservation lease, `Paths` / `SkipPaths`, `MaxBodyBytes` and
+    /// `AllowAnonymous` come from the `Idempotency` section either way.
     pub fn use_idempotency(
         mut self,
         store: Arc<dyn webx_core::idempotency::IIdempotencyStore>,
@@ -1394,6 +1401,13 @@ impl HostBuilder {
     /// metadata all come back as [`Error::Di`] carrying the same operator-facing
     /// message [`HostBuilder::build`] panics with.
     ///
+    /// Configuration violations are collected before the first one is reported:
+    /// one `Error::Di` lists every invalid key, sorted by section and key, so a
+    /// broken `appsettings.json` does not require a redeploy per fix. See
+    /// [`crate::config_validation`] for the validator and the reusable
+    /// [`validate_options`](crate::config_validation::validate_options) entry
+    /// point.
+    ///
     /// ```ignore
     /// match Host::builder().mode(AppMode::Production).try_build() {
     ///     Ok(host) => host.run().await?,
@@ -1504,21 +1518,22 @@ impl HostBuilder {
         for modifier in std::mem::take(&mut self.options_modifiers) {
             modifier(&mut options);
         }
-        validate_tls_client_auth(&options)?;
-
-        // Fail closed: Production must keep a bounded inbound request. A hung
-        // handler otherwise pins a connection and an admission permit forever.
-        webx_engine::config::validate_request_timeout(
-            self.mode,
-            options.server.request_timeout_seconds,
-        )?;
-        webx_engine::config::validate_admission_timeout(
-            self.mode,
-            options.server.admission_timeout_ms,
-        )?;
 
         // XR-2: resolve Jwt.SecretFile into Jwt.Secret (env/code secret wins; fail fast).
         crate::auth_jwt::apply_jwt_secret_file(&mut options)?;
+
+        // Fail closed, but report everything at once: collect all startup
+        // configuration violations and return one `Error::Di` listing them in a
+        // deterministic order instead of stopping at the first `?`. The rules
+        // are the existing startup guards (TLS client auth, bounded engine
+        // server, Production secret/CORS/legacy-RateLimit guards, JWT and TURN
+        // sections); only the reporting changed.
+        let violations = self.config_violations(&options);
+        if !violations.is_empty() {
+            return Err(Error::Di(crate::config_validation::format_violations(
+                &violations,
+            )));
+        }
 
         // TURN/STUN: explicit builder override wins, otherwise the `Turn`
         // section. Partial/invalid configuration fails startup (no silent
@@ -1718,6 +1733,73 @@ impl HostBuilder {
         })
     }
 
+    /// Collect every startup configuration violation that can be decided before
+    /// the DI provider is built.
+    ///
+    /// [`crate::config_validation::validate_options`] covers checks that depend
+    /// on the merged [`AppOptions`] and mode alone. The checks below need builder
+    /// state (whether authentication is enabled, an explicit `use_cors` /
+    /// `use_turn_config` / `JwtValidation` override), so they mirror the
+    /// assembly-time guards; those guards stay in [`Self::assemble`] as the
+    /// enforcement point and report the same shared messages.
+    fn config_violations(
+        &self,
+        options: &AppOptions,
+    ) -> Vec<crate::config_validation::ConfigViolation> {
+        let mut violations = crate::config_validation::validate_options(options, self.mode);
+
+        // CORS: validate the list the middleware will actually use — an explicit
+        // `use_cors` override supersedes the `Cors` section.
+        let cors_origins = match self.cors_config.as_ref() {
+            Some(config) => config.origins.as_slice(),
+            None => options.cors.origins.as_slice(),
+        };
+        if let Some(violation) =
+            crate::config_validation::production_cors_violation(self.mode, cors_origins)
+        {
+            violations.push(violation);
+        }
+
+        // JWT verification settings are only validated when authentication is
+        // enabled (an unused `Jwt` section keeps building today), and an explicit
+        // `JwtValidation` builder override supersedes the section.
+        if self.auth_enabled && self.jwt_validation.is_none() {
+            if let Err(error) = JwtValidation::from_section(&options.jwt) {
+                violations.push(crate::config_validation::violation_from_error(
+                    "Jwt", "Jwt", &error,
+                ));
+            }
+        }
+        // Production never signs with a weak/missing HMAC secret.
+        if let Some(violation) = crate::config_validation::production_jwt_secret_violation(
+            self.mode,
+            self.auth_enabled,
+            options
+                .jwt
+                .algorithms
+                .contains(&webx_core::config::JwtAlgorithm::Hs256),
+            is_weak_jwt_secret(&options.jwt.secret),
+        ) {
+            violations.push(violation);
+        }
+
+        // TURN: an explicit builder config wins over the `Turn` section.
+        let turn_error = match self.turn_config.as_ref() {
+            Some(config) => config.validate().err(),
+            None if options.turn.is_configured() => {
+                webx_core::realtime::TurnRestConfig::from_section(&options.turn).err()
+            }
+            None => None,
+        };
+        if let Some(error) = turn_error {
+            violations.push(crate::config_validation::violation_from_error(
+                "Turn", "Turn", &error,
+            ));
+        }
+
+        violations
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn assemble(
         mut self,
@@ -1811,11 +1893,10 @@ impl HostBuilder {
         // Validate the configuration the middleware will actually use. The
         // previous guard checked `options.cors` only, so
         // `use_cors(CorsConfig::default())` could ship `ACAO: *` in Production.
-        if self.mode == AppMode::Production && cors.origins.iter().any(|o| o == "*") {
-            return Err(Error::Di(
-                "Production forbids CORS origin '*'. Set explicit origins via Cors.Origins or APP__Cors__Origins."
-                    .to_string(),
-            ));
+        if let Some(violation) =
+            crate::config_validation::production_cors_violation(self.mode, &cors.origins)
+        {
+            return Err(Error::Di(violation.message));
         }
         if !cors.origins.is_empty() {
             pipeline.add_middleware(Arc::new(CorsMiddleware::new(cors)));
@@ -1828,17 +1909,13 @@ impl HostBuilder {
         let legacy_rate_limit_proxy_config =
             options.rate_limit.trust_proxy || !options.rate_limit.trusted_proxies.is_empty();
         if legacy_rate_limit_proxy_config {
-            if self.mode == AppMode::Production {
+            if let Some(violation) =
+                crate::config_validation::legacy_rate_limit_trust_keys_violation(self.mode)
+            {
                 // Fail closed: silently ignoring the keys would limit every
                 // client by the reverse-proxy address (one global bucket an
                 // attacker can drain). Force the one-line migration instead.
-                return Err(Error::Di(
-                    "RateLimit.TrustProxy / RateLimit.TrustedProxies are legacy and ignored since \
-                     2.8.0. Move the trust configuration to ClientInfo.TrustForwardedHeaders / \
-                     ClientInfo.TrustedProxies (see docs/rust-webx/10-configuration/appsettings.md). \
-                     Development/Test hosts keep starting with a warning."
-                        .to_string(),
-                ));
+                return Err(Error::Di(violation.message));
             }
             tracing::warn!(
                 "RateLimit.TrustProxy / RateLimit.TrustedProxies are ignored (legacy since 2.8.0); \
@@ -1967,23 +2044,70 @@ impl HostBuilder {
             pipeline.add_middleware(Arc::new(RateLimitMiddleware::from_policy(policy)));
         }
 
-        // Request-level idempotency: an explicit store wins, otherwise the
-        // `Idempotency` section enables the bounded in-memory default.
+        // M8: warn (do not fail) when Production enables idempotency with the
+        // risky default scope — every path plus anonymous replay scoped only by
+        // client IP. The same fail-closed *style* as the CORS / legacy RateLimit
+        // guards, but a warning here: the middleware is safe for the common
+        // authenticated-only deployment, and disabling it outright would break
+        // existing opt-ins.
+        if self.mode == AppMode::Production
+            && options.idempotency.enabled
+            && options.idempotency.allow_anonymous
+            && options.idempotency.paths.is_empty()
+        {
+            tracing::warn!(
+                "[Host] Idempotency is enabled in Production with AllowAnonymous=true and an \
+                 empty Paths list: anonymous state-changing requests on every path replay by \
+                 client IP, so clients behind one NAT/proxy can replay each other's responses. \
+                 Set Idempotency.AllowAnonymous=false and/or restrict Idempotency.Paths."
+            );
+        }
+
+        // Request-level idempotency: an explicit store wins, then a store
+        // registered in DI (2.8 auto-discovery, so `Idempotency.Enabled=true` is
+        // enough to pick up e.g. `EfIdempotencyStore`), then the bounded
+        // in-memory default.
         let idempotency = match self.idempotency.take() {
             Some(custom) => Some(custom),
-            None if options.idempotency.enabled => Some((
-                Arc::new(crate::idempotency::InMemoryIdempotencyStore::with_max_keys(
-                    options.idempotency.max_tracked_keys,
-                )) as Arc<dyn webx_core::idempotency::IIdempotencyStore>,
-                std::time::Duration::from_secs(options.idempotency.ttl_seconds.max(1)),
-            )),
+            None if options.idempotency.enabled => {
+                let ttl = std::time::Duration::from_secs(options.idempotency.ttl_seconds.max(1));
+                match provider
+                    .get_all::<dyn webx_core::idempotency::IIdempotencyStore>()
+                    .into_iter()
+                    .next()
+                {
+                    Some(store) => {
+                        tracing::info!(
+                            "[Host] Idempotency enabled: using the IIdempotencyStore registered in DI"
+                        );
+                        Some((store, ttl))
+                    }
+                    None => Some((
+                        Arc::new(crate::idempotency::InMemoryIdempotencyStore::with_max_keys(
+                            options.idempotency.max_tracked_keys,
+                        ))
+                            as Arc<dyn webx_core::idempotency::IIdempotencyStore>,
+                        ttl,
+                    )),
+                }
+            }
             None => None,
         };
         if let Some((store, ttl)) = idempotency {
-            tracing::info!("[Host] Idempotency enabled (Idempotency-Key middleware)");
+            let lease = std::time::Duration::from_secs(options.idempotency.lease_seconds.max(1));
+            tracing::info!(
+                ttl_seconds = ttl.as_secs(),
+                lease_seconds = lease.as_secs().min(ttl.as_secs()),
+                "[Host] Idempotency enabled (Idempotency-Key middleware)"
+            );
             let middleware = crate::idempotency::IdempotencyMiddleware::new(store, ttl)
+                .with_lease(lease)
                 .with_max_body_bytes(options.idempotency.max_body_bytes)
-                .with_anonymous_allowed(options.idempotency.allow_anonymous);
+                .with_anonymous_allowed(options.idempotency.allow_anonymous)
+                .with_paths(
+                    options.idempotency.paths.clone(),
+                    options.idempotency.skip_paths.clone(),
+                );
             pipeline.add_middleware(Arc::new(middleware));
         }
 
@@ -2074,15 +2198,13 @@ impl HostBuilder {
             .jwt
             .algorithms
             .contains(&webx_core::config::JwtAlgorithm::Hs256);
-        if self.mode == AppMode::Production
-            && self.auth_enabled
-            && uses_hs256
-            && is_weak_jwt_secret(&options.jwt.secret)
-        {
-            return Err(Error::Di(
-                "Production requires a strong JWT secret. Set APP__Jwt__Secret or JWT_SECRET env var (min 32 chars, not a placeholder)."
-                    .to_string(),
-            ));
+        if let Some(violation) = crate::config_validation::production_jwt_secret_violation(
+            self.mode,
+            self.auth_enabled,
+            uses_hs256,
+            is_weak_jwt_secret(&options.jwt.secret),
+        ) {
+            return Err(Error::Di(violation.message));
         }
 
         let mut engine_router = webx_engine::Router::new();
@@ -2456,8 +2578,9 @@ impl HostBuilder {
     ///
     /// Equivalent to [`HostBuilder::try_build`] followed by a panic that keeps
     /// the historical message, so a misconfigured deployment stops the process
-    /// instead of serving with weakened guards. Call `try_build` directly when
-    /// the caller wants to handle the error itself.
+    /// instead of serving with weakened guards. When several keys are invalid the
+    /// panic lists all of them in the same aggregate message `try_build` returns.
+    /// Call `try_build` directly when the caller wants to handle the error itself.
     pub fn build(self) -> Host {
         match self.try_build() {
             Ok(host) => host,
@@ -2481,7 +2604,11 @@ fn build_provider_error(error: rust_dix::RdiError) -> Error {
 /// Without this, `ClientAuth=Required` with an HTTP-only listener would build a
 /// host that silently serves plaintext; the engine would only reject it when
 /// `run()` starts a listener.
-fn validate_tls_client_auth(options: &AppOptions) -> Result<()> {
+///
+/// Retained as the single rule implementation: [`crate::config_validation::validate_options`]
+/// calls it and turns the first failure into a [`crate::config_validation::ConfigViolation`]
+/// for the aggregate startup report.
+pub(crate) fn validate_tls_client_auth(options: &AppOptions) -> Result<()> {
     let tls = &options.tls;
     let enabled = tls.client_auth != webx_core::config::TlsClientAuth::Off;
     if !enabled {
@@ -2594,6 +2721,15 @@ impl Host {
     /// Root DI container for this host instance.
     pub fn provider(&self) -> &Arc<ServiceProvider> {
         &self.provider
+    }
+
+    /// Engine state this host runs with (router, pipeline, config, admission).
+    ///
+    /// In-crate wire/test harnesses drive one connection through the real engine
+    /// loop and need the exact [`webx_engine::Shared`]; deliberately not public
+    /// API.
+    pub(crate) fn engine_shared(&self) -> Arc<webx_engine::Shared> {
+        Arc::clone(&self.engine)
     }
 
     /// Whether this host serves the direct (non-mediated) HTTP dispatch path.
@@ -2740,14 +2876,15 @@ impl Host {
                         "HTTPS URLs require Tls.CertPath and Tls.KeyPath".to_string(),
                     ));
                 }
-                tls_configs.push(Some(
+                tls_configs.push(Some(webx_engine::tls::with_key_log(
                     webx_engine::tls::build_server_config_with_client_auth(
                         &tls.cert_path,
                         &tls.key_path,
                         &tls.client_ca_path,
                         tls.client_auth,
                     )?,
-                ));
+                    self.engine.config.mode,
+                )));
             } else {
                 tls_configs.push(None);
             }

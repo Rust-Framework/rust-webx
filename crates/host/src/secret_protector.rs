@@ -1,7 +1,7 @@
 //! At-rest secret protection: AES-256-GCM with a rotatable key ring.
 //!
 //! [`AesGcmSecretProtector`] implements
-//! [`ISecretProtector`](webx_core::secrets::ISecretProtector) for values that
+//! [`ISecretProtector`] for values that
 //! must live in a database row (TOTP seeds, provider refresh tokens,
 //! one-time signing keys). Ciphertexts are self-describing:
 //!
@@ -17,7 +17,7 @@
 //!
 //! Keys are 32 bytes (AES-256). [`AesGcmSecretProtector::from_secret_store`]
 //! resolves base64-encoded keys from an
-//! [`ISecretStore`](webx_core::secrets::ISecretStore) (environment, mounted
+//! [`ISecretStore`] (environment, mounted
 //! files, KMS/Vault adapter), so the key material never lives in
 //! `appsettings.json`. [`AesGcmSecretProtector::from_keys`] takes raw bytes for
 //! tests and custom loaders.

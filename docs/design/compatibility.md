@@ -1,6 +1,6 @@
 # 兼容性政策（SemVer、N-2 升级、锁步版本）
 
-> 基线：rust-webx 2.7.0。门禁在 `.github/workflows/ci.yml` 的 `semver`、`upgrade`、
+> 基线：rust-webx 2.8.0。门禁在 `.github/workflows/ci.yml` 的 `semver`、`upgrade`、
 > `lint`（内部版本钉）三个 job。
 
 ## 1. 三条承诺

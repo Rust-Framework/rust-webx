@@ -1,7 +1,7 @@
 //! Capture senders for tests and local development.
 //!
 //! [`InMemoryEmailSender`] and [`InMemorySmsSender`] implement the
-//! [`IEmailSender`]/[`ISmsSender`](webx_core::notifications::ISmsSender) ports
+//! [`IEmailSender`]/[`ISmsSender`] ports
 //! and keep the most recent messages so tests can assert what a handler tried to
 //! deliver. They validate the message shape exactly like a real adapter, never
 //! touch the network, and bound their buffer.

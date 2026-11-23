@@ -354,7 +354,7 @@ impl MetricsEndpoint {
     }
 
     /// Mirror the real-time snapshot into the app's
-    /// [`IMeter`](webx_core::metrics::IMeter) on scrape.
+    /// [`IMeter`] on scrape.
     pub fn with_meter(mut self, meter: Arc<dyn webx_core::metrics::IMeter>) -> Self {
         self.meter = Some(meter);
         self

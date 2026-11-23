@@ -3,6 +3,148 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [2.8.0] — 2026-11-23
+
+> **English** · **简体中文**
+
+### English
+
+Multi-instance hardening release: a durable `IIdempotencyStore` for `rust-webx-ef`, and a
+single source of truth for forwarded-header resolution (`ClientInfo`) that rate limiting now
+consumes. Additive APIs; the only behavior change is that the legacy `RateLimit.TrustProxy` /
+`RateLimit.TrustedProxies` keys are ignored (with a startup warning) — see **Changed**.
+
+#### Added
+
+- **`rust-webx-ef::idempotency` — durable request idempotency over rust-ef.**
+  `IdempotencyRecord` (table `webx_idempotency`, registered with
+  `register_idempotency_model`), `EfIdempotencyStore` implementing the existing
+  `IIdempotencyStore` port (`begin` / `complete` / `release`), `purge_expired`, and
+  `IdempotencyHousekeeping` (`PeriodicBackgroundService`) for TTL cleanup. The store owns
+  the application's `Arc<DbContextOptions>` and opens a short-lived `DbContext` per
+  operation, so it is constructed before `HostBuilder::build()` and wired with
+  `use_idempotency(store, ttl)`. Cross-instance correctness uses the primary-key uniqueness
+  of the protocol key's SHA-256 digest (`key_hash`, fixed width; the full unbounded key
+  is kept in a non-indexed `key` column) plus a compare-and-set lease claim
+  (`UPDATE ... WHERE key_hash = ? AND expires_at <= ?`); a completed, unexpired key replays the stored status/content-type/
+  content-encoding/body (binary-safe), a live key returns `InProgress` (409), and an
+  expired key is reclaimed by exactly one instance. `complete` and `release` are
+  conditional on `state = 'in_progress' AND expires_at > now`, so a late completion for an
+  expired reservation is discarded. The port carries no per-attempt token: a completion
+  that races a reclaim can still land on the new lease, so keep the TTL above the
+  handler's worst-case duration (documented in the deployment notes). Schema comes from the official rust-ef migration tooling — no runtime DDL.
+  See `docs/rust-webx/11-production/idempotency.md` § 数据库持久化（多实例）.
+- **`webx_core::client_info` — shared trusted-proxy resolution.**
+  `IpCidr` (`parse` / `contains`), `client_from_forwarded_for` (right-most hop that is not
+  a trusted proxy), and `resolve_client_info` (peer + forwarded chain + `X-Real-IP` under
+  the trusted-proxy policy) now live in core, so every middleware resolves the client
+  address the same way.
+
+#### Changed
+
+- **Rate limiting keys on the resolved client address, and both configuration paths agree.**
+  `RateLimitMiddleware` no longer parses `X-Forwarded-For` itself: `RateLimitSubject::Ip`
+  (and the IP fallback for `User` / `Tenant` / `ApiKey`) reads
+  `IHttpContext::client_info().client_ip`, i.e. the value produced by the `ClientInfo`
+  middleware (or the peer address when that middleware is not installed). Consequently
+  `RateLimitMiddleware::from_policy` and the `RateLimit` configuration section now behave
+  identically; previously the policy path hard-coded "do not trust forwarded headers"
+  while the config path could trust them.
+- **`RateLimit.TrustProxy` / `RateLimit.TrustedProxies` are legacy (ignored).**
+  The keys are still accepted by serde (old appsettings do not fail to start) but the rate
+  limiter ignores them and the host logs a startup warning. Migrate to
+  `ClientInfo.TrustForwardedHeaders` / `ClientInfo.TrustedProxies`. Per the repository 2.x
+  policy no new `#[deprecated]` attributes are added (downstreams build with
+  `-D warnings`); the items are registered in `docs/design/deprecations.md` for the 3.0
+  window, and `RateLimiter::with_trust_proxy` remains as a no-op compatibility shell.
+- **`ClientInfoMiddleware` delegates to `webx_core::client_info::resolve_client_info`.**
+  Behavior (trusted proxy gate, forwarded chain, fallback to the peer) is unchanged.
+- **docbit production sample** now configures `ClientInfo.TrustForwardedHeaders` /
+  `ClientInfo.TrustedProxies` (loopback Nginx) instead of `RateLimit.TrustProxy`.
+- **Documentation toolchain**: CI and `docs/rust-webx/book.toml` moved to mdBook v0.5.4
+  (the `multilingual` key was removed; it defaulted to `false`).
+
+#### Verification
+
+- `cargo test --workspace` green; new host end-to-end tests assert (a) two forwarded
+  clients behind a trusted proxy get independent rate-limit buckets, (b) a direct client
+  forging `X-Forwarded-For` is still limited by its peer address, (c) `from_policy` and
+  `from_config` produce the same decisions and bucket keys, (d) without the `ClientInfo`
+  middleware the limiter falls back to the peer, (e) legacy keys only produce a warning.
+- `rust-webx-ef` idempotency: 8 unit + 14 SQLite integration tests (replay, in-progress
+  conflict, TTL reclaim for both states, release, purge/grace, binary body round-trip,
+  failed-INSERT recovery, over-244-byte protocol key by digest, late completion/release
+  discarded after expiry).
+- `cargo clippy --workspace --all-targets -D warnings`, rustdoc `-D warnings`, MSRV
+  1.95 and both feature-matrix checks green; both mdBook sites build with mdBook v0.5.4.
+- `cargo audit`: no vulnerabilities (the committed lockfile refreshed `url` 2.5.8 ->
+  2.5.9 for RUSTSEC-2026-0592); the remaining advisories are the allowed unmaintained
+  warnings (chrono, rustls-pemfile).
+
+### 简体中文
+
+多实例加固版本：`rust-webx-ef` 新增持久化 `IIdempotencyStore`；转发头解析收敛为
+`ClientInfo` 唯一入口，限流改为读取其解析结果。API 为加法；唯一行为变化是
+`RateLimit.TrustProxy` / `RateLimit.TrustedProxies` 旧键被忽略（启动时 warn，见「变更」）。
+
+#### 新增
+
+- **`rust-webx-ef::idempotency` — 基于 rust-ef 的持久化请求幂等。**
+  `IdempotencyRecord` 实体（表 `webx_idempotency`，用 `register_idempotency_model` 注册到
+  应用模型，建表/迁移走官方 rust-ef 工具）；`EfIdempotencyStore` 实现既有
+  `IIdempotencyStore` 端口（`begin`/`complete`/`release`）；`purge_expired` 与
+  `IdempotencyHousekeeping`（`PeriodicBackgroundService`）负责 TTL 清理。store 持有应用的
+  `Arc<DbContextOptions>`，每次操作开短生命周期 `DbContext`，因此在 `HostBuilder::build()`
+  之前即可构造并用 `use_idempotency(store, ttl)` 装配。跨实例正确性靠主键唯一 + CAS 租约
+  抢占（`UPDATE ... WHERE key = ? AND expires_at <= ?`）：已完成且未过期的键重放
+  status/content-type/content-encoding/body（二进制安全）；进行中的键返回 `InProgress`
+  （409）；过期键恰好一个实例抢占成功。`complete`/`release` 都以
+  `state = 'in_progress' AND expires_at > now` 为条件，过期后的迟到完成会被丢弃；端口没有
+  per-attempt token，与抢占同时发生的迟到完成仍可能落到新租约上，因此 TTL 应大于 Handler
+  最坏耗时（部署说明已写明）。无需运行时 DDL。
+  详见 `docs/rust-webx/11-production/idempotency.md`「数据库持久化（多实例）」。
+- **`webx_core::client_info` — 共享可信代理解析。**
+  `IpCidr`（`parse`/`contains`）、`client_from_forwarded_for`（最右侧非可信代理 hop）、
+  `resolve_client_info`（对端 + 转发链 + `X-Real-IP`，按可信代理策略）提升到 core，
+  所有中间件用同一套解析。
+
+#### 变更
+
+- **限流按已解析客户端地址计桶，两条配置路径行为一致。**
+  `RateLimitMiddleware` 不再自己解析 `X-Forwarded-For`：`RateLimitSubject::Ip`
+  （以及 `User`/`Tenant`/`ApiKey` 的 IP 回退）读取
+  `IHttpContext::client_info().client_ip`，即 `ClientInfo` 中间件的解析结果（未安装该
+  中间件时即连接对端地址）。因此 `RateLimitMiddleware::from_policy` 与 `RateLimit`
+  配置节现在行为一致；此前 policy 路径固定不信任转发头，而配置节路径可信任。
+- **`RateLimit.TrustProxy` / `RateLimit.TrustedProxies` 变为 legacy（被忽略）。**
+  serde 仍接受旧配置（旧 appsettings 不会启动失败），但限流器忽略并在宿主启动时
+  打 warn。迁移到 `ClientInfo.TrustForwardedHeaders` / `ClientInfo.TrustedProxies`。
+  按仓库 2.x 政策不新增 `#[deprecated]` 属性（下游常以 `-D warnings` 构建）；两项登记在
+  `docs/design/deprecations.md` 的 3.0 窗口，`RateLimiter::with_trust_proxy` 保留为
+  no-op 兼容壳。
+- **`ClientInfoMiddleware` 改为调用 `webx_core::client_info::resolve_client_info`。**
+  行为（可信代理门控、转发链、回退对端）不变。
+- **docbit 生产示例**改用 `ClientInfo.TrustForwardedHeaders` /
+  `ClientInfo.TrustedProxies`（本机 Nginx），不再使用 `RateLimit.TrustProxy`。
+- **文档工具链**：CI 与 `docs/rust-webx/book.toml` 升到 mdBook v0.5.4（移除
+  `multilingual` 键，其原值即默认 false）。
+
+#### 验证
+
+- `cargo test --workspace` 全绿；新增 host 端到端测试断言：(a) 可信代理后两个转发
+  客户端各自独立限流桶；(b) 直连客户端伪造 `X-Forwarded-For` 仍按对端地址限流；
+  (c) `from_policy` 与 `from_config` 决策与桶键一致；(d) 无 `ClientInfo` 中间件时回退
+  对端；(e) 旧配置键只产生 warn。
+- `rust-webx-ef` 幂等：8 个单元测试 + 14 个 SQLite 集成测试（重放、进行中冲突、两种状态
+  的 TTL 抢占、release、purge/grace、二进制 body 往返、失败 INSERT 恢复、>244 字节协议键
+  走摘要、过期后的迟到 complete/release 被丢弃）。
+- `cargo clippy --workspace --all-targets -D warnings`、rustdoc `-D warnings`、MSRV
+  1.95 与 feature 矩阵检查全绿；两个 mdBook 站点均可用 mdBook v0.5.4 构建。
+- `cargo audit` 无漏洞（提交的 lockfile 把 `url` 2.5.8 升到 2.5.9，对应
+  RUSTSEC-2026-0592）；剩余为允许的 unmaintained 告警（chrono、rustls-pemfile）。
+
+---
+
 ## [2.7.0] — 2026-11-22
 
 > **English** · **简体中文**

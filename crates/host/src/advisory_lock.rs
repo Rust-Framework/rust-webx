@@ -1,7 +1,7 @@
 //! Process-local advisory lock (tests and single-node deployments).
 //!
 //! [`InMemoryAdvisoryLock`] implements
-//! [`IAdvisoryLock`](webx_core::locking::IAdvisoryLock) with the same lease
+//! [`IAdvisoryLock`] with the same lease
 //! semantics as the distributed backends: `try_acquire` returns `None` under
 //! contention, expired leases are reclaimable, and release/renew require the
 //! ownership token.

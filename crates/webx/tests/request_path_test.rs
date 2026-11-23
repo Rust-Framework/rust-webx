@@ -11,14 +11,19 @@ use webx::*;
 fn find_free_port() -> u16 {
     // Tests in this binary run in parallel: asking the OS for an ephemeral
     // port twice can return the same number after release (the host binds it
-    // milliseconds later), so use a process-unique rolling range and verify
-    // each candidate is still free.
+    // milliseconds later), so use a rolling range and verify each candidate is
+    // still free. The base is per-process (and overridable) so two concurrently
+    // running test binaries do not start probing the same range.
     use std::sync::atomic::{AtomicU16, Ordering};
     static NEXT: AtomicU16 = AtomicU16::new(0);
+    let base = std::env::var("WEBX_TEST_PORT_BASE")
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or_else(|| 20_000 + (std::process::id() as u16 % 200) * 100);
     loop {
         let offset = NEXT.fetch_add(1, Ordering::Relaxed);
-        let port = 20_000 + (offset % 30_000);
-        if TcpListener::bind(("127.0.0.1", port)).is_ok() {
+        let port = base.saturating_add(offset % 100);
+        if port != 0 && TcpListener::bind(("127.0.0.1", port)).is_ok() {
             return port;
         }
     }

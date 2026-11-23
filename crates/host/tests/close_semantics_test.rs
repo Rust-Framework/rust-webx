@@ -20,6 +20,16 @@ use webx_host::server::{Host, ServerHandle};
 
 const TEST_SECRET: &str = "close-semantics-test-secret-key-0123456789";
 
+/// Serializes the four session tests in this binary.
+///
+/// Each test binds an ephemeral port, starts its own host and connects a WS
+/// client to the **same** `/ws` path. Running them concurrently lets the
+/// port-probe → `run_at` window hand a client to another test's host, which
+/// then keeps the connection open after the "wrong" host is shut down. The
+/// tests exercise process-local session semantics, so serializing them costs a
+/// few seconds and removes the cross-wiring entirely.
+static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 fn free_port() -> u16 {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("free port");
     listener.local_addr().expect("addr").port()
@@ -221,6 +231,7 @@ async fn expect_close_frame(client: &mut Client, expected_code: u16) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn client_close_is_recorded_as_client_closed() {
+    let _serial = SERIAL.lock().await;
     let port = free_port();
     let (handler, slot) = Recorder::new();
     let (shutdown, server) =
@@ -240,6 +251,7 @@ async fn client_close_is_recorded_as_client_closed() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn lifetime_deadline_is_recorded_as_lifetime_exceeded() {
+    let _serial = SERIAL.lock().await;
     let port = free_port();
     let (handler, slot) = Recorder::new();
     let limits =
@@ -282,6 +294,7 @@ async fn token_expiry_is_recorded_as_token_expired() {
         .expect("token")
     }
 
+    let _serial = SERIAL.lock().await;
     let port = free_port();
     let (handler, slot) = Recorder::new();
     let limits = WebSocketLimits::default().close_at_token_expiry();
@@ -316,6 +329,7 @@ async fn token_expiry_is_recorded_as_token_expired() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn server_shutdown_is_recorded_as_server_shutdown() {
+    let _serial = SERIAL.lock().await;
     let port = free_port();
     let (handler, slot) = Recorder::new();
     let (shutdown, server) =

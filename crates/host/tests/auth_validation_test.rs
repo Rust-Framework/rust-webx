@@ -1,4 +1,4 @@
-﻿//! 2.5 M1 鈥?JWT validation hardening.
+﻿//! 2.5 M1 —JWT validation hardening.
 //!
 //! Covers the fail-closed configuration surface (issuer/audience/leeway/size/
 //! algorithm/behavior), empty `sub`, future `iat`, and the two invalid-token

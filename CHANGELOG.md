@@ -330,6 +330,17 @@ allowlist and `docs/design/compatibility.md`); all items are mechanical to migra
 - `cargo audit`: no vulnerabilities (the committed lockfile refreshed `url` 2.5.8 ->
   2.5.9 for RUSTSEC-2026-0592); the remaining advisories are the allowed unmaintained
   warnings (chrono, rustls-pemfile).
+- **2.8 observability/quality gates (this batch).** `cargo fmt --all --check`,
+  `cargo clippy --workspace --all-targets -- -D warnings`,
+  `cargo test --workspace --no-fail-fast`, `RUSTDOCFLAGS="-D warnings" cargo doc` for
+  core/engine/host and `scripts/check-docs.sh` are green. New coverage: wire harness 4,
+  aggregated config validation 7, observability 3, close semantics 4, error-code
+  registry 6, admission invariant metrics 4, fuzz logic 8 (stable-toolchain
+  `cargo test --manifest-path fuzz/Cargo.toml --lib`). Local `scripts/conformance.sh`
+  HTTP/1.1 matrix passes 9/9; h2spec 2.6.0 against the same process records the
+  documented one-known-deviation baseline (invalid connection preface closes TCP
+  without GOAWAY). Nightly cargo-fuzz linkage and the Linux HTTP/2 h2c matrix remain
+  CI-only (Windows libFuzzer has no entry point; local Windows curl lacks nghttp2).
 - **Cross-repo pairing with rust-ef 2.8.0.** `scripts/check-pairing-rust-ef.sh` builds
   this workspace with `[patch.crates-io]` overrides that point `rust-ef` /
   `rust-ef-sqlite` at a local rust-ef checkout (`RUST_EF_PATH`), then runs
@@ -580,6 +591,17 @@ allowlist and `docs/design/compatibility.md`); all items are mechanical to migra
   1.95 与 feature 矩阵检查全绿；两个 mdBook 站点均可用 mdBook v0.5.4 构建。
 - `cargo audit` 无漏洞（提交的 lockfile 把 `url` 2.5.8 升到 2.5.9，对应
   RUSTSEC-2026-0592）；剩余为允许的 unmaintained 告警（chrono、rustls-pemfile）。
+- **2.8 观测/质量门禁（本批）**：`cargo fmt --all --check`、
+  `cargo clippy --workspace --all-targets -- -D warnings`、
+  `cargo test --workspace --no-fail-fast`、core/engine/host 的
+  `RUSTDOCFLAGS="-D warnings" cargo doc` 与 `scripts/check-docs.sh` 全绿。新增覆盖：
+  wire harness 4、配置聚合校验 7、观测量 3、关闭语义 4、错误码注册表 6、准入不变量
+  指标 4、fuzz 逻辑 8（稳定工具链
+  `cargo test --manifest-path fuzz/Cargo.toml --lib`）。本机 `scripts/conformance.sh`
+  的 HTTP/1.1 矩阵 9/9 通过；h2spec 2.6.0 对同一进程测得已登记的单条已知偏差基线
+  （非法 connection preface 时关闭 TCP 而未发 GOAWAY）。nightly cargo-fuzz 链接与
+  Linux HTTP/2 h2c 矩阵仍只在 CI 验证（Windows libFuzzer 无入口点；本机 Windows curl
+  无 nghttp2）。
 - **与 rust-ef 2.8.0 的跨仓配对**：`scripts/check-pairing-rust-ef.sh` 用
   `[patch.crates-io]` 把 `rust-ef` / `rust-ef-sqlite` 指向本地 rust-ef checkout
   （`RUST_EF_PATH`）后编译本工作区，并执行 `cargo test -p rust-webx-ef`；可选 CI

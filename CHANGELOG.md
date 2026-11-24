@@ -86,6 +86,12 @@ writer renders every error through it.
   `DEFAULT_HEALTH_CHECK_TIMEOUT`. Caches/queues/payment adapters migrated to the spec.
 - The registry keeps `register`/`register_async` as the low-level primitives; host registration goes
   through the spec.
+- **`MiddlewareSpec` is public and `use_middleware(spec)` is the single middleware entry**:
+  `MiddlewareSpec::new::<M>()` uses `M::default()` in `AfterAuth`;
+  `MiddlewareSpec::factory(|| Arc::new(M::new(..)) as Arc<dyn IMiddleware>).at(slot)` covers
+  constructor parameters and explicit slots. `use_middleware::<M>()`, `use_middleware_at`,
+  `use_middleware_with` and `use_middleware_with_at` are removed; the workspace call sites are
+  migrated.
 
 ##### Nested request models (E2)
 
@@ -203,6 +209,11 @@ writer renders every error through it.
   `add_health_check_async_with_timeout`；异步默认超时仍是 `DEFAULT_HEALTH_CHECK_TIMEOUT`。
   cache/queue/payment 适配器已迁移。
 - registry 的 `register`/`register_async` 保留为底层原语；宿主注册统一走 spec。
+- **`MiddlewareSpec` 公开，`use_middleware(spec)` 成为唯一中间件入口**：
+  `MiddlewareSpec::new::<M>()` 用 `M::default()` 放在 `AfterAuth`；
+  `MiddlewareSpec::factory(|| Arc::new(M::new(..)) as Arc<dyn IMiddleware>).at(slot)` 覆盖构造参数
+  与显式槽位。删除 `use_middleware::<M>()`、`use_middleware_at`、`use_middleware_with`、
+  `use_middleware_with_at`；workspace 调用点已迁移。
 
 ##### 嵌套请求模型（E2）
 

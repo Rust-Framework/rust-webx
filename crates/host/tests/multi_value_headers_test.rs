@@ -3,6 +3,7 @@
 use std::net::TcpListener;
 use std::ops::ControlFlow;
 use std::sync::Arc;
+use webx_host::MiddlewareSpec;
 
 use webx_core::error::Result;
 use webx_core::http::IHttpContext;
@@ -34,7 +35,9 @@ async fn two_set_cookie_headers_are_preserved() {
     let host = Host::builder()
         .mode(webx_core::mode::AppMode::Development)
         .no_spa()
-        .use_middleware_with(|| Arc::new(TwoCookies) as Arc<dyn IMiddleware>)
+        .use_middleware(MiddlewareSpec::factory(|| {
+            Arc::new(TwoCookies) as Arc<dyn IMiddleware>
+        }))
         .build();
     let base = format!("http://{addr}");
     tokio::spawn(async move {

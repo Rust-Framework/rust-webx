@@ -200,9 +200,41 @@ type MiddlewareFactory = Box<dyn Fn() -> Arc<dyn IMiddleware> + Send + Sync>;
 type ServiceConfig = Box<dyn FnOnce(ServiceCollection, &AppOptions) -> ServiceCollection + Send>;
 
 /// A user middleware waiting to be placed in the pipeline at its slot.
-struct MiddlewareSpec {
+///
+/// Build one with [`MiddlewareSpec::new`] (a `Default` middleware type) or
+/// [`MiddlewareSpec::factory`] (a custom constructor), then place it with
+/// [`MiddlewareSpec::at`] and register it through
+/// [`HostBuilder::use_middleware`].
+pub struct MiddlewareSpec {
     slot: webx_core::middleware::MiddlewareSlot,
     factory: MiddlewareFactory,
+}
+
+impl MiddlewareSpec {
+    /// A middleware created with `M::default()` in the default `AfterAuth` slot.
+    pub fn new<M: IMiddleware + Default + 'static>() -> Self {
+        Self {
+            slot: webx_core::middleware::MiddlewareSlot::AfterAuth,
+            factory: Box::new(|| Arc::new(M::default()) as Arc<dyn IMiddleware>),
+        }
+    }
+
+    /// A middleware created by a custom factory in the default `AfterAuth` slot.
+    pub fn factory<F>(factory: F) -> Self
+    where
+        F: Fn() -> Arc<dyn IMiddleware> + Send + Sync + 'static,
+    {
+        Self {
+            slot: webx_core::middleware::MiddlewareSlot::AfterAuth,
+            factory: Box::new(factory),
+        }
+    }
+
+    /// Place the middleware in a specific pipeline slot.
+    pub fn at(mut self, slot: webx_core::middleware::MiddlewareSlot) -> Self {
+        self.slot = slot;
+        self
+    }
 }
 
 #[allow(clippy::type_complexity)]
@@ -1227,16 +1259,15 @@ impl HostBuilder {
         self
     }
 
-    /// Register a middleware by type in the default slot
-    /// ([`MiddlewareSlot::AfterAuth`](webx_core::middleware::MiddlewareSlot::AfterAuth)).
+    /// Register a middleware through [`MiddlewareSpec`].
     ///
-    /// The default slot runs **after** authentication, so middleware that reads
-    /// `ctx.claims()` actually sees the principal. Use
-    /// [`Self::use_middleware_at`] to choose a different slot.
+    /// `MiddlewareSpec::new::<M>()` creates `M::default()` in the default
+    /// `AfterAuth` slot; `.at(slot)` moves it, and `MiddlewareSpec::factory`
+    /// supplies constructor parameters.
     ///
     /// ```ignore
     /// Host::builder()
-    ///     .use_middleware::<TimingMiddleware>()
+    ///     .use_middleware(MiddlewareSpec::new::<TimingMiddleware>())
     ///     .build()
     /// ```
     /// Override the framework clock (2.4-5).
@@ -1260,61 +1291,21 @@ impl HostBuilder {
         self
     }
 
-    /// Register a middleware by type in the default pipeline slot.
+    /// Register a user middleware through [`MiddlewareSpec`].
     ///
     /// ```ignore
     /// Host::builder()
-    ///     .use_middleware::<TimingMiddleware>()
+    ///     .use_middleware(MiddlewareSpec::new::<TimingMiddleware>())
+    ///     .use_middleware(
+    ///         MiddlewareSpec::factory(|| Arc::new(
+    ///             CorsMiddleware::new("api"),
+    ///         ) as Arc<dyn IMiddleware>)
+    ///         .at(MiddlewareSlot::BeforeCors),
+    ///     )
     ///     .build()
     /// ```
-    pub fn use_middleware<T: IMiddleware + Default + 'static>(self) -> Self {
-        self.use_middleware_at::<T>(webx_core::middleware::MiddlewareSlot::AfterAuth)
-    }
-
-    /// Register a middleware by type in a specific pipeline slot.
-    pub fn use_middleware_at<T: IMiddleware + Default + 'static>(
-        mut self,
-        slot: webx_core::middleware::MiddlewareSlot,
-    ) -> Self {
-        self.middleware_specs.push(MiddlewareSpec {
-            slot,
-            factory: Box::new(|| Arc::new(T::default()) as Arc<dyn IMiddleware>),
-        });
-        self
-    }
-
-    /// Register a middleware with a custom factory function (default slot:
-    /// [`MiddlewareSlot::AfterAuth`](webx_core::middleware::MiddlewareSlot::AfterAuth)).
-    ///
-    /// Use this when the middleware requires constructor parameters:
-    ///
-    /// ```ignore
-    /// Host::builder()
-    ///     .use_middleware_with(|| {
-    ///         Arc::new(TimingMiddleware::new("api")) as Arc<dyn IMiddleware>
-    ///     })
-    ///     .build()
-    /// ```
-    pub fn use_middleware_with<F>(self, factory: F) -> Self
-    where
-        F: Fn() -> Arc<dyn IMiddleware> + Send + Sync + 'static,
-    {
-        self.use_middleware_with_at(webx_core::middleware::MiddlewareSlot::AfterAuth, factory)
-    }
-
-    /// Register a middleware with a custom factory in a specific pipeline slot.
-    pub fn use_middleware_with_at<F>(
-        mut self,
-        slot: webx_core::middleware::MiddlewareSlot,
-        factory: F,
-    ) -> Self
-    where
-        F: Fn() -> Arc<dyn IMiddleware> + Send + Sync + 'static,
-    {
-        self.middleware_specs.push(MiddlewareSpec {
-            slot,
-            factory: Box::new(factory),
-        });
+    pub fn use_middleware(mut self, spec: MiddlewareSpec) -> Self {
+        self.middleware_specs.push(spec);
         self
     }
 

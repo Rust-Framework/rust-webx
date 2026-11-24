@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use webx_host::cors::CorsConfig;
 use webx_host::health::HealthCheckSpec;
+use webx_host::MiddlewareSpec;
 
 async fn spawn_test_host(port: u16) {
     spawn_test_host_with(port, |b| b).await;
@@ -385,10 +386,10 @@ async fn integration_default_request_id_present() {
 async fn integration_rate_limit_returns_429_when_exceeded() {
     let port = find_free_port();
     spawn_test_host_with(port, |b| {
-        b.use_middleware_with(|| {
+        b.use_middleware(MiddlewareSpec::factory(|| {
             Arc::new(webx_host::rate_limit::RateLimitMiddleware::new(1.0, 2))
                 as Arc<dyn webx_core::middleware::IMiddleware>
-        })
+        }))
     })
     .await;
 
@@ -466,7 +467,9 @@ async fn integration_use_middleware_with_runs_in_pipeline() {
 
     let port = find_free_port();
     spawn_test_host_with(port, |b| {
-        b.use_middleware_with(|| Arc::new(HeaderTagMiddleware) as Arc<dyn IMiddleware>)
+        b.use_middleware(MiddlewareSpec::factory(|| {
+            Arc::new(HeaderTagMiddleware) as Arc<dyn IMiddleware>
+        }))
     })
     .await;
 
@@ -487,11 +490,11 @@ async fn integration_compression_gzips_large_response() {
 
     let port = find_free_port();
     spawn_test_host_with(port, |b| {
-        b.use_middleware_with(|| {
+        b.use_middleware(MiddlewareSpec::factory(|| {
             Arc::new(CompressionMiddleware::with_config(
                 CompressionConfig::default().min_size(10),
             )) as Arc<dyn webx_core::middleware::IMiddleware>
-        })
+        }))
     })
     .await;
 
@@ -526,7 +529,9 @@ async fn integration_compression_gzips_large_response() {
 async fn integration_compression_skips_small_response() {
     let port = find_free_port();
     spawn_test_host_with(port, |b| {
-        b.use_middleware::<webx_host::compression::CompressionMiddleware>()
+        b.use_middleware(MiddlewareSpec::new::<
+            webx_host::compression::CompressionMiddleware,
+        >())
     })
     .await;
 
@@ -548,7 +553,9 @@ async fn integration_compression_skips_small_response() {
 async fn integration_compression_skips_without_accept_encoding() {
     let port = find_free_port();
     spawn_test_host_with(port, |b| {
-        b.use_middleware::<webx_host::compression::CompressionMiddleware>()
+        b.use_middleware(MiddlewareSpec::new::<
+            webx_host::compression::CompressionMiddleware,
+        >())
     })
     .await;
 

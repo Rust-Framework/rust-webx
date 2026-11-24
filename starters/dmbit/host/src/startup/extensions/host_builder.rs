@@ -10,8 +10,8 @@ pub trait HostBuilderExt {
 
 impl HostBuilderExt for HostBuilder {
     fn use_production_middleware(self) -> Self {
-        self.use_middleware::<CompressionMiddleware>()
-            .use_middleware::<TimingMiddleware>()
-            .use_middleware::<RequestTracing>()
+        self.use_middleware(MiddlewareSpec::new::<CompressionMiddleware>())
+            .use_middleware(MiddlewareSpec::new::<TimingMiddleware>())
+            .use_middleware(MiddlewareSpec::new::<RequestTracing>())
     }
 }

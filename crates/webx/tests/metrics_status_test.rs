@@ -56,7 +56,7 @@ async fn failed_handler_is_counted_as_5xx_before_after_hooks() {
     let host = Host::builder()
         .mode(AppMode::Development)
         .no_spa()
-        .use_middleware::<PoisonHeaders>()
+        .use_middleware(MiddlewareSpec::new::<PoisonHeaders>())
         .configure(|app| app.useOptions(|options| options.metrics.enabled = true))
         .build();
     tokio::spawn(async move { host.run_at(&addr).await });

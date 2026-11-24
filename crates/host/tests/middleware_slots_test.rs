@@ -7,6 +7,7 @@
 //! there prevents the CORS headers from being added.
 
 #![allow(clippy::type_complexity)]
+use webx_host::MiddlewareSpec;
 
 use std::net::TcpListener;
 use std::time::Duration;
@@ -169,8 +170,8 @@ async fn spawn_host() -> (String, webx_host::server::ServerHandle) {
             origins: vec!["https://app.example.com".to_string()],
             ..Default::default()
         })
-        .use_middleware::<IdentityProbe>()
-        .use_middleware_at::<EarlyBlocker>(MiddlewareSlot::BeforeCors)
+        .use_middleware(MiddlewareSpec::new::<IdentityProbe>())
+        .use_middleware(MiddlewareSpec::new::<EarlyBlocker>().at(MiddlewareSlot::BeforeCors))
         .build();
     let handle = host.server_handle();
     tokio::spawn(async move { host.run_at(&addr).await.unwrap() });

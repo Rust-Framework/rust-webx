@@ -60,7 +60,7 @@ async fn spawn_host() -> String {
     let host = Host::builder()
         .mode(AppMode::Development)
         .no_spa()
-        .use_middleware::<BodyLength>()
+        .use_middleware(MiddlewareSpec::new::<BodyLength>())
         .build();
 
     tokio::spawn(async move {

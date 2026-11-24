@@ -7,6 +7,7 @@ use std::sync::Arc;
 use webx_core::http::IHttpContext;
 use webx_core::middleware::IMiddleware;
 use webx_host::server::Host;
+use webx_host::MiddlewareSpec;
 
 fn find_free_port() -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -39,7 +40,7 @@ async fn use_middleware_registers_into_pipeline() {
     let host = Host::builder()
         .mode(webx_core::mode::AppMode::Development)
         .no_spa()
-        .use_middleware::<MarkerMiddleware>()
+        .use_middleware(MiddlewareSpec::new::<MarkerMiddleware>())
         .build();
     tokio::spawn(async move { host.run_at(&addr).await.unwrap() });
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -74,7 +75,9 @@ async fn use_middleware_with_registers_into_pipeline() {
     let host = Host::builder()
         .mode(webx_core::mode::AppMode::Development)
         .no_spa()
-        .use_middleware_with(|| Arc::new(TagMiddleware) as Arc<dyn IMiddleware>)
+        .use_middleware(MiddlewareSpec::factory(|| {
+            Arc::new(TagMiddleware) as Arc<dyn IMiddleware>
+        }))
         .build();
     tokio::spawn(async move { host.run_at(&addr).await.unwrap() });
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;

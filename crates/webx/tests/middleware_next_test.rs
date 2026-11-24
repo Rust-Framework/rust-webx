@@ -26,7 +26,7 @@ async fn spawn_host(middlewares: Vec<Arc<dyn IMiddleware>>) -> (String, webx::Se
     let mut builder = Host::builder().mode(AppMode::Development).no_spa();
     for middleware in middlewares {
         let middleware = Arc::clone(&middleware);
-        builder = builder.use_middleware_with(move || Arc::clone(&middleware));
+        builder = builder.use_middleware(MiddlewareSpec::factory(move || Arc::clone(&middleware)));
     }
     let host = builder.build();
     let handle = host.server_handle();

@@ -165,7 +165,7 @@ fn serve(port: u16) {
         builder = builder.add_authentication();
     }
     if std::env::var_os("ALLOC_PROBE_NOOP_MW").is_some() {
-        builder = builder.use_middleware::<NoopMiddleware>();
+        builder = builder.use_middleware(MiddlewareSpec::new::<NoopMiddleware>());
     }
     let host = builder.build();
     runtime.block_on(async move {

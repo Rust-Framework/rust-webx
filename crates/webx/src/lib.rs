@@ -228,6 +228,7 @@ pub use webx_host::session_cache::CachedSessionStore;
 pub use webx_host::testing::{free_port, spawn, spawn_with_health, wait_until_ready, TestServer};
 pub use webx_host::testing::{ChaosControl, TestHost, WireConnection};
 pub use webx_host::timing::TimingMiddleware;
+pub use webx_host::MiddlewareSpec;
 
 // --- Mediator ---
 pub use webx_core::mediator::Mediator;

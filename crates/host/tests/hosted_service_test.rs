@@ -20,6 +20,7 @@ use std::net::TcpListener;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use webx_host::MiddlewareSpec;
 
 use rust_dix::IServiceResolver;
 use webx_core::app::IHost;
@@ -438,7 +439,7 @@ async fn hosted_services_stop_before_in_flight_requests_finish() {
 
     let (handle, _runner) = spawn(port, move |builder| {
         builder
-            .use_middleware_with(|| Arc::new(SlowOnDemand))
+            .use_middleware(MiddlewareSpec::factory(|| Arc::new(SlowOnDemand)))
             .register(move |svc| {
                 svc.add_hosted_service_with(move |_| {
                     Arc::new(StopTimeRecorder {

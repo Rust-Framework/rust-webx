@@ -28,7 +28,7 @@ async fn spawn_host_with_tracing() -> String {
     let host = Host::builder()
         .mode(AppMode::Development)
         .no_spa()
-        .use_middleware::<RequestTracing>()
+        .use_middleware(MiddlewareSpec::new::<RequestTracing>())
         .build();
     let base = format!("http://{addr}");
     tokio::spawn(async move {

@@ -56,7 +56,7 @@ impl CompressionConfig {
 ///
 /// ```ignore
 /// Host::builder()
-///     .use_middleware::<CompressionMiddleware>()
+///     .use_middleware(MiddlewareSpec::new::<CompressionMiddleware>())
 ///     .build()
 /// ```
 #[derive(Default)]

@@ -17,6 +17,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
+use webx_host::MiddlewareSpec;
 
 use bytes::Bytes;
 use tokio::net::TcpStream;
@@ -530,7 +531,7 @@ async fn websocket_long_connection_emits_opened_and_closed_events() {
         .no_spa()
         // The trace id is assigned by the tracing middleware, then propagated to
         // the upgrade request's connection metadata (and thus the events).
-        .use_middleware::<RequestTracing>()
+        .use_middleware(MiddlewareSpec::new::<RequestTracing>())
         .use_websocket(WS_PATH, handler)
         .build();
     let server_handle = host.server_handle();

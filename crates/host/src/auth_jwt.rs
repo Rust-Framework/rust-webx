@@ -10,7 +10,7 @@
 //! own signing or session code:
 //!
 //! * [`JwtTokenIssuer`] implements `ITokenIssuer` and is registered
-//!   automatically by `HostBuilder::add_authentication()` from `Jwt.Secret`.
+//!   automatically by `HostBuilder::use_authentication()` from `Jwt.Secret`.
 //!   A login handler injects `Arc<dyn ITokenIssuer>` and calls
 //!   [`ITokenIssuer::issue`].
 //! * `.use_session_store(store)` registers an `ISessionStore`; the auth
@@ -703,7 +703,7 @@ fn unix_now() -> u64 {
 /// sessions.revoke(&issued.jti).await?; // logout
 /// ```
 ///
-/// `HostBuilder::add_authentication()` registers one from the configured
+/// `HostBuilder::use_authentication()` registers one from the configured
 /// `Jwt.Secret` / `Jwt.ExpirationMinutes`; register a custom [`ITokenIssuer`] in
 /// DI to replace it. `HostBuilder::register_with_options` hands the closure the
 /// final `AppOptions` (with `Jwt.SecretFile` already resolved), so a custom
@@ -888,7 +888,7 @@ static JWT_ENCODING_SECRET: OnceLock<String> = OnceLock::new();
 /// Deprecated 2.5 compatibility shim: initialize the global JWT encoding
 /// secret.
 ///
-/// `.add_authentication()` still populates this for applications that have not
+/// `.use_authentication()` still populates this for applications that have not
 /// migrated yet, but new code must inject `Arc<dyn ITokenIssuer>` and call
 /// `issue(TokenClaims)` instead. The global will be removed in the next major.
 /// (No `#[deprecated]` attribute in 2.x: adding one would break downstream

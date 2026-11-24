@@ -70,7 +70,7 @@ async fn main() {
             // 注册你的服务与依赖
         })
         .use_spa("wwwroot")      // 可选：SPA 静态托管
-        .add_authentication()              // 可选：JWT 认证
+        .use_authentication()              // 可选：JWT 认证
         .add_memory_cache()      // 可选：进程内内存缓存
         .build()
         .run()

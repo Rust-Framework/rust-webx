@@ -31,7 +31,7 @@ async fn main() -> Result<()> {
                     "dev-only-secret-change-me-at-least-32-bytes".to_string();
             });
         })
-        .add_authentication() // 注册 JWT 校验 + 默认 ITokenIssuer + IPasswordHasher
+        .use_authentication() // 注册 JWT 校验 + 默认 ITokenIssuer + IPasswordHasher
         .build();
     host.run().await
 }

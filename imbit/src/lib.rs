@@ -85,7 +85,7 @@ pub fn build_host() -> Host {
                 configure_turn_defaults(options);
             });
         })
-        .add_authentication()
+        .use_authentication()
         .register(move |svc| {
             let storage = Arc::clone(&storage);
             svc.add_mediator()

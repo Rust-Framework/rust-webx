@@ -14,7 +14,7 @@
 //! ```ignore
 //! Host::builder()
 //!     .add_authentication_scheme(Arc::new(ApiKeyScheme::new(validator)))
-//!     .add_authentication() // JWT scheme appended after explicit schemes
+//!     .use_authentication() // JWT scheme appended after explicit schemes
 //!     .build();
 //! ```
 

@@ -3,7 +3,7 @@
 ## 一行启用
 
 ```rust
-Host::builder().add_authentication().build().run().await?;
+Host::builder().use_authentication().build().run().await?;
 ```
 
 自动：
@@ -53,7 +53,7 @@ Host::builder().add_authentication().build().run().await?;
 
 ```rust
 Host::builder()
-    .add_authentication()
+    .use_authentication()
     .use_jwt_validation(
         JwtValidation::builder()
             .require_issuer("https://id.example.com")
@@ -160,7 +160,7 @@ let issued = self.tokens.issue(
 
 ## 小结
 
-> 兼容 shim：`init_jwt_secret` / `jwt_secret()` 仅为 N-2 兼容保留（`.add_authentication()` 仍会填充全局），**下一 major 删除**。新代码必须注入 `Arc<dyn ITokenIssuer>` 并调用 `issue(TokenClaims)`；不要读取/保存全局 secret。
+> 兼容 shim：`init_jwt_secret` / `jwt_secret()` 仅为 N-2 兼容保留（`.use_authentication()` 仍会填充全局），**下一 major 删除**。新代码必须注入 `Arc<dyn ITokenIssuer>` 并调用 `issue(TokenClaims)`；不要读取/保存全局 secret。
 
 `add_authentication()` + `Jwt` 配置即可启用 JWT 认证；当前 `iss`/`aud`/算法/时钟偏移/令牌上限/严格模式全部可配且 fail-closed。业务代码优先通过 Request 的 `IdentityUser` 字段拿身份，登录/登出通过 `ITokenIssuer`/`ISessionStore` 端口。
 
@@ -171,7 +171,7 @@ let issued = self.tokens.issue(
 ```rust
 Host::builder()
     .add_authentication_scheme(Arc::new(MtlsScheme::new(resolver)))
-    .add_authentication() // JWT
+    .use_authentication() // JWT
     .use_auth_scheme_for("/mtls", ["mtls"]) // /mtls 只接受 mTLS
     .build();
 ```

@@ -162,7 +162,7 @@ fn serve(port: u16) {
     // isolation: run `compare` twice (with and without this variable) and
     // subtract the framework numbers.
     if std::env::var_os("ALLOC_PROBE_AUTH").is_some() {
-        builder = builder.add_authentication();
+        builder = builder.use_authentication();
     }
     if std::env::var_os("ALLOC_PROBE_NOOP_MW").is_some() {
         builder = builder.use_middleware(MiddlewareSpec::new::<NoopMiddleware>());

@@ -1,7 +1,7 @@
 # API Key 认证（与 JWT 共存）
 
 管理面通常用 JWT（人登录），数据面通常用 `sk-` API Key（SDK/服务调用）。框架用
-**认证 scheme 链**把两者放在同一台 host 上：`HostBuilder::add_authentication_scheme` 注册的
+**认证 scheme 链**把两者放在同一台 host 上：`HostBuilder::use_authentication_scheme` 注册的
 scheme 先尝试，JWT 由 `add_authentication()` 追加在最后。
 
 ```rust
@@ -10,7 +10,7 @@ use webx::*;
 
 Host::builder()
     .add_authentication_scheme(Arc::new(ApiKeyScheme::new(validator)))
-    .add_authentication() // JWT，排在 API Key 之后
+    .use_authentication() // JWT，排在 API Key 之后
     .build();
 ```
 

@@ -46,7 +46,7 @@ async fn spawn_host(port: u16, store: Arc<InMemorySessionStore>) {
     let builder = Host::builder()
         .mode(AppMode::Development)
         .no_spa()
-        .add_authentication()
+        .use_authentication()
         .use_session_store(store)
         .configure(|b| {
             b.useOptions(|o| {

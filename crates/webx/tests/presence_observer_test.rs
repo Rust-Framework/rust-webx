@@ -90,7 +90,7 @@ async fn spawn_host(port: u16, recorder: Arc<Recorder>) -> ServerHandle {
     let host = Host::builder()
         .mode(AppMode::Development)
         .no_spa()
-        .add_authentication()
+        .use_authentication()
         .configure(|app| {
             app.useOptions(|options| {
                 options.jwt.secret = JWT_SECRET.to_string();

@@ -264,7 +264,7 @@ fn host_build_resolves_the_secret_from_the_file() {
         .mode(AppMode::Development)
         .no_spa()
         .configure(configure_secret_file(&path))
-        .add_authentication()
+        .use_authentication()
         .try_build()
         .expect("a valid secret file must let the host build");
 
@@ -282,7 +282,7 @@ fn host_build_fails_fast_when_the_secret_file_is_missing() {
         .mode(AppMode::Development)
         .no_spa()
         .configure(configure_secret_file(&missing))
-        .add_authentication()
+        .use_authentication()
         .try_build()
         .err()
         .expect("a missing secret file must abort start-up");
@@ -306,7 +306,7 @@ fn host_build_fails_fast_when_the_secret_file_is_too_short() {
         .mode(AppMode::Development)
         .no_spa()
         .configure(configure_secret_file(&path))
-        .add_authentication()
+        .use_authentication()
         .try_build()
         .err()
         .expect("a weak secret file must abort start-up");
@@ -334,7 +334,7 @@ fn code_level_secret_override_wins_over_the_file() {
                 options.jwt.secret_file = Some(secret_file);
             });
         })
-        .add_authentication()
+        .use_authentication()
         .try_build()
         .expect("an explicit secret must skip the file");
 
@@ -357,7 +357,7 @@ fn production_guard_accepts_a_file_backed_secret() {
                 options.cors.origins = vec!["https://example.com".into()];
             });
         })
-        .add_authentication()
+        .use_authentication()
         .try_build()
         .expect("the resolved file secret must satisfy the Production weak-secret guard");
 

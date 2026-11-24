@@ -110,7 +110,7 @@ async fn spawn_auth_host(port: u16) {
     let builder = Host::builder()
         .mode(AppMode::Development)
         .no_spa()
-        .add_authentication()
+        .use_authentication()
         .configure(|b| {
             b.useOptions(|o| {
                 o.jwt.secret = String::from_utf8_lossy(TEST_SECRET).to_string();

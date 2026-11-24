@@ -33,7 +33,7 @@ async fn main() {
         .register(|svc| svc.add_docbit_db())
         .register(|svc| svc.add_mediator())
         .add_options::<SiteConfig>("Site")
-        .add_authentication()
+        .use_authentication()
         .add_memory_cache()
         .use_spa("wwwroot")
         .build()

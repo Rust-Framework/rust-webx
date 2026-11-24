@@ -33,7 +33,7 @@ Host::builder()
 ## JWT 认证
 
 ```rust
-Host::builder().add_authentication()
+Host::builder().use_authentication()
 ```
 
 `add_authentication()` 注册 `jwt_middleware` 并从 `Jwt.Secret` 读取密钥。管道顺序见

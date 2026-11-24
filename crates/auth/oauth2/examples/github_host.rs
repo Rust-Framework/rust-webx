@@ -154,7 +154,7 @@ async fn main() -> Result<()> {
                 .try_add_singleton::<OAuth2Client>(move |_| Arc::clone(&client))
                 .try_add_singleton::<PendingStore>(move |_| Arc::clone(&pending))
         })
-        .add_authentication()
+        .use_authentication()
         .build()
         .run()
         .await

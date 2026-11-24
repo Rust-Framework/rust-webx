@@ -15,7 +15,7 @@ webx_ai_gateway::install(); // force the route inventory into the binary
 
 // Register the executor built from your catalog/router/quota/usage wiring.
 Host::builder()
-    .add_authentication()          // management-plane JWT
+    .use_authentication()          // management-plane JWT
     // or: .add_authentication_scheme(Arc::new(ApiKeyScheme::new(validator)))
     .add_error_writer(Arc::new(webx_ai::OpenAiErrorWriter::new()))
     .register(move |svc| svc.instance(Arc::new(executor)))

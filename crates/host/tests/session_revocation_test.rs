@@ -213,7 +213,7 @@ fn host_with_jwt(expiration_minutes: Option<u64>) -> webx_host::Host {
     webx_host::Host::builder()
         .mode(webx_core::mode::AppMode::Development)
         .no_spa()
-        .add_authentication()
+        .use_authentication()
         .configure(move |b| {
             b.useOptions(move |o| {
                 o.jwt.secret = SECRET.to_string();

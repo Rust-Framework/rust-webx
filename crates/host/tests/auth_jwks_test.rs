@@ -220,7 +220,7 @@ fn host_builds_with_jwks_only_and_no_shared_secret() {
                 });
             });
         })
-        .add_authentication()
+        .use_authentication()
         .try_build()
         .expect("JWKS-only authentication must build without an HMAC secret");
 }

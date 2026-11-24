@@ -100,7 +100,7 @@ pub struct GetDocContentHandler {
 Host::builder()
     .register(|svc| svc.add_docbit_db())   // SQLite DbContext
     .use_spa("wwwroot")
-    .add_authentication()
+    .use_authentication()
     .build();
 ```
 

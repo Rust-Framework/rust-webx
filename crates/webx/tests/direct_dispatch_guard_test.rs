@@ -66,7 +66,7 @@ async fn route_authorization_is_enforced_on_the_direct_dispatch_host() {
                 options.jwt.secret = "direct-guard-test-secret-at-least-32-bytes".to_string();
             });
         })
-        .add_authentication()
+        .use_authentication()
         .try_build()
         .expect("host must build");
 

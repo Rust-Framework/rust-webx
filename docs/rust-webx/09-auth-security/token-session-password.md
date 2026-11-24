@@ -50,7 +50,7 @@ use std::time::Duration;
 use webx::{ITokenIssuer, JwtTokenIssuer};
 
 Host::builder()
-    .add_authentication()
+    .use_authentication()
     .register_with_options(|svc, options| {
         // options.jwt.secret 已是 APP__Jwt__Secret / Jwt.Secret / SecretFile 的最终值
         let issuer = JwtTokenIssuer::from_secret(
@@ -79,7 +79,7 @@ Host::builder()
 
 ```rust
 Host::builder()
-    .add_authentication()
+    .use_authentication()
     .use_session_store(Arc::new(InMemorySessionStore::new()))
     .build()
 ```
@@ -115,7 +115,7 @@ session_store
 
 ```rust
 Host::builder()
-    .add_authentication()
+    .use_authentication()
     .CachedSessionStore::new(store, Duration::from_secs(5))
     .build();
 ```

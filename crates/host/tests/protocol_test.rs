@@ -237,7 +237,7 @@ async fn spawn_auth_host(port: u16) {
     let host = webx_host::server::Host::builder()
         .mode(webx_core::mode::AppMode::Development)
         .no_spa()
-        .add_authentication()
+        .use_authentication()
         .configure(|b| {
             b.useOptions(|o| {
                 o.jwt.secret = String::from_utf8_lossy(TEST_SECRET).to_string();

@@ -71,7 +71,7 @@ wwwroot/
 ```rust
 Host::builder()
     .use_spa("wwwroot")
-    .add_authentication()
+    .use_authentication()
     .build()
     .run()
     .await?;

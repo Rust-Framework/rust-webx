@@ -102,6 +102,9 @@ writer renders every error through it.
   `HostedServiceSpec::with_factory(..).ordered(n).enabled(flag)` for factory construction,
   start/stop order and conditional registration. `add_hosted_service_with`,
   `_ordered`, `_with_ordered`, `_if` and `_with_if` are removed; tests migrated.
+- **Authentication enablement uses `use_authentication()`** (was `add_authentication()`): enabling
+  JWT is a `use_*` action, while `add_authentication_scheme` still stacks an explicit scheme.
+  `use_auth_scheme_for` keeps its per-prefix selection role. All workspace/docs call sites renamed.
 
 ##### Nested request models (E2)
 
@@ -233,6 +236,9 @@ writer renders every error through it.
   `HostedServiceSpec::with_factory(..).ordered(n).enabled(flag)` 覆盖工厂构造、启动/停止顺序与
   条件注册。删除 `add_hosted_service_with`、`_ordered`、`_with_ordered`、`_if`、`_with_if`；
   测试已迁移。
+- **认证启用改为 `use_authentication()`**（原 `add_authentication()`）：启用 JWT 属 `use_*` 动作；
+  `add_authentication_scheme` 仍用于叠加显式 scheme，`use_auth_scheme_for` 保留按前缀选择职责。
+  workspace/文档调用点已全部改名。
 
 ##### 嵌套请求模型（E2）
 

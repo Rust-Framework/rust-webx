@@ -52,7 +52,7 @@ impl IRequestHandler<MyRequest, MyResponse> for MyHandler {
 
 ```rust
 Host::builder()
-    .add_authentication()
+    .use_authentication()
     .add_localization()   // 可选：locales/<culture>.json
     .use_cors(config)
     .add_memory_cache()

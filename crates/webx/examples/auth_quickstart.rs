@@ -99,7 +99,7 @@ async fn main() -> Result<()> {
                 options.jwt.secret = "dev-only-secret-change-me-at-least-32-bytes".to_string();
             });
         })
-        .add_authentication()
+        .use_authentication()
         .build()
         .run()
         .await

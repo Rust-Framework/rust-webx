@@ -13,7 +13,7 @@ pub fn build_host() -> Host {
         .register(|svc| svc.add_docbit_db())
         .register(|svc| svc.add_mediator())
         .add_options::<SiteConfig>("Site")
-        .add_authentication()
+        .use_authentication()
         .add_memory_cache(CacheOptions::default())
         .use_spa("wwwroot");
 

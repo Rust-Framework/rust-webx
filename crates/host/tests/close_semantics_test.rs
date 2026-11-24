@@ -301,7 +301,7 @@ async fn token_expiry_is_recorded_as_token_expired() {
     let host = Host::builder()
         .mode(AppMode::Development)
         .no_spa()
-        .add_authentication()
+        .use_authentication()
         .configure(|builder| {
             builder.use_options(|options| {
                 options.jwt.secret = TEST_SECRET.to_string();

@@ -116,7 +116,7 @@ async fn spawn_host_with(failure_limit: Option<(u32, Duration)>, with_jwt: bool)
         .add_authentication_scheme(Arc::new(scheme));
 
     if with_jwt {
-        builder = builder.add_authentication().configure(|app| {
+        builder = builder.use_authentication().configure(|app| {
             app.useOptions(|options| {
                 options.jwt.secret = JWT_SECRET.to_string();
             });

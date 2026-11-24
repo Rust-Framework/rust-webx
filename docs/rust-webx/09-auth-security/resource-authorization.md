@@ -30,7 +30,7 @@ let policy = ResourceAuthorization::new()
 
 ```rust
 Host::builder()
-    .add_authentication()  // JWT；#[authorize] 规则由端点自己执行
+    .use_authentication()  // JWT；#[authorize] 规则由端点自己执行
     .build()
 ```
 

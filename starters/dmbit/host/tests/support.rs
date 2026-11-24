@@ -9,7 +9,7 @@ pub fn build_host() -> Host {
         .register(|svc| svc.add_dmbit_db())
         .register(|svc| svc.add_mediator())
         .add_options::<SiteConfig>("Site")
-        .add_authentication();
+        .use_authentication();
 
     if AppMode::from_env() == AppMode::Production {
         builder = builder.use_production_middleware();

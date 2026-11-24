@@ -87,7 +87,7 @@ async fn custom_issuer_resolving_jwt_secret_produces_tokens_the_host_verifies() 
         .mode(AppMode::Development)
         .no_spa()
         .configure(configure_secret_file(path))
-        .add_authentication()
+        .use_authentication()
         .register(|svc| {
             // The factory is invoked after the provider is built; `JwtSecret`
             // must already be registered by then (the host adds it before user

@@ -122,7 +122,7 @@ async fn spawn_host() -> String {
     let host = Host::builder()
         .mode(AppMode::Development)
         .no_spa()
-        .add_authentication()
+        .use_authentication()
         .configure(|app| {
             app.useOptions(|options| {
                 options.jwt.secret = JWT_SECRET.to_string();

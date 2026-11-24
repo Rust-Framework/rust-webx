@@ -16,7 +16,7 @@ fn production_build_rejects_weak_jwt_when_auth_enabled() {
         .mode(AppMode::Production)
         .no_spa()
         .configure(production_options)
-        .add_authentication()
+        .use_authentication()
         .build();
 }
 
@@ -78,7 +78,7 @@ fn production_build_succeeds_with_strong_jwt_and_explicit_cors() {
                 o.jwt.secret = "production-jwt-secret-at-least-32-chars".into();
             });
         })
-        .add_authentication()
+        .use_authentication()
         .build();
 }
 
@@ -91,7 +91,7 @@ fn try_build_returns_err_instead_of_panicking() {
         .mode(AppMode::Production)
         .no_spa()
         .configure(production_options)
-        .add_authentication()
+        .use_authentication()
         .try_build()
         .err()
         .expect("weak JWT in Production must be rejected");
@@ -138,7 +138,7 @@ fn try_build_succeeds() {
                 o.jwt.secret = "production-jwt-secret-at-least-32-chars".into();
             });
         })
-        .add_authentication()
+        .use_authentication()
         .try_build()
         .expect("a valid Production configuration must build");
 

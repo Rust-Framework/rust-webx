@@ -368,7 +368,7 @@ fn host_build_rejects_unsupported_jwt_algorithm() {
                 options.jwt.algorithms = vec![JwtAlgorithm::Rs256];
             });
         })
-        .add_authentication()
+        .use_authentication()
         .try_build()
         .err()
         .expect("an algorithm the host cannot verify must abort startup");
@@ -393,7 +393,7 @@ fn host_build_accepts_explicit_validation_override() {
                 options.jwt.secret = SECRET.to_string();
             });
         })
-        .add_authentication()
+        .use_authentication()
         .use_jwt_validation(validation)
         .try_build()
         .expect("explicit validation must build");
@@ -411,7 +411,7 @@ async fn default_issuer_mints_the_configured_iss_and_aud() {
                 options.jwt.audience = Some("travel-api".to_string());
             });
         })
-        .add_authentication()
+        .use_authentication()
         .try_build()
         .expect("host with iss/aud configuration must build");
 

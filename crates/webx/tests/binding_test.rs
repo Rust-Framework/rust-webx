@@ -527,7 +527,7 @@ async fn spawn_host() -> String {
     let host = Host::builder()
         .mode(AppMode::Development)
         .no_spa()
-        .add_authentication()
+        .use_authentication()
         .configure(|b| {
             b.useOptions(|o| {
                 o.jwt.secret = String::from_utf8_lossy(TEST_SECRET).to_string();

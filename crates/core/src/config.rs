@@ -71,7 +71,7 @@ fn default_max_connections() -> usize {
 /// appsettings keys are PascalCase: `Jwt.Secret` and `Jwt.ExpirationMinutes`
 /// (or `APP__Jwt__ExpirationMinutes`). `ExpirationMinutes` drives the lifetime
 /// of tokens minted by the default `ITokenIssuer` that
-/// `HostBuilder::add_authentication()` registers.
+/// `HostBuilder::use_authentication()` registers.
 ///
 /// # Where the signing secret comes from (XR-2)
 ///

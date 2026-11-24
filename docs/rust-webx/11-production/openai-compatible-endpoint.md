@@ -14,7 +14,7 @@ use webx_ai::{GatewayExecutor, OpenAiErrorWriter};
 webx_ai_gateway::install(); // 把路由 inventory 链入二进制
 
 Host::builder()
-    .add_authentication()                 // 或 add_authentication_scheme(ApiKeyScheme…)
+    .use_authentication()                 // 或 add_authentication_scheme(ApiKeyScheme…)
     .add_error_writer(Arc::new(OpenAiErrorWriter::new()))
     .register(move |svc| svc.instance(Arc::new(executor)))
     .build()

@@ -210,7 +210,7 @@ fn builder_context_guards_are_aggregated() {
                 options.server.admission_timeout_ms = 0;
             });
         })
-        .add_authentication()
+        .use_authentication()
         .try_build()
         .err()
         .expect("weak JWT secret in Production must fail startup");
@@ -233,7 +233,7 @@ fn builder_context_guards_are_aggregated() {
                 options.jwt.algorithms = Vec::new();
             });
         })
-        .add_authentication()
+        .use_authentication()
         .try_build()
         .err()
         .expect("an invalid Jwt section must fail startup when auth is on");

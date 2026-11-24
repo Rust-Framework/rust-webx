@@ -75,7 +75,7 @@ Host::builder()
     .register(|svc| {
         svc.singleton::<UserRepo>(|_| Arc::new(UserRepo::new()));
     })
-    .add_authentication()
+    .use_authentication()
     .build()
     .run()
     .await?;
@@ -93,7 +93,7 @@ Host::builder()
 
 ```rust
 Host::builder()
-    .add_authentication()
+    .use_authentication()
     .add_localization()   // locales/<culture>.json
     .build();
 ```

@@ -277,7 +277,7 @@ async fn spawn_dynamic_host(port: u16, authorizer: Arc<dyn IDynamicAuthorizer>) 
     let host = Host::builder()
         .mode(AppMode::Development)
         .no_spa()
-        .add_authentication()
+        .use_authentication()
         .configure(|builder| {
             builder.useOptions(|options| {
                 options.jwt.secret = TEST_SECRET.to_string();

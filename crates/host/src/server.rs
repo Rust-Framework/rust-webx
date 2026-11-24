@@ -432,7 +432,7 @@ impl HostBuilder {
     /// use std::time::Duration;
     ///
     /// Host::builder()
-    ///     .add_authentication()
+    ///     .use_authentication()
     ///     .register_with_options(|svc, options| {
     ///         let issuer = JwtTokenIssuer::from_secret(
     ///             options.jwt.secret.as_bytes(),
@@ -1017,7 +1017,7 @@ impl HostBuilder {
     ///
     /// ```ignore
     /// Host::builder()
-    ///     .add_authentication()
+    ///     .use_authentication()
     ///     .build()
     /// ```
     ///
@@ -1031,7 +1031,7 @@ impl HostBuilder {
     /// `options.jwt.secret` in the closure) or by resolving `JwtSecret` in a
     /// factory. The host's default issuer is added with `try_add`, so an issuer
     /// registered by the application wins.
-    pub fn add_authentication(mut self) -> Self {
+    pub fn use_authentication(mut self) -> Self {
         self.auth_enabled = true;
         self
     }
@@ -1046,7 +1046,7 @@ impl HostBuilder {
     /// ```ignore
     /// Host::builder()
     ///     .add_authentication_scheme(Arc::new(ApiKeyScheme::new(validator)))
-    ///     .add_authentication() // JWT, tried after the API-key scheme
+    ///     .use_authentication() // JWT, tried after the API-key scheme
     ///     .build()
     /// ```
     ///
@@ -1082,7 +1082,7 @@ impl HostBuilder {
     ///
     /// ```ignore
     /// Host::builder()
-    ///     .add_authentication()
+    ///     .use_authentication()
     ///     .use_jwt_validation(
     ///         JwtValidation::builder()
     ///             .require_issuer("https://id.example.com")
@@ -1157,7 +1157,7 @@ impl HostBuilder {
     ///
     /// ```ignore
     /// Host::builder()
-    ///     .add_authentication()
+    ///     .use_authentication()
     ///     .use_session_store(Arc::new(InMemorySessionStore::new()))
     ///     .build()
     /// ```

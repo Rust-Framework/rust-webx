@@ -318,7 +318,7 @@ HTTP/3 是可选 crate，默认构建不会引入 QUIC 依赖。
 
 | crate | 入口 | 说明 |
 |-------|------|------|
-| [`rust-webx-h3`](https://crates.io/crates/rust-webx-h3) | `H3Transport` + `HostBuilder::use_http_transport(Arc::new(transport))`，可选 `use_h3_alt_svc(udp_port)`、可选 `H3Config::with_webtransport_handler` | QUIC + rustls + h3（`trev-h3` fork）、TLS 1.3 / ALPN `h3`、mTLS、SSE/流式响应、每连接 GOAWAY 排空、共享 `App.MaxConnections` 准入、`/metrics` 传输维度标签、显式 `Alt-Svc`、**HTTP/3 WebSocket（RFC 9220 extended CONNECT）**、**WebTransport adapter-level MVP**（session + bidi stream echo；transport-neutral 端口后续）。 |
+| [`rust-webx-h3`](https://crates.io/crates/rust-webx-h3) | `H3Transport` + `HostBuilder::use_http_transport(Arc::new(transport))`，可选 `use_alt_svc("h3=\":<udp_port>\"; ma=86400")`、可选 `H3Config::with_webtransport_handler` | QUIC + rustls + h3（`trev-h3` fork）、TLS 1.3 / ALPN `h3`、mTLS、SSE/流式响应、每连接 GOAWAY 排空、共享 `App.MaxConnections` 准入、`/metrics` 传输维度标签、显式 `Alt-Svc`、**HTTP/3 WebSocket（RFC 9220 extended CONNECT）**、**WebTransport adapter-level MVP**（session + bidi stream echo；transport-neutral 端口后续）。 |
 
 ## 示例应用
 

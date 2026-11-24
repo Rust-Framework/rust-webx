@@ -1139,28 +1139,6 @@ impl HostBuilder {
         self
     }
 
-    /// Register a session store behind a short-TTL negative cache.
-    ///
-    /// Every authenticated request asks the store whether the token was
-    /// revoked. With a database-backed store that is one round-trip per
-    /// request; this wrapper caches the "not revoked" answer for `ttl` and
-    /// invalidates it immediately on a local `revoke`.
-    ///
-    /// Another instance's revocation becomes visible after at most `ttl`; keep
-    /// it small (1–5s) in a multi-instance deployment.
-    ///
-    /// ```ignore
-    /// Host::builder()
-    ///     .add_authentication()
-    ///     .use_session_store_cached(store, Duration::from_secs(5))
-    ///     .build();
-    /// ```
-    pub fn use_session_store_cached(self, store: Arc<dyn ISessionStore>, ttl: Duration) -> Self {
-        self.use_session_store(Arc::new(crate::session_cache::CachedSessionStore::new(
-            store, ttl,
-        )))
-    }
-
     /// Register the metrics factory used by built-in components.
     ///
     /// Authentication emits `auth.requests{scheme,outcome}` and
@@ -1370,8 +1348,9 @@ impl HostBuilder {
     /// Advertise an `Alt-Svc` value on every HTTP/1.1+2 response (2.9).
     ///
     /// Configure this only when the advertised alternative service is actually
-    /// reachable. For an HTTP/3 endpoint use [`Self::use_h3_alt_svc`]; the raw
-    /// form is useful for other alternative services and custom `ma` policies.
+    /// reachable. For an HTTP/3 endpoint pass the conventional value (or the raw
+    /// header from [`crate::alt_svc::AltSvcMiddleware::h3`]); the raw form also
+    /// covers other alternative services and custom `ma` policies.
     /// See [`crate::alt_svc`] for the deployment/UDP caveats.
     pub fn use_alt_svc(mut self, value: impl Into<String>) -> Self {
         let value = value.into();
@@ -1380,15 +1359,6 @@ impl HostBuilder {
             factory: Box::new(move || crate::alt_svc::factory(value.clone())),
         });
         self
-    }
-
-    /// Advertise an HTTP/3 endpoint as `h3=":<port>"; ma=86400` (2.9).
-    ///
-    /// `port` is the **UDP** port of the `rust-webx-h3` transport. The header is
-    /// only emitted when this method is called; clients that cannot reach UDP
-    /// keep using the TCP listener.
-    pub fn use_h3_alt_svc(self, port: u16) -> Self {
-        self.use_alt_svc(format!("h3=\":{port}\"; ma=86400"))
     }
 
     /// Register a **synchronous** health check probe.

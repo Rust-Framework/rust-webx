@@ -1,4 +1,4 @@
-//! 2.5 M1 — revocation cache wiring (`use_session_store_cached`).
+//! 2.5 M1 — revocation cache wiring (`CachedSessionStore`).
 
 mod test_utils;
 
@@ -8,6 +8,7 @@ use std::time::Duration;
 use webx_core::mode::AppMode;
 use webx_core::security::{ISessionStore, InMemorySessionStore};
 use webx_host::server::Host;
+use webx_host::CachedSessionStore;
 
 #[tokio::test]
 async fn cached_store_is_registered_and_serves_revocations() {
@@ -15,7 +16,10 @@ async fn cached_store_is_registered_and_serves_revocations() {
     let host = Host::builder()
         .mode(AppMode::Development)
         .no_spa()
-        .use_session_store_cached(inner, Duration::from_secs(5))
+        .use_session_store(Arc::new(CachedSessionStore::new(
+            inner,
+            Duration::from_secs(5),
+        )))
         .try_build()
         .expect("host builds");
 

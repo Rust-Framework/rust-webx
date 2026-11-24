@@ -454,7 +454,7 @@ async fn host_injects_alt_svc_when_configured() {
         Host::builder()
             .mode(AppMode::Development)
             .no_spa()
-            .use_h3_alt_svc(4433),
+            .use_alt_svc("h3=\":4433\"; ma=86400"),
     );
 
     let captured = capture(
@@ -465,7 +465,7 @@ async fn host_injects_alt_svc_when_configured() {
     assert_eq!(
         captured.header("alt-svc"),
         Some("h3=\":4433\"; ma=86400"),
-        "use_h3_alt_svc must advertise the configured UDP endpoint"
+        "use_alt_svc must advertise the configured UDP endpoint"
     );
 }
 

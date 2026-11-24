@@ -66,6 +66,12 @@ writer renders every error through it.
   `OperationResult::success("deleted")`, and `failed(status, message)` is unchanged. The redundant
   constructors were only aliases of the `with_*` builders; `operation_contract` 6 tests and
   `operation_result_test` 3 tests cover the replacement.
+- **`use_session_store_cached` removed**: wrap explicitly with
+  `use_session_store(Arc::new(CachedSessionStore::new(store, ttl)))`. The cache is still a public
+  decorator; there is no second registration entry.
+- **`use_h3_alt_svc` removed**: `use_alt_svc("h3=\":443\"; ma=86400")` is the single entry (the raw
+  value also covers non-H3 alt services). `AltSvcMiddleware::h3(port)` remains available when
+  assembling the pipeline by hand.
 
 ##### Nested request models (E2)
 
@@ -165,6 +171,11 @@ writer renders every error through it.
   `OperationResult::success("created").with_status(7).with_result(value)`；无载荷用
   `OperationResult::success("deleted")`；`failed(status, message)` 不变。被删的只是 `with_*`
   的别名；`operation_contract` 6 条与 `operation_result_test` 3 条测试覆盖替代写法。
+- **删除 `use_session_store_cached`**：显式用
+  `use_session_store(Arc::new(CachedSessionStore::new(store, ttl)))` 装饰；缓存仍是公开装饰器，
+  注册入口只保留一个。
+- **删除 `use_h3_alt_svc`**：唯一入口是 `use_alt_svc("h3=\":443\"; ma=86400")`（原始值也覆盖
+  非 H3 的 alt service）；手工组装 pipeline 时仍可用 `AltSvcMiddleware::h3(port)`。
 
 ##### 嵌套请求模型（E2）
 

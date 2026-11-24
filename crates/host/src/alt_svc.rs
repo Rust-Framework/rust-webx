@@ -1,14 +1,14 @@
 //! `Alt-Svc` advertisement for HTTP/3 endpoints.
 //!
 //! Applications that run an HTTP/3 transport alongside the hyper HTTP/1.1+2
-//! listener use [`HostBuilder::use_h3_alt_svc`](crate::HostBuilder::use_h3_alt_svc)
+//! listener use [`HostBuilder::use_alt_svc`](crate::HostBuilder::use_alt_svc)
 //! to advertise the UDP endpoint on every HTTP/1.1+2 response:
 //!
 //! ```rust,ignore
 //! let h3 = H3Transport::new(H3Config::new("0.0.0.0:443", "cert.pem", "key.pem"))?;
 //! let host = Host::builder()
 //!     .use_http_transport(Arc::new(h3))
-//!     .use_h3_alt_svc(443)
+//!     .use_alt_svc("h3=\":443\"; ma=86400")
 //!     .build();
 //! ```
 //!
@@ -29,9 +29,9 @@ use webx_core::middleware::IMiddleware;
 
 /// Response middleware that sets the `Alt-Svc` header.
 ///
-/// Prefer the host-builder helpers [`crate::HostBuilder::use_alt_svc`] and
-/// [`crate::HostBuilder::use_h3_alt_svc`]; construct this type directly only
-/// when assembling the pipeline without a [`crate::HostBuilder`].
+/// Prefer the host-builder helper [`crate::HostBuilder::use_alt_svc`];
+/// construct this type directly only when assembling the pipeline without a
+/// [`crate::HostBuilder`].
 pub struct AltSvcMiddleware {
     value: String,
 }

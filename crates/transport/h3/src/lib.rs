@@ -113,7 +113,7 @@
 //! * **0-RTT stays disabled.** QUIC early data is left off
 //!   (`max_early_data_size = 0`) until the idempotency replay story is designed.
 //! * **`Alt-Svc` is explicit.** Use
-//!   `HostBuilder::use_h3_alt_svc(udp_port)` to advertise the endpoint on
+//!   `HostBuilder::use_alt_svc("h3=\":<udp_port>\"; ma=86400")` to advertise the endpoint on
 //!   HTTP/1.1+2 responses; nothing is advertised unless configured.
 //! * **h3 is a pinned fork.** `trev-h3 = 0.3.0` / `trev-h3-quinn = 0.3.0`
 //!   (a fork of hyperium/h3 with RFC 9220 + WebTransport fixes) are pinned

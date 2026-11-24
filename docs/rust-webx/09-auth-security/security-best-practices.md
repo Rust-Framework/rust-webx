@@ -122,7 +122,7 @@ if !setup.consume(candidate) {
 - **令牌**：配置 `Jwt.Issuer`/`Jwt.Audience`；资源服务器用 `InvalidTokenBehavior = Reject`；`sub` 空、算法不符、超长令牌一律拒绝。
 - **口令**：Argon2id（`IPasswordHasher`），不要 bcrypt/自写哈希；`PasswordPolicy` 只做长度+黑名单；登录失败用 `verify_password_or_dummy` 防枚举。
 - **登录限流**：`ILoginThrottle`（账号+客户端双维度、指数退避、不永久锁）；`BoundedPasswordHasher` 限制 Argon2 并发。
-- **会话/吊销**：JWT `revoke_until(jti, exp)` + `use_session_store_cached` 负缓存；Cookie 会话用 `ISessionRepository`，删除即失效。
+- **会话/吊销**：JWT `revoke_until(jti, exp)` + `CachedSessionStore::new` 负缓存；Cookie 会话用 `ISessionRepository`，删除即失效。
 - **浏览器**：Cookie 用 `HttpOnly`/`Secure`/`SameSite`；Cookie scheme 必须配 `use_csrf`，否则启动失败。
 - **Basic**：只在 TLS 后使用；校验器用 `constant_time_eq`，未知用户返回 `None`。
 - **可观测**：`use_meter` 接 `auth.requests`/`auth.duration`；启动日志确认 schemes/CSRF/session store。

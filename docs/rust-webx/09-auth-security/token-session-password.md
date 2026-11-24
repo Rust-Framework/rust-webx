@@ -116,7 +116,7 @@ session_store
 ```rust
 Host::builder()
     .add_authentication()
-    .use_session_store_cached(store, Duration::from_secs(5))
+    .CachedSessionStore::new(store, Duration::from_secs(5))
     .build();
 ```
 

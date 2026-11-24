@@ -41,7 +41,7 @@
 | 紧急全站 | 轮换签名密钥（非对称移除旧 kid / HS256 换 secret） | 一个 TTL 内 |
 
 - 吊销存储故障必须 503（fail-closed），**不会**静默放行。
-- 负缓存 `use_session_store_cached` 的跨实例窗口 = TTL（建议 1–5s）。
+- 负缓存 `CachedSessionStore::new` 的跨实例窗口 = TTL（建议 1–5s）。
 
 ## 4. 健康检查
 

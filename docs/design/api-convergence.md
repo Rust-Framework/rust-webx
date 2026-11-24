@@ -23,14 +23,14 @@
 | 3 | `OperationResult::{ok, ok_with_status, success, success_with_status}` | 同义 | `success(message)` / `failed(status, message)` + `with_status` / `with_message` / `with_result` | A |
 | 4 | `Error::Message`（500，裸文本，13 处） | 同义 | 删除，统一 `Error::Internal`（500、`public_detail()=None`）；`State` 仅用于状态机 | A |
 | 5 | `Error::Http(String)`（400） | 同义 | 删除，统一 `Error::Status(400, _)` / `Validation` | A |
-| 6 | `use_session_store` + `use_session_store_cached` | 复制 | 只留 `use_session_store`；缓存用 `CachedSessionStore::new(store, ttl)` 显式装饰 | A |
+| 6 | `use_session_store` + `use_session_store_cached` | 复制 | **已完成（3.0）**：只留 `use_session_store`；缓存用 `CachedSessionStore::new(store, ttl)` 显式装饰 | A |
 | 7 | `add_localization` + `add_localization_with(Options)` | 复制 | `use_localization(LocalizationOptions)`（`Default` + builder） | A |
 | 8 | `add_memory_cache` + `add_memory_cache_with(max_entries)` | 复制 | `add_memory_cache(CacheOptions)`（`Default` + `.max_entries(n)`） | A |
 | 9 | `add_options` / `use_options` / `add_options_monitor` | 复制 + 命名混 | `add_options::<T>(section)` 同时注册 `IOptions<T>`/`IOptionsMonitor<T>`；`use_options(value)` 只用于预构造实例 | B |
 | 10 | `add_health_check` / `_async` / `_async_with_timeout`（+ registry `register`/`register_async`） | 复制 + 维度 | `add_health_check(HealthCheckSpec::new(name, check).timeout(d))`；sync 闭包经 `IntoHealthCheck` 适配 | B |
 | 11 | `use_middleware` / `_at` / `_with` / `_with_at` | 维度 | `use_middleware(MiddlewareSpec::<M>::default().at(order).factory(f))` | B |
 | 12 | `add_background_service` / `_with` / `add_hosted_service_with` / `_ordered` / `_if` | 维度 + 命名混 | `add_background_service(spec)`（spec 承载 order/if/构造）；`PeriodicBackgroundService` 仍是 trait 变体，不是注册变体 | B |
-| 13 | `use_alt_svc(value)` / `use_h3_alt_svc(port)` | 同义 | 只留 `use_alt_svc(impl Into<String>)` | A |
+| 13 | `use_alt_svc(value)` / `use_h3_alt_svc(port)` | 同义 | **已完成（3.0）**：只留 `use_alt_svc(impl Into<String>)` | A |
 | 14 | `build` / `try_build` | 保留（panic vs Result） | 生产装配只用 `try_build`；`build` 仅测试/示例 | 规则 |
 | 15 | `Mediator::send` / `send_boxed` | 保留（typed vs erased） | `send_boxed` 只给 `Arc<dyn IMediator>` 类型擦除调用 | 规则 |
 | 16 | `IRequest<Response>` 自控响应 vs `ActionResult<T>` vs `OperationResult<T>` | 保留（语义不同） | 写死三选一：DTO → `ActionResult<T>`；命令型业务信封 → `OperationResult`；文件/非 JSON/自定义状态 → `IRequest<Response>` | 规则 |

@@ -328,7 +328,7 @@ do not pull QUIC dependencies.
 
 | Crate | Entry point | Notes |
 |-------|-------------|-------|
-| [`rust-webx-h3`](https://crates.io/crates/rust-webx-h3) | `H3Transport` + `HostBuilder::use_http_transport(Arc::new(transport))`, optional `use_h3_alt_svc(udp_port)`, optional `H3Config::with_webtransport_handler` | QUIC + rustls + h3 fork (`trev-h3`), TLS 1.3 / ALPN `h3`, mTLS, SSE/streaming, per-connection GOAWAY drain, shared `App.MaxConnections` admission, `/metrics` transport labels, explicit `Alt-Svc`, **WebSocket over HTTP/3 via RFC 9220 extended CONNECT**, and **WebTransport adapter-level MVP** (session + bidi stream echo; transport-neutral port is future work). |
+| [`rust-webx-h3`](https://crates.io/crates/rust-webx-h3) | `H3Transport` + `HostBuilder::use_http_transport(Arc::new(transport))`, optional `use_alt_svc("h3=\":<udp_port>\"; ma=86400")`, optional `H3Config::with_webtransport_handler` | QUIC + rustls + h3 fork (`trev-h3`), TLS 1.3 / ALPN `h3`, mTLS, SSE/streaming, per-connection GOAWAY drain, shared `App.MaxConnections` admission, `/metrics` transport labels, explicit `Alt-Svc`, **WebSocket over HTTP/3 via RFC 9220 extended CONNECT**, and **WebTransport adapter-level MVP** (session + bidi stream echo; transport-neutral port is future work). |
 
 ## Example Applications
 

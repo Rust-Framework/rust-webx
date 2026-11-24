@@ -4,6 +4,7 @@ use serde_json;
 use std::sync::Arc;
 use tracing::Instrument;
 use webx_core::error::Result;
+use webx_core::http::IClaimsExt as _;
 use webx_core::http::IHttpContext;
 use webx_core::routing::IEndpoint;
 
@@ -34,7 +35,22 @@ impl IEndpoint for RequestEndpoint {
             kind = "request",
             status = tracing::field::Empty,
         );
-        let outcome = (self.handler)(ctx).instrument(span.clone()).await;
+        // Custom endpoints get the same request context as macro-dispatched
+        // ones, so a closure that calls an audit helper or a persistence
+        // callback reads the same identity the authentication middleware set.
+        let identity = ctx
+            .claims()
+            .map(|claims| Arc::new(webx_core::auth::IdentityUser::from_claims(claims)));
+        let trace_id = ctx.trace_id().map(Arc::<str>::from);
+        // Build the handler future *inside* the scope: a custom endpoint that
+        // reads RequestContext while constructing its future must see the same
+        // identity/trace the request carries.
+        let outcome =
+            webx_core::request_context::RequestContext::run_with_trace(identity, trace_id, async {
+                (self.handler)(ctx).await
+            })
+            .instrument(span.clone())
+            .await;
         span.record("status", u64::from(ctx.response().status()));
         outcome
     }
@@ -189,30 +205,40 @@ impl IEndpoint for StubEndpoint {
             path = self.path,
             status = tracing::field::Empty,
         );
-        let outcome = async {
-            if !self.authorize(ctx).await? {
-                return Ok(());
-            }
+        // The request context must cover **authorization** as well as dispatch:
+        // a dynamic authorizer reads `RequestContext::identity()` to decide, and
+        // the handler macro below reuses this same `Arc` instead of building a
+        // second identity. Building it before the authorization guard is what
+        // makes `identity()` visible on the whole endpoint path.
+        let identity = ctx
+            .claims()
+            .map(|claims| Arc::new(webx_core::auth::IdentityUser::from_claims(claims)));
+        let trace_id = ctx.trace_id().map(Arc::<str>::from);
+        let outcome =
+            webx_core::request_context::RequestContext::run_with_trace(identity, trace_id, async {
+                if !self.authorize(ctx).await? {
+                    return Ok(());
+                }
 
-            if let Some(dispatch) = self.dispatch_fn {
-                let response = dispatch(&mut *ctx).await?;
-                response.execute(&mut *ctx).await?;
-                return Ok(());
-            }
+                if let Some(dispatch) = self.dispatch_fn {
+                    let response = dispatch(&mut *ctx).await?;
+                    response.execute(&mut *ctx).await?;
+                    return Ok(());
+                }
 
-            write_problem(
-                ctx,
-                501,
-                &format!(
-                    "Route handler not implemented: {} {} (request type: {})",
-                    self.method, self.path, self.handler_type
-                ),
-            )
+                write_problem(
+                    ctx,
+                    501,
+                    &format!(
+                        "Route handler not implemented: {} {} (request type: {})",
+                        self.method, self.path, self.handler_type
+                    ),
+                )
+                .await;
+                Ok(())
+            })
+            .instrument(span.clone())
             .await;
-            Ok(())
-        }
-        .instrument(span.clone())
-        .await;
         span.record("status", u64::from(ctx.response().status()));
         outcome
     }
@@ -264,15 +290,22 @@ impl webx_engine::RouteTarget for DirectRouteTarget {
             path = self.auth.path,
             status = tracing::field::Empty,
         );
-        let outcome = async {
-            if !self.auth.authorize(ctx).await? {
-                return Ok(());
-            }
-            let result = (self.dispatch)(ctx as &mut dyn IHttpContext, self.encoder).await?;
-            ctx.write_endpoint_result(result).await
-        }
-        .instrument(span.clone())
-        .await;
+        // Same rule as `StubEndpoint::handle`: the scope starts before the
+        // authorization guard so dynamic authorizers can read the identity.
+        let identity = ctx
+            .claims()
+            .map(|claims| Arc::new(webx_core::auth::IdentityUser::from_claims(claims)));
+        let trace_id = ctx.trace_id().map(Arc::<str>::from);
+        let outcome =
+            webx_core::request_context::RequestContext::run_with_trace(identity, trace_id, async {
+                if !self.auth.authorize(ctx).await? {
+                    return Ok(());
+                }
+                let result = (self.dispatch)(ctx as &mut dyn IHttpContext, self.encoder).await?;
+                ctx.write_endpoint_result(result).await
+            })
+            .instrument(span.clone())
+            .await;
         span.record("status", u64::from(ctx.response().status()));
         outcome
     }

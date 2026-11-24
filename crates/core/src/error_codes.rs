@@ -22,7 +22,9 @@
 //! * lowercase `snake_case`; stable once released — 2.x adds entries, never
 //!   renames or removes them;
 //! * one HTTP status per code, and `retryable` must match
-//!   [`status_is_retryable`](crate::error::status_is_retryable) for that status;
+//!   [`status_is_retryable`](crate::error::status_is_retryable) for that
+//!   status, except for a documented condition-specific code
+//!   (`conflict_retryable`: a `409` whose conflict is transient);
 //! * application-defined codes (carried through
 //!   [`ProblemDetails`](crate::problem::ProblemDetails)) are **not** registered
 //!   here: they belong to the application's own contract.
@@ -41,8 +43,11 @@ pub struct ErrorCodeSpec {
     pub status: u16,
     /// Whether retrying the same request may succeed.
     ///
-    /// `true` only for transient conditions (`429`, `502`, `503`, `504`); a
-    /// validation failure or a server-side defect is never retryable.
+    /// `true` for transient conditions: every `429`/`502`/`503`/`504` status,
+    /// plus [`conflict_retryable`](crate::error::Error::conflict_retryable) —
+    /// a `409` that means "wait for the conflicting work, then retry". A
+    /// validation failure, a permanent state conflict or a server-side defect is
+    /// never retryable.
     pub retryable: bool,
 }
 
@@ -118,6 +123,11 @@ pub const ERROR_CODES: &[ErrorCodeSpec] = &[
         code: "conflict",
         status: 409,
         retryable: false,
+    },
+    ErrorCodeSpec {
+        code: "conflict_retryable",
+        status: 409,
+        retryable: true,
     },
     ErrorCodeSpec {
         code: "payload_too_large",

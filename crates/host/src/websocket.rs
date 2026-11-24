@@ -63,6 +63,11 @@ pub struct WebSocketMiddleware {
     /// Presence observers resolved once at assembly (registration is static),
     /// so accepting a connection does no DI enumeration or allocation.
     observers: Arc<[Arc<dyn webx_core::realtime::IPresenceObserver>]>,
+    /// Origins allowed to open a session; empty disables the check.
+    ///
+    /// A browser attaches cookies to a cross-site WebSocket handshake, so
+    /// without an allow-list any site can hijack a `SameSite=None` session.
+    origins: Arc<[String]>,
 }
 
 impl WebSocketMiddleware {
@@ -78,12 +83,34 @@ impl WebSocketMiddleware {
             provider,
             limits,
             observers,
+            origins: Arc::from(Vec::<String>::new()),
         }
     }
 
-    #[allow(dead_code)]
-    fn matching_route(&self, path: &str) -> Option<&WebSocketRoute> {
-        self.routes.iter().find(|route| route.path == path)
+    /// Restrict which browser origins may open a session.
+    ///
+    /// When the list is non-empty, an upgrade must carry an `Origin` header that
+    /// matches one entry exactly; a missing origin (non-browser client) is
+    /// rejected too, so a browser-only deployment stays closed. An empty list
+    /// keeps the historical behavior (no origin check) and is what a
+    /// non-browser client needs.
+    pub fn with_origins(mut self, origins: Vec<String>) -> Self {
+        self.origins = origins.into();
+        self
+    }
+
+    /// Whether the upgrade's `Origin` may open a session.
+    ///
+    /// Empty allow-list = no check (non-browser clients). A configured list
+    /// requires an exact match, so a browser-only deployment also rejects
+    /// handshakes whose `Origin` was stripped.
+    fn origin_allowed(&self, ctx: &dyn IHttpContext) -> bool {
+        if self.origins.is_empty() {
+            return true;
+        }
+        ctx.request()
+            .header("origin")
+            .is_some_and(|origin| self.origins.iter().any(|allowed| allowed == origin))
     }
 }
 
@@ -121,6 +148,17 @@ impl IMiddleware for WebSocketMiddleware {
             ctx.response_mut().set_status(426);
             ctx.response_mut().set_header("upgrade", "websocket");
             ctx.response_mut().set_header("connection", "close");
+            return Ok(ControlFlow::Break(()));
+        }
+
+        if !self.origin_allowed(ctx) {
+            tracing::warn!(
+                path = %ctx.request().path(),
+                "WebSocket upgrade rejected: origin is not in the allow-list"
+            );
+            ctx.response_mut().set_status(403);
+            ctx.response_mut()
+                .set_header("content-type", "text/plain; charset=utf-8");
             return Ok(ControlFlow::Break(()));
         }
 
@@ -211,7 +249,7 @@ impl IUpgradeSession for WebSocketSession {
         }
         // Bounded outbound queue: a slow client can never block the sender.
         let (sender, receiver) = mpsc::channel(limits.outbound_queue);
-        let writer = tokio::spawn(write_loop(sink, receiver));
+        let writer = tokio::spawn(write_loop(sink, receiver, limits.write_timeout));
         let connection = Arc::new(WebSocketConnection {
             context: Arc::clone(&context),
             sender,
@@ -275,7 +313,18 @@ impl IUpgradeSession for WebSocketSession {
             });
         }
         drop(connection);
-        let _ = writer.await;
+        match tokio::time::timeout(WRITER_JOIN_GRACE, writer).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                tracing::error!(%error, "websocket writer task failed");
+            }
+            Err(_) => {
+                tracing::warn!(
+                    grace_ms = WRITER_JOIN_GRACE.as_millis(),
+                    "websocket writer did not finish within the join grace; session closed anyway"
+                );
+            }
+        }
         if let Some(metrics) = &realtime_metrics {
             metrics.record_connection_closed();
         }
@@ -469,19 +518,53 @@ impl InboundWindow {
 }
 
 /// Drain the outbound queue into the socket, then close the socket.
-async fn write_loop(mut sink: SessionSink, mut receiver: mpsc::Receiver<Message>) {
+///
+/// Every write is bounded by [`WebSocketLimits::write_timeout`]: a peer that
+/// stops reading must cost one timeout, not the process lifetime.
+async fn write_loop(
+    mut sink: SessionSink,
+    mut receiver: mpsc::Receiver<Message>,
+    write_timeout: Option<Duration>,
+) {
     while let Some(message) = receiver.recv().await {
         let is_close = matches!(message, Message::Close(_));
-        if sink.send(message).await.is_err() {
+        let sent = match write_timeout {
+            Some(timeout) => match tokio::time::timeout(timeout, sink.send(message)).await {
+                Ok(result) => result,
+                Err(_) => {
+                    tracing::warn!(
+                        timeout_ms = timeout.as_millis(),
+                        "websocket write timed out; the peer stopped reading, closing the session"
+                    );
+                    return;
+                }
+            },
+            None => sink.send(message).await,
+        };
+        if sent.is_err() {
             break;
         }
         if is_close {
             break;
         }
     }
-    // Flush the close handshake / socket.
-    let _ = sink.close().await;
+    // Flush the close handshake / socket under the same deadline.
+    match write_timeout {
+        Some(timeout) => {
+            let _ = tokio::time::timeout(timeout, sink.close()).await;
+        }
+        None => {
+            let _ = sink.close().await;
+        }
+    }
 }
+
+/// How long the session waits for the writer task to finish before giving up.
+///
+/// The writer already bounds each write, so this only covers a queued close
+/// frame; it exists so a wedged writer can never keep the session (and its
+/// connection accounting) alive forever.
+const WRITER_JOIN_GRACE: Duration = Duration::from_secs(5);
 
 fn payload_bytes(message: &Message) -> u64 {
     match message {
@@ -505,6 +588,10 @@ fn enqueue_frame(
         return Err(Error::Http("websocket connection is closed".to_string()));
     }
     let bytes = payload_bytes(&message);
+    // A close frame is protocol state, not data: it must reach the peer or be
+    // reported. Dropping it under the backpressure policy would make `close()`
+    // report success while the peer never learns why the session ended.
+    let is_close = matches!(message, Message::Close(_));
     match sender.try_send(message) {
         Ok(()) => {
             stats.messages_out.fetch_add(1, Ordering::Relaxed);
@@ -519,6 +606,12 @@ fn enqueue_frame(
                 stats.dropped_outbound.fetch_add(1, Ordering::Relaxed);
                 if let Some(metrics) = metrics {
                     metrics.record_dropped_outbound();
+                }
+                if is_close {
+                    return Err(Error::Http(
+                        "websocket backpressure: outbound queue full, close frame not delivered"
+                            .to_string(),
+                    ));
                 }
                 Ok(())
             }
@@ -944,6 +1037,23 @@ mod tests {
         )
         .expect_err("disconnect policy must fail the send");
         assert!(error.to_string().contains("backpressure"));
+
+        // A close frame is protocol state: under the Drop policy it must be
+        // reported instead of silently discarded, otherwise `close()` claims a
+        // close handshake the peer never receives.
+        let error = enqueue_frame(
+            &sender,
+            &queue_limits(BackpressurePolicy::Drop),
+            &stats,
+            None,
+            false,
+            Message::Close(Some(CloseFrame {
+                code: CloseCode::from(1000),
+                reason: "bye".into(),
+            })),
+        )
+        .expect_err("a dropped close frame must surface as an error");
+        assert!(error.to_string().contains("close frame"), "got {error}");
 
         // A closed connection never queues.
         let error = enqueue_frame(

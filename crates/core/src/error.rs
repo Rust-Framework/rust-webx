@@ -60,6 +60,29 @@ pub enum Error {
     #[error("{0}")]
     Conflict(String),
 
+    /// Rate limit exceeded; the client may retry after `retry_after_secs`.
+    ///
+    /// Use [`Error::too_many_requests`] instead of writing
+    /// [`Error::Status(429, …)`](Error::Status): the host writes the RFC 6585
+    /// `Retry-After` header from the value carried here. `detail` is shown to
+    /// the client (it is the error's `public_detail`).
+    #[error("Too many requests (retry after {retry_after_secs}s): {detail}")]
+    TooManyRequests {
+        /// Seconds the client should wait before retrying (`0` = immediately).
+        retry_after_secs: u64,
+        /// Client-facing explanation.
+        detail: String,
+    },
+
+    /// A conflict the client may retry once the conflicting work finishes.
+    ///
+    /// Maps to `409`, `code = "conflict_retryable"` and `retryable = true`.
+    /// This is a "wait, then retry" signal, not an instruction to retry
+    /// blindly: the client should re-read the state (or replay the same
+    /// idempotency key) instead of hammering the endpoint.
+    #[error("Conflict (retryable): {0}")]
+    ConflictRetryable(String),
+
     /// Request body (or one uploaded file) exceeded the configured limit.
     #[error("{0}")]
     PayloadTooLarge(String),
@@ -77,6 +100,43 @@ pub enum Error {
 }
 
 impl Error {
+    /// A typed `429` that carries its `Retry-After` value.
+    ///
+    /// Prefer this over [`Error::Status(429, …)`](Error::Status): the host
+    /// writes `Retry-After: <retry_after_secs>` for you, so business code never
+    /// formats the header or hand-writes the status code.
+    pub fn too_many_requests(retry_after_secs: u64, detail: impl Into<String>) -> Self {
+        Error::TooManyRequests {
+            retry_after_secs,
+            detail: detail.into(),
+        }
+    }
+
+    /// A typed `409` whose `retryable` is `true`: the conflict is transient.
+    ///
+    /// Use it for "another request is doing this right now" (an in-flight
+    /// idempotent duplicate, a plan change in progress): the client should wait
+    /// for that work to finish and retry. A permanent state/version conflict
+    /// stays [`Error::Conflict`] (`retryable = false`). No `Retry-After` header
+    /// is written, because the framework does not know how long the other work
+    /// takes.
+    pub fn conflict_retryable(detail: impl Into<String>) -> Self {
+        Error::ConflictRetryable(detail.into())
+    }
+
+    /// The `Retry-After` value (seconds) carried by a typed rate-limit error.
+    ///
+    /// `None` for every other variant, including a bare
+    /// [`Error::Status(429, …)`](Error::Status), which carries no wait value.
+    pub fn retry_after_secs(&self) -> Option<u64> {
+        match self {
+            Error::TooManyRequests {
+                retry_after_secs, ..
+            } => Some(*retry_after_secs),
+            _ => None,
+        }
+    }
+
     /// Map the error to an appropriate HTTP status code.
     ///
     /// Used by the built-in exception middleware to produce
@@ -97,6 +157,8 @@ impl Error {
             Error::Validation(_) => 400,
             Error::NotFound(_) => 404,
             Error::Conflict(_) => 409,
+            Error::TooManyRequests { .. } => 429,
+            Error::ConflictRetryable(_) => 409,
             Error::PayloadTooLarge(_) => 413,
             Error::UnsupportedMediaType(_) => 415,
             Error::Problem(problem) => problem.status,
@@ -125,6 +187,8 @@ impl Error {
             Error::Validation(_) => Cow::Borrowed("validation_failed"),
             Error::NotFound(_) => Cow::Borrowed("not_found"),
             Error::Conflict(_) => Cow::Borrowed("conflict"),
+            Error::TooManyRequests { .. } => Cow::Borrowed("too_many_requests"),
+            Error::ConflictRetryable(_) => Cow::Borrowed("conflict_retryable"),
             Error::PayloadTooLarge(_) => Cow::Borrowed("payload_too_large"),
             Error::UnsupportedMediaType(_) => Cow::Borrowed("unsupported_media_type"),
             Error::Problem(problem) => match problem.code() {
@@ -136,12 +200,16 @@ impl Error {
 
     /// Whether retrying the same request could succeed.
     ///
-    /// Only transient conditions are retryable: rate limiting and upstream
-    /// unavailability/timeout. A validation error or a server-side defect is
-    /// not — retrying would just repeat the failure.
+    /// Only transient conditions are retryable: rate limiting, upstream
+    /// unavailability/timeout, and a conflict explicitly created as retryable
+    /// ([`Error::conflict_retryable`]) — the latter means "retry after the
+    /// conflicting work finishes", not "retry blindly". A validation error or a
+    /// server-side defect is not retryable — retrying would just repeat the
+    /// failure.
     pub fn retryable(&self) -> bool {
         match self {
             Error::Status(code, _) => status_is_retryable(*code),
+            Error::TooManyRequests { .. } | Error::ConflictRetryable(_) => true,
             Error::Problem(problem) => problem
                 .retryable()
                 .unwrap_or_else(|| status_is_retryable(problem.status)),
@@ -165,9 +233,12 @@ impl Error {
             | Error::Validation(detail)
             | Error::NotFound(detail)
             | Error::Conflict(detail)
+            | Error::ConflictRetryable(detail)
             | Error::PayloadTooLarge(detail)
             | Error::UnsupportedMediaType(detail) => Some(detail),
             Error::Status(_, detail) => Some(detail),
+            // The typed 429 was built for the client, so its detail is safe.
+            Error::TooManyRequests { detail, .. } => Some(detail),
             // Internal / DI / state / response serialization / already-written
             // problem: nothing here is safe or meaningful for a client.
             Error::Di(_)
@@ -178,6 +249,20 @@ impl Error {
             | Error::Message(_)
             | Error::Problem(_) => None,
         }
+    }
+}
+
+/// Runtime dependency-resolution failures become [`Error::Di`].
+///
+/// A handler, port implementation or hosted service that asks the container for
+/// a service the composition root does not register is a server-side defect:
+/// the client gets a 500 whose detail is hidden (`public_detail()` is `None`),
+/// while the operator log keeps the container's message (missing service type,
+/// key, circular graph, …). `?` therefore works directly in any function that
+/// returns [`Result`], and applications no longer need a local conversion.
+impl From<rust_dix::RdiError> for Error {
+    fn from(error: rust_dix::RdiError) -> Self {
+        Error::Di(error.to_string())
     }
 }
 
@@ -280,6 +365,15 @@ mod tests {
     }
 
     #[test]
+    fn di_failures_convert_to_a_hidden_di_error() {
+        let error: Error = rust_dix::RdiError::not_found("OrderService", None).into();
+        assert!(matches!(error, Error::Di(_)));
+        assert_eq!(error.status_code(), 500);
+        assert_eq!(error.public_detail(), None);
+        assert!(error.to_string().contains("OrderService"));
+    }
+
+    #[test]
     fn codes_and_retryability_are_stable() {
         assert_eq!(Error::Validation("x".into()).code(), "validation_failed");
         assert_eq!(Error::NotFound("x".into()).code(), "not_found");
@@ -306,5 +400,36 @@ mod tests {
         assert_eq!(error.status_code(), 429);
         assert_eq!(error.code(), "rate_limited");
         assert!(error.retryable());
+    }
+
+    #[test]
+    fn typed_rate_limit_carries_retry_after_and_keeps_bare_429_behavior() {
+        let limited = Error::too_many_requests(7, "quota exhausted");
+        assert_eq!(limited.status_code(), 429);
+        assert_eq!(limited.code(), "too_many_requests");
+        assert!(limited.retryable());
+        assert_eq!(limited.public_detail(), Some("quota exhausted"));
+        assert_eq!(limited.retry_after_secs(), Some(7));
+        assert!(limited.to_string().contains("retry after 7s"));
+
+        // A bare 429 keeps the pre-existing mapping; it just has no wait value.
+        let bare = Error::Status(429, "slow down".into());
+        assert_eq!(bare.code(), "too_many_requests");
+        assert!(bare.retryable());
+        assert_eq!(bare.retry_after_secs(), None);
+    }
+
+    #[test]
+    fn typed_retryable_conflict_is_not_the_permanent_conflict() {
+        let retryable = Error::conflict_retryable("plan change in progress");
+        assert_eq!(retryable.status_code(), 409);
+        assert_eq!(retryable.code(), "conflict_retryable");
+        assert!(retryable.retryable());
+        assert_eq!(retryable.public_detail(), Some("plan change in progress"));
+        assert_eq!(retryable.retry_after_secs(), None);
+
+        assert_eq!(Error::Conflict("version".into()).status_code(), 409);
+        assert_eq!(Error::Conflict("version".into()).code(), "conflict");
+        assert!(!Error::Conflict("version".into()).retryable());
     }
 }

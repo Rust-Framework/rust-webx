@@ -176,7 +176,6 @@ pub use webx_host::auth_jwks::{
     HttpJwksFetcher, IJwksFetcher, IJwtKeyResolver, Jwk, JwkSet, JwksHealthCheck, JwksResolver,
     ResolvedJwk, StaticKeyResolver, JWKS_MAX_DOCUMENT_BYTES,
 };
-#[allow(deprecated)]
 pub use webx_host::auth_jwt::{
     apply_jwt_secret_file, init_jwt_secret, jwt_middleware, jwt_middleware_with_revocation,
     jwt_secret, JwtAuth, JwtClaims, JwtSecret, JwtTokenIssuer, JwtValidation, JwtValidationBuilder,
@@ -213,8 +212,10 @@ pub use webx_host::notifications::{InMemoryEmailSender, InMemorySmsSender};
 #[cfg(feature = "password-argon2")]
 pub use webx_host::password_argon2::{Argon2Params, Argon2PasswordHasher};
 pub use webx_host::pipeline::{HandlerFn, MiddlewarePipeline};
-pub use webx_host::rate_limit::{InMemoryRateLimiter, RateLimitMiddleware, RateLimiter};
-pub use webx_host::refresh::{IssuedRefreshToken, RefreshTokenService};
+pub use webx_host::rate_limit::{
+    token_bucket, InMemoryRateLimiter, RateLimitMiddleware, RateLimiter,
+};
+pub use webx_host::refresh::{IssuedRefreshToken, RefreshTokenService, RotateOutcome};
 pub use webx_host::request_id::RequestIdMiddleware;
 pub use webx_host::request_tracing::RequestTracing;
 pub use webx_host::router::Router;

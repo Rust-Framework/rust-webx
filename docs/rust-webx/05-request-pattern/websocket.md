@@ -107,6 +107,11 @@ Host::builder()
 {"error":{"code":"validation_failed","message":"text is required","retryable":false}}
 ```
 
+**身份只来自升级请求，绝不来自帧。** 帧是客户端可控 JSON，所以消息请求类型上**不要**声明
+`#[fromclaim]` / `#[fromheader]` / `#[fromclient]` 字段：这些绑定器会从「请求」取值，而这条路径的
+「请求」就是帧，客户端因此能自选身份、角色或客户端 IP。需要身份时读连接上下文：
+`RequestContext::identity()`（handler 内）或 `connection.context().identity()`（`on_connect`）。
+
 ```rust
 #[derive(serde::Deserialize)]
 struct EchoRequest { text: String }
@@ -162,6 +167,20 @@ WebSocket 中间件运行时已填充。
 - 未携带凭据：按匿名升级（`identity()` 为 `None`），是否拒绝由业务 Handler 决定；
 - 显式无效凭据：认证中间件在握手前返回 `401`，WebSocket 握手失败；
 - 身份来自升级请求，连接中途不重新认证（需要会话续期时由业务层处理）。
+
+### Origin 校验
+
+浏览器在跨站 WebSocket 握手时会自动携带 cookie，因此不匹配的握手必须在升级前拒绝：
+
+```rust
+Host::builder().use_websocket_origins(vec!["https://app.example.com".to_string()])
+```
+
+- 显式白名单（非空）：`Origin` 缺失或不匹配 → `403`；
+- 未显式配置：回落到 `Cors.Origins`（非空且不含 `*` 时），规则同上；
+- 两者都没有：不校验，适合非浏览器客户端（它们不带 `Origin`）。
+
+非浏览器客户端在启用了 CORS 白名单的部署里必须显式 `use_websocket_origins(Vec::new())`。
 
 ```rust
 #[async_trait::async_trait]

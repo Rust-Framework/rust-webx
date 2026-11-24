@@ -181,6 +181,63 @@ impl<T: Serialize> CursorPage<T> {
             has_more,
         }
     }
+
+    /// Build a page from up to `page_size + 1` fetched **entities**, mapping each
+    /// kept entity to the response item.
+    ///
+    /// The entity type does not have to be `Serialize`, and the response item
+    /// does not have to carry the raw sort values: the cursor is computed from
+    /// the last kept entity through `sort_key`, and `map` runs only for the rows
+    /// that stay on the page (the probe row is dropped before mapping). Use it
+    /// when the list query returns domain entities and the endpoint answers with
+    /// DTOs:
+    ///
+    /// ```ignore
+    /// let rows = load_after(&mut self.ctx, &req.room_id, key, paging.page_size() + 1).await?;
+    /// Ok(CursorPage::from_entities(rows, paging.page_size(),
+    ///     |row| vec![row.created_at.to_string(), row.id.clone()],
+    ///     MessageDto::from_model))
+    /// ```
+    pub fn from_entities<E>(
+        mut rows: Vec<E>,
+        page_size: u32,
+        sort_key: impl Fn(&E) -> Vec<String>,
+        map: impl FnMut(E) -> T,
+    ) -> Self {
+        let page_size = page_size.clamp(1, 100) as usize;
+        let has_more = rows.len() > page_size;
+        if has_more {
+            rows.truncate(page_size);
+        }
+        let cursor = rows.last().filter(|_| has_more).map(|last| {
+            let key = sort_key(last);
+            let refs: Vec<&str> = key.iter().map(String::as_str).collect();
+            Cursor::encode(&refs)
+        });
+        Self {
+            items: rows.into_iter().map(map).collect(),
+            cursor,
+            has_more,
+        }
+    }
+
+    /// Map the kept items to another response type, preserving `cursor` and
+    /// `has_more`.
+    ///
+    /// Rebuilding a page by hand (`CursorPage::new(mapped, page.cursor)`)
+    /// silently recomputes `has_more` from `cursor.is_some()`; this helper keeps
+    /// the page envelope intact and only transforms the items.
+    pub fn map_items<U, F>(self, mut map: F) -> CursorPage<U>
+    where
+        U: Serialize,
+        F: FnMut(T) -> U,
+    {
+        CursorPage {
+            items: self.items.into_iter().map(&mut map).collect(),
+            cursor: self.cursor,
+            has_more: self.has_more,
+        }
+    }
 }
 
 impl From<CursorError> for crate::error::Error {
@@ -287,10 +344,85 @@ mod tests {
     }
 
     #[test]
+    fn from_entities_maps_only_kept_rows_and_never_needs_entity_serialize() {
+        // A domain entity: deliberately not `Serialize`.
+        struct Message {
+            created_at: i64,
+            id: &'static str,
+        }
+
+        #[derive(Serialize, PartialEq, Debug)]
+        struct MessageModel {
+            id: &'static str,
+        }
+
+        let rows = vec![
+            Message {
+                created_at: 0,
+                id: "a",
+            },
+            Message {
+                created_at: 1,
+                id: "b",
+            },
+            Message {
+                created_at: 2,
+                id: "c",
+            },
+        ];
+        let mut mapped = 0usize;
+
+        let page: CursorPage<MessageModel> = CursorPage::from_entities(
+            rows,
+            2,
+            |row| vec![row.created_at.to_string(), row.id.to_string()],
+            |row| {
+                mapped += 1;
+                MessageModel { id: row.id }
+            },
+        );
+
+        assert_eq!(
+            page.items,
+            vec![MessageModel { id: "a" }, MessageModel { id: "b" }]
+        );
+        // The probe row is dropped before mapping.
+        assert_eq!(mapped, 2);
+        assert!(page.has_more);
+        assert_eq!(
+            Cursor::decode(page.cursor.as_deref().expect("cursor")).expect("decode"),
+            vec!["1".to_string(), "b".to_string()]
+        );
+    }
+
+    #[test]
     fn serialized_page_omits_an_absent_cursor() {
         let page: CursorPage<u32> = CursorPage::new(vec![1, 2], None);
         let json = serde_json::to_value(&page).expect("serialize");
         assert_eq!(json["has_more"], false);
         assert!(json.get("cursor").is_none());
+    }
+
+    #[test]
+    fn map_items_keeps_the_page_envelope() {
+        #[derive(Serialize, PartialEq, Debug)]
+        struct Model {
+            id: u32,
+        }
+
+        let page: CursorPage<u32> = CursorPage::new(vec![1, 2], Some("next".to_string()));
+        let mapped = page.map_items(|id| Model { id });
+        assert_eq!(
+            mapped.items,
+            vec![Model { id: 1 }, Model { id: 2 }],
+            "items are transformed in order"
+        );
+        assert_eq!(mapped.cursor.as_deref(), Some("next"));
+        assert!(mapped.has_more, "has_more must not be recomputed/lost");
+
+        let last: CursorPage<u32> = CursorPage::new(vec![3], None);
+        let mapped = last.map_items(|id| Model { id });
+        assert!(!mapped.has_more);
+        assert!(mapped.cursor.is_none());
     }
 }

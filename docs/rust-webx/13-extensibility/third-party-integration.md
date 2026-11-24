@@ -94,7 +94,9 @@ let blog = ctx
 ```
 
 `Query`/`TypeConversion`（400）与 `UniqueViolation`（409）使用固定文案：SQL、列名、
-constraint/table 不会回显；500 保留原始信息与 source 链供操作者日志。完整契约见
+constraint/table 不会回显；`Database` 的瞬态条件（`SQLSTATE` 08/40/57P0*、SQLite busy/locked、
+MySQL 1205/1213）与 `Connection`/`Transaction` 一样是可重试 503；500 保留原始信息与 source 链
+供操作者日志。完整契约见
 [边界约定](../../design/compatibility.md#4-边界约定rust-ef-错误映射)。
 
 ## 密码哈希（IPasswordHasher）
@@ -153,7 +155,7 @@ let response = client.execute(OutboundRequest::get("/repos/owner/repo")).await?;
 
 ```rust
 let email = Arc::new(InMemoryEmailSender::new());
-Host::builder().use_email_sender(email.clone()).build();
+Host::builder().use_email(email.clone()).build();
 
 #[derive(Inject)]
 struct ForgotPasswordHandler {
@@ -166,10 +168,26 @@ self.email
     .await?;
 ```
 
+多租户/品牌发件人、`Reply-To` 与附加头都在消息上表达，而不是塞进适配器字段：
+
+```rust
+self.email
+    .send(
+        &EmailMessage::new(to, "Reset your password", &link)
+            .with_from("support@tenant.example")       // 可选；缺省用适配器配置
+            .with_reply_to("help@tenant.example")      // 可选
+            .with_header("List-Unsubscribe", "<https://tenant.example/unsubscribe>"),
+    )
+    .await?;
+```
+
+`validate()` 会校验地址与头：空地址、无 `@`、空白，以及头名/头值里的 CRLF/控制字符都会被拒绝
+（防头注入）；适配器必须在发送前调用它。
+
 生产实现（SMTP/SES/Postmark、Twilio）把传输失败映射为可重试 503，且失败细节只进操作者日志；
 不要在数据库事务或锁内发送。多实例要求“恰好一次”投递时，用 outbox + 后台任务
 （见[后台服务](../06-di-lifecycle/hosted-services.md)），请求内只写库。
-`use_sms_sender` 与 `InMemorySmsSender` 同构，用于断言验证码短信。
+`use_sms` 与 `InMemorySmsSender` 同构，用于断言验证码短信。
 
 ## 一次性令牌与防枚举（OneTimeSecret）
 
@@ -190,7 +208,7 @@ let valid = slot.consume(&sha256_hex(&candidate)); // 原子 check-and-consume�
 
 ## 集成原则
 
-1. 基础设施在宿主组合根注册（`.add_http_client(...)`、`.use_email_sender(...)`、
+1. 基础设施在宿主组合根注册（`.add_http_client(...)`、`.use_email(...)`、
    `svc.singleton::<dyn Port>(...)`）；
 2. 业务代码只依赖 core 端口（trait），不依赖具体 crate/SDK；
 3. 初始化与升级走官方迁移 / 后台服务，不在请求路径里做全量 schema 操作；

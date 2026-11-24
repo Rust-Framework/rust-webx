@@ -44,7 +44,7 @@ impl RefreshMetrics {
 }
 
 /// A freshly issued (or rotated) refresh token.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct IssuedRefreshToken {
     /// Opaque `token_id.secret`; return it to the client once.
     pub token: String,
@@ -54,6 +54,50 @@ pub struct IssuedRefreshToken {
     pub family_id: String,
     /// Absolute expiry of this token (Unix seconds).
     pub expires_at_unix_secs: u64,
+}
+
+/// The raw token is a credential: never print it in a log line.
+impl std::fmt::Debug for IssuedRefreshToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IssuedRefreshToken")
+            .field("token", &"<redacted>")
+            .field("token_id", &self.token_id)
+            .field("family_id", &self.family_id)
+            .field("expires_at_unix_secs", &self.expires_at_unix_secs)
+            .finish()
+    }
+}
+
+/// Outcome of [`RefreshTokenService::rotate_outcome`].
+///
+/// Expected failures are values, not errors: the caller decides how to answer
+/// and — for [`RotateOutcome::Reused`] — can revoke the **paired session row**
+/// because the outcome carries the family id. Without it an application knows
+/// only "the refresh token was reused" and has to leave the leaked access token
+/// valid until it expires (upstream feedback §20).
+///
+/// Backend failures still surface as `Err`: "the store is down" is not a
+/// rotation outcome.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RotateOutcome {
+    /// The presented token was consumed and a replacement was issued.
+    Rotated(IssuedRefreshToken),
+    /// The presented token had already been rotated. The whole family has been
+    /// revoked; `family_id` identifies the login whose session should also be
+    /// revoked.
+    Reused {
+        /// Family id shared by every rotation of that login.
+        family_id: String,
+    },
+    /// The token or its family passed its absolute expiry. The family is not
+    /// revoked (a client may still hold a valid sibling).
+    Expired,
+    /// The token or its family was already revoked.
+    Revoked,
+    /// Unknown token, malformed token, or wrong secret. Nothing was revoked:
+    /// an attacker who guesses a token id must not be able to log the user out.
+    Invalid,
 }
 
 /// Issues and rotates refresh tokens over [`IRefreshTokenStore`].
@@ -143,38 +187,69 @@ impl RefreshTokenService {
         })
     }
 
-    /// Rotate a presented refresh token.
+    /// Rotate a presented refresh token, mapping expected failures to `401`.
+    ///
+    /// Use [`Self::rotate_outcome`] when the caller must know **which family**
+    /// was reused so it can revoke the paired session row.
     ///
     /// A consumed token means reuse: the family is revoked and the caller gets
     /// `401`. A wrong secret does **not** revoke the family (otherwise an
     /// attacker who learns a token id could log the user out).
     pub async fn rotate(&self, presented: &str) -> Result<IssuedRefreshToken> {
-        let (token_id, secret) = split_token(presented)?;
+        match self.rotate_outcome(presented).await? {
+            RotateOutcome::Rotated(issued) => Ok(issued),
+            RotateOutcome::Reused { .. } => Err(Error::Unauthorized(
+                "refresh token reuse detected; session revoked".to_string(),
+            )),
+            RotateOutcome::Expired => {
+                Err(Error::Unauthorized("refresh token has expired".to_string()))
+            }
+            RotateOutcome::Revoked => Err(Error::Unauthorized(
+                "refresh token has been revoked".to_string(),
+            )),
+            RotateOutcome::Invalid => Err(Error::Unauthorized("invalid refresh token".to_string())),
+        }
+    }
+
+    /// Rotate a presented refresh token without collapsing expected failures
+    /// into `401`.
+    ///
+    /// On reuse the family is revoked **before** [`RotateOutcome::Reused`] is
+    /// returned, and the outcome carries `family_id`: the caller can now revoke
+    /// the matching session row instead of leaving the leaked access token
+    /// valid until it expires. A wrong secret is [`RotateOutcome::Invalid`] and
+    /// revokes nothing.
+    pub async fn rotate_outcome(&self, presented: &str) -> Result<RotateOutcome> {
+        let Ok((token_id, secret)) = split_token(presented) else {
+            // Malformed input is the same rejection bucket as an unknown token
+            // (metrics must not distinguish "how" the client failed).
+            self.record("rejected");
+            return Ok(RotateOutcome::Invalid);
+        };
         let now = unix_now();
         let Some(record) = self.store.get(token_id).await? else {
-            return Err(Error::Unauthorized("invalid refresh token".to_string()));
+            self.record("rejected");
+            return Ok(RotateOutcome::Invalid);
         };
 
         if record.status == RefreshTokenStatus::Revoked {
             self.record("rejected");
-            return Err(Error::Unauthorized(
-                "refresh token has been revoked".to_string(),
-            ));
+            return Ok(RotateOutcome::Revoked);
         }
         if !constant_time_eq(
             hash_secret(secret).as_bytes(),
             record.secret_hash.as_bytes(),
         ) {
             self.record("rejected");
-            return Err(Error::Unauthorized("invalid refresh token".to_string()));
+            return Ok(RotateOutcome::Invalid);
         }
         if record.status == RefreshTokenStatus::Used {
             // Reuse after a successful rotation: kill the family.
             self.store.revoke_family(&record.family_id).await?;
             self.record("reuse");
-            return Err(Error::Unauthorized(
-                "refresh token reuse detected; session revoked".to_string(),
-            ));
+            return Ok(RotateOutcome::Reused {
+                family_id: record.family_id,
+            });
         }
 
         let family_expires = record
@@ -184,7 +259,7 @@ impl RefreshTokenService {
             // Expiry is not revocation: do not kill a family that may still
             // contain a token the client is legitimately about to rotate.
             self.record("expired");
-            return Err(Error::Unauthorized("refresh token has expired".to_string()));
+            return Ok(RotateOutcome::Expired);
         }
 
         let replacement_id = new_id();
@@ -207,33 +282,33 @@ impl RefreshTokenService {
         match self.store.rotate(token_id, now, replacement).await? {
             RefreshRotation::Rotated => {
                 self.record("rotated");
-                Ok(IssuedRefreshToken {
+                Ok(RotateOutcome::Rotated(IssuedRefreshToken {
                     token: format!("{replacement_id}.{replacement_secret}"),
                     token_id: replacement_id,
                     family_id: record.family_id,
                     expires_at_unix_secs: now
                         .saturating_add(self.ttl.as_secs())
                         .min(family_expires),
-                })
+                }))
             }
             RefreshRotation::Reused => {
                 self.store.revoke_family(&record.family_id).await?;
                 self.record("reuse");
-                Err(Error::Unauthorized(
-                    "refresh token reuse detected; session revoked".to_string(),
-                ))
+                Ok(RotateOutcome::Reused {
+                    family_id: record.family_id,
+                })
             }
             RefreshRotation::Expired => {
                 self.record("expired");
-                Err(Error::Unauthorized(
-                    "refresh token is no longer valid".to_string(),
-                ))
+                Ok(RotateOutcome::Expired)
             }
-            RefreshRotation::Revoked | RefreshRotation::NotFound => {
+            RefreshRotation::Revoked => {
                 self.record("rejected");
-                Err(Error::Unauthorized(
-                    "refresh token is no longer valid".to_string(),
-                ))
+                Ok(RotateOutcome::Revoked)
+            }
+            RefreshRotation::NotFound => {
+                self.record("rejected");
+                Ok(RotateOutcome::Invalid)
             }
         }
     }

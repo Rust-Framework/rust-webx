@@ -39,6 +39,12 @@ const DEFAULT_STATUSES: &[(u16, &str)] = &[
     (504, "gateway_timeout"),
 ];
 
+/// Codes whose retryability comes from the condition, not from the status
+/// class: `conflict_retryable` keeps the `409` status (the request conflicts
+/// with current state) but the conflict is transient, so retrying after the
+/// conflicting work finishes may succeed.
+const CONDITION_RETRYABLE_CODES: &[&str] = &["conflict_retryable"];
+
 fn serde_error() -> serde_json::Error {
     serde_json::from_str::<serde_json::Value>("{").unwrap_err()
 }
@@ -63,6 +69,8 @@ fn representative_errors() -> Vec<Error> {
         Error::Validation("field".into()),
         Error::NotFound("resource".into()),
         Error::Conflict("version".into()),
+        Error::too_many_requests(7, "slow down"),
+        Error::conflict_retryable("another request is in flight"),
         Error::PayloadTooLarge("too big".into()),
         Error::UnsupportedMediaType("xml".into()),
         Error::Problem(Box::new(ProblemDetails::new(418, "I'm a teapot"))),
@@ -96,6 +104,8 @@ fn assert_variant_covered(error: &Error) {
         | Error::Validation(_)
         | Error::NotFound(_)
         | Error::Conflict(_)
+        | Error::TooManyRequests { .. }
+        | Error::ConflictRetryable(_)
         | Error::PayloadTooLarge(_)
         | Error::UnsupportedMediaType(_)
         | Error::Problem(_) => {}
@@ -204,12 +214,25 @@ fn registry_has_no_duplicates_and_every_entry_is_consistent() {
             );
             assert_eq!(
                 spec.retryable,
-                status_is_retryable(spec.status),
-                "retryable for `{}` must mirror status_is_retryable({})",
+                status_is_retryable(spec.status) || CONDITION_RETRYABLE_CODES.contains(&spec.code),
+                "retryable for `{}` must mirror status_is_retryable({}) or be a documented \
+                 condition-specific code",
                 spec.code,
                 spec.status
             );
         }
+    }
+
+    // The condition-specific escape hatch is exactly the documented 409 code:
+    // it must be an exception, not a second way to declare a status default.
+    for code in CONDITION_RETRYABLE_CODES {
+        let spec = spec(code);
+        assert_eq!(spec.status, 409, "`{code}` keeps the conflict status");
+        assert!(spec.retryable, "`{code}` is retryable by condition");
+        assert!(
+            !status_is_retryable(spec.status),
+            "`{code}` must be an exception to the status default"
+        );
     }
 }
 

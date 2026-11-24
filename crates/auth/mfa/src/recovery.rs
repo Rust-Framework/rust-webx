@@ -19,10 +19,15 @@ pub struct RecoveryCodeRecord {
 
 /// The hashed recovery codes of one user.
 ///
-/// `verify_and_consume` gives atomic single-use semantics for a single
-/// in-memory set. A database-backed deployment persists
-/// [`RecoveryCodeRecord`]s and performs the equivalent conditional update
-/// (`used = 0` guard) in one statement; the hash format here is the contract.
+/// [`RecoveryCodeSet::verify_and_consume`] gives atomic single-use semantics
+/// for a single in-memory set. A database-backed deployment persists
+/// [`RecoveryCodeRecord`]s and performs the equivalent conditional update.
+/// [`RecoveryCodeSet::find`] / [`RecoveryCodeSet::consume_matched`] return the
+/// matched record so the adapter can use its [`RecoveryCodeRecord::hash`] in one
+/// statement, e.g.
+/// `UPDATE mfa_recovery_codes SET used_at = ? WHERE user_id = ? AND code_hash = ? AND used_at IS NULL`
+/// (0 rows affected ⇒ the code was already consumed). The hash format here is
+/// the contract.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RecoveryCodeSet {
     records: Vec<RecoveryCodeRecord>,
@@ -59,14 +64,53 @@ impl RecoveryCodeSet {
         self.records.iter().filter(|record| !record.used).count()
     }
 
+    /// Find the record matching `candidate` without consuming it.
+    ///
+    /// Accepts the display form (`ABCDE-FGHIJ`), lowercase, and surrounding
+    /// whitespace. The returned record's [`RecoveryCodeRecord::hash`] is the
+    /// value a database adapter should use for its single conditional update
+    /// (`WHERE code_hash = ? AND used = 0`), so the candidate is normalized and
+    /// hashed exactly once. Already-consumed records are still returned (with
+    /// [`RecoveryCodeRecord::used`] set), letting the caller tell a replayed
+    /// code from a wrong one.
+    ///
+    /// This does not consume: for the in-memory single-use guarantee use
+    /// [`RecoveryCodeSet::consume_matched`] (or `verify_and_consume`).
+    pub fn find(&self, candidate: &str) -> Option<&RecoveryCodeRecord> {
+        let index = self.find_index(candidate)?;
+        self.records.get(index)
+    }
+
+    /// Consume and return the record matching `candidate`, if it is unused.
+    ///
+    /// This is the in-memory equivalent of the database CAS described on
+    /// [`RecoveryCodeSet`]: the returned record is the pre-consumption value
+    /// (its `hash` addresses the persisted row) and this set's copy is marked
+    /// [`RecoveryCodeRecord::used`], so a second call with the same candidate
+    /// returns `None`.
+    pub fn consume_matched(&mut self, candidate: &str) -> Option<RecoveryCodeRecord> {
+        let index = self.find_index(candidate)?;
+        let record = self.records.get_mut(index)?;
+        if record.used {
+            return None;
+        }
+        let matched = record.clone();
+        record.used = true;
+        Some(matched)
+    }
+
     /// Verify and consume one code.
     ///
     /// Accepts the display form (`ABCDE-FGHIJ`), lowercase, and surrounding
-    /// whitespace. A consumed code is never accepted twice.
+    /// whitespace. A consumed code is never accepted twice. Thin boolean
+    /// wrapper over [`RecoveryCodeSet::consume_matched`] for callers that need
+    /// only the verdict.
     pub fn verify_and_consume(&mut self, candidate: &str) -> bool {
-        let Some(normalized) = normalize_code(candidate) else {
-            return false;
-        };
+        self.consume_matched(candidate).is_some()
+    }
+
+    fn find_index(&self, candidate: &str) -> Option<usize> {
+        let normalized = normalize_code(candidate)?;
         let hash = hash_code(&normalized);
         let mut matched = None;
         for (index, record) in self.records.iter().enumerate() {
@@ -74,14 +118,7 @@ impl RecoveryCodeSet {
                 matched = Some(index);
             }
         }
-        let Some(index) = matched else {
-            return false;
-        };
-        if self.records[index].used {
-            return false;
-        }
-        self.records[index].used = true;
-        true
+        matched
     }
 }
 
@@ -157,6 +194,60 @@ mod tests {
         assert!(!set.verify_and_consume("AAAAA-AAAAA"));
         assert_eq!(set.remaining(), 2);
         assert!(set.verify_and_consume(&codes[1]));
+    }
+
+    #[test]
+    fn find_returns_the_matching_record_hash_without_consuming() {
+        let (codes, set) = RecoveryCodeSet::generate(3);
+        let lowered = codes[1].to_ascii_lowercase();
+        let record = set
+            .find(&format!("  {lowered}  "))
+            .expect("the code matches");
+        assert_eq!(record.hash, hash_code(&codes[1]));
+        assert!(!record.used);
+        assert_eq!(set.remaining(), 3, "find must not consume");
+        assert!(set.find("AAAAA-AAAAA").is_none());
+        assert!(set.find("too-short").is_none());
+    }
+
+    #[test]
+    fn consume_matched_returns_the_record_once() {
+        let (codes, mut set) = RecoveryCodeSet::generate(2);
+        let consumed = set.consume_matched(&codes[0]).expect("first use");
+        assert_eq!(consumed.hash, hash_code(&codes[0]));
+        assert!(!consumed.used, "the clone is the pre-consumption value");
+        assert_eq!(set.remaining(), 1);
+
+        assert!(set.consume_matched(&codes[0]).is_none(), "single use");
+        assert!(!set.verify_and_consume(&codes[0]), "single use via wrapper");
+        assert_eq!(set.remaining(), 1);
+        assert!(
+            set.find(&codes[0])
+                .expect("used record stays findable")
+                .used,
+            "find reports the consumed record for the CAS path"
+        );
+    }
+
+    #[test]
+    fn persisted_used_records_are_not_consumable() {
+        let records = vec![
+            RecoveryCodeRecord {
+                hash: hash_code("AAAAA-AAAAA"),
+                used: true,
+            },
+            RecoveryCodeRecord {
+                hash: hash_code("BBBBB-BBBBB"),
+                used: false,
+            },
+        ];
+        let mut set = RecoveryCodeSet::from_records(records);
+        assert!(set.find("AAAAA-AAAAA").is_some());
+        assert!(set.consume_matched("AAAAA-AAAAA").is_none());
+        assert!(!set.verify_and_consume("AAAAA-AAAAA"));
+        assert_eq!(set.remaining(), 1);
+        assert!(set.consume_matched("BBBBB-BBBBB").is_some());
+        assert_eq!(set.remaining(), 0);
     }
 
     #[test]

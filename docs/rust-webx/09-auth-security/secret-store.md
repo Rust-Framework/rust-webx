@@ -88,6 +88,14 @@ Host::builder().use_secret_protector(protector).build();
 - 轮换：新 ring 把 active 换成新 key、保留旧 key；旧行可读，新写入自动用新 key；
 - 失败关闭：密文被篡改 / 未知 key / 前缀不符 → `SecretError::Unavailable`，绝不返回明文；
 - `from_keys(Vec<(id, [u8; 32])>, active)` 用于测试或自定义加载；
+- **同步组合根**：`build_host(config)` 是同步函数（在 `#[tokio::main]` / `#[tokio::test]` 内不能
+  `block_on`）时用 `AesGcmSecretProtector::from_env_names(&ids, active)`，它同步读 env 并复用同一套
+  32B/base64 校验；async 或 KMS/挂载文件场景仍用 `from_secret_store`（首选）；
+- **错误映射**：`impl From<SecretError> for webx::Error` 已提供——`NotFound` → 500
+  `internal_error`（`public_detail() = None`，密钥名只进日志），`Unavailable` → 503
+  `service_unavailable`、`retryable = true`（客户端可据 `retryable` 重试）。Handler 里直接 `?`，
+  不再需要本地 `map_protector_error`；默认 problem 渲染器对所有 5xx 统一使用稳定文案，
+  不把密钥名/存储原因写进响应；
 - KMS/Vault 实现同一 trait 即可，调用方不变；不要把远调用放进长事务或锁内。
 
 部署语义：多实例必须共享同一 key ring（同一 secret store / KMS），否则 A 节点写的行 B 节点读不出；
@@ -118,5 +126,6 @@ let provider = OpenAiProvider::new("openai", client, key); // key: SecretValue
 `crates/core/src/secrets.rs` 覆盖：env 读取/空值、`Debug` 脱敏、文件读取与换行裁剪、空文件、
 路径穿越/分隔符拒绝、Unix `0600` 校验、链式 `NotFound`/`Unavailable` 语义；
 `crates/host/src/secret_protector.rs` 覆盖：往返/随机 nonce、篡改与未知 key 失败关闭、
-轮换后旧行可读、key ring 校验、从 `ISecretStore` 加载；`crates/ai/core/src/openai.rs`
+轮换后旧行可读、key ring 校验、从 `ISecretStore` 加载、`from_env_names` 缺失/空值/非法
+base64/短 key 的脱敏错误；`crates/ai/core/src/openai.rs`
 覆盖 `from_secret_store` 成功与 typed 失败。

@@ -13,7 +13,7 @@
 //!   HTTP dependency or a queue without blocking the runtime.
 
 use futures_util::future::join_all;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 use webx_core::error::Result;
 use webx_core::http::IHttpContext;
@@ -155,9 +155,10 @@ impl HealthCheckRegistry {
     /// [`Self::register_async`] for anything that blocks on I/O: a sync probe
     /// runs inside the request task and cannot be timed out.
     pub fn register(self: &Arc<Self>, name: impl Into<String>, check: HealthCheckFn) {
-        if let Ok(mut checks) = self.checks.lock() {
-            checks.push((name.into(), HealthCheck::Sync(check)));
-        }
+        self.checks
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((name.into(), HealthCheck::Sync(check)));
     }
 
     /// Register an async probe with its own timeout.
@@ -167,9 +168,23 @@ impl HealthCheckRegistry {
     /// other probes still report their real status.
     pub fn register_async(self: &Arc<Self>, check: Arc<dyn IHealthCheck>, timeout: Duration) {
         let name = check.name().to_string();
-        if let Ok(mut checks) = self.checks.lock() {
-            checks.push((name, HealthCheck::Async { check, timeout }));
-        }
+        self.checks
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((name, HealthCheck::Async { check, timeout }));
+    }
+
+    /// Snapshot of the registered probes.
+    ///
+    /// A probe that panics while holding the registry lock cannot brick
+    /// readiness: the poisoned lock is recovered, so `/health/ready` keeps
+    /// reporting real probe state (and recovers as soon as the probe passes
+    /// again) instead of pinning the host to a permanent 503.
+    fn probes(&self) -> Vec<(String, HealthCheck)> {
+        self.checks
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     /// `true` when no check reports `fail` in the **synchronous** view.
@@ -177,11 +192,7 @@ impl HealthCheckRegistry {
     /// Async checks appear as `warn` here, so they never make this return
     /// `false`; use [`Self::all_healthy_async`] for the authoritative answer.
     pub fn all_healthy(&self) -> bool {
-        let checks = match self.checks.lock() {
-            Ok(c) => c,
-            Err(_) => return false,
-        };
-        checks
+        self.probes()
             .iter()
             .all(|(name, check)| sync_entry(name, check).status != "fail")
     }
@@ -191,24 +202,16 @@ impl HealthCheckRegistry {
     /// Async 检查不会在这里执行，而是以 `warn` 计入，detail 说明需要异步求值；
     /// 需要真实结论时用 [`Self::snapshot_async`]。
     pub fn snapshot(&self) -> Vec<HealthCheckEntry> {
-        let checks = match self.checks.lock() {
-            Ok(c) => c,
-            Err(_) => return Vec::new(),
-        };
-        checks
+        self.probes()
             .iter()
             .map(|(name, check)| sync_entry(name, check))
             .collect()
     }
 
     /// 计算整体状态（同步视图）：fail 优先于 warn 优先于 pass；空列表视为 pass。
-    /// Mutex poisoned 时保守返回 "fail"。
     pub fn overall_status(&self) -> &'static str {
-        let checks = match self.checks.lock() {
-            Ok(c) => c,
-            Err(_) => return "fail",
-        };
-        let entries: Vec<HealthCheckEntry> = checks
+        let entries: Vec<HealthCheckEntry> = self
+            .probes()
             .iter()
             .map(|(name, check)| sync_entry(name, check))
             .collect();
@@ -221,10 +224,7 @@ impl HealthCheckRegistry {
     /// 超时记为 `fail`（detail 含 `timed out after ...`），整体状态随即变为
     /// fail，readiness 端点返回 503。
     pub async fn snapshot_async(&self) -> Vec<HealthCheckEntry> {
-        let checks = match self.checks.lock() {
-            Ok(c) => c.clone(),
-            Err(_) => return Vec::new(),
-        };
+        let checks = self.probes();
         join_all(checks.iter().map(|(name, check)| async move {
             match check {
                 HealthCheck::Sync(f) => entry(name, f()),

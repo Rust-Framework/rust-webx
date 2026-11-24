@@ -300,3 +300,85 @@ fn build_panics_with_the_same_aggregate_message() {
         "build() must panic with try_build's message"
     );
 }
+
+/// An enabled limiter with a zero burst or rate is a startup error.
+///
+/// `BurstSize = 0` makes every request `429` forever and `RequestsPerSecond = 0`
+/// stops serving after one burst; both used to start "successfully" and look
+/// healthy in the log line.
+#[test]
+fn enabled_rate_limit_with_zero_limits_is_a_violation() {
+    let mut options = AppOptions::default();
+    options.rate_limit.enabled = true;
+    options.rate_limit.burst_size = 0;
+    options.rate_limit.requests_per_second = 0.0;
+
+    let violations = validate_options(&options, AppMode::Development);
+    let keys: Vec<&str> = violations.iter().map(|v| v.key.as_str()).collect();
+    assert_eq!(
+        keys,
+        vec!["RateLimit.BurstSize", "RateLimit.RequestsPerSecond"],
+        "both zero values must be reported, sorted by key"
+    );
+
+    // Disabling the limiter makes the same numbers irrelevant.
+    options.rate_limit.enabled = false;
+    assert!(validate_options(&options, AppMode::Development).is_empty());
+}
+
+/// `*` plus credentials is refused in every mode, not just Production.
+#[test]
+fn cors_wildcard_with_credentials_is_always_a_violation() {
+    let mut options = AppOptions::default();
+    options.cors.origins = vec!["*".to_string()];
+    options.cors.allow_credentials = true;
+
+    for mode in [AppMode::Development, AppMode::Production] {
+        let violations = validate_options(&options, mode);
+        assert!(
+            violations.iter().any(|v| v.key == "Cors.Origins"),
+            "{mode:?} must refuse '*' with credentials, got {violations:?}"
+        );
+    }
+}
+
+/// A CSRF session-cookie name that differs from the registered cookie scheme is
+/// refused at startup: the check would otherwise never run.
+#[test]
+fn csrf_cookie_name_must_match_the_session_cookie_scheme() {
+    use std::sync::Arc;
+    use webx_core::security::InMemorySessionRepository;
+    use webx_host::auth_cookie::{CookieOptions, SessionCookieScheme};
+    use webx_host::csrf::CsrfConfig;
+
+    let options = CookieOptions {
+        name: "sid".to_string(),
+        ..CookieOptions::default()
+    };
+    let scheme = SessionCookieScheme::new(Arc::new(InMemorySessionRepository::new()), options)
+        .expect("valid cookie options");
+
+    let error = Host::builder()
+        .mode(AppMode::Development)
+        .no_spa()
+        .add_authentication_scheme(Arc::new(scheme))
+        .use_csrf(CsrfConfig::default())
+        .try_build()
+        .err()
+        .expect("a drifted CSRF cookie name must abort startup");
+    assert!(error.to_string().contains("does not match"), "got {error}");
+
+    // The matching name builds: default CSRF config reads `__Host-webx_session`.
+    let matching = SessionCookieScheme::new(
+        Arc::new(InMemorySessionRepository::new()),
+        CookieOptions::default(),
+    )
+    .expect("valid cookie options");
+    Host::builder()
+        .mode(AppMode::Development)
+        .no_spa()
+        .add_authentication_scheme(Arc::new(matching))
+        .use_csrf(CsrfConfig::default())
+        .try_build()
+        .expect("matching cookie names build");
+}

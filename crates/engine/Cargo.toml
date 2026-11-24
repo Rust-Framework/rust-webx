@@ -43,6 +43,15 @@ serde_json.workspace = true
 [dev-dependencies]
 rust-dix.workspace = true
 rcgen = "0.13"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "router_bench"
+harness = false
+
+[[bench]]
+name = "pipeline_bench"
+harness = false
 
 [lints]
 workspace = true

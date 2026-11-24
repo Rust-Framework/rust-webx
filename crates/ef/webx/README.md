@@ -27,7 +27,13 @@ ctx.save_changes().await.map_ef()?;
 | `Query` / `TypeConversion` | 400 | fixed text (SQL/column names never echoed) |
 | `UniqueViolation` | 409 | fixed text (constraint/table never echoed) |
 | `Connection` / `Transaction` | 503 | fixed text, retryable |
+| `Database` with a transient driver condition¹ | 503 | fixed text, retryable |
 | everything else | 500 | none (`public_detail() = None`); message + source chain stay in the operator log |
+
+¹ `SQLSTATE` class `08`/`40`/`57P0*`, SQLite `busy`/`locked` (extended codes
+`5`/`6`, including `261`/`517`/`262`) and MySQL `1205`/`1213`. Providers report
+these as `EFError::Database`, not `Connection`, so the classification lives here
+and applications never re-implement it.
 
 `rust-webx-core` and the `rust-webx` umbrella never link this crate: add
 `rust-webx-ef` to the application (or use the reference apps' `db.rs` helpers)

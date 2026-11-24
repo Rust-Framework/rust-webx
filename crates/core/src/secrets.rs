@@ -28,6 +28,15 @@ use thiserror::Error;
 use zeroize::Zeroize;
 
 /// Secret lookup failure. Details stay server-side (they may contain paths).
+///
+/// # Error mapping
+///
+/// `?` works in any function returning [`crate::error::Error`] (a handler, a
+/// hosted service): the [`From`] implementation below maps `NotFound` to a
+/// hidden 500 and `Unavailable` to a retryable 503. The secret **name** and the
+/// store's reason are logged for the operator and never placed in the returned
+/// error, whose `Display`/`public_detail()` may end up in a response. The
+/// secret **value** is never logged by this crate.
 #[derive(Debug, Error)]
 pub enum SecretError {
     /// The store does not have a secret with this name.
@@ -47,6 +56,39 @@ impl SecretError {
     /// Whether the failure means "try the next store in a chain".
     pub fn is_not_found(&self) -> bool {
         matches!(self, Self::NotFound(_))
+    }
+}
+
+/// Client-facing detail for a transient secret-store failure.
+///
+/// Fixed on purpose: neither the secret name nor the store's reason may appear
+/// in a response. Retrying the request can succeed once the store recovers,
+/// which is why the mapped status is 503.
+const SECRET_UNAVAILABLE_DETAIL: &str = "secret resolution is temporarily unavailable; retry later";
+
+/// Convert a secret failure into the framework error type.
+///
+/// * `NotFound` means the deployment is missing a secret (a key that was never
+///   provisioned, an empty file): a server-side defect, so 500 with no public
+///   detail. `NotFound` also drives chain fall-through, so only the last error
+///   usually reaches a handler.
+/// * `Unavailable` means the store could not answer right now: 503 with a
+///   fixed, retryable detail.
+///
+/// The secret name and the store reason are logged here (operator diagnostics)
+/// and intentionally left out of the value returned to the caller.
+impl From<SecretError> for crate::error::Error {
+    fn from(error: SecretError) -> Self {
+        match error {
+            SecretError::NotFound(name) => {
+                tracing::error!(secret = %name, "secret lookup failed: not found");
+                crate::error::Error::Internal("secret is not available".to_string())
+            }
+            SecretError::Unavailable { name, detail } => {
+                tracing::error!(secret = %name, reason = %detail, "secret store is unavailable");
+                crate::error::Error::Status(503, SECRET_UNAVAILABLE_DETAIL.to_string())
+            }
+        }
     }
 }
 
@@ -458,6 +500,34 @@ mod tests {
         let value = SecretValue::new("do-not-print");
         assert_eq!(format!("{value:?}"), "SecretValue(<redacted>)");
         assert_eq!(value.expose(), "do-not-print");
+    }
+
+    #[test]
+    fn secret_errors_map_to_sanitized_framework_errors() {
+        let not_found: crate::error::Error =
+            SecretError::NotFound("OPENAI_API_KEY".to_string()).into();
+        assert_eq!(not_found.status_code(), 500);
+        assert_eq!(not_found.code(), "internal_error");
+        assert_eq!(not_found.public_detail(), None);
+        assert!(!not_found.retryable(), "a missing secret is not transient");
+        assert!(!not_found.to_string().contains("OPENAI_API_KEY"));
+
+        let unavailable: crate::error::Error = SecretError::Unavailable {
+            name: "TOTP_PROTECTION_KEY".to_string(),
+            detail: "connection refused by vault at 10.0.0.7".to_string(),
+        }
+        .into();
+        assert_eq!(unavailable.status_code(), 503);
+        assert_eq!(unavailable.code(), "service_unavailable");
+        assert!(unavailable.retryable(), "503 invites a retry");
+        assert_eq!(unavailable.public_detail(), Some(SECRET_UNAVAILABLE_DETAIL));
+        for operator_only in ["TOTP_PROTECTION_KEY", "vault", "10.0.0.7"] {
+            assert!(!unavailable.to_string().contains(operator_only));
+            assert!(!unavailable
+                .public_detail()
+                .expect("503 keeps a fixed detail")
+                .contains(operator_only));
+        }
     }
 
     #[tokio::test]

@@ -18,6 +18,8 @@ pub enum Error {
     Validation(String),
     NotFound(String),
     Conflict(String),
+    TooManyRequests { retry_after_secs: u64, detail: String },
+    ConflictRetryable(String),
     PayloadTooLarge(String),
     UnsupportedMediaType(String),
     Problem(Box<ProblemDetails>),   // 绑定/校验失败，原样写出
@@ -41,7 +43,9 @@ pub enum Error {
 | `Message` | 500 | 通用错误 |
 | `Validation` | 400 | 业务校验失败 |
 | `NotFound` | 404 | 资源不存在 |
-| `Conflict` | 409 | 状态冲突 / 并发冲突 |
+| `Conflict` | 409 | 状态冲突 / 并发冲突（永久冲突） |
+| `TooManyRequests { .. }` | 429 | 被限流；同时写出 `Retry-After`（秒） |
+| `ConflictRetryable` | 409 | 可等待的冲突：冲突方完成后重试可能成功（`retryable: true`） |
 | `PayloadTooLarge` | 413 | 请求体或上传文件超限 |
 | `UnsupportedMediaType` | 415 | 请求内容类型不受支持 |
 | `Problem(details)` | `details.status` | 字段级校验/绑定失败，携带 `errors` |
@@ -53,15 +57,21 @@ pub enum Error {
 | 成员 | 类型 | 含义 |
 |---|---|---|
 | `code` | string | 稳定机器码，客户端按它分支，不要解析 `detail` |
-| `retryable` | bool | 同一请求重试是否可能成功（仅 429/502/503/504 为 true） |
+| `retryable` | bool | 同一请求重试是否可能成功（429/502/503/504 与 `conflict_retryable` 为 true） |
 | `instance` | string | 请求路径（`problem.instance` 为空时自动填充） |
 | `traceId` | string | 与响应头 `x-trace-id` 同一个值（扩展成员） |
 
 主要错误码：`bad_request`、`unauthorized`、`forbidden`、`not_found`、`method_not_allowed`、
-`conflict`、`payload_too_large`、`unsupported_media_type`、`unprocessable_entity`、
-`too_many_requests`、`validation_failed`、`invalid_json`、`internal_error`、
-`service_unavailable`、`bad_gateway`、`gateway_timeout`。端点可通过
+`conflict`、`conflict_retryable`、`payload_too_large`、`unsupported_media_type`、
+`unprocessable_entity`、`too_many_requests`、`validation_failed`、`invalid_json`、
+`internal_error`、`service_unavailable`、`bad_gateway`、`gateway_timeout`。端点可通过
 `ProblemDetails::new(..).with_code("...")` 自定义。
+
+限流用 `Error::too_many_requests(retry_after_secs, detail)`：引擎写出 `Retry-After` 响应头
+（只写一次），不要手写 `Error::Status(429, …)` 再自己拼头；`Status(429)` 的既有行为保留
+（不带头）。可等待的冲突用 `Error::conflict_retryable(detail)`：`409` +
+`retryable: true`，表示等冲突方完成后重试，**不是**自动盲目重试；永久冲突仍用
+`Error::Conflict`（`retryable: false`）。
 
 ## 默认错误响应格式
 
@@ -138,22 +148,23 @@ return Err(ProblemDetails::validation(vec![
 ## 持久层错误（rust-ef）
 
 `rust-ef` 是 Web 无关的 ORM（2.6 起没有 `webx` feature），`EFError` 到
-`webx::Error` 的翻译属于**应用边界**：在 handlers 的 `db.rs` / `common_mapper.rs`
-实现一次 `map_ef_error` 与 `EfResultExt::map_ef()`，调用点写 `.map_ef()?`；
-`rust-webx-core` / umbrella 不提供 `ef` feature（避免把 ORM 带进核心依赖图）。
+`webx::Error` 的翻译由独立的适配 crate `rust-webx-ef` 承担一次（`webx_ef`），
+应用只依赖它、不再自己写映射：
 
 ```rust
-// handlers/src/db.rs（应用侧，每个应用一份）
-pub fn map_ef_error(error: EFError) -> webx::Error { /* 404/400/409/503/500 + 脱敏 */ }
+// handlers/src/db.rs（应用侧只需 re-export，或不写任何文件直接 use）
+pub use webx_ef::{map_ef_error, EfResultExt};
 
 // Handler
 let blogs = self.ctx.set::<Blog>().query().to_list().await.map_ef()?;
 ```
 
-`NotFound`/`ModelValidation`/`ConcurrencyConflict` 保留业务文案；驱动与查询错误使用
-固定文案脱敏（`UniqueViolation` 不回显 constraint/table，`Database` 只进日志）。
-完整映射表、方向约定与参考实现见
-[兼容性政策 §4](../../design/compatibility.md#4-边界约定rust-ef-错误映射)。
+`NotFound`/`ModelValidation`/`ConcurrencyConflict` 保留业务文案；`Query`/`TypeConversion`
+是固定文案的 400，`UniqueViolation` 不回显 constraint/table，`Database` 的瞬态条件
+（`SQLSTATE` 08/40/57P0*、SQLite busy/locked、MySQL 1205/1213）与 `Connection`/`Transaction`
+一样是可重试 503，其余只在日志展开、客户端拿 500 且无 detail。
+运行期 DI 解析失败用 `?` 即转 `Error::Di`（500、detail 不回显），不需要本地助手。
+完整映射表见 [兼容性政策 §4](../../design/compatibility.md#4-边界约定rust-ef-错误映射)。
 
 ## 错误处理最佳实践
 

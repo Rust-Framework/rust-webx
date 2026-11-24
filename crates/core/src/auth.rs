@@ -113,6 +113,15 @@ pub trait IAuthenticationScheme: Send + Sync {
     /// Stable scheme name for diagnostics, e.g. `"jwt"` or `"api-key"`.
     fn name(&self) -> &'static str;
 
+    /// The session cookie this scheme reads, when it is a cookie scheme.
+    ///
+    /// The host compares it with `CsrfConfig::session_cookie_name` and refuses
+    /// to start on a mismatch: a drifted name means the CSRF middleware never
+    /// sees the cookie and every cross-site request would pass unchecked.
+    fn session_cookie_name(&self) -> Option<&str> {
+        None
+    }
+
     /// Whether this scheme recognizes the request's credential shape.
     ///
     /// Must be cheap and side-effect free — no I/O and no response mutation.
@@ -169,7 +178,7 @@ pub trait IAuthorizationPolicy: Send + Sync {
 /// endpoint's `&'static [AuthorizeRule]` slice directly through
 /// [`IDynamicAuthorizer::authorize_with_declared_rules`], so this wrapper no
 /// longer needs to be built on the hot path. It stays for source compatibility
-/// and is scheduled for removal in 2.0 — new code should take the raw slice.
+/// and is scheduled for removal in 3.0 (see docs/design/deprecations.md) — new code should take the raw slice.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DeclaredRules<'a> {
     rules: &'a [crate::route::scan::AuthorizeRule],
@@ -237,7 +246,7 @@ impl<'a> DeclaredRules<'a> {
 ///   role/permission codes the endpoint declared.
 /// * `authorize_with_rules` — 1.2.0 signature taking a [`DeclaredRules`] view.
 ///   Kept for source compatibility; the host no longer calls it. Scheduled for
-///   removal in 2.0. The default forwards to `authorize`.
+///   removal in 3.0 (see docs/design/deprecations.md). The default forwards to `authorize`.
 /// * `authorize` — receives the user's claims, matched route pattern, and HTTP
 ///   method. Kept for source compatibility with 1.1; the default implementation
 ///   of both methods above ends up here, so an implementation that only
@@ -267,7 +276,7 @@ pub trait IDynamicAuthorizer: Send + Sync {
     /// [`IDynamicAuthorizer::authorize_with_declared_rules`], which passes the
     /// raw slice. This method is kept for source compatibility (existing
     /// implementations that override it still receive the rules through the new
-    /// method's default forwarding) and is scheduled for removal in 2.0.
+    /// method's default forwarding) and is scheduled for removal in 3.0.
     ///
     /// A default implementation forwarding to `authorize` keeps 1.1
     /// implementations wire-compatible.

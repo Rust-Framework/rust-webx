@@ -371,16 +371,19 @@ fn generate_dispatch_fn(
             Box::pin(async move {
                 // One identity for the whole request: the binder, the handler and
                 // anything reading RequestContext (audit helpers, persistence
-                // callbacks) share this Arc instead of re-reading claims.
-                let identity = ctx.claims().map(|claims| {
-                    ::std::sync::Arc::new(::webx::IdentityUser::from_claims(claims))
+                // callbacks) share this Arc instead of re-reading claims. Reuse
+                // the endpoint adapter's scope when it already established one
+                // (authorization needs it before dispatch).
+                let identity = ::webx::RequestContext::identity().or_else(|| {
+                    ctx.claims().map(|claims| {
+                        ::std::sync::Arc::new(::webx::IdentityUser::from_claims(claims))
+                    })
                 });
                 // Same for the trace id: the tracing middleware stored it on the
                 // context before the endpoint ran, so the handler reads the very
                 // value that is written to the `x-trace-id` response header.
-                let trace_id = ctx
-                    .trace_id()
-                    .map(|id| ::std::sync::Arc::<str>::from(id));
+                let trace_id = ::webx::RequestContext::trace_id()
+                    .or_else(|| ctx.trace_id().map(|id| ::std::sync::Arc::<str>::from(id)));
 
                 ::webx::RequestContext::run_with_trace(identity, trace_id, async move {
                     // One declaration on the request struct decides every field's

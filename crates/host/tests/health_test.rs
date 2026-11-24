@@ -91,3 +91,36 @@ fn registry_snapshot_includes_warn_detail() {
     assert_eq!(snap[0].status, "warn");
     assert_eq!(snap[0].detail.as_deref(), Some("latency 500ms"));
 }
+
+/// A probe that panics must not brick readiness.
+///
+/// The registry lock is poisoned by the panic; swallowing that poisoning used to
+/// pin `/health/ready` to 503 for the process lifetime even after the dependency
+/// recovered. Recovering the poisoned lock keeps `pass`/`fail` honest.
+#[test]
+fn a_panicking_probe_does_not_brick_readiness() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let registry = HealthCheckRegistry::new();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let probe_calls = Arc::clone(&calls);
+    registry.register(
+        "flaky",
+        Arc::new(move || {
+            if probe_calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                panic!("probe panicked");
+            }
+            HealthStatus::pass()
+        }),
+    );
+
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| registry.snapshot()));
+    assert!(panicked.is_err(), "the first evaluation panics");
+
+    assert!(
+        registry.all_healthy(),
+        "readiness must recover once the probe passes again"
+    );
+    assert_eq!(registry.overall_status(), "pass");
+    assert_eq!(registry.snapshot().len(), 1, "the probe stays registered");
+}

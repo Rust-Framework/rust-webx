@@ -238,6 +238,16 @@ pub struct WebSocketLimits {
     pub outbound_queue: usize,
     /// What to do when the outbound queue is full.
     pub on_queue_full: BackpressurePolicy,
+    /// Per-frame write deadline (`None` = wait forever).
+    ///
+    /// A peer that stops reading (TCP zero window, a suspended proxy, a slow
+    /// consumer) makes `send` block indefinitely and pins the writer task, the
+    /// socket and one queue's worth of frames for the process lifetime. With a
+    /// deadline the writer gives up, the session ends, and the connection
+    /// accounting returns to zero. Close frames are never dropped by the
+    /// backpressure policy, so a stalled peer is closed by this timeout instead
+    /// of leaking.
+    pub write_timeout: Option<std::time::Duration>,
     /// Close the connection when no inbound frame arrives within this duration.
     ///
     /// The session records [`CloseReason::IdleTimeout`] and closes with `1001`.
@@ -266,6 +276,7 @@ impl Default for WebSocketLimits {
             max_bytes_per_second: 0,
             outbound_queue: 64,
             on_queue_full: BackpressurePolicy::Drop,
+            write_timeout: Some(std::time::Duration::from_secs(10)),
             idle_timeout: None,
             max_connection_lifetime: None,
             close_at_token_expiry: false,
@@ -301,6 +312,12 @@ impl WebSocketLimits {
     pub fn with_outbound_queue(mut self, queue: usize, policy: BackpressurePolicy) -> Self {
         self.outbound_queue = queue.max(1);
         self.on_queue_full = policy;
+        self
+    }
+
+    /// Bound each outbound write (default 10s; `None` waits forever).
+    pub fn with_write_timeout(mut self, timeout: Option<std::time::Duration>) -> Self {
+        self.write_timeout = timeout;
         self
     }
 

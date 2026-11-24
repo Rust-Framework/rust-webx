@@ -18,11 +18,17 @@ tokio::task_local! {
 /// layer.
 ///
 /// This is the single source of truth for "who is acting" and "which request is
-/// this". The HTTP adapter establishes the context **before** binding the
-/// request (`RequestModel::bind`), so the binder, the handler, middleware and
-/// the persistence layer all read the very same `Arc<IdentityUser>` and the very
-/// same trace id — there is no second copy of `sub` and no way for audit and
-/// handler code to disagree.
+/// this". The HTTP adapter establishes the context **before** the endpoint's
+/// authorization guard and request binding (`RequestModel::bind`), so dynamic
+/// authorizers, the binder, the handler and the persistence layer all read the
+/// very same `Arc<IdentityUser>` and the very same trace id — there is no second
+/// copy of `sub` and no way for audit and handler code to disagree.
+///
+/// The context starts **at the endpoint**, after the authentication middleware
+/// has attached the claims: middleware registered before the endpoint runs
+/// outside the scope and must read `IHttpContext::claims()` instead. This is
+/// the same ordering the framework documents for authentication (auth attaches
+/// claims, the endpoint then authorizes and binds).
 ///
 /// The trace id is the one the tracing middleware echoes in the `x-trace-id`
 /// response header, so a handler that stamps it onto an audit row can be joined

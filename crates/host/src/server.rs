@@ -119,7 +119,6 @@ const HOSTED_START_TIMEOUT_SECS: u64 = 30;
 const HOSTED_STOP_TIMEOUT_SECS: u64 = 30;
 
 pub struct Host {
-    #[allow(dead_code)]
     provider: Arc<ServiceProvider>,
     dispatch_runtime: Arc<DispatchRuntime>,
     pub options: AppOptions,
@@ -256,6 +255,8 @@ pub struct HostBuilder {
     )>,
     /// Per-connection WebSocket limits (backpressure, rates, frame size, idle).
     websocket_limits: webx_core::realtime::WebSocketLimits,
+    /// Browser origins allowed to open a WebSocket session (empty = no check).
+    websocket_origins: Vec<String>,
     /// Explicit real-time replay log; `None` keeps the in-memory default when
     /// the host has WebSocket routes.
     realtime_event_store: Option<Arc<dyn webx_core::realtime::IRealtimeEventStore>>,
@@ -351,6 +352,7 @@ impl HostBuilder {
             http_transports: Vec::new(),
             websockets: Vec::new(),
             websocket_limits: webx_core::realtime::WebSocketLimits::default(),
+            websocket_origins: Vec::new(),
             realtime_event_store: None,
             presence_observers: Vec::new(),
             rate_limit_limiter: None,
@@ -803,10 +805,7 @@ impl HostBuilder {
     /// resolution instead of silently dropping mail. Production passes an
     /// SMTP/API adapter; tests and local development pass
     /// [`InMemoryEmailSender`](crate::notifications::InMemoryEmailSender).
-    pub fn use_email_sender(
-        mut self,
-        sender: Arc<dyn webx_core::notifications::IEmailSender>,
-    ) -> Self {
+    pub fn use_email(mut self, sender: Arc<dyn webx_core::notifications::IEmailSender>) -> Self {
         self.service_configs.push(Box::new(move |svc, _options| {
             svc.instance::<dyn webx_core::notifications::IEmailSender>(sender)
         }));
@@ -815,8 +814,8 @@ impl HostBuilder {
 
     /// Register the SMS delivery port.
     ///
-    /// No sender is registered by default; see [`Self::use_email_sender`].
-    pub fn use_sms_sender(mut self, sender: Arc<dyn webx_core::notifications::ISmsSender>) -> Self {
+    /// No sender is registered by default; see [`Self::use_email`].
+    pub fn use_sms(mut self, sender: Arc<dyn webx_core::notifications::ISmsSender>) -> Self {
         self.service_configs.push(Box::new(move |svc, _options| {
             svc.instance::<dyn webx_core::notifications::ISmsSender>(sender)
         }));
@@ -916,7 +915,19 @@ impl HostBuilder {
         self.websocket_limits = limits;
         self
     }
-
+    /// Restrict which browser origins may open a WebSocket session.
+    ///
+    /// A browser attaches cookies to a cross-site WebSocket handshake, so a
+    /// session cookie with SameSite=None can be hijacked by any site unless the
+    /// upgrade's Origin is checked. When this list is non-empty the host answers
+    /// 403 for a handshake whose Origin is missing or not listed; non-browser
+    /// clients (which send no Origin) then need an explicit entry or no list.
+    /// When it is empty and CORS has explicit origins configured, those origins
+    /// are used, so enabling CORS does not silently leave WebSocket open.
+    pub fn use_websocket_origins(mut self, origins: Vec<String>) -> Self {
+        self.websocket_origins = origins;
+        self
+    }
     /// Serve a WebSocket endpoint whose frames are **requests** (2.3-3).
     ///
     /// Each text frame is decoded from JSON into `Req`, dispatched through the
@@ -933,6 +944,23 @@ impl HostBuilder {
     /// Requires `add_mediator()` (register it in the host's `register` block);
     /// the handler fails the connection with a diagnostic when the mediator is
     /// missing.
+    ///
+    /// # Identity comes from the upgrade, never from the frame
+    ///
+    /// The frame is untrusted client JSON, so a request type must **not** declare
+    /// `#[fromclaim]`, `#[fromheader]` or `#[fromclient]` fields: those binders
+    /// fill the field from the request, and on this path the "request" is the
+    /// frame — a client could then choose its own identity, roles or client IP.
+    /// Read the connection identity instead:
+    ///
+    /// ```ignore
+    /// let identity = RequestContext::identity();            // inside the handler
+    /// let identity = connection.context().identity();       // inside on_connect
+    /// ```
+    ///
+    /// Tagged-enum request types (the usual shape for message protocols) cannot
+    /// express binding sources at all, which is why this is a documented contract
+    /// rather than a compile-time bound (2.10 tracks a derive-emitted marker).
     pub fn use_websocket_request<Req, Rsp>(self, path: &'static str) -> Self
     where
         Req: webx_core::mediator::IRequest<Rsp> + serde::de::DeserializeOwned + Send + 'static,
@@ -1795,9 +1823,19 @@ impl HostBuilder {
             Some(config) => config.origins.as_slice(),
             None => options.cors.origins.as_slice(),
         };
+        let cors_allow_credentials = match self.cors_config.as_ref() {
+            Some(config) => config.allow_credentials,
+            None => options.cors.allow_credentials,
+        };
         if let Some(violation) =
             crate::config_validation::production_cors_violation(self.mode, cors_origins)
         {
+            violations.push(violation);
+        }
+        if let Some(violation) = crate::config_validation::cors_credentials_wildcard_violation(
+            cors_origins,
+            cors_allow_credentials,
+        ) {
             violations.push(violation);
         }
 
@@ -1822,6 +1860,28 @@ impl HostBuilder {
             is_weak_jwt_secret(&options.jwt.secret),
         ) {
             violations.push(violation);
+        }
+
+        // CSRF: the configured session cookie name must be the cookie the
+        // registered scheme actually reads, otherwise the check never runs.
+        if let Some(csrf) = &self.csrf {
+            if let Some(name) = self
+                .auth_schemes
+                .iter()
+                .find_map(|scheme| scheme.session_cookie_name())
+            {
+                if name != csrf.session_cookie_name {
+                    violations.push(crate::config_validation::ConfigViolation::new(
+                        "Csrf",
+                        "Csrf.SessionCookieName",
+                        format!(
+                            "session_cookie_name '{}' does not match the session cookie the \
+                             registered scheme reads ('{name}')",
+                            csrf.session_cookie_name
+                        ),
+                    ));
+                }
+            }
         }
 
         // TURN: an explicit builder config wins over the `Turn` section.
@@ -1939,6 +1999,15 @@ impl HostBuilder {
         {
             return Err(Error::Di(violation.message));
         }
+        if let Some(violation) = crate::config_validation::cors_credentials_wildcard_violation(
+            &cors.origins,
+            cors.allow_credentials,
+        ) {
+            return Err(Error::Di(violation.message));
+        }
+        // The WebSocket origin policy falls back to these origins, so keep them
+        // before the CORS middleware takes ownership.
+        let cors_origins_for_websocket = cors.origins.clone();
         if !cors.origins.is_empty() {
             pipeline.add_middleware(Arc::new(CorsMiddleware::new(cors)));
         }
@@ -1993,6 +2062,26 @@ impl HostBuilder {
                  Call HostBuilder::use_csrf(CsrfConfig::double_submit())."
                     .to_string(),
             ));
+        }
+        // A drifted cookie name silently disables the double-submit check: the
+        // middleware looks for a cookie the scheme never reads. Refuse to start
+        // instead of shipping a host that logs `csrf = true` but checks nothing.
+        if let Some(csrf) = &self.csrf {
+            for scheme in &self.auth_schemes {
+                let Some(name) = scheme.session_cookie_name() else {
+                    continue;
+                };
+                if name != csrf.session_cookie_name {
+                    return Err(Error::Di(format!(
+                        "CsrfConfig::session_cookie_name ('{}') does not match the session cookie \
+                         name of the registered {} scheme ('{}'). CSRF checks would never run; set \
+                         `CsrfConfig::session_cookie_name` to the cookie name the scheme reads.",
+                        csrf.session_cookie_name,
+                        scheme.name(),
+                        name
+                    )));
+                }
+            }
         }
         if let Some(csrf) = self.csrf.clone() {
             pipeline.add_middleware(Arc::new(CsrfMiddleware::new(csrf)?));
@@ -2179,14 +2268,29 @@ impl HostBuilder {
                     handler: Arc::clone(handler),
                 })
                 .collect();
-            pipeline.add_middleware(Arc::new(crate::websocket::WebSocketMiddleware::new(
-                routes,
-                Arc::clone(&provider),
-                self.websocket_limits.clone(),
-                provider
-                    .get_all::<dyn webx_core::realtime::IPresenceObserver>()
-                    .into(),
-            )));
+            // Origin allow-list: explicit builder value, else the CORS origins
+            // when those are an explicit list (a `*` CORS policy cannot protect
+            // a WebSocket handshake and would reject everything).
+            let websocket_origins = if !self.websocket_origins.is_empty() {
+                self.websocket_origins.clone()
+            } else {
+                cors_origins_for_websocket
+                    .iter()
+                    .filter(|origin| origin.as_str() != "*")
+                    .cloned()
+                    .collect()
+            };
+            pipeline.add_middleware(Arc::new(
+                crate::websocket::WebSocketMiddleware::new(
+                    routes,
+                    Arc::clone(&provider),
+                    self.websocket_limits.clone(),
+                    provider
+                        .get_all::<dyn webx_core::realtime::IPresenceObserver>()
+                        .into(),
+                )
+                .with_origins(websocket_origins),
+            ));
         }
 
         // SPA 自动启用：若应用显式调用 `use_spa`，使用指定的文件源；

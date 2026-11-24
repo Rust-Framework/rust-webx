@@ -6,7 +6,7 @@
 
 ## 路由匹配
 
-`Router` 基于 `matchit` 的基数树（radix tree）匹配。匹配本身无堆分配；路由参数会被复制进请求上下文（每个参数一个 `String`），因此不要宣称“请求期零分配”。实测见 `cargo bench -p rust-webx-host`。
+`Router` 基于 `matchit` 的基数树（radix tree）匹配。静态路由匹配本身不分配；动态路由会把参数复制进请求上下文（每个参数一个值 `String`，2.x 还会为参数名分配 `String` 并建一张 name→value 表），因此不要宣称“请求期零分配”。实测（`cargo bench -p rust-webx-engine --bench router_bench`，Windows 参考）：静态路由约 **58 ns**、1 个参数约 **200 ns**、3 个参数约 **360 ns**、catch-all 约 **208 ns**；参数路由比静态路由多出的 ~140 ns/参数就是上面这些分配，3.0 计划改为借用切片后消除。
 
 ## Arc 共享
 

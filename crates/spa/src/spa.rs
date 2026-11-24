@@ -226,15 +226,15 @@ impl SpaMiddleware {
 #[async_trait::async_trait]
 impl IMiddleware for SpaMiddleware {
     async fn invoke(&self, ctx: &mut dyn IHttpContext) -> Result<ControlFlow<()>> {
-        let method = ctx.request().method().to_uppercase();
-        if method != "GET" && method != "HEAD" {
+        // API routes must reach the router — never serve index.html for /api/*.
+        // Checked before the method so `POST /api/*` costs no comparison.
+        let request_path = ctx.request().path();
+        if request_path.starts_with("/api/") {
             return Ok(ControlFlow::Continue(()));
         }
 
-        let request_path = ctx.request().path();
-
-        // API routes must reach the router — never serve index.html for /api/*.
-        if request_path.starts_with("/api/") {
+        let method = ctx.request().method();
+        if !(method.eq_ignore_ascii_case("GET") || method.eq_ignore_ascii_case("HEAD")) {
             return Ok(ControlFlow::Continue(()));
         }
 

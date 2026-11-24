@@ -165,11 +165,34 @@ let issued = refresh
 let rotated = refresh.rotate(&presented).await?; // 旧 token 立即失效
 ```
 
+如果业务把 refresh family 与 `identity_session` 行关联（多端会话管理），用 `rotate_outcome`
+拿回被重放的 `family_id`，才能把**对应的 session**一起置为 revoked：
+
+```rust
+use webx::RotateOutcome;
+
+match refresh.rotate_outcome(&presented).await? {
+    RotateOutcome::Rotated(issued) => {
+        // 返回 issued.token
+    }
+    RotateOutcome::Reused { family_id } => {
+        // family 已由 rotate_outcome 撤销；按业务关联撤销配对 session，
+        // 避免已泄露的 access token 活到自然过期。
+        revoke_paired_session(&family_id).await?;
+        // 统一 401
+    }
+    RotateOutcome::Expired | RotateOutcome::Revoked | RotateOutcome::Invalid => {
+        // 统一 401，文案不要区分（防枚举）
+    }
+}
+```
+
 - 令牌格式 `token_id.secret`（不透明）；存储只保存 `SHA-256(secret)`，泄露账本不等于泄露会话。
 - **单次使用 + 原子轮换**：并发刷新只有一个赢家；其他调用看到 `Used`。
-- **重用检测**：已消费 token 再次出现 → 撤销整条 family（`revoke_family`），所有派生 token 失效。
+- **重用检测**：已消费 token 再次出现 → 撤销整条 family（`revoke_family`），所有派生 token 失效；
+  `rotate_outcome` 把被重放的 `family_id` 返回给调用方（`rotate` 只返回 401）。
 - 错误 secret 只返回 401，**不**撤销 family（否则知道 token_id 就能把用户踢下线）。
-- 过期或超过 family 绝对上限 → 401 并撤销 family。
+- 过期或超过 family 绝对上限 → 401；**不**撤销 family（客户端可能还持有合法的 sibling token）。
 - 登出用 `revoke_family`；全端下线用 `revoke_all_for_subject`。
 - `InMemoryRefreshTokenStore` 只适合单进程；多实例用 `rust-webx-auth-ef` 的 `EfRefreshTokenStore`（`auth_refresh_tokens` 表、条件更新 + 事务实现同一原子语义）。
 

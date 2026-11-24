@@ -6,7 +6,8 @@ Multi-factor primitives for rust-webx:
   `last_accepted_step`, `otpauth://` enrollment URI.
 - **Recovery codes**: one-time codes stored only as SHA-256 hashes; the caller
   persists the hash records and gets atomic single-use semantics through
-  `verify_and_consume`.
+  `verify_and_consume` in memory, or `find`/`consume_matched` when a database
+  adapter needs the matched hash for a `code_hash = ? AND used = 0` update.
 - **Assurance claims**: `amr`/`acr` helpers for step-up authorization.
 
 No secrets are logged: `TotpSecret`'s `Debug` is redacted.

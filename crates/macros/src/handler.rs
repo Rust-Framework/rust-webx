@@ -210,10 +210,17 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
             >,
         > {
             Box::pin(async move {
-                let __identity = ctx.claims().map(|claims| {
-                    ::std::sync::Arc::new(::webx::IdentityUser::from_claims(claims))
+                // The endpoint adapter may already have installed the request
+                // context (it must, so dynamic authorizers can read the
+                // identity). Reuse that `Arc`; only a direct in-process dispatch
+                // without an outer scope builds one here.
+                let __identity = ::webx::RequestContext::identity().or_else(|| {
+                    ctx.claims().map(|claims| {
+                        ::std::sync::Arc::new(::webx::IdentityUser::from_claims(claims))
+                    })
                 });
-                let __trace = ctx.trace_id().map(|id| ::std::sync::Arc::<str>::from(id));
+                let __trace = ::webx::RequestContext::trace_id()
+                    .or_else(|| ctx.trace_id().map(|id| ::std::sync::Arc::<str>::from(id)));
                 ::webx::RequestContext::run_with_trace(__identity, __trace, async move {
                     let __request: #req_ty =
                         ::webx::bind_request::<#req_ty>(&mut *ctx).await?;

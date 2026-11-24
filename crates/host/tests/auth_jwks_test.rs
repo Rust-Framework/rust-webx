@@ -284,3 +284,50 @@ async fn jwks_health_check_passes_and_fails() {
     ));
     assert_eq!(JwksHealthCheck::new(broken).check().await.status, "fail");
 }
+
+/// An unknown `kid` is attacker-controlled: it may trigger at most one upstream
+/// fetch per `min_refresh_interval`, otherwise unauthenticated token spam would
+/// serialize every authentication behind a JWKS round trip.
+#[tokio::test]
+async fn unknown_kid_refresh_is_rate_limited() {
+    let (_private, public) = key_pair();
+    let fetcher = Arc::new(FakeFetcher {
+        calls: AtomicUsize::new(0),
+        document: es256_jwk_document(&public),
+        fail: false,
+    });
+    let resolver = JwksResolver::new(fetcher.clone(), Duration::from_secs(60), 8)
+        .with_min_refresh_interval(Duration::from_secs(60));
+
+    // Prime the cache: a cold resolver must be allowed to fetch.
+    assert!(resolver.resolve(KID, Algorithm::ES256).await.is_ok());
+    assert_eq!(fetcher.calls.load(Ordering::SeqCst), 1);
+
+    // The first unknown kid may refresh once (the key may have rotated).
+    let error = resolver
+        .resolve("rotated-kid", Algorithm::ES256)
+        .await
+        .err()
+        .expect("unknown kid");
+    assert!(matches!(error, Error::Unauthorized(_)), "got {error:?}");
+    assert_eq!(fetcher.calls.load(Ordering::SeqCst), 2);
+
+    // Every further unknown kid inside the interval is rejected without a fetch.
+    for _ in 0..25 {
+        let error = resolver
+            .resolve("attacker-kid", Algorithm::ES256)
+            .await
+            .err()
+            .expect("unknown kid");
+        assert!(matches!(error, Error::Unauthorized(_)), "got {error:?}");
+    }
+    assert_eq!(
+        fetcher.calls.load(Ordering::SeqCst),
+        2,
+        "unknown kids must not reach the identity provider every time"
+    );
+
+    // A known kid still resolves from the refreshed cache without fetching.
+    assert!(resolver.resolve(KID, Algorithm::ES256).await.is_ok());
+    assert_eq!(fetcher.calls.load(Ordering::SeqCst), 2);
+}

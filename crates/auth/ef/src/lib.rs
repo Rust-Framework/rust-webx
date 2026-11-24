@@ -9,6 +9,33 @@
 //! The entity is migration-ready; `ensure_created` is for tests only. In
 //! production generate DDL through the official `rust-ef migration` tooling.
 //!
+//! # Model registration
+//!
+//! `RefreshTokenEntity` derives `EntityType`, so a **default** `DbContext`
+//! discovers it from the compile-time `inventory` registry without any call.
+//! Call [`register_refresh_token_model`] when:
+//!
+//! - the context is **keyed** (`DbContextOptionsBuilder::context_key(..)`): a
+//!   keyed model only discovers entities tagged `#[context("key")]`, and this
+//!   function adds this entity explicitly; or
+//! - a starter wants an explicit, idempotent registration step before model-based
+//!   schema creation (`bootstrap` / official DDL diff), exactly like
+//!   `webx_ef::idempotency::register_idempotency_model`.
+//!
+//! ```ignore
+//! use rust_ef::db_context::DbContext;
+//! use webx_auth_ef::register_refresh_token_model;
+//!
+//! let mut ctx = DbContext::from_options(&keyed_options)?; // context_key("analytics")
+//! register_refresh_token_model(&mut ctx);                 // auth_refresh_tokens
+//! ctx.bootstrap().await?;                                 // model-based DDL
+//! ```
+//!
+//! `ctx.migrate("Migrations")` reads versioned **SQL** files and does not read
+//! the model, so registration is irrelevant to that path. The relative order of
+//! `register_refresh_token_model` and another starter's `register_*` call does
+//! not matter; registration is idempotent.
+//!
 //! ```ignore
 //! let store = std::sync::Arc::new(EfRefreshTokenStore::from_options(db_options));
 //! let service = webx_host::refresh::RefreshTokenService::new(
@@ -117,6 +144,20 @@ impl RefreshTokenEntity {
                 .unwrap_or(0),
         }
     }
+}
+
+/// Register [`RefreshTokenEntity`] in the application `DbContext` model.
+///
+/// Call it from the same place the application registers its own entities
+/// (`ctx.set::<T>()`), before model-based schema creation (`bootstrap` / DDL
+/// diff) — the same step (and ordering rule) as
+/// `webx_ef::idempotency::register_idempotency_model`. A **default** context
+/// already discovers the entity through `inventory`; a **keyed** context needs
+/// this explicit call because it only discovers entities tagged
+/// `#[context("key")]`. `ctx.migrate(dir)` reads SQL files and does not use the
+/// model. Registration is idempotent, so a repeated call is harmless.
+pub fn register_refresh_token_model(ctx: &mut DbContext) {
+    ctx.set::<RefreshTokenEntity>();
 }
 
 /// A factory returning a fresh `DbContext` for one operation.
@@ -325,6 +366,14 @@ mod tests {
     static NEXT_DB: AtomicU64 = AtomicU64::new(0);
 
     fn test_options() -> (Arc<DbContextOptions>, PathBuf) {
+        test_options_with_key(None)
+    }
+
+    /// Build a context with a keyed model. Entities declared with
+    /// `#[context("key")]` are discovered through `inventory`; an entity
+    /// without that attribute (like `RefreshTokenEntity`) is **not** part of a
+    /// keyed model unless `register_refresh_token_model` registers it.
+    fn test_options_with_key(context_key: Option<&str>) -> (Arc<DbContextOptions>, PathBuf) {
         let sequence = NEXT_DB.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
             "webx-auth-ef-refresh-{}-{}-{}.db",
@@ -334,6 +383,9 @@ mod tests {
         ));
         let mut builder = DbContextOptionsBuilder::new();
         builder.use_sqlite(&path.to_string_lossy());
+        if let Some(key) = context_key {
+            builder.context_key(key);
+        }
         let options = Arc::new(builder.build());
         options.create_provider().expect("provider");
         (options, path)
@@ -359,6 +411,41 @@ mod tests {
             status: RefreshTokenStatus::Active,
             family_created_at_unix_secs: now,
         }
+    }
+
+    #[tokio::test]
+    async fn registration_adds_the_entity_to_a_keyed_model() {
+        let (options, path) = test_options_with_key(Some("analytics"));
+        let mut ctx = DbContext::from_options(&options).expect("context");
+
+        // A keyed context only discovers entities tagged for that key. Without
+        // registration, `RefreshTokenEntity` (no `#[context]`) is absent — this
+        // is the assertion the default context cannot make, because there the
+        // `inventory` discovery already includes it.
+        assert!(
+            ctx.model_builder()
+                .find_entity::<RefreshTokenEntity>()
+                .is_none(),
+            "the keyed model must not contain the unregistered entity"
+        );
+        assert!(!ctx.entity_metas_contains::<RefreshTokenEntity>());
+
+        register_refresh_token_model(&mut ctx);
+        // Registration is idempotent: the model must not gain a second entry.
+        register_refresh_token_model(&mut ctx);
+
+        assert!(ctx.entity_metas_contains::<RefreshTokenEntity>());
+        let meta = ctx
+            .model_builder()
+            .find_entity::<RefreshTokenEntity>()
+            .expect("the registered entity is part of the model");
+        assert_eq!(meta.table_name.as_ref(), "auth_refresh_tokens");
+
+        // `bootstrap`/DDL build from the model: the registered entity must
+        // materialize a table, which is the contract the starter entry exists for.
+        ctx.bootstrap().await.expect("bootstrap");
+
+        let _ = std::fs::remove_file(path);
     }
 
     #[tokio::test]

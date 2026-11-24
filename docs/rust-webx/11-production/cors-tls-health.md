@@ -13,6 +13,8 @@ Host::builder().use_cors(CorsConfig {
 
 Production 环境禁止使用 `Cors.Origins: ["*"]`：builder 会直接 panic 硬失败，必须通过 `Cors.Origins` 或环境变量 `APP__Cors__Origins` 设置明确白名单。守卫校验的是**实际生效**的 `CorsConfig`（包括 `use_cors`），并在响应中追加 `Vary: Origin`。
 
+WebSocket 握手也受同一份白名单约束：未显式调用 use_websocket_origins(...) 时，非空且不含 * 的 CORS 白名单会作为 WS 的 Origin 白名单（不匹配或缺失 Origin 的握手回 403），避免开启 CORS 后 WS 仍然可被任意站点跨站握手。非浏览器客户端（不带 Origin）需要显式 use_websocket_origins(Vec::new())，或用 use_websocket_origins(...) 指定它实际使用的 Origin。
+
 ## TLS
 
 ```json

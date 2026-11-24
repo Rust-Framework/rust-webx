@@ -77,6 +77,12 @@ jobs:
         # groups) and framework crates may not depend on domain adapters.
         run: bash scripts/check-crate-layout.sh
 
+      - name: Runtime crates stay independent of rust-ef
+        # Feedback §37: no webx ↔ ef edge; only opt-in starter crates may link
+        # both. This fails the PR that leaks an ORM dependency into the core
+        # feature graph instead of discovering it at release time.
+        run: bash scripts/check-core-isolation.sh
+
       - name: Check publish order
         # Every publishable crate must appear once in both publish paths, with
         # dependencies before dependents (a dropped crate would publish nothing
@@ -181,8 +187,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Router and pipeline benchmarks
         run: |
-          cargo bench -p rust-webx-host --bench router_bench -- --warm-up-time 1 --measurement-time 1
-          cargo bench -p rust-webx-host --bench pipeline_bench -- --warm-up-time 1 --measurement-time 1
+          # The production router and pipeline live in the engine; the host
+          # bencher measures the 1.5 compatibility embedder that no request uses.
+          cargo bench -p rust-webx-engine --bench router_bench -- --warm-up-time 1 --measurement-time 1
+          cargo bench -p rust-webx-engine --bench pipeline_bench -- --warm-up-time 1 --measurement-time 1
 
   alloc:
     name: Allocation budget

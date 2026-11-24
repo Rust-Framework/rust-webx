@@ -6,7 +6,7 @@ use std::time::Duration;
 use sha2::{Digest, Sha256};
 use webx_core::metrics::MemoryMeter;
 use webx_core::security::{InMemoryRefreshTokenStore, RefreshTokenRecord, RefreshTokenStatus};
-use webx_host::refresh::RefreshTokenService;
+use webx_host::refresh::{RefreshTokenService, RotateOutcome};
 
 fn service() -> Arc<RefreshTokenService> {
     Arc::new(RefreshTokenService::new(
@@ -66,6 +66,55 @@ async fn reuse_revokes_the_whole_family() {
     assert!(
         service.rotate(&second.token).await.is_err(),
         "the rotated token belongs to the revoked family"
+    );
+}
+
+/// Upstream feedback §20: a reuse must identify the family so the caller can
+/// revoke the matching session row (otherwise the leaked access token stays
+/// valid until it expires).
+#[tokio::test]
+async fn rotate_outcome_reports_the_reused_family() {
+    let service = service();
+    let first = service.issue("user-1", None, None).await.expect("issue");
+
+    let issued = match service
+        .rotate_outcome(&first.token)
+        .await
+        .expect("rotate outcome")
+    {
+        RotateOutcome::Rotated(issued) => issued,
+        other => panic!("expected Rotated, got {other:?}"),
+    };
+    assert_eq!(issued.family_id, first.family_id);
+
+    match service
+        .rotate_outcome(&first.token)
+        .await
+        .expect("reuse outcome")
+    {
+        RotateOutcome::Reused { family_id } => {
+            assert_eq!(family_id, first.family_id, "the family must be reported");
+        }
+        other => panic!("expected Reused, got {other:?}"),
+    }
+
+    // The family is revoked by the reuse path, so even the legitimate
+    // replacement token is now reported as Revoked (not as a silent success).
+    assert_eq!(
+        service
+            .rotate_outcome(&issued.token)
+            .await
+            .expect("revoked outcome"),
+        RotateOutcome::Revoked
+    );
+
+    // Malformed input is an expected failure value, not a backend error.
+    assert_eq!(
+        service
+            .rotate_outcome("not-a-refresh-token")
+            .await
+            .expect("malformed outcome"),
+        RotateOutcome::Invalid
     );
 }
 

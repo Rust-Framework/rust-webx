@@ -15,9 +15,12 @@
 //! lists keep every occurrence, and failures accumulate in a [`Binder`] so the
 //! response can report all of them at once.
 //!
-//! JSON bodies stay with `serde`: the derive generates a hidden body struct
-//! containing only the body-bound fields, so `rename`, `flatten`, `default` and
-//! custom deserializers keep working exactly as written.
+//! JSON bodies stay with `serde`: the body is decoded once into a
+//! `serde_json::Value` (so `rename`, `flatten`, `default` and custom
+//! deserializers keep working exactly as written) and each field is then taken
+//! from that document, which is what lets every field report its own error. A
+//! single-pass shadow-struct path for bodies without custom field handling is
+//! tracked for 3.0.
 
 use crate::auth::IClaims;
 use crate::error::{Error, Result};
@@ -32,14 +35,14 @@ use std::pin::Pin;
 use crate::http::IHttpRequest;
 
 /// Whether a media type denotes JSON (`application/json` or `*/*+json`).
+///
+/// Allocation-free: this runs once per JSON request and the media type is
+/// effectively always ASCII, so a case-insensitive comparison beats
+/// lowercasing a fresh `String`.
 pub fn is_json_content_type(value: &str) -> bool {
-    let media = value
-        .split(';')
-        .next()
-        .unwrap_or("")
-        .trim()
-        .to_ascii_lowercase();
-    media == "application/json" || media.ends_with("+json")
+    let media = value.split(';').next().unwrap_or("").trim();
+    media.eq_ignore_ascii_case("application/json")
+        || (media.len() > 5 && media.as_bytes()[media.len() - 5..].eq_ignore_ascii_case(b"+json"))
 }
 
 /// Reject a non-JSON media type before a generated JSON binder parses the body.

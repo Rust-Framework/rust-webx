@@ -36,6 +36,92 @@ impl IRequestHandler<BoomRequest, BoomView> for BoomHandler {
     }
 }
 
+#[derive(Default, WebxRequestMeta)]
+struct QuotaRequest;
+
+#[get("/quota")]
+impl IRequest<BoomView> for QuotaRequest {}
+
+#[derive(Default)]
+struct QuotaHandler;
+
+#[handler]
+#[async_trait::async_trait]
+impl IRequestHandler<QuotaRequest, BoomView> for QuotaHandler {
+    async fn handle(&mut self, _req: QuotaRequest) -> ActionResult<BoomView> {
+        Err(Error::too_many_requests(7, "quota exhausted; retry later"))
+    }
+}
+
+#[derive(Default, WebxRequestMeta)]
+struct PlanChangeRequest;
+
+#[get("/plan-change")]
+impl IRequest<BoomView> for PlanChangeRequest {}
+
+#[derive(Default)]
+struct PlanChangeHandler;
+
+#[handler]
+#[async_trait::async_trait]
+impl IRequestHandler<PlanChangeRequest, BoomView> for PlanChangeHandler {
+    async fn handle(&mut self, _req: PlanChangeRequest) -> ActionResult<BoomView> {
+        Err(Error::conflict_retryable("plan change in progress"))
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn typed_errors_write_retry_after_and_flag_the_retryable_conflict() {
+    let port = free_port();
+    let addr = format!("127.0.0.1:{port}");
+    let base = format!("http://{addr}");
+    let host = Host::builder().mode(AppMode::Development).no_spa().build();
+    tokio::spawn(async move {
+        let _ = host.run_at(&addr).await;
+    });
+
+    let client = reqwest::Client::new();
+    for _ in 0..100 {
+        if client
+            .get(format!("{base}/health/live"))
+            .send()
+            .await
+            .is_ok()
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    let limited = client.get(format!("{base}/quota")).send().await.unwrap();
+    assert_eq!(limited.status().as_u16(), 429);
+    assert_eq!(
+        limited.headers().get_all("retry-after").iter().count(),
+        1,
+        "the typed 429 writes Retry-After exactly once"
+    );
+    assert_eq!(limited.headers()["retry-after"], "7");
+    let body: serde_json::Value = limited.json().await.unwrap();
+    assert_eq!(body["code"], "too_many_requests");
+    assert_eq!(body["retryable"], true);
+    assert_eq!(body["detail"], "quota exhausted; retry later");
+
+    let conflict = client
+        .get(format!("{base}/plan-change"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(conflict.status().as_u16(), 409);
+    assert!(
+        conflict.headers().get("retry-after").is_none(),
+        "a retryable conflict has no wait value"
+    );
+    let body: serde_json::Value = conflict.json().await.unwrap();
+    assert_eq!(body["code"], "conflict_retryable");
+    assert_eq!(body["retryable"], true);
+    assert_eq!(body["detail"], "plan change in progress");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn problem_json_carries_code_retryable_instance_and_trace() {
     let port = free_port();

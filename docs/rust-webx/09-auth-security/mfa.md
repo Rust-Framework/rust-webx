@@ -47,9 +47,30 @@ if set.verify_and_consume(&candidate) {
 }
 ```
 
+数据库适配器不需要再算一遍 hash：`find` / `consume_matched` 直接返回**命中的记录**（含 hash），
+用它做单条条件更新即可：
+
+```rust
+// 先读记录到 set（或直接按 hash 查询），再 CAS
+if let Some(record) = set.find(&candidate) {
+    let affected = sqlx::query(
+        "UPDATE mfa_recovery_codes SET used_at = ? \
+         WHERE user_id = ? AND code_hash = ? AND used_at IS NULL",
+    )
+    .bind(now)
+    .bind(&user.id)
+    .bind(&record.hash)
+    .execute(&pool)
+    .await?
+    .rows_affected();
+    // affected == 0：已被并发消费（重放）
+}
+```
+
 - 10 个 10 字符码（去掉易混淆字符），展示形式 `XXXXX-XXXXX`；大小写/空格/连字符宽容。
 - 存储只保存 `SHA-256(normalized)`，`hash_code` 会先归一化；**不存明文**。
-- `verify_and_consume` 在内存集合内保证单次使用；数据库实现用 `used = 0` 条件更新取得同样的原子语义。
+- 内存集合：`consume_matched` 返回消费前的记录并标记 `used`；`verify_and_consume` 是其布尔薄包装。
+- 数据库实现用 `used_at IS NULL` 条件更新取得同样的原子语义；0 行受影响 = 已消费。
 - 剩余数量用 `remaining()` 做 UI 提醒；用尽后要求重新生成。
 
 ## 4. `amr`/`acr` step-up

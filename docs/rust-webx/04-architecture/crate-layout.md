@@ -71,9 +71,9 @@ workspace。应用代码只依赖 `crates/` 下的包。
 | 组件 | 实现 |
 |------|------|
 | HTTP 服务 | hyper + tokio |
-| 路由 | matchit radix 树 `Router` |
+| 路由 | `webx_engine::Router`（matchit radix 树，生产路径）；`webx_host::router::Router` 仅为 1.5 兼容嵌入器，不服务请求 |
 | 上下文 | `webx_engine::EngineContext`（应用契约是 `IHttpContext`） |
-| 管道 | `MiddlewarePipeline` |
+| 管道 | `webx_engine::Pipeline`（生产路径）；`MiddlewarePipeline::execute` 仅为 1.5 兼容执行器 |
 | 认证 | `JwtAuth`, `jwt_middleware`, `AuthenticationMiddleware` + `JwtScheme` / `ApiKeyScheme` 链 |
 | 授权 | 端点执行 `#[authorize]` 规则；`resource_auth_middleware` 已弃用（路由前无法读取 `route_pattern`） |
 | 端点 | `StubEndpoint`（路由宏端点）, `RequestEndpoint`, `ControllerEndpoint`, `StaticJsonEndpoint`, `StaticHtmlEndpoint` |

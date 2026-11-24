@@ -28,6 +28,11 @@
 | 框架（CORS on） | **16.42** | **18.43** |
 | **框架税 = 总分配 − 地板** | **10.42** | **12.42** |
 
+直连分发目前仍走类型擦除的 binder：每个请求一次 boxed future + 一次 `Box<dyn Any>` 请求装箱。
+把 `bind_request::<T>` 换成 `RequestModel::bind_inline` 可省 **1.00 alloc/req**（实测
+10.42 → 9.42），但要求请求类型实现 `RequestModel`，会让「消息即请求」的 WS 枚举请求类型
+无法编译，因此列为 3.0 项（需要同时为枚举请求提供空绑定元数据）。
+
 地板随 hyper 版本移动，因此预算必须按 **地板 + 框架税** 定义；CI 比较框架税，不硬编码总数。
 Linux 的 allocator/runtime 比 Windows 多 2 allocs/request，因此 CI 预算为 **≤13**，Windows
 参考预算为 **≤12**；两者都不允许随版本漂移。

@@ -271,6 +271,10 @@ impl IAuthenticationScheme for SessionCookieScheme {
         SESSION_COOKIE_SCHEME_NAME
     }
 
+    fn session_cookie_name(&self) -> Option<&str> {
+        Some(self.options.name.as_str())
+    }
+
     fn matches(&self, ctx: &dyn IHttpContext) -> bool {
         // A Bearer request belongs to the JWT/API-key schemes; never let a
         // stale session cookie shadow an explicit Authorization header.

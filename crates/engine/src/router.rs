@@ -6,8 +6,10 @@
 //! * an `Arc<str>` pattern that is cloned (never copied) on every match, so a
 //!   request never allocates a pattern `String`;
 //! * the ordered `{param}` names as `&'static str` slices of the pattern, so a
-//!   request only allocates the `String` values of the parameters it actually
-//!   has (a static route allocates nothing).
+//!   request never allocates a parameter-name `String`; it allocates the values
+//!   of the parameters it actually has plus the small name→value table the 2.x
+//!   context exposes (a static route allocates neither). The 3.0 target is to
+//!   expose the borrowed (&'static str, &str) pairs and drop that table.
 //!
 //! `match_route` returns the target, the pattern and the parameters, and
 //! implements the same dispatch rules as the 1.5 host router:

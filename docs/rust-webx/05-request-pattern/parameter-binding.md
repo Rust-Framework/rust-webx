@@ -97,6 +97,23 @@ pub struct SearchRequest {
 只从 body 绑定。`#[serde(deny_unknown_fields)]` 在 body 上生效（存在 flatten 字段时无法判定）。
 body 字段类型错误、`null` 赋给非 `Option` 字段都按该字段返回 400，不会被当作“缺失”回退到 query。
 
+`serde` 已注册为 `WebxRequestMeta` 的 helper attribute：请求结构体**不需要**为了默认值额外
+`#[derive(Deserialize)]`，只 derive `WebxRequestMeta` 就能让查询绑定使用默认值（3.0 的
+`PagedRequest` 依赖这一点把 `from_parts` 的缺省值下沉到 binding）：
+
+```rust
+fn twenty() -> u32 { 20 }
+
+#[derive(WebxRequestMeta)]
+pub struct ListOrdersRequest {
+    #[serde(default = "twenty")]
+    pub page_size: u32,
+    #[serde(default)]
+    pub filter: String,
+}
+```
+
+
 ## 用户身份
 
 需要登录的接口把身份声明成普通字段，绑定层负责 `401` 与字段填充：

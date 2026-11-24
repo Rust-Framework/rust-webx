@@ -44,6 +44,42 @@ impl IRequestHandler<QueryRequest, serde_json::Value> for QueryHandler {
     }
 }
 
+// A request with serde defaults but no `Deserialize` derive: `#[serde(default)]`
+// is a `WebxRequestMeta` helper attribute, so the query binder fills the default
+// without requiring a serde derive (and without the handler using `from_parts`).
+fn default_page_size() -> u32 {
+    20
+}
+
+fn default_filter() -> String {
+    "all".to_string()
+}
+
+#[derive(WebxRequestMeta)]
+struct DefaultsQuery {
+    #[serde(default = "default_page_size")]
+    page_size: u32,
+    #[serde(default = "default_filter")]
+    filter: String,
+}
+
+#[get("/bind/defaults")]
+impl IRequest<serde_json::Value> for DefaultsQuery {}
+
+#[derive(Default)]
+struct DefaultsHandler;
+
+#[handler]
+#[async_trait::async_trait]
+impl IRequestHandler<DefaultsQuery, serde_json::Value> for DefaultsHandler {
+    async fn handle(&mut self, req: DefaultsQuery) -> ActionResult<serde_json::Value> {
+        Ok(serde_json::json!({
+            "page_size": req.page_size,
+            "filter": req.filter,
+        }))
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Header binding
 // ---------------------------------------------------------------------------
@@ -508,6 +544,32 @@ async fn query_binds_non_string_types_and_repeated_keys() {
     assert_eq!(body["page"], 2);
     assert_eq!(body["size"], 10);
     assert_eq!(body["ids"], serde_json::json!([1, 2, 3]));
+}
+
+#[tokio::test]
+async fn serde_defaults_bind_without_a_serde_derive() {
+    let base = spawn_host().await;
+
+    // Both fields are absent: the binder fills the serde defaults.
+    let body: serde_json::Value = reqwest::get(format!("{base}/bind/defaults"))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(body["page_size"], 20);
+    assert_eq!(body["filter"], "all");
+
+    // A supplied value wins over the default.
+    let body: serde_json::Value =
+        reqwest::get(format!("{base}/bind/defaults?page_size=5&filter=open"))
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+    assert_eq!(body["page_size"], 5);
+    assert_eq!(body["filter"], "open");
 }
 
 #[tokio::test]

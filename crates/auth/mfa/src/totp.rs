@@ -92,12 +92,19 @@ impl fmt::Debug for TotpSecret {
 
 impl TotpSecret {
     /// Generate a 160-bit secret (RFC 4226 recommendation).
+    ///
+    /// The bytes come from the operating-system CSPRNG (`getrandom`). A system
+    /// RNG failure is unrecoverable for a security primitive, so this panics
+    /// instead of falling back to weaker entropy.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the operating-system CSPRNG is unavailable. There is no
+    /// weaker fallback; callers should treat this as a process-level fault.
     pub fn generate() -> Self {
-        let mut bytes = Vec::with_capacity(20);
-        bytes.extend_from_slice(uuid::Uuid::new_v4().as_bytes());
-        bytes.extend_from_slice(uuid::Uuid::new_v4().as_bytes());
-        bytes.truncate(20);
-        Self(bytes)
+        let mut bytes = [0u8; 20];
+        getrandom::fill(&mut bytes).expect("operating-system CSPRNG is unavailable");
+        Self(bytes.to_vec())
     }
 
     /// Parse a base32 secret (spaces/hyphens ignored, case-insensitive).
@@ -380,6 +387,18 @@ mod tests {
         assert!(uri.contains("algorithm=SHA1"));
         assert!(uri.contains("digits=6"));
         assert!(uri.contains("period=30"));
+    }
+
+    #[test]
+    fn generate_returns_a_fresh_160_bit_secret() {
+        let first = TotpSecret::generate();
+        let second = TotpSecret::generate();
+        assert_eq!(first.as_bytes().len(), 20);
+        assert_eq!(second.as_bytes().len(), 20);
+        assert_ne!(first.as_bytes(), second.as_bytes());
+        // 160 bits of unpadded base32 is 32 characters; the enrollment output
+        // format did not change with the switch to the OS CSPRNG.
+        assert_eq!(first.to_base32().len(), 32);
     }
 
     #[test]

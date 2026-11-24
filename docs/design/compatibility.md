@@ -1,12 +1,13 @@
 # 兼容性政策（SemVer、N-2 升级、锁步版本）
 
-> 基线：rust-webx 2.9.0。门禁在 `.github/workflows/ci.yml` 的 `semver`、`upgrade`、
+> 基线：rust-webx 2.9.1。门禁在 `.github/workflows/ci.yml` 的 `semver`、`upgrade`、
 > `lint`（内部版本钉）三个 job。
 
 ## 1. 三条承诺
 
 1. **公开 API 只加性演进**：2.x minor 不删除/改名公开项，不收紧泛型 bound，不移除
    auto trait，不给既有函数新增 `#[deprecated]`（会让下游 `-D warnings` 构建失败）。
+   唯一已记录的例外是 2.9.1 的通知端口改名（见 §3）：维护者决定跳过弃用窗口，旧名直接删除。
 2. **内部 crate 锁步发布**：`rust-webx*` 之间使用**精确版本** `=x.y.z` 依赖，
    消费者无法解析出 umbrella 与子 crate 混版本组合。
 3. **N-2 源码兼容**：同一份只使用 2.7 API 的应用源码，必须能同时编译
@@ -24,12 +25,13 @@ cargo semver-checks --package rust-webx        --baseline-rev v2.7.0
 ```
 
 例外：`constructible_struct_adds_field = "allow"`（见 §3），以及 2.8.0 幂等值类型的
-`struct_marked_non_exhaustive` / `enum_marked_non_exhaustive = "allow"`（同见 §3）。
+`struct_marked_non_exhaustive` / `enum_marked_non_exhaustive = "allow"`（同见 §3），以及
+2.9.1 通知端口改名的 `inherent_method_missing = "allow"`（**只在 `rust-webx-host`**，同见 §3）。
 
 ### upgrade（N-2 源码兼容）
 
 `testing/upgrade-smoke/src/main.rs` 只用 2.7 时代 API，分别在两个独立 workspace 编译。
-N-2 基线随当前版本滚动：2.9.0 的 N-2 是 **rust-webx 2.7.0**（下一个版本发布时同步前移）。
+N-2 基线随当前版本滚动：2.9.1 的 N-2 是 **rust-webx 2.7.0**（下一个 minor 发布时同步前移）。
 
 ```text
 testing/upgrade-smoke/stable/Cargo.toml   → rust-webx = "=2.7.0"（固定 2.7 全套）
@@ -41,7 +43,7 @@ testing/upgrade-smoke/current/Cargo.toml  → rust-webx = { path = "../../../cra
 工作区所有 `path = "crates/..."` 内部依赖的 `version` 必须等于
 `[workspace.package].version`；否则 CI 失败。
 
-## 3. 已知例外：幂等值类型的新增字段与 `#[non_exhaustive]`（配置 section / `IdempotentResponse`）
+## 3. 已知例外：幂等值类型的新增字段与 `#[non_exhaustive]`（配置 section / `IdempotentResponse`）、2.9.1 通知端口改名、`EmailMessage` 新字段、`Error` 新变体
 
 `constructible_struct_adds_field`、`struct_marked_non_exhaustive` 与
 `enum_marked_non_exhaustive` 设为 `allow`，覆盖以下已文档化的 2.8.0 变更：
@@ -58,6 +60,43 @@ testing/upgrade-smoke/current/Cargo.toml  → rust-webx = { path = "../../../cra
    `IdempotencyLease` 用 `::new(token)`，`match IdempotencyBegin` 补 `_` 通配分支。
    `IIdempotencyStore` 仍保持对象安全，新增的租约方法都有默认实现。
    该部分与配置 section 同窗口在 3.0 复核收口。
+3. **2.9.1 通知端口改名**：`HostBuilder::use_email_sender` / `use_sms_sender` 删除，改为
+   `use_email` / `use_sms`（参数类型本来就是 `Arc<dyn IEmailSender>` / `Arc<dyn ISmsSender>`，
+   名字与 `use_clock` / `use_meter` / `use_session_store` 同形）。维护者决定**不给兼容别名、
+   不走弃用窗口**，因此一个补丁版本里出现了公开方法移除——这与 §1 的加性承诺相悖，作为已登记
+   例外处理：
+
+   - 影响面：只有通知端口的两个 builder 方法；DI 注册方式、「默认不注册发送器」契约、
+     `InMemoryEmailSender` / `InMemorySmsSender` 全部不变；
+   - 迁移：调用点改一个标识符，见 CHANGELOG `[2.9.1]` → Breaking 与 `deprecations.md`；
+   - 门禁：`inherent_method_missing` 的 `allow` **只写在 `crates/host/Cargo.toml` 的
+     `[package.metadata.cargo-semver-checks.lints]`**，`rust-webx-core` / `rust-webx-engine` /
+     `rust-webx` 仍保持完整的方法移除检测；
+   - 锁定：`crates/webx/tests/notifications_test.rs` 覆盖 `use_email` / `use_sms` 的注册与捕获；
+   - 收口：`semver` job 的 baseline 前移到 v2.9.1 之后，该条目与 crate 级 `allow` 一并删除。
+
+4. **2.9.1 `EmailMessage` 新增 `from` / `reply_to` / `headers`**（上游反馈 §7）：邮件发送器需要
+   按租户/品牌选发件人、设置 `Reply-To`、附加 `List-Unsubscribe` 等头。只破坏**结构体字面量**
+   构造；文档化构造是 `EmailMessage::new(..)` + `with_from(..)` / `with_reply_to(..)` /
+   `with_header(..)`。`validate()` 同时校验地址与头（拒绝 CRLF/控制字符注入）。
+   CHANGELOG `[2.9.1]` → Breaking 给迁移写法，`constructible_struct_adds_field` 的全局允许在
+   `Cargo.toml` 注释里登记为第三种用例。
+
+5. **2.9.1 `Error` 新增 `TooManyRequests` / `ConflictRetryable`；`RateLimitRoute` 新增 `Pattern`、
+   `RateLimitSubject` 新增 `Composite`**（上游反馈 §8/§5）：
+   - 新增变体意味着下游**穷举 `match`** 需要补通配分支；这是 2.x 加性承诺的登记例外，
+     `crates/core/Cargo.toml` 里以 `enum_variant_added = "allow"` 限定在 `rust-webx-core`，
+     baseline 前移后删除；
+   - 行为不变的部分：`Error::Status(429, ..)` 仍映射 429 且不写 `Retry-After`；
+     `Error::Conflict` 仍是不可重试 409；只有新变体带 `Retry-After` / `retryable = true`；
+     `RateLimitRoute::Exact/Prefix/Any` 与 `RateLimitSubject::{Ip,User,Tenant,ApiKey}` 的匹配/
+     键派生不变，新增分支只是让模板与组合主体可用；
+   - 迁移：把 `Err(Error::Status(429, msg))` 换成 `Error::too_many_requests(secs, msg)`，
+     把"等待冲突方完成可重试"的 409 换成 `Error::conflict_retryable(msg)`；限流规则按需改
+     `RateLimitRoute::pattern(..)` / `RateLimitSubject::Composite(..)`，旧的 exact/prefix 规则
+     不需要改；
+   - 锁定：`crates/core/src/error.rs` / `rate_limit.rs` 单测 + `docs/design/error-codes.md`
+     的码表一致性测试。
 
 需要保持字面量构造的结构体（如 `ProblemDetails`）由
 `crates/webx/tests/api_stability_test.rs` 锁定字段集合。
@@ -68,7 +107,7 @@ testing/upgrade-smoke/current/Cargo.toml  → rust-webx = { path = "../../../cra
 `rust-webx`。持久层错误到 HTTP 的翻译属于**应用边界**，由单独的适配 crate
 `rust-webx-ef` 承担（应用按需依赖；core 与 umbrella 不链接它）：
 
-配对发布：先 rust-ef 2.9.0、后 rust-webx 2.9.0；workspace 依赖写 `rust-ef = "2.6"`
+配对发布：先 rust-ef 2.9.0、后 rust-webx 2.9.1；workspace 依赖写 `rust-ef = "2.6"`
 （semver 范围，已含 2.9.x，本版按 2.9.0 验证），不收紧为精确 pin——否则在 ORM 发布前
 `Cargo.lock` 不可解析。
 
@@ -90,7 +129,7 @@ pub use webx_ef::{map_ef_error, EfResultExt};
 let blogs = ctx.set::<Blog>().query().to_list().await.map_ef()?;
 ```
 
-映射契约（与 rust-ef 2.6+ 迁移指南一致；本版按 2.9.0 配对验证）：
+映射契约（与 rust-ef 2.6+ 迁移指南一致；本版按 rust-ef 2.9.0 配对验证）：
 
 | `EFError` | HTTP | `webx::Error` | 客户端可见 detail |
 |---|---|---|---|
@@ -100,7 +139,16 @@ let blogs = ctx.set::<Blog>().query().to_list().await.map_ef()?;
 | `Query`、`TypeConversion` | 400 | `Validation` | 固定文案（不回显 SQL/列名） |
 | `UniqueViolation` | 409 | `Conflict` | 固定文案（不回显 constraint/table） |
 | `Connection`、`Transaction` | 503 | `Status(503, _)` | 固定文案、可重试 |
+| `Database` 的瞬态条件（`SQLSTATE` 08/40/57P0*、SQLite `busy`/`locked`、MySQL 1205/1213） | 503 | `Status(503, _)` | 固定文案、可重试 |
 | `Database`、`Migration`、`Configuration`、`Provider`、`ChangeTracking`、`Other` | 500 | `Internal` | 无（`public_detail() = None`，原文与 source 链只进日志） |
+
+瞬态判定由 `webx_ef` 读 `DatabaseErrorInfo` 的 `sqlstate`/`code` 完成：provider 只把唯一约束提升为
+`UniqueViolation`，其余驱动错误都以 `Database` 上报，应用侧不再需要 `code == 5/6` 或
+`"database is locked"` 之类的前置判断。
+
+运行期 DI 解析失败不属于持久层：`impl From<rust_dix::RdiError> for webx::Error` 把失败转成
+`Error::Di`（500、`public_detail()` 为 `None`、容器消息只进运维日志），端口实现里
+`scope.get_owned()?` 直接可用，应用不再需要本地 `map_di_error`。
 
 5xx 的原文与 `source` 链拼进 `Error::Internal`，`public_detail()` 为 `None`，由
 host 写入日志。新增 rust-ef 变体走同一隐藏 500 分支，升级依赖不会扩大客户端可见
@@ -112,7 +160,7 @@ ORM → Web 框架。
 
 ### 配对验证（pairing verified）的证据边界
 
-发布顺序是 **rust-ef 2.9.0 → rust-webx 2.9.0**（见上）。发布前用本地 rust-ef
+发布顺序是 **rust-ef 2.9.0 → rust-webx 2.9.1**（见上）。发布前用本地 rust-ef
 checkout 做编译级配对验证：
 
 ```bash
@@ -175,7 +223,7 @@ rust-ef 发布后、给 rust-webx 打 tag 前，执行 `cargo update -p rust-ef 
 □ 配对 ORM 已先行发布（rust-ef x.y.z → rust-webx x.y.z；`rust-ef = "2.6"` 范围覆盖 2.9.x，不收紧为精确 pin）
 □ 配对验证已跑：`RUST_EF_PATH=… bash scripts/check-pairing-rust-ef.sh`（或 CI `pairing` job）通过，证据边界见 §4
 □ semver-checks 对上一发布通过（例外仅 §3）
-□ N-2 冒烟通过（testing/upgrade-smoke；2.9.0 的 N-2 = rust-webx 2.7.0）
+□ N-2 冒烟通过（testing/upgrade-smoke；2.9.1 的 N-2 = rust-webx 2.7.0）
 □ cargo audit 0 漏洞 + 内部版本钉一致
 □ LTS backport 只含安全/关键缺陷修复
 ```

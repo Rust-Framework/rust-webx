@@ -15,7 +15,7 @@ RFC 9457 problem 响应的扩展成员（不是“另一种信封”，客户端
 |---|---|---|
 | `code` | string | **稳定**机器可读码，小写 snake_case；同一 HTTP 状态可有多个码，由它区分原因 |
 | `status` | number | HTTP 状态（响应行同值） |
-| `retryable` | bool | 重试同一请求是否可能成功（仅过载/上游瞬时故障为 `true`） |
+| `retryable` | bool | 重试同一请求是否可能成功（过载/上游瞬时故障，以及“等待冲突方完成后可重试”的 `conflict_retryable` 为 `true`） |
 | `traceId` | string | 与 `x-trace-id` 响应头同源，用于日志关联 |
 | `detail` / `title` | string | 面向人；**不是**契约，客户端不得解析 |
 
@@ -40,7 +40,7 @@ RFC 9457 problem 响应的扩展成员（不是“另一种信封”，客户端
 - 响应 `content-type` 固定为 `application/problem+json`（见
   [`ProblemDetails`](../../crates/core/src/problem.rs)）。
 
-## 3. 稳定码表（`ERROR_CODES`，22 项）
+## 3. 稳定码表（`ERROR_CODES`，23 项）
 
 `status` 为 `FALLBACK_STATUS = 0` 表示状态由错误自身携带（仅通用兜底码 `error`）。
 
@@ -54,11 +54,12 @@ RFC 9457 problem 响应的扩展成员（不是“另一种信封”，客户端
 | `not_found` | 404 | false | 业务资源不存在 | `Error::NotFound`；`ProblemDetails::not_found` |
 | `route_not_found` | 404 | false | 没有匹配的路由 | `Error::Routing` |
 | `method_not_allowed` | 405 | false | 路径存在但方法不允许 | `Status(405)` 兜底 |
-| `conflict` | 409 | false | 并发/状态冲突 | `Error::Conflict` |
+| `conflict` | 409 | false | 并发/状态冲突（永久冲突） | `Error::Conflict` |
+| `conflict_retryable` | 409 | **true** | 可等待的冲突：冲突方完成后重试可能成功 | `Error::conflict_retryable` |
 | `payload_too_large` | 413 | false | 请求体或单个上传文件超限 | `Error::PayloadTooLarge` |
 | `unsupported_media_type` | 415 | false | 端点不支持该 content-type | `Error::UnsupportedMediaType` |
 | `unprocessable_entity` | 422 | false | 语义不可处理 | `Status(422)` 兜底 |
-| `too_many_requests` | 429 | **true** | 被限流，可退避重试 | `Status(429)` 兜底 |
+| `too_many_requests` | 429 | **true** | 被限流，可退避重试；typed 变体同时写 `Retry-After` | `Error::too_many_requests`；`Status(429)` 兜底 |
 | `dependency_injection` | 500 | false | DI 解析/装配失败（服务端缺陷） | `Error::Di` |
 | `internal_error` | 500 | false | 未分类服务端错误 | `Error::Internal`；`Error::Message`；`Status(500)` |
 | `invalid_state` | 500 | false | 状态机/编程错误（如响应已写出） | `Error::State` |
@@ -75,9 +76,16 @@ RFC 9457 problem 响应的扩展成员（不是“另一种信封”，客户端
    `status_code()`/`retryable()` 一致；
 2. `default_code_for_status` 的每个专用状态都在表中且与
    `status_is_retryable` 一致；
-3. 表中无重复、均为 snake_case、`retryable` 只对 `429/502/503/504` 为 `true`；
+3. 表中无重复、均为 snake_case；`retryable` 只对 `429/502/503/504` 与
+   `conflict_retryable`（409，按条件而非状态类重试）为 `true`；
 4. 表的码集合**恰好**等于运行时可达码集合（不允许陈旧条目）；
 5. 未登记状态回落到 `error`，且 `error` 永远不可重试。
+
+`conflict_retryable` 是唯一的“按条件可重试”条码：它保留 409（请求与当前状态冲突），
+但框架知道该冲突是瞬时的（另一请求正在处理同一幂等键/同一计划变更），因此
+`retryable: true`。它不是“自动重试”指令：客户端应等待冲突方完成、重读状态或重放
+同一幂等键；永久冲突仍用 `conflict`（`retryable: false`）。typed 429 的
+`retry_after_secs` 由引擎错误 writer 写成 RFC 6585 `Retry-After` 响应头（只写一次）。
 
 ## 4. 覆盖范围与边界
 

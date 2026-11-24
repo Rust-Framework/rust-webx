@@ -1,0 +1,24 @@
+[package]
+name = "load-probe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "load-probe"
+path = "src/main.rs"
+
+[dependencies]
+rust-webx = { path = "../../crates/webx", features = ["testing"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time"] }
+hyper = { workspace = true }
+hyper-util = { workspace = true, features = ["tokio", "client-legacy", "server-auto"] }
+http-body-util.workspace = true
+http.workspace = true
+bytes.workspace = true
+async-trait = "0.1"
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
+[lints]
+workspace = true

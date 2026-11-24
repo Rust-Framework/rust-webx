@@ -1,7 +1,7 @@
-//! N-2 upgrade smoke application for the rust-webx 2.9.0 release.
+//! N-2 upgrade smoke application for the rust-webx 2.9.1 release.
 //!
 //! This file is compiled twice in CI: against the published `rust-webx 2.7.0`
-//! (the N-2 release for 2.9.0) and against the current workspace path. It may
+//! (the N-2 release for 2.9.1) and against the current workspace path. It may
 //! only use APIs that existed in 2.7.0 — if an upgrade breaks this file, the
 //! change is not additive.
 

@@ -213,7 +213,11 @@ let identity = webx::RequestContext::identity();      // Option<Arc<IdentityUser
 entity.updated_by = operator.unwrap_or_else(|| "system".to_string());
 ```
 
-- HTTP dispatch 在**绑定请求字段之前**建立上下文，因此 binder、Handler、审计 helper 读到的是同一份身份；
+- HTTP endpoint 在**授权守卫与绑定请求字段之前**建立上下文，因此 `#[authorize(dynamic)]` 的
+  授权器、binder、Handler、审计 helper 读到的是同一份身份（授权器可以直接用
+  `RequestContext::identity()` 按 sub/tenant 判定）；
+- 认证中间件运行在 endpoint 之前，此时作用域尚未建立：中间件里用 `ctx.claims()`，不要用
+  `RequestContext::identity()`；
 - `RequestContext` 是 task-local：`tokio::spawn` 出去的任务不继承它，需要显式传递身份；
 - HostedService / 后台任务默认没有身份（`operator_id()` 为 `None`），应显式记录为 System，
   或在需要时用 `RequestContext::run(Some(Arc::new(system_identity)), ...)` 包裹。 

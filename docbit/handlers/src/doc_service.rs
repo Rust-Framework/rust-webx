@@ -67,12 +67,6 @@ impl DocService {
         candidates.into_iter().find(|path| path.is_dir())
     }
 
-    /// Legacy aggregate docs root (first existing parent docs directory).
-    #[allow(dead_code)]
-    fn root() -> PathBuf {
-        Self::workspace_docs_root().unwrap_or_else(|| app_base().join("docs"))
-    }
-
     /// Resolve the directory for one work slug (deploy mirror → workspace mirror → live sibling).
     fn work_dir(work: &str) -> PathBuf {
         let deploy = app_base().join("docs").join(work);

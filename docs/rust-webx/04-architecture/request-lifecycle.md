@@ -67,9 +67,9 @@ sequenceDiagram
 
 `#[handler]` 生成的 `HandlerDispatch` 按 `(请求类型, 响应类型)` 的 `TypeId` 注册；`Host` 启动时把它和 `#[get]` 等路由 join：
 
-1. 先执行静态 `#[authorize]` 规则，再运行已注册的 `IDynamicAuthorizer`（仅限有 `#[authorize]` 的路由）；全部通过才继续
-2. 从 route params、query、body 绑定 Request struct
-3. 注入 claims，进入 `RequestContext`
+1. 进入 `RequestContext`（identity/trace 作用域）：动态授权器、binder、Handler 与审计 helper 读到同一份身份；
+2. 先执行静态 `#[authorize]` 规则，再运行已注册的 `IDynamicAuthorizer`（仅限有 `#[authorize]` 的路由）；全部通过才继续
+3. 从 route params、query、body 绑定 Request struct（claims 已由认证中间件在步骤 2 注入 `IHttpContext`）
 4. 若没有注册任何 `IPipelineBehavior`：直接构造 handler 并 `handle(request)`（不经过 `Mediator`、`Box<dyn Any>`、`JsonResult` 装箱）；有 behavior 时回退到 mediated 路径
 5. `#[handler(inject)]` 按请求开一个 DI scope；普通 handler 不创建 scope
 6. 响应转为 `EndpointResult::{Empty, Json(Bytes), Action(Response)}`，由 engine 写入状态/头/body

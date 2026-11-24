@@ -79,8 +79,8 @@ graph BT
 框架的**运行时**：
 
 - `Host` / `HostBuilder` — 应用宿主与构建器
-- `Router` — 基于 Trie 的路由匹配
-- `MiddlewarePipeline` — 中间件顺序执行
+- `Router` — 基于 Trie 的路由匹配（生产实现是 `webx_engine::Router`；`webx_host::router::Router` 为 1.5 兼容嵌入器）
+- `MiddlewarePipeline` — 中间件顺序执行（生产实现是 `webx_engine::Pipeline`）
 - `EngineContext` — 当前引擎的 HTTP 上下文具体实现（应用只依赖 `IHttpContext`）
 - `JwtAuth` / `ResourceAuthorization` — 认证授权实现
 - `MemoryCache`, `RateLimiter`, `CorsMiddleware` 等内置中间件

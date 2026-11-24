@@ -18,8 +18,8 @@ async fn a_host_registers_the_email_and_sms_ports_and_they_capture() {
     let host = Host::builder()
         .mode(AppMode::Development)
         .no_spa()
-        .use_email_sender(email.clone())
-        .use_sms_sender(sms.clone())
+        .use_email(email.clone())
+        .use_sms(sms.clone())
         .build();
 
     let sender = host

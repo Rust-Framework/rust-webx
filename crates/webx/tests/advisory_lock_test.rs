@@ -35,6 +35,41 @@ async fn a_host_registers_the_advisory_lock_port() {
 }
 
 #[tokio::test]
+async fn a_held_key_can_be_awaited_with_a_bounded_timeout() {
+    let lock = InMemoryAdvisoryLock::new();
+    let held = lock
+        .try_acquire("quota:tenant-1", Duration::from_secs(30))
+        .await
+        .expect("acquire")
+        .expect("free key");
+
+    // The framework-owned waiting policy: one attempt plus bounded backoff,
+    // then `Ok(None)` at the deadline (never a spin loop in business code).
+    let started = tokio::time::Instant::now();
+    assert!(lock
+        .acquire_with_timeout(
+            "quota:tenant-1",
+            Duration::from_secs(5),
+            Duration::from_millis(40)
+        )
+        .await
+        .expect("contention is not an error")
+        .is_none());
+    assert!(started.elapsed() >= Duration::from_millis(40));
+
+    assert!(lock.release(&held).await.expect("release"));
+    assert!(lock
+        .acquire_with_timeout(
+            "quota:tenant-1",
+            Duration::from_secs(5),
+            Duration::from_secs(1)
+        )
+        .await
+        .expect("acquire")
+        .is_some());
+}
+
+#[tokio::test]
 async fn a_host_without_a_lock_never_silently_coordinates_locally() {
     let host = Host::builder().mode(AppMode::Development).no_spa().build();
     assert!(

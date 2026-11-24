@@ -7,7 +7,7 @@
 //! touch the network, and bound their buffer.
 //!
 //! Production deployments register a real adapter with
-//! `HostBuilder::use_email_sender` / `use_sms_sender`; the host never installs a
+//! `HostBuilder::use_email` / `use_sms`; the host never installs a
 //! no-op sender by default, so a missing adapter fails loudly at DI resolution
 //! instead of silently dropping messages.
 
@@ -208,6 +208,38 @@ mod tests {
         assert_eq!(sent.len(), 2);
         assert_eq!(sent[0].subject, "subject 1");
         assert_eq!(sent[1].subject, "subject 2");
+    }
+
+    #[tokio::test]
+    async fn email_sender_captures_sender_reply_to_and_headers() {
+        let sender = InMemoryEmailSender::new();
+        sender
+            .send(
+                &EmailMessage::new("alice@example.com", "Reset", "open the link")
+                    .with_from("billing@example.com")
+                    .with_reply_to("support@example.com")
+                    .with_header("List-Unsubscribe", "<https://example.com/u>"),
+            )
+            .await
+            .expect("valid email");
+
+        let captured = sender.last().expect("captured");
+        assert_eq!(captured.from.as_deref(), Some("billing@example.com"));
+        assert_eq!(captured.reply_to.as_deref(), Some("support@example.com"));
+        assert_eq!(
+            captured.headers,
+            vec![(
+                "List-Unsubscribe".to_string(),
+                "<https://example.com/u>".to_string()
+            )]
+        );
+
+        // The capture sender runs the same validation as a real adapter.
+        assert!(sender
+            .send(&EmailMessage::new("alice@example.com", "hi", "body").with_from("billing"))
+            .await
+            .is_err());
+        assert_eq!(sender.len(), 1, "invalid messages are not captured");
     }
 
     #[tokio::test]

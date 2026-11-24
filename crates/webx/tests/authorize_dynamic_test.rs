@@ -272,7 +272,7 @@ fn bearer_token(permissions: &[&str]) -> String {
     .unwrap()
 }
 
-async fn spawn_dynamic_host(port: u16, authorizer: Arc<RecordingAuthorizer>) {
+async fn spawn_dynamic_host(port: u16, authorizer: Arc<dyn IDynamicAuthorizer>) {
     let addr = format!("127.0.0.1:{port}");
     let host = Host::builder()
         .mode(AppMode::Development)
@@ -300,7 +300,9 @@ async fn spawn_dynamic_host(port: u16, authorizer: Arc<RecordingAuthorizer>) {
 async fn dynamic_routes_delegate_to_the_authorizer_while_static_routes_do_not() {
     let port = free_port();
     let authorizer = Arc::new(RecordingAuthorizer::default());
-    spawn_dynamic_host(port, Arc::clone(&authorizer)).await;
+    let recording: Arc<RecordingAuthorizer> = Arc::clone(&authorizer);
+    let dynamic_authorizer: Arc<dyn IDynamicAuthorizer> = recording;
+    spawn_dynamic_host(port, dynamic_authorizer).await;
 
     let client = reqwest::Client::new();
     let token = bearer_token(&[]);
@@ -367,4 +369,55 @@ async fn dynamic_routes_delegate_to_the_authorizer_while_static_routes_do_not() 
         !routes.iter().any(|route| route == "/api/webx18/static"),
         "the static gate must short-circuit before dynamic authorization, got {routes:?}"
     );
+}
+
+/// A dynamic authorizer that makes its decision from the ambient request
+/// context, exactly like a database-backed permission authorizer that needs the
+/// tenant/actor (RXStudio upstream-feedback §1).
+struct IdentityGateAuthorizer;
+
+#[async_trait::async_trait]
+impl IDynamicAuthorizer for IdentityGateAuthorizer {
+    async fn authorize(
+        &self,
+        _claims: &dyn IClaims,
+        _route_pattern: &str,
+        _method: &str,
+    ) -> Result<()> {
+        match RequestContext::identity() {
+            Some(identity) if identity.id == "user-1" => Ok(()),
+            Some(identity) => Err(Error::Forbidden(format!(
+                "unexpected request-context identity `{}`",
+                identity.id
+            ))),
+            None => Err(Error::Forbidden(
+                "RequestContext::identity() is not installed on the HTTP path".to_string(),
+            )),
+        }
+    }
+}
+
+/// Regression for upstream-feedback §1: the request context must be installed
+/// **before** the authorization guard. Before the fix the authorizer observed
+/// `RequestContext::identity() == None` and every authenticated request to a
+/// dynamic endpoint was rejected (the bug reached RXStudio as a 401).
+#[tokio::test]
+async fn dynamic_authorizer_reads_request_context_identity() {
+    let port = free_port();
+    spawn_dynamic_host(port, Arc::new(IdentityGateAuthorizer)).await;
+
+    let response = reqwest::Client::new()
+        .delete(format!("http://127.0.0.1:{port}/api/webx18/dynamic-allow"))
+        .header("authorization", format!("Bearer {}", bearer_token(&[])))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.status().as_u16(),
+        200,
+        "the dynamic authorizer must see the identical identity the handler sees"
+    );
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body, "dynamic-allowed");
 }

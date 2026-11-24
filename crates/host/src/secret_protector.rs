@@ -19,8 +19,10 @@
 //! resolves base64-encoded keys from an
 //! [`ISecretStore`] (environment, mounted
 //! files, KMS/Vault adapter), so the key material never lives in
-//! `appsettings.json`. [`AesGcmSecretProtector::from_keys`] takes raw bytes for
-//! tests and custom loaders.
+//! `appsettings.json`. [`AesGcmSecretProtector::from_env_names`] is the
+//! **synchronous** composition-root entry (for a `build_host(config)` that runs
+//! in `main` or a `#[tokio::test]`); [`AesGcmSecretProtector::from_keys`] takes
+//! raw bytes for tests and custom loaders.
 //!
 //! # Deployment semantics
 //!
@@ -129,6 +131,43 @@ impl AesGcmSecretProtector {
         Self::from_keys(keys, active_key_id)
     }
 
+    /// Build a ring from base64 keys in the process environment, synchronously.
+    ///
+    /// Use this from a synchronous composition root — a
+    /// `build_host(config) -> Result<Host, Error>` that `main` calls from
+    /// `#[tokio::main]` (or a test from `#[tokio::test]`), where blocking on
+    /// [`Self::from_secret_store`] is not allowed:
+    ///
+    /// ```ignore
+    /// let protector = AesGcmSecretProtector::from_env_names(
+    ///     &["SECRET_PROTECTION_K1", "SECRET_PROTECTION_K2"],
+    ///     "SECRET_PROTECTION_K2",
+    /// )?;
+    /// ```
+    ///
+    /// Each id is both the environment variable name and the id embedded in
+    /// ciphertexts (same contract as [`Self::from_secret_store`]); values must
+    /// decode to 32-byte AES-256 keys and are validated exactly like
+    /// [`Self::from_keys`]. Prefer [`Self::from_secret_store`] when the builder
+    /// is async or the keys come from a mounted file, KMS or Vault
+    /// [`ISecretStore`] chain; this entry only reads the environment.
+    ///
+    /// Errors name the id and the failure kind only — never the key material
+    /// or the environment value.
+    pub fn from_env_names(key_ids: &[&str], active_key_id: &str) -> Result<Self, SecretError> {
+        if key_ids.is_empty() {
+            return Err(unavailable("at least one protection key id is required"));
+        }
+        let mut keys = Vec::with_capacity(key_ids.len());
+        for id in key_ids {
+            let value = env_key(id)?;
+            let material = decode_key(&value)
+                .ok_or_else(|| unavailable(format!("protection key `{id}` is not valid base64")))?;
+            keys.push(((*id).to_string(), material));
+        }
+        Self::from_keys(keys, active_key_id)
+    }
+
     /// Number of keys in the ring (rotation diagnostics).
     pub fn key_count(&self) -> usize {
         self.keys.len()
@@ -220,6 +259,22 @@ fn decode_key(value: &str) -> Option<Vec<u8>> {
         }
     }
     None
+}
+
+/// Read one base64 key from the environment; the error names the id only.
+fn env_key(id: &str) -> Result<String, SecretError> {
+    match std::env::var(id) {
+        Ok(value) if !value.trim().is_empty() => Ok(value),
+        Ok(_) => Err(unavailable(format!(
+            "protection key `{id}` is empty in the environment"
+        ))),
+        Err(std::env::VarError::NotPresent) => Err(unavailable(format!(
+            "protection key `{id}` is not set in the environment"
+        ))),
+        Err(std::env::VarError::NotUnicode(_)) => Err(unavailable(format!(
+            "protection key `{id}` is not valid UTF-8"
+        ))),
+    }
 }
 
 /// Build a protector from a base64 key map (test/bootstrap helper).
@@ -372,5 +427,99 @@ mod tests {
             protector_from_base64_keys(vec![("k1".to_string(), STANDARD.encode(key(3)))], "k1")
                 .expect("valid base64 key");
         assert_eq!(protector.key_count(), 1);
+    }
+
+    /// Unique environment names so parallel tests (and other test binaries)
+    /// never share a key variable.
+    fn unique_key_id(tag: &str) -> String {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT_ENV: AtomicU64 = AtomicU64::new(0);
+        let sequence = NEXT_ENV.fetch_add(1, Ordering::Relaxed);
+        format!("WEBX_T_{tag}_{}_{sequence}", std::process::id())
+    }
+
+    #[tokio::test]
+    async fn env_entry_builds_the_ring_synchronously() {
+        let first = unique_key_id("k1");
+        let second = unique_key_id("k2");
+        std::env::set_var(&first, STANDARD.encode(key(1)));
+        std::env::set_var(&second, URL_SAFE_NO_PAD.encode(key(2)));
+
+        let protector =
+            AesGcmSecretProtector::from_env_names(&[first.as_str(), second.as_str()], &second)
+                .expect("ring from the environment");
+        assert_eq!(protector.active_key_id(), second);
+        assert_eq!(protector.key_count(), 2);
+
+        let ciphertext = protector.protect("totp-seed").await.expect("protect");
+        assert!(ciphertext.starts_with(&format!("webx1:{second}:")));
+        assert_eq!(
+            protector
+                .unprotect(&ciphertext)
+                .await
+                .expect("unprotect")
+                .expose(),
+            "totp-seed"
+        );
+
+        std::env::remove_var(&first);
+        std::env::remove_var(&second);
+    }
+
+    #[test]
+    fn env_entry_rejects_bad_keys_without_leaking_values() {
+        assert!(
+            AesGcmSecretProtector::from_env_names(&[], "k1").is_err(),
+            "an empty ring is a configuration error"
+        );
+
+        let missing = unique_key_id("missing");
+        std::env::remove_var(&missing);
+        let error = match AesGcmSecretProtector::from_env_names(&[missing.as_str()], &missing) {
+            Ok(_) => panic!("a missing environment key must fail the ring"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains(&missing));
+        assert!(error.to_string().contains("not set in the environment"));
+
+        let empty = unique_key_id("empty");
+        std::env::set_var(&empty, "   ");
+        let error = match AesGcmSecretProtector::from_env_names(&[empty.as_str()], &empty) {
+            Ok(_) => panic!("a blank environment key must fail the ring"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("empty in the environment"));
+        std::env::remove_var(&empty);
+
+        let invalid = unique_key_id("invalid");
+        // '!' is outside every base64 alphabet this loader accepts.
+        let invalid_value = "SENSITIVE!NOT!BASE64!";
+        std::env::set_var(&invalid, invalid_value);
+        let error = match AesGcmSecretProtector::from_env_names(&[invalid.as_str()], &invalid) {
+            Ok(_) => panic!("an undecodable key must fail the ring"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("not valid base64"));
+        assert!(!error.to_string().contains(invalid_value));
+        std::env::remove_var(&invalid);
+
+        let short = unique_key_id("short");
+        let short_value = STANDARD.encode([9u8; KEY_BYTES - 8]);
+        std::env::set_var(&short, &short_value);
+        let error = match AesGcmSecretProtector::from_env_names(&[short.as_str()], &short) {
+            Ok(_) => panic!("a non-256-bit key must fail the ring"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("32 bytes"));
+        assert!(!error.to_string().contains(&short_value));
+        std::env::remove_var(&short);
+
+        let active = unique_key_id("active");
+        std::env::set_var(&active, STANDARD.encode(key(3)));
+        assert!(
+            AesGcmSecretProtector::from_env_names(&[active.as_str()], "unknown-key-id").is_err(),
+            "the active key must be part of the env ring"
+        );
+        std::env::remove_var(&active);
     }
 }

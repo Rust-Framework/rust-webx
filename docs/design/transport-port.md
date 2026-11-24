@@ -238,7 +238,7 @@ fork 维护。下游缺口判定与互操作基线（quiche-client / h3i / h3spe
 |---|---|---|
 | semver 破坏 | `EngineContext`/`TransportKind`/`ConnectionMeta`/`Listener` 公开形状被改 | §7 红线；semver-checks 基线门禁；改动降级到下一个 major |
 | 双路径漂移 | 新传输与 hyper 路径各写一份 pipeline/错误处理 | 单一 pipeline/错误写入；fake 与 hyper parity 契约测试 |
-| alloc/p99 退化 | 端口抽象把动态分发带进每请求路径 | 端口只在连接/构造层；hyper 请求体一次装箱、无逐帧锁；alloc-probe + wire p99 门禁 |
+| alloc/p99 退化 | 端口抽象把动态分发带进每请求路径 | 端口只在连接/构造层；hyper 请求体一次装箱（流式帧经 `SyncBodyStream` 的 Mutex 逐帧加锁，3.0 计划降为 `Send` 后去除）；alloc-probe + wire p99 门禁 |
 | 依赖/发布顺序 | 新增 h3 适配 crate | 独立 crate 按精确钉版本 + `check-publish-order.py` 发布，不进 core |
 | 原生构建链 | 选 quiche | 选 quinn + rustls；三平台 CI 先验证 |
 | 上游停更 | `trev-*` fork 停止维护 | 精确钉版 + 本地回归；跟踪上游 h3 进展，可评估切回 |

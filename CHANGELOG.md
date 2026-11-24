@@ -3,6 +3,246 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [2.9.1] — 2026-11-24
+
+> **English** · **简体中文**
+
+### English
+
+Downstream-feedback release: the fixes and additive APIs reported by RXStudio against 2.9.0
+(`upstream-feedback.md`), plus the notification-port rename from the earlier 2.9.1 draft.
+Dynamic authorizers can finally read `RequestContext::identity()` on the HTTP path, refresh-token
+reuse reports the family that must be revoked, MFA recovery codes return the matched hash for a
+database CAS, secret resolution maps to typed errors, and the rate limiter can express a
+`(tenant, user)` budget on a templated route. The old notification names are deleted, not
+deprecated, by maintainer decision (see Breaking).
+
+#### Added
+
+- **`webx_ef` classifies transient driver errors as a retryable `503`.** `rust-webx-ef` maps
+  `EFError::Database` by its structured diagnostics: `SQLSTATE` class `08`/`40`/`57P0*`, SQLite
+  `busy`/`locked` (extended result codes `5`/`6`, including `261`/`517`/`262`) and MySQL
+  `1205`/`1213` now produce the same `503` + fixed retryable detail as `EFError::Connection`.
+  Providers report these conditions as `Database` (only unique violations are promoted), so before
+  this release a SQLite busy or a PostgreSQL deadlock reached the client as a non-retryable `500`.
+  Applications no longer need a local pre-check for `code == 5/6` or `"database is locked"`.
+- **`impl From<rust_dix::RdiError> for webx::Error`.** A failed runtime resolution now converts to
+  `Error::Di` (500, `public_detail()` is `None`, the operator log keeps the container message), so
+  `?` works in any function returning `webx::Error` and applications no longer need a local
+  `map_di_error` helper.
+- **`CursorPage::from_entities`** — build a keyset page from up to `page_size + 1` domain
+  **entities** and map only the kept rows to the response items. The cursor is computed from the
+  last kept entity through `sort_key`, so the entity type no longer needs `Serialize` and the
+  response item does not need to expose the raw sort values; the probe row is dropped before
+  `map` runs.
+- **`CursorPage::map_items`** — transform the kept items while preserving `cursor` and `has_more`.
+  Rebuilding a page by hand (`CursorPage::new(mapped, page.cursor)`) recomputes `has_more` from
+  `cursor.is_some()`; this helper keeps the page envelope intact.
+- **The request context now covers authorization.** `StubEndpoint`, `DirectRouteTarget` and
+  `RequestEndpoint` establish `RequestContext::run_with_trace` **before** the authorization guard,
+  so an `IDynamicAuthorizer` can read `RequestContext::identity()` (and `trace_id()`) exactly like
+  the handler does. The handler/endpoint macros reuse the same `Arc<IdentityUser>`/trace id
+  instead of allocating a second copy. Before this release the endpoint's authorization guard ran
+  **outside** any request scope (only the later handler dispatch had one), so an authorizer read
+  `None` and every authenticated dynamic authorization failed as a 401.
+- **`IAdvisoryLock::acquire_with_timeout(key, ttl, wait)`** — the framework-owned waiting policy
+  for advisory locks: one immediate attempt, then 10 ms/doubling/200 ms-capped backoff until
+  `wait`; returns `Ok(None)` on contention, propagates backend errors unchanged, and treats
+  `wait == Duration::ZERO` as one attempt. Business code no longer needs its own retry loop.
+- **Rate-limit route templates, composite subjects and a token-bucket constructor** —
+  `RateLimitRoute::pattern("/api/tenants/{id}/invitations")` matches one route shape without
+  widening to a prefix, `RateLimitSubject::Composite(&[Tenant, User])` budgets the combination
+  (each leaf keeps the anonymous-IP fallback, nested composites are flattened), and
+  `webx_host::rate_limit::token_bucket(route, subject, rps, burst)` builds a rule over the same
+  sharded `InMemoryRateLimiter` as the configuration path (re-exported as `webx::token_bucket`).
+- **`EmailMessage` sender fields** — `from`, `reply_to` and `headers` (with `with_from`,
+  `with_reply_to`, `with_header`) let a multi-tenant/branded sender choose the envelope instead of
+  hiding it in the adapter; `validate()` now checks all addresses and rejects CRLF/control
+  characters in header names and values (header-injection defense).
+- **Typed `429`/`409` constructors** — `Error::too_many_requests(retry_after_secs, detail)` and
+  `Error::conflict_retryable(detail)`. The engine's default problem writer emits `Retry-After`
+  for the typed 429 exactly once; a bare `Error::Status(429, ..)` keeps its previous behavior.
+- **`impl From<SecretError> for Error`** — `NotFound` becomes a hidden 500 (a missing secret is a
+  deployment defect; the name goes to the operator log only) and `Unavailable` a retryable 503;
+  handlers can use `?` instead of a local `map_protector_error`. `AesGcmSecretProtector::from_env_names`
+  is the synchronous composition-root entry for `build_host(config)` (async/KMS paths keep using
+  `from_secret_store`).
+- **`RotateOutcome`** — `RefreshTokenService::rotate_outcome` returns
+  `Rotated(IssuedRefreshToken)` / `Reused { family_id }` / `Expired` / `Revoked` / `Invalid`;
+  reuse still revokes the family before returning, and the family id lets the caller revoke the
+  paired session row instead of leaving the leaked access token valid until expiry. `rotate`
+  keeps its 401 behavior.
+- **MFA recovery codes return the matched record** — `RecoveryCodeSet::find` and
+  `consume_matched` expose the matched `RecoveryCodeRecord` (including its hash) so a database
+  adapter can run one `WHERE code_hash = ? AND used IS NULL` CAS instead of hashing twice;
+  `verify_and_consume` is unchanged. `TotpSecret::generate` now uses the OS CSPRNG
+  (`getrandom`, 160 bits) instead of two UUIDs.
+- **`serde` is a `WebxRequestMeta` helper attribute** — a request struct no longer needs a separate
+  `#[derive(Deserialize)]` just to use `#[serde(default)]` / `rename` / `alias`; the query binder
+  honors the default when every source is absent. This is the binding prerequisite for the 3.0
+  `PagedRequest` defaults (the `from_parts` normalization can then move into binding: absent
+  `page_size` → default, out-of-range → `400`).
+- **`webx_auth_ef::register_refresh_token_model(ctx)`** — explicit, idempotent registration of the
+  refresh-token entity, shaped like `register_idempotency_model`. It matters for **keyed** contexts
+  (a keyed model only discovers `#[context("key")]` entities) and for model-based DDL
+  (`bootstrap` / diff); a default context already discovers the entity through `inventory`, and
+  `migrate(dir)` reads SQL files and does not use the model.
+
+#### Changed
+
+- `HostBuilder::use_email_sender` → **`HostBuilder::use_email`**,
+  `HostBuilder::use_sms_sender` → **`HostBuilder::use_sms`**. Same parameter types, same DI
+  registration, same "no adapter registered by default" contract. Capture-sender rustdoc,
+  `notifications_test` and the extensibility guide (`13-extensibility/third-party-integration.md`)
+  use the new names.
+
+#### Hardening
+
+- **WebSocket**: each outbound frame now has a write deadline (`WebSocketLimits::with_write_timeout`,
+  default 10 s; `None` waits forever), so a peer that stops reading cannot pin a writer task and
+  its queue for the process lifetime. Browser sessions can be restricted to an Origin allowlist
+  (`HostBuilder::use_websocket_origins` / `WebSocketLimits::with_origins`); an empty list keeps the
+  previous unchecked behavior.
+- **JWKS**: an unknown `kid` is unauthenticated input; refreshes triggered by it are now spaced by
+  `JwksResolver::with_min_refresh_interval` (default 5 s), so guesses cannot amplify into
+  identity-provider fetches while the single-flight mutex serializes authentication.
+- **CSRF**: `IAuthenticationScheme::session_cookie_name` exposes the cookie a scheme reads; the host
+  refuses to start when it differs from `CsrfConfig::session_cookie_name` (a drifted name would make
+  the CSRF middleware miss every request).
+- **Startup validation**: CORS `"*"` combined with credentials is rejected in every mode, and an
+  enabled `RateLimit` with zero burst or a non-positive rate is a startup error instead of a host
+  that rejects/blocks every request.
+- **Health**: a probe panic that poisons the registry mutex no longer pins readiness to `503`; the
+  poisoned lock is recovered and real probe state is reported again.
+- **Binding**: JSON media-type detection no longer lowercases a fresh `String` on every request.
+- **Build**: router/pipeline benches moved to `rust-webx-engine` (the host bencher measured the 1.5
+  compatibility embedder), and the `testing/load-probe` harness is registered.
+
+#### Breaking
+
+- **`use_email_sender` / `use_sms_sender` are removed.** Rename the call site to `use_email` /
+  `use_sms`; there is no forwarding shim and no `#[deprecated]` marker. `cargo-semver-checks`
+  reports the removal through the documented `rust-webx-host` exception in
+  [compatibility.md](docs/design/compatibility.md) §3, and the rename is recorded in
+  [deprecations.md](docs/design/deprecations.md).
+- **`EmailMessage` gains three public fields** (`from`, `reply_to`, `headers`): only
+  struct-literal construction breaks. Build with `EmailMessage::new(..)` plus the `with_*`
+  builders, as documented in [compatibility.md](docs/design/compatibility.md) §3.
+- **`Error` gains `TooManyRequests { retry_after_secs, detail }` and `ConflictRetryable(String)`**:
+  a downstream exhaustive `match` needs a wildcard arm. `Error::Status(429, ..)` and
+  `Error::Conflict(..)` keep their previous status/code/retryable behavior; the semver exception is
+  scoped to `rust-webx-core` in its `Cargo.toml` and registered in
+  [compatibility.md](docs/design/compatibility.md) §3.
+- **`RateLimitRoute` gains `Pattern(String)` and `RateLimitSubject` gains
+  `Composite(&'static [RateLimitSubject])`**: exhaustive matches need a wildcard arm. Existing
+  `Exact`/`Prefix`/`Any` and `Ip`/`User`/`Tenant`/`ApiKey` behavior is unchanged; the same
+  `rust-webx-core` semver exception and compatibility entry cover these additions.
+
+### 简体中文
+
+命名收敛 + 下游反馈修复版本：在 `upstream-feedback.md` 对 2.9.0 的实测结论上，修复动态授权器
+拿不到身份、refresh 重用不回报 family、恢复码无法做 DB CAS、秘密错误无映射、限流无法表达
+`(tenant, user)` 等阻塞项；同时保留 2.9.1 草稿里的通知端口改名（旧名直接删除，见"破坏性变更"）。
+
+#### 新增
+
+- **`webx_ef` 把驱动层的瞬态错误归为可重试 `503`。** `rust-webx-ef` 按结构化诊断分类
+  `EFError::Database`：`SQLSTATE` 类 `08`/`40`/`57P0*`、SQLite `busy`/`locked`（扩展码
+  `5`/`6`，含 `261`/`517`/`262`）、MySQL `1205`/`1213` 现在与 `EFError::Connection` 一样输出
+  `503` + 固定可重试文案。provider 只把唯一约束提升为 `UniqueViolation`，其余驱动错误都以
+  `Database` 上报，因此本次之前 SQLite busy / PostgreSQL 死锁会以不可重试的 `500` 到达客户端；
+  应用不再需要本地的 `code == 5/6` / `"database is locked"` 前置判断。
+- **`impl From<rust_dix::RdiError> for webx::Error`。** 运行期解析失败转成 `Error::Di`
+  （500、`public_detail()` 为 `None`、容器消息只进运维日志），任何返回 `webx::Error` 的函数都能
+  直接 `?`，应用不再需要本地 `map_di_error` 助手。
+- **`CursorPage::from_entities`** —— 用最多 `page_size + 1` 条领域**实体**构建游标页，只把留在
+  本页的行映射成响应项。游标取自最后一条保留实体，因此实体不必实现 `Serialize`、响应项也不必
+  暴露原始排序值；多取的探测行在 `map` 之前就被丢弃。
+- **`CursorPage::map_items`** —— 只转换本页项，保留 `cursor` 与 `has_more`。手工
+  `CursorPage::new(mapped, page.cursor)` 会按 `cursor.is_some()` 重算 `has_more`，容易丢状态。
+- **请求上下文覆盖授权阶段**：`StubEndpoint` / `DirectRouteTarget` / `RequestEndpoint` 在
+  授权守卫**之前**建立 `RequestContext::run_with_trace`，动态授权器可以像 Handler 一样读
+  `RequestContext::identity()` / `trace_id()`；handler/endpoint 宏复用同一个
+  `Arc<IdentityUser>`/trace id，不再二次分配。修复前真实 HTTP 路径上 `identity()` 恒为 `None`，
+  所有已认证的动态授权都会变成 401。
+- **`IAdvisoryLock::acquire_with_timeout(key, ttl, wait)`**：框架统一的等待策略——先立即尝试一次，
+  之后 10ms 起、倍增、上限 200ms 退避，直到 `wait`；争用返回 `Ok(None)`，后端错误原样上抛，
+  `wait = Duration::ZERO` 只尝试一次。业务不再手写 `loop + sleep`。
+- **限流模板路由、组合主体与 token-bucket 构造器**：`RateLimitRoute::pattern(
+  "/api/tenants/{id}/invitations")` 精确匹配一种路由形状而不放大到前缀；
+  `RateLimitSubject::Composite(&[Tenant, User])` 按组合预算（叶子仍回退 IP，嵌套被拒绝）；
+  `webx_host::rate_limit::token_bucket(route, subject, rps, burst)` 复用配置路径同一个分片
+  `InMemoryRateLimiter`，不复制实现。
+- **`EmailMessage` 发件人字段**：新增 `from` / `reply_to` / `headers` 与
+  `with_from` / `with_reply_to` / `with_header`，多租户/品牌发件人不再藏进适配器字段；
+  `validate()` 校验全部地址并拒绝头名/头值中的 CRLF/控制字符（防头注入）。
+- **typed `429`/`409` 构造器**：`Error::too_many_requests(retry_after_secs, detail)` 与
+  `Error::conflict_retryable(detail)`。引擎默认 problem writer 只为 typed 429 写一次
+  `Retry-After`；裸 `Error::Status(429, ..)` 行为不变。
+- **`impl From<SecretError> for Error`**：`NotFound` → 隐藏 500（部署缺密钥，名称只进运维日志），
+  `Unavailable` → 可重试 503；Handler 直接 `?`，不再需要 `map_protector_error`。
+  `AesGcmSecretProtector::from_env_names` 用于同步 `build_host(config)` 组合根；async/KMS 仍走
+  `from_secret_store`。
+- **`RotateOutcome`**：`RefreshTokenService::rotate_outcome` 返回
+  `Rotated(IssuedRefreshToken)` / `Reused { family_id }` / `Expired` / `Revoked` / `Invalid`；
+  reuse 仍先撤销 family，并返回 family id，调用方据此撤销配对 session，避免泄露的 access token
+  活到自然过期。`rotate` 保持 401 语义。
+- **MFA 恢复码返回命中记录**：`RecoveryCodeSet::find` / `consume_matched` 暴露命中的
+  `RecoveryCodeRecord`（含 hash），数据库适配器可用一条 `WHERE code_hash = ? AND used IS NULL`
+  条件更新完成单次使用，不再重复哈希；`verify_and_consume` 行为不变。`TotpSecret::generate`
+  改用 OS CSPRNG（`getrandom`，160 位），不再用两个 UUID。
+- **`serde` 成为 `WebxRequestMeta` 的 helper attribute**：请求结构体不必为了 `#[serde(default)]` /
+  `rename` / `alias` 额外 `#[derive(Deserialize)]`；所有来源都缺失时查询绑定使用默认值。这是
+  3.0 `PagedRequest` 默认值（`from_parts` 归一逻辑下沉到 binding：缺省 `page_size` → 默认值，
+  越界 → 400）的前置能力。
+- **`webx_auth_ef::register_refresh_token_model(ctx)`**：显式、幂等的 refresh token 实体注册入口，
+  与 `register_idempotency_model` 同形。真正需要它的是 **keyed context**（keyed 模型只发现
+  `#[context("key")]` 实体）与基于模型的 DDL（`bootstrap`/diff）；默认 context 已通过
+  `inventory` 自动发现，`migrate(dir)` 读 SQL 文件、不读模型。
+
+#### 变更
+
+- `HostBuilder::use_email_sender` → **`HostBuilder::use_email`**，
+  `HostBuilder::use_sms_sender` → **`HostBuilder::use_sms`**。参数类型、DI 注册方式、以及
+  「默认不注册发送器，缺适配器即解析失败」的契约都不变。捕获发送器的 rustdoc、
+  `notifications_test` 与扩展性指南（`13-extensibility/third-party-integration.md`）已改用新名。
+
+#### 加固
+
+- **WebSocket**：每帧写有截止时间（`WebSocketLimits::with_write_timeout`，默认 10 秒；`None` 永久
+  等待），对端停止读取时不会永久占用 writer 任务与队列；浏览器会话可配置 Origin 白名单
+  （`HostBuilder::use_websocket_origins` / `WebSocketLimits::with_origins`），空列表保持旧行为。
+- **JWKS**：未知 `kid` 是未认证输入；由其触发的刷新用
+  `JwksResolver::with_min_refresh_interval`（默认 5 秒）限速，避免猜测放大成对 IdP 的请求，
+  同时 single-flight 锁不再被串行化认证拖住。
+- **CSRF**：`IAuthenticationScheme::session_cookie_name` 暴露 scheme 读取的 cookie；与
+  `CsrfConfig::session_cookie_name` 不一致时宿主拒绝启动（名字漂移会让 CSRF 中间件漏掉所有请求）。
+- **启动校验**：CORS `"*"` + credentials 在任何模式都拒绝；`RateLimit` 启用但 burst 为 0 或速率
+  非正时启动失败，而不是启动后把每个请求都拒掉/放行。
+- **健康检查**：探针 panic 污染 registry mutex 后不再把 readiness 永久钉在 503；恢复锁并继续报告
+  真实探针状态。
+- **绑定**：JSON media-type 判断不再为每个请求分配小写 `String`。
+- **构建**：router/pipeline bench 移到 `rust-webx-engine`（host bencher 测的是 1.5 兼容嵌入器），
+  新增 `testing/load-probe` 压测 harness。
+
+#### 破坏性变更
+
+- **`use_email_sender` / `use_sms_sender` 已删除。** 调用点改成 `use_email` / `use_sms`；没有转发
+  别名，也没有 `#[deprecated]` 标记。`cargo-semver-checks` 的移除报告按
+  [compatibility.md](docs/design/compatibility.md) §3 的已登记例外处理，改名同时登记在
+  [deprecations.md](docs/design/deprecations.md)。
+- **`EmailMessage` 新增三个公开字段**（`from` / `reply_to` / `headers`）：只破坏结构体字面量构造。
+  用 `EmailMessage::new(..)` + `with_*` 构建器，迁移见
+  [compatibility.md](docs/design/compatibility.md) §3。
+- **`Error` 新增 `TooManyRequests { retry_after_secs, detail }` 与 `ConflictRetryable(String)`**：
+  下游穷举 `match` 需补通配分支。`Error::Status(429, ..)` 与 `Error::Conflict(..)` 的状态码/code/
+  retryable 行为不变；semver 例外只限定在 `rust-webx-core` 的 `Cargo.toml`，并登记在
+  [compatibility.md](docs/design/compatibility.md) §3。
+- **`RateLimitRoute` 新增 `Pattern(String)`、`RateLimitSubject` 新增
+  `Composite(&'static [RateLimitSubject])`**：下游穷举 `match` 需补通配分支。既有
+  `Exact`/`Prefix`/`Any` 与 `Ip`/`User`/`Tenant`/`ApiKey` 的匹配/键派生不变；同一份
+  `rust-webx-core` semver 例外与 compatibility 登记覆盖这两个新增。
+
 ## [2.9.0] — 2026-11-24
 
 > **English** · **简体中文**

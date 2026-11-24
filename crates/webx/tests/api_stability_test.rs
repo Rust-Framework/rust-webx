@@ -65,6 +65,21 @@ fn documented_constructors_still_exist() {
     let store = InMemoryRateLimiter::new(10.0, 20, 1_000);
     let _: &dyn IRateLimiter = &store;
 
+    // 2.9.1 typed errors: rate limiting carries its `Retry-After` value, and a
+    // waitable conflict is distinct from the permanent `Error::Conflict`.
+    assert_eq!(Error::too_many_requests(5, "slow down").status_code(), 429);
+    assert_eq!(
+        Error::conflict_retryable("in flight").code(),
+        "conflict_retryable"
+    );
+
+    // 2.9.1 email fields: the documented construction path is `new` + builders.
+    let email = EmailMessage::new("a@example.com", "subject", "text")
+        .with_from("billing@example.com")
+        .with_reply_to("support@example.com")
+        .with_header("X-Test", "value");
+    assert!(email.validate().is_ok());
+
     // Idempotency (2.8): the value types are `#[non_exhaustive]`, so these
     // constructors are the documented construction path for custom stores.
     let response = IdempotentResponse::new(

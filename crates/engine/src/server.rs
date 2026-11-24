@@ -985,6 +985,16 @@ pub(crate) mod connection {
             ctx.response_mut()
                 .set_header("www-authenticate", "Bearer realm=\"rust-webx\"");
         }
+        // A typed rate-limit error carries the RFC 6585 wait value; this is the
+        // only writer that turns a handler `Error` into a response, so the
+        // header is written exactly once. A bare `Error::Status(429, …)` has no
+        // wait value and keeps its previous behavior.
+        if status == 429 {
+            if let Some(retry_after_secs) = error.retry_after_secs() {
+                ctx.response_mut()
+                    .set_header("retry-after", &retry_after_secs.to_string());
+            }
+        }
 
         let detail = if status >= 500 {
             tracing::error!(status, error = %error, "engine: unhandled server error");

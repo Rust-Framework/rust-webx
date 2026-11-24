@@ -212,6 +212,53 @@ fn retry_after_seconds(rate: f64) -> u64 {
     ((1.0 / rate).ceil() as u64).max(1)
 }
 
+/// Tracked-key budget used by [`token_bucket`] and by
+/// [`RateLimitMiddleware::new`].
+///
+/// Same value as the `RateLimit.MaxTrackedIps` configuration default, so a
+/// hand-built rule and a configuration-section rule bound their stores the same
+/// way.
+pub const DEFAULT_MAX_TRACKED_KEYS: usize = 10_000;
+
+/// A [`RateLimitRule`] whose budget is its own in-process token bucket.
+///
+/// Convenience for the common "every rule gets its own rate and burst" policy.
+/// This is exactly
+/// `RateLimitRule::new(route, subject, Arc::new(InMemoryRateLimiter::new(requests_per_second, burst, DEFAULT_MAX_TRACKED_KEYS)))`
+/// — the same sharded store as the configuration path, not a second limiter
+/// implementation. A deployment that installs a distributed [`IRateLimiter`]
+/// keeps building its rules from that store instead.
+///
+/// ```
+/// use webx_core::rate_limit::{RateLimitRoute, RateLimitSubject};
+/// use webx_host::rate_limit::token_bucket;
+///
+/// static OWNER: &[RateLimitSubject] =
+///     &[RateLimitSubject::Tenant, RateLimitSubject::User];
+/// let rule = token_bucket(
+///     RateLimitRoute::pattern("/api/tenants/{id}/invitations"),
+///     RateLimitSubject::Composite(OWNER),
+///     0.5, // sustained: 30 requests per minute per (tenant, user)
+///     5,   // burst
+/// );
+/// ```
+pub fn token_bucket(
+    route: RateLimitRoute,
+    subject: RateLimitSubject,
+    requests_per_second: f64,
+    burst: u32,
+) -> RateLimitRule {
+    RateLimitRule::new(
+        route,
+        subject,
+        Arc::new(InMemoryRateLimiter::new(
+            requests_per_second,
+            burst,
+            DEFAULT_MAX_TRACKED_KEYS,
+        )),
+    )
+}
+
 /// Compatibility wrapper for the pre-2.2 single-bucket API.
 ///
 /// New code should depend on [`IRateLimiter`] / [`InMemoryRateLimiter`].
@@ -271,7 +318,7 @@ pub struct RateLimitMiddleware {
 
 impl RateLimitMiddleware {
     pub fn new(requests_per_second: f64, burst_size: u32) -> Self {
-        Self::new_with_max_ips(requests_per_second, burst_size, 10_000)
+        Self::new_with_max_ips(requests_per_second, burst_size, DEFAULT_MAX_TRACKED_KEYS)
     }
 
     pub fn new_with_max_ips(
@@ -302,7 +349,12 @@ impl RateLimitMiddleware {
     /// Rate-limit with per-route/subject rules.
     ///
     /// The host installs this after authentication (so `User`/`Tenant`/`ApiKey`
-    /// subjects resolve); rule routes match the raw request path.
+    /// subjects resolve). Rule routes match the **raw request path**: routing
+    /// happens in the pipeline terminal, after this middleware, so
+    /// `IHttpRequest::route_pattern()` is still unset here.
+    /// [`RateLimitRoute::Pattern`] therefore implements the documented subset
+    /// described on [`RateLimitRoute::pattern`] rather than a second routing
+    /// dialect.
     pub fn from_policy(policy: RateLimitPolicy) -> Self {
         Self { policy }
     }
@@ -357,14 +409,54 @@ impl IMiddleware for RateLimitMiddleware {
     }
 }
 
-/// Resolve the budget key for `subject`, falling back to the client IP when the
-/// principal/credential is absent (fail-closed: anonymous traffic still gets
-/// limited, just per address instead of per user).
+/// Resolve the budget key for `subject`.
+///
+/// Each leaf falls back to the client IP when the principal/credential is absent
+/// (fail-closed: anonymous traffic still gets limited, just per address instead
+/// of per user). A [`RateLimitSubject::Composite`] resolves every part with that
+/// same leaf fallback and joins the parts in declaration order, so a missing part
+/// becomes the client IP — it is never skipped, which would otherwise let an
+/// authenticated-but-incomplete request slip through a wider budget. Nested
+/// composites are flattened into the same key (a nested composite budgets exactly
+/// like the equivalent flat slice), so a nesting mistake cannot disable a rule.
 ///
 /// The client address is the resolved [`IHttpContext::client_info`] value — the
 /// peer address by default, or the trusted forwarded client when the `ClientInfo`
 /// middleware ran. This function never parses forwarded headers itself.
 fn resolve_subject_key(ctx: &dyn IHttpContext, subject: RateLimitSubject) -> Option<String> {
+    match subject {
+        RateLimitSubject::Composite(parts) => {
+            let mut keys = Vec::new();
+            collect_composite_keys(ctx, parts, &mut keys)?;
+            (!keys.is_empty()).then(|| composite_key(&keys))
+        }
+        leaf => resolve_leaf_key(ctx, leaf),
+    }
+}
+
+/// Collect the leaf keys of a (possibly nested) composite in declaration order.
+///
+/// Flattening is what makes `Composite(&[Composite(&[A, B]), C])` budget the same
+/// as `Composite(&[A, B, C])`; the slices are `'static` data, so the recursion
+/// depth is bounded by the declared policy.
+fn collect_composite_keys(
+    ctx: &dyn IHttpContext,
+    parts: &'static [RateLimitSubject],
+    keys: &mut Vec<String>,
+) -> Option<()> {
+    for part in parts {
+        match part {
+            RateLimitSubject::Composite(nested) => collect_composite_keys(ctx, nested, keys)?,
+            leaf => keys.push(resolve_leaf_key(ctx, *leaf)?),
+        }
+    }
+    Some(())
+}
+
+/// One leaf subject's key, falling back to the client IP when the
+/// principal/credential is absent. `None` only when even the client address is
+/// unknown (then the middleware passes the request; see [`RateLimitMiddleware`]).
+fn resolve_leaf_key(ctx: &dyn IHttpContext, subject: RateLimitSubject) -> Option<String> {
     let ip_key = || ctx.client_info().client_ip.map(|ip| format!("ip:{ip}"));
     match subject {
         RateLimitSubject::Ip => ip_key(),
@@ -377,7 +469,27 @@ fn resolve_subject_key(ctx: &dyn IHttpContext, subject: RateLimitSubject) -> Opt
         RateLimitSubject::ApiKey => presented_credential(ctx)
             .map(|credential| format!("key:{}", hash_credential(credential)))
             .or_else(ip_key),
+        // Composites are flattened by `collect_composite_keys`; this arm is
+        // unreachable from `resolve_subject_key` and has no key on its own.
+        RateLimitSubject::Composite(_) => None,
     }
+}
+
+/// Join child keys into one composite budget key.
+///
+/// Each child key is length-prefixed (`<len>:<key>|`), so no client-controlled
+/// claim value can forge a part boundary and make two different combinations
+/// share a budget. Parts are joined in declaration order.
+fn composite_key(keys: &[String]) -> String {
+    let mut key = String::with_capacity(16 + keys.iter().map(|part| part.len() + 4).sum::<usize>());
+    key.push_str("composite:");
+    for part in keys {
+        key.push_str(&part.len().to_string());
+        key.push(':');
+        key.push_str(part);
+        key.push('|');
+    }
+    key
 }
 
 fn claims_subject(ctx: &dyn IHttpContext) -> Option<String> {

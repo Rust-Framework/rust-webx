@@ -13,7 +13,15 @@
 //! | `Query` / `TypeConversion` | 400 | fixed text (SQL/column names never echoed) |
 //! | `UniqueViolation` | 409 | fixed text (constraint/table never echoed) |
 //! | `Connection` / `Transaction` | 503 | fixed text, retryable |
+//! | `Database` with a transient driver condition¹ | 503 | fixed text, retryable |
 //! | anything else | 500 | none (`public_detail() = None`), operator detail in the log |
+//!
+//! ¹ `SQLSTATE` class `08` (connection exception) / `40` (serialization failure,
+//! deadlock) / `57P0*` (shutdown, crash, cannot connect now), SQLite
+//! `busy`/`locked` (extended result codes `5`/`6` in the low byte) and MySQL
+//! `1205`/`1213`. Providers report these as [`EFError::Database`] rather than
+//! [`EFError::Connection`], so without the classification a transient outage
+//! would reach the client as a non-retryable 500.
 //!
 //! ```ignore
 //! use webx_ef::EfResultExt;
@@ -63,7 +71,7 @@ pub use idempotency::{
     register_idempotency_model, EfIdempotencyStore, IdempotencyHousekeeping, IdempotencyRecord,
 };
 
-use rust_ef::error::EFError;
+use rust_ef::error::{DatabaseErrorInfo, EFError};
 use webx_core::error::Error;
 
 /// Client-visible detail for a `400` caused by database-derived input problems.
@@ -82,12 +90,55 @@ pub const DETAIL_UNIQUE_VIOLATION: &str =
 /// Client-visible detail for a transient database outage (`503`).
 pub const DETAIL_UNAVAILABLE: &str = "the database is temporarily unavailable; retry later";
 
+/// Whether the provider reported a condition a caller can usefully retry.
+///
+/// Providers keep driver diagnostics in [`EFError::Database`] instead of
+/// normalizing them into [`EFError::Connection`]/[`EFError::Transaction`], so
+/// the retryability conclusion has to be read from the diagnostics:
+///
+/// * `SQLSTATE` class `08` — connection exception.
+/// * `SQLSTATE` class `40` — transaction rollback (serialization failure,
+///   deadlock).
+/// * `SQLSTATE` `57P01`/`57P02`/`57P03` — shutdown, crash, cannot connect now.
+/// * SQLite has no `SQLSTATE`; it reports an extended result code whose primary
+///   code is the low byte (`SQLITE_BUSY = 5`, `SQLITE_LOCKED = 6`), so
+///   `5`/`6`, `261`/`517` (busy recovery/snapshot) and `262` (locked
+///   shared-cache) all qualify.
+/// * MySQL vendor codes `1205` (lock wait timeout) and `1213` (deadlock);
+///   `1213` also carries `SQLSTATE` `40001`, but `1205` does not.
+///
+/// Everything else stays a hidden 500: an unparseable statement, a missing
+/// table or a constraint violation is a defect, not a retryable outage.
+fn is_transient(info: &DatabaseErrorInfo) -> bool {
+    if let Some(sqlstate) = info.sqlstate.as_deref() {
+        if sqlstate.starts_with("08")
+            || sqlstate.starts_with("40")
+            || matches!(sqlstate, "57P01" | "57P02" | "57P03")
+        {
+            return true;
+        }
+    }
+    match info.code.as_deref() {
+        Some("1205" | "1213") => true,
+        // SQLite is the only supported provider that reports no SQLSTATE; its
+        // extended result code embeds the primary code in the low eight bits.
+        Some(code) if info.sqlstate.is_none() => code
+            .parse::<i32>()
+            .map(|code| matches!(code & 0xFF, 5 | 6))
+            .unwrap_or(false),
+        _ => false,
+    }
+}
+
 /// Map a rust-ef failure to the framework error contract.
 ///
 /// Business conclusions authored by the caller (`NotFound`, `ModelValidation`,
 /// `ConcurrencyConflict`) keep their message; infrastructure-derived payloads
 /// are replaced by fixed text so SQL, column, constraint and connection details
-/// never reach the client.
+/// never reach the client. A driver-reported transient condition
+/// ([`EFError::Database`] with a retryable `SQLSTATE`/vendor code) becomes the
+/// same retryable 503 as [`EFError::Connection`], so an application never has to
+/// re-classify driver errors itself.
 pub fn map_ef_error(error: EFError) -> Error {
     match error {
         // Business conclusions authored by the caller keep their own message.
@@ -103,6 +154,13 @@ pub fn map_ef_error(error: EFError) -> Error {
 
         // Transient infrastructure failures: retryable 503 with fixed text.
         EFError::Connection(..) | EFError::Transaction(..) => {
+            Error::Status(503, DETAIL_UNAVAILABLE.to_string())
+        }
+
+        // Driver-reported transient conditions (connection loss, deadlock,
+        // SQLite busy/locked) are the same retryable conclusion, just wrapped
+        // in structured diagnostics by the provider.
+        EFError::Database(info, _) if is_transient(&info) => {
             Error::Status(503, DETAIL_UNAVAILABLE.to_string())
         }
 
@@ -182,6 +240,51 @@ mod tests {
             let mapped = map_ef_error(error);
             assert_eq!(mapped.status_code(), 400);
             assert_eq!(mapped.public_detail(), Some(DETAIL_INVALID_REQUEST));
+        }
+    }
+
+    #[test]
+    fn transient_driver_conditions_are_a_retryable_503() {
+        let cases = [
+            // PostgreSQL/MySQL connection exception, serialization failure, shutdown.
+            DatabaseErrorInfo::new("server closed the connection unexpectedly")
+                .with_sqlstate("08006"),
+            DatabaseErrorInfo::new("deadlock detected").with_sqlstate("40P01"),
+            DatabaseErrorInfo::new("the database system is shutting down").with_sqlstate("57P02"),
+            // SQLite: no SQLSTATE; the extended result code carries the primary code.
+            DatabaseErrorInfo::new("database is locked").with_code("5"),
+            DatabaseErrorInfo::new("database table is locked").with_code("6"),
+            DatabaseErrorInfo::new("database is locked").with_code("261"),
+            DatabaseErrorInfo::new("database is locked").with_code("517"),
+            DatabaseErrorInfo::new("database table is locked").with_code("262"),
+            // MySQL: lock wait timeout / deadlock.
+            DatabaseErrorInfo::new("Lock wait timeout exceeded")
+                .with_sqlstate("HY000")
+                .with_code("1205"),
+            DatabaseErrorInfo::new("Deadlock found when trying to get lock").with_code("1213"),
+        ];
+        for info in cases {
+            let mapped = map_ef_error(EFError::database(info));
+            assert_eq!(mapped.status_code(), 503);
+            assert!(mapped.retryable());
+            assert_eq!(mapped.public_detail(), Some(DETAIL_UNAVAILABLE));
+        }
+    }
+
+    #[test]
+    fn non_transient_driver_conditions_stay_a_hidden_500() {
+        for info in [
+            DatabaseErrorInfo::new("relation \"secret\" does not exist").with_sqlstate("42P01"),
+            DatabaseErrorInfo::new("insert or update violates foreign key constraint")
+                .with_sqlstate("23503")
+                .with_table("orders"),
+            DatabaseErrorInfo::new("disk I/O error").with_code("10"),
+            DatabaseErrorInfo::new("driver reported nothing structured"),
+        ] {
+            let mapped = map_ef_error(EFError::database(info));
+            assert_eq!(mapped.status_code(), 500);
+            assert_eq!(mapped.public_detail(), None);
+            assert!(!mapped.retryable());
         }
     }
 

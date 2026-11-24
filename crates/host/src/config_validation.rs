@@ -67,8 +67,48 @@ pub fn validate_options(options: &AppOptions, mode: AppMode) -> Vec<ConfigViolat
     collect_tls_client_auth(options, &mut violations);
     collect_engine_server(options, mode, &mut violations);
     collect_legacy_rate_limit_trust(options, mode, &mut violations);
+    collect_rate_limit(options, &mut violations);
+    collect_cors(options, &mut violations);
     sort_violations(&mut violations);
     violations
+}
+
+/// The `Cors` section may not combine `*` with credentials (any mode).
+fn collect_cors(options: &AppOptions, violations: &mut Vec<ConfigViolation>) {
+    if let Some(violation) =
+        cors_credentials_wildcard_violation(&options.cors.origins, options.cors.allow_credentials)
+    {
+        violations.push(violation);
+    }
+}
+
+/// An enabled rate limiter with a zero rate or burst limiter is a startup
+/// error, not a silently-throttled host.
+///
+/// `BurstSize = 0` makes every request `429` with `Retry-After: 1` forever;
+/// `RequestsPerSecond = 0` allows one burst and then nothing. Both look like a
+/// healthy configuration in the log line, so refuse to start instead.
+fn collect_rate_limit(options: &AppOptions, violations: &mut Vec<ConfigViolation>) {
+    let limit = &options.rate_limit;
+    if !limit.enabled {
+        return;
+    }
+    if limit.burst_size < 1 {
+        violations.push(ConfigViolation::new(
+            "RateLimit",
+            "RateLimit.BurstSize",
+            "RateLimit is enabled but BurstSize is 0: every request would be rejected with 429. \
+             Set BurstSize >= 1 (APP__RateLimit__BurstSize) or disable RateLimit.",
+        ));
+    }
+    if !limit.requests_per_second.is_finite() || limit.requests_per_second <= 0.0 {
+        violations.push(ConfigViolation::new(
+            "RateLimit",
+            "RateLimit.RequestsPerSecond",
+            "RateLimit is enabled but RequestsPerSecond must be a finite value > 0. \
+             Set RequestsPerSecond (APP__RateLimit__RequestsPerSecond) or disable RateLimit.",
+        ));
+    }
 }
 
 /// Format violations as the operator-facing multi-line startup error.
@@ -111,6 +151,26 @@ pub(crate) fn production_cors_violation(
             "Cors",
             "Cors.Origins",
             "Production forbids CORS origin '*'. Set explicit origins via Cors.Origins or APP__Cors__Origins.",
+        )
+    })
+}
+
+/// A wildcard origin combined with credentials is refused in every mode.
+///
+/// Per the CORS spec `Access-Control-Allow-Origin: *` cannot be combined with
+/// credentials, so echoing the request origin while `AllowCredentials` is on
+/// lets any site read authenticated responses. ASP.NET Core and Spring reject
+/// this combination at startup; so does rust-webx, regardless of `APP_ENV`.
+pub(crate) fn cors_credentials_wildcard_violation(
+    origins: &[String],
+    allow_credentials: bool,
+) -> Option<ConfigViolation> {
+    (allow_credentials && origins.iter().any(|origin| origin == "*")).then(|| {
+        ConfigViolation::new(
+            "Cors",
+            "Cors.Origins",
+            "'*' cannot be combined with AllowCredentials = true (the framework would echo any \
+             origin with credentials). List the allowed origins explicitly.",
         )
     })
 }

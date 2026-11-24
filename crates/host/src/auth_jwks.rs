@@ -279,7 +279,18 @@ pub struct JwksResolver {
     max_keys: usize,
     cache: RwLock<Option<CachedJwks>>,
     refresh: tokio::sync::Mutex<()>,
+    /// When the last unknown-`kid` refresh was attempted.
+    ///
+    /// An unknown `kid` is unauthenticated input: without this gate every such
+    /// request would trigger an upstream fetch and the single-flight mutex would
+    /// serialize authentication behind it (identity-provider DoS amplification).
+    last_unknown_kid_refresh: std::sync::Mutex<Option<Instant>>,
+    /// Minimum spacing between two unknown-`kid` refreshes.
+    min_refresh_interval: Duration,
 }
+
+/// Default spacing between two unknown-`kid` JWKS refreshes.
+pub const DEFAULT_JWKS_MIN_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 
 impl JwksResolver {
     /// Build from a fetcher; `ttl` is clamped to at least one second.
@@ -290,7 +301,15 @@ impl JwksResolver {
             max_keys: max_keys.clamp(1, 256),
             cache: RwLock::new(None),
             refresh: tokio::sync::Mutex::new(()),
+            last_unknown_kid_refresh: std::sync::Mutex::new(None),
+            min_refresh_interval: DEFAULT_JWKS_MIN_REFRESH_INTERVAL,
         }
+    }
+
+    /// Set the minimum spacing between unknown-`kid` refreshes (`0` disables).
+    pub fn with_min_refresh_interval(mut self, interval: Duration) -> Self {
+        self.min_refresh_interval = interval;
+        self
     }
 
     /// Build from `Jwt.Jwks` configuration.
@@ -375,6 +394,29 @@ impl IJwtKeyResolver for JwksResolver {
         let _guard = self.refresh.lock().await;
         if let Some(key) = self.lookup(kid, alg) {
             return Ok(key);
+        }
+        // Unknown `kid` is attacker-controlled input: bound how often it can
+        // reach the identity provider (see `last_unknown_kid_refresh`). The gate
+        // only applies once a document exists — a cold resolver must fetch.
+        let has_document = self
+            .cache
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .is_some();
+        if has_document && self.min_refresh_interval > Duration::ZERO {
+            let mut last = self
+                .last_unknown_kid_refresh
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let now = Instant::now();
+            if let Some(previous) = *last {
+                if now.duration_since(previous) < self.min_refresh_interval {
+                    return Err(Error::Unauthorized(format!(
+                        "unknown JWKS key id '{kid}' for {alg:?}"
+                    )));
+                }
+            }
+            *last = Some(now);
         }
         self.refresh().await?;
         self.lookup(kid, alg)

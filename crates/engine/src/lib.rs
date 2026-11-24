@@ -7,12 +7,14 @@
 pub mod body;
 pub mod config;
 pub mod context;
+mod hyper_compat;
 pub mod pipeline;
 pub mod response;
 pub mod router;
 pub mod server;
 pub mod shared;
 pub mod tls;
+pub mod transport;
 pub mod worker;
 
 pub use body::BodyLimits;
@@ -22,4 +24,8 @@ pub use pipeline::{FinalHandler, Pipeline};
 pub use response::{EndpointResult, RespBody};
 pub use router::{DirectDispatchFn, DirectTarget, EndpointTarget, RouteMatch, RouteTarget, Router};
 pub use server::{Listener, Server, ServerHandle};
-pub use shared::{AdmissionStats, ServerStats, Shared};
+pub use shared::{AdmissionStats, ServerStats, Shared, TransportMetrics, TransportStats};
+pub use transport::{
+    IHttpTransport, TransportConnectionPermit, TransportRequest, TransportResponse,
+    TransportRuntime,
+};

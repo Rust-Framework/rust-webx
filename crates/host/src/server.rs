@@ -148,6 +148,8 @@ pub struct Host {
     /// Whether this host serves the direct (non-mediated) dispatch path.
     /// Decided per host from its own DI registrations, never from global state.
     direct_dispatch_enabled: bool,
+    /// Listener-level transport backends started with the host (2.9).
+    http_transports: Vec<Arc<dyn webx_engine::IHttpTransport>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -243,6 +245,8 @@ pub struct HostBuilder {
     /// Route allow-list by call-site module path; `None` registers every
     /// compiled route (the pre-2.2 behavior).
     route_sources: Option<Vec<&'static str>>,
+    /// Listener-level transport backends started with the host (2.9).
+    http_transports: Vec<Arc<dyn webx_engine::IHttpTransport>>,
     /// Whether `Host::build` scans the route inventory at all (default `true`).
     inventory_routes: bool,
     /// WebSocket routes registered through `use_websocket`.
@@ -344,6 +348,7 @@ impl HostBuilder {
             event_publisher: None,
             route_sources: None,
             inventory_routes: true,
+            http_transports: Vec::new(),
             websockets: Vec::new(),
             websocket_limits: webx_core::realtime::WebSocketLimits::default(),
             realtime_event_store: None,
@@ -353,6 +358,18 @@ impl HostBuilder {
             idempotency: None,
             lenient_scope_validation: false,
         }
+    }
+
+    /// Add a listener-level transport backend (2.9).
+    ///
+    /// The backend is started with the host and receives the engine's
+    /// [`webx_engine::TransportRuntime`] (shared pipeline state and shutdown
+    /// signal), so it serves the same routes, middleware and errors as the
+    /// hyper HTTP/1.1+2 listeners. Use this for HTTP/3 or any other transport
+    /// model without changing application code.
+    pub fn use_http_transport(mut self, transport: Arc<dyn webx_engine::IHttpTransport>) -> Self {
+        self.http_transports.push(transport);
+        self
     }
 
     /// Defer service registration until host build.
@@ -985,7 +1002,7 @@ impl HostBuilder {
     /// Restrict authentication on paths under `path_prefix` to `schemes`.
     ///
     /// The first matching prefix wins; unmatched paths keep the full chain.
-    /// This is opt-in (M3-04): most deployments use the global chain plus
+    /// This is opt-in: most deployments use the global chain plus
     /// `#[authorize]`. A request that presents no allowed credential continues
     /// anonymously; protected endpoints still return 401.
     pub fn use_auth_scheme_for<I>(mut self, path_prefix: impl Into<String>, schemes: I) -> Self
@@ -1320,6 +1337,30 @@ impl HostBuilder {
             factory: Box::new(factory),
         });
         self
+    }
+
+    /// Advertise an `Alt-Svc` value on every HTTP/1.1+2 response (2.9).
+    ///
+    /// Configure this only when the advertised alternative service is actually
+    /// reachable. For an HTTP/3 endpoint use [`Self::use_h3_alt_svc`]; the raw
+    /// form is useful for other alternative services and custom `ma` policies.
+    /// See [`crate::alt_svc`] for the deployment/UDP caveats.
+    pub fn use_alt_svc(mut self, value: impl Into<String>) -> Self {
+        let value = value.into();
+        self.middleware_specs.push(MiddlewareSpec {
+            slot: webx_core::middleware::MiddlewareSlot::AfterAuth,
+            factory: Box::new(move || crate::alt_svc::factory(value.clone())),
+        });
+        self
+    }
+
+    /// Advertise an HTTP/3 endpoint as `h3=":<port>"; ma=86400` (2.9).
+    ///
+    /// `port` is the **UDP** port of the `rust-webx-h3` transport. The header is
+    /// only emitted when this method is called; clients that cannot reach UDP
+    /// keep using the TCP listener.
+    pub fn use_h3_alt_svc(self, port: u16) -> Self {
+        self.use_alt_svc(format!("h3=\":{port}\"; ma=86400"))
     }
 
     /// Register a **synchronous** health check probe.
@@ -2571,6 +2612,7 @@ impl HostBuilder {
             shutdown_token,
             state: AtomicU8::new(HostState::Built.load()),
             direct_dispatch_enabled,
+            http_transports: self.http_transports,
         })
     }
 
@@ -2958,10 +3000,59 @@ impl Host {
         config.tls = None;
         shared.config = Arc::new(config);
         shared.tls = None;
+        let shared = Arc::new(shared);
 
-        let run_result = webx_engine::Server::new(Arc::new(shared))
+        // Listener-level transports (HTTP/3, ...) run alongside the hyper
+        // listeners against the same shared pipeline and shutdown signal.
+        let mut transport_tasks = Vec::with_capacity(self.http_transports.len());
+        for transport in &self.http_transports {
+            let engine = webx_engine::Server::new(Arc::clone(&shared));
+            let transport = Arc::clone(transport);
+            let label = transport.kind();
+            // The adapter owns its protocol-level drain budget; the host only
+            // enforces it (and aborts a backend that refuses to stop).
+            let stop_budget = transport.stop_budget();
+            let task = tokio::spawn(async move {
+                if let Err(error) = engine.run_transport(transport).await {
+                    tracing::warn!(transport = label, %error, "host: transport backend stopped");
+                }
+            });
+            transport_tasks.push((task, stop_budget, label));
+        }
+
+        let run_result = webx_engine::Server::new(Arc::clone(&shared))
             .run_listeners(engine_listeners)
             .await;
+
+        // The shared shutdown signal stops transports; wait for their graceful
+        // close, then abort a backend that refuses to stop within its own budget.
+        for (task, stop_budget, label) in transport_tasks {
+            if run_result.is_err() {
+                task.abort();
+                continue;
+            }
+            let abort = task.abort_handle();
+            match tokio::time::timeout(stop_budget, task).await {
+                Ok(Ok(())) => {}
+                Ok(Err(join_error)) => {
+                    if join_error.is_panic() {
+                        tracing::error!(
+                            transport = label,
+                            %join_error,
+                            "host: transport backend panicked while stopping"
+                        );
+                    }
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        transport = label,
+                        budget = ?stop_budget,
+                        "host: transport backend did not stop within its budget; aborting"
+                    );
+                    abort.abort();
+                }
+            }
+        }
 
         self.stop_hosted_services_once().await;
         shutdown_bridge.abort();

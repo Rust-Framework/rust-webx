@@ -160,6 +160,7 @@ pub use webx_client::{
     IHttpClientFactory, OutboundRequest, OutboundResponse, ResponseStream, SseStream,
 };
 pub use webx_host::advisory_lock::InMemoryAdvisoryLock;
+pub use webx_host::alt_svc::AltSvcMiddleware;
 pub use webx_host::auth::{
     ApiKeyClaims, ApiKeyHeader, ApiKeyScheme, AuthMetrics, AuthOutcome, AuthenticationMiddleware,
     IApiKeyValidator, JwtScheme, AUTH_DURATION_METRIC, AUTH_REQUESTS_METRIC,

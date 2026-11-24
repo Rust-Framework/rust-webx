@@ -9,7 +9,7 @@
 //!
 //! The trait is dependency-free; the in-memory implementation is suitable for
 //! tests and single-process deployments. A persistent implementation lives in
-//! the optional `rust-webx-auth-ef` crate (2.5 M2).
+//! the optional `rust-webx-auth-ef` crate.
 
 use crate::error::{Error, Result};
 use std::collections::HashMap;

@@ -116,21 +116,21 @@ pub struct JwtSection {
     /// Expected `iss` claim. When set (non-empty), a token without a matching
     /// `iss` is rejected.
     ///
-    /// Additive (2.5): unset keeps the previous behaviour (no issuer check).
+    /// Additive: unset means no issuer check.
     #[serde(default, rename = "Issuer")]
     pub issuer: Option<String>,
 
     /// Expected `aud` claim. When set (non-empty), a token without a matching
     /// `aud` is rejected.
     ///
-    /// Additive (2.5): unset keeps the previous behaviour (no audience check).
+    /// Additive: unset means no audience check.
     #[serde(default, rename = "Audience")]
     pub audience: Option<String>,
 
     /// Accepted signature algorithms. Default: `["HS256"]`.
     ///
-    /// `HS256` is the only algorithm implemented in 2.5 M1; asymmetric
-    /// algorithms are enabled by the JWKS support in M2. A configured value
+    /// `HS256` uses the shared secret; the asymmetric algorithms require JWKS
+    /// metadata so the host can resolve the signing keys. A configured value
     /// that the host cannot verify is a startup error (fail-closed), never a
     /// silent downgrade.
     #[serde(default = "default_jwt_algorithms", rename = "Algorithms")]
@@ -220,17 +220,17 @@ fn default_jwks_max_keys() -> usize {
 /// JWT signature algorithm accepted by the host.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 pub enum JwtAlgorithm {
-    /// HMAC-SHA256 (shared secret). The only algorithm implemented in 2.5 M1.
+    /// HMAC-SHA256 (shared secret).
     #[default]
     #[serde(rename = "HS256")]
     Hs256,
-    /// RSASSA-PKCS1-v1_5 with SHA-256. Enabled by JWKS in 2.5 M2.
+    /// RSASSA-PKCS1-v1_5 with SHA-256 (requires JWKS keys).
     #[serde(rename = "RS256")]
     Rs256,
-    /// ECDSA with P-256 and SHA-256. Enabled by JWKS in 2.5 M2.
+    /// ECDSA with P-256 and SHA-256 (requires JWKS keys).
     #[serde(rename = "ES256")]
     Es256,
-    /// RSASSA-PSS with SHA-256. Enabled by JWKS in 2.5 M2.
+    /// RSASSA-PSS with SHA-256 (requires JWKS keys).
     #[serde(rename = "PS256")]
     Ps256,
 }

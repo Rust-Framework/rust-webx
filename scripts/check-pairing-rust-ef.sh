@@ -2,7 +2,7 @@
 # -----------------------------------------------------------------------------
 # Cross-repo pairing gate: rust-webx x local rust-ef checkout.
 #
-# Why: rust-ef is released first (2.8.0) and rust-webx 2.8.0 consumes it from
+# Why: rust-ef is released first (2.8.0) and rust-webx 2.9.0 consumes it from
 # crates.io. This script proves that the webx workspace and the rust-webx-ef
 # adapter compile -- and that the adapter's SQLite tests pass -- against a *local*
 # rust-ef tree before that tree is published. It is intentionally not a
@@ -147,7 +147,7 @@ check-pairing-rust-ef: pairing rust-ef $EF_VERSION (local) with rust-webx $WEBX_
   patch config   : $PATCH_CONFIG (temporary; Cargo.lock is restored on exit)
 EOF
 if [ "$EF_VERSION" != "$WEBX_VERSION" ]; then
-    echo "check-pairing-rust-ef: note: version skew (rust-ef $EF_VERSION vs rust-webx $WEBX_VERSION); releases are paired 1:1 (rust-ef 2.8.0 -> rust-webx 2.8.0)."
+    echo "check-pairing-rust-ef: note: version skew (rust-ef $EF_VERSION vs rust-webx $WEBX_VERSION); releases are paired 1:1 (rust-ef 2.8.0 -> rust-webx 2.9.0)."
 fi
 
 # -- 3. Reconcile Cargo.lock, then require the patch to be in the graph ------

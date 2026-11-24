@@ -218,9 +218,44 @@ impl TestHost {
             task,
         }
     }
-}
+    /// Serve one in-process neutral transport request through the real pipeline.
+    ///
+    /// The caller supplies a [`webx_engine::TransportRequest`] and receives the
+    /// [`webx_engine::TransportResponse`]; router, middleware, handler dispatch,
+    /// binding, error writer and panic boundary are the production ones. This is
+    /// the request-level seam used by non-hyper transports (and by the
+    /// transport-port tests).
+    pub async fn serve_transport_request(
+        &self,
+        request: webx_engine::TransportRequest,
+    ) -> webx_engine::TransportResponse {
+        let engine = webx_engine::Server::new(self.host.engine_shared());
+        engine.serve_transport_request(request).await
+    }
 
-/// Size of the in-process pipe used by [`TestHost::connect_wire`].
+    /// Engine-level shutdown handle for transport tests.
+    ///
+    /// A running `Host` bridges the host shutdown signal to the engine; a
+    /// `TestHost` driven only through [`Self::serve_transport_request`] has no
+    /// bridge, so this handle lets a test raise the engine shutdown directly.
+    pub fn engine_handle(&self) -> webx_engine::ServerHandle {
+        webx_engine::Server::new(self.host.engine_shared()).handle()
+    }
+
+    /// Run a listener-level transport backend through the real engine.
+    ///
+    /// The backend owns accept/handshake and uses the supplied
+    /// [`webx_engine::TransportRuntime`] to submit requests through
+    /// `Server::serve_transport_request`; this is the in-process seam used by
+    /// the transport-port tests and by non-hyper adapters.
+    pub async fn run_http_transport(
+        &self,
+        transport: Arc<dyn webx_engine::IHttpTransport>,
+    ) -> Result<()> {
+        let engine = webx_engine::Server::new(self.host.engine_shared());
+        engine.run_transport(transport).await
+    }
+}
 const WIRE_PIPE_BYTES: usize = 64 * 1024;
 
 /// One in-process wire connection served by the real engine pipeline.

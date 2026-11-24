@@ -396,6 +396,7 @@ impl MetricsEndpoint {
                 &snapshot,
                 self.admission_invariants.violations_seen(),
             ));
+            body.push_str(&render_transports(&admission.transport_snapshots()));
         }
         if let Some((realtime, registry)) = &self.realtime {
             body.push_str(&render_realtime(realtime, registry.as_ref()));
@@ -651,6 +652,53 @@ fn render_realtime(
         );
     }
     out
+}
+
+/// Render the per-transport listener counters (one label set per backend).
+fn render_transports(transports: &[(&'static str, webx_engine::shared::TransportStats)]) -> String {
+    let mut out = String::from(
+        "# HELP engine_transport_connections_total Connections opened by each non-hyper transport listener\n\
+         # TYPE engine_transport_connections_total counter\n\
+         # HELP engine_transport_connections_active Connections currently open per transport\n\
+         # TYPE engine_transport_connections_active gauge\n\
+         # HELP engine_transport_requests_total Requests served through the neutral port per transport\n\
+         # TYPE engine_transport_requests_total counter\n\
+         # HELP engine_transport_connections_rejected_total Connections rejected by engine admission per transport\n\
+         # TYPE engine_transport_connections_rejected_total counter\n\
+         # HELP engine_transport_handshake_failures_total Transport handshakes that failed before a connection existed\n\
+         # TYPE engine_transport_handshake_failures_total counter\n",
+    );
+    for (kind, stats) in transports {
+        let transport = escape_label_value(kind);
+        let _ = writeln!(
+            out,
+            "engine_transport_connections_total{{transport=\"{transport}\"}} {}\n\
+             engine_transport_connections_active{{transport=\"{transport}\"}} {}\n\
+             engine_transport_requests_total{{transport=\"{transport}\"}} {}\n\
+             engine_transport_connections_rejected_total{{transport=\"{transport}\"}} {}\n\
+             engine_transport_handshake_failures_total{{transport=\"{transport}\"}} {}",
+            stats.connections,
+            stats.active,
+            stats.requests,
+            stats.rejected,
+            stats.handshake_failures,
+        );
+    }
+    out
+}
+
+/// Escape a Prometheus label value (`\`, `"` and newlines).
+fn escape_label_value(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\n' => escaped.push_str("\\n"),
+            other => escaped.push(other),
+        }
+    }
+    escaped
 }
 
 fn render_admission(stats: &webx_engine::shared::ServerStats, violations_seen: u64) -> String {
@@ -942,6 +990,47 @@ mod tests {
         assert!(!gate.observe(&healthy));
         assert!(!gate.observe(&violating), "the latch never re-arms");
         assert_eq!(gate.violations_seen(), 3);
+    }
+
+    #[test]
+    fn endpoint_render_exposes_per_transport_counters() {
+        let stats = Arc::new(webx_engine::shared::AdmissionStats::default());
+        let h3 = stats.register_transport("h3");
+        let guard = h3.connection_opened();
+        h3.record_request();
+        h3.record_request();
+        h3.record_rejected();
+        h3.record_handshake_failure();
+
+        let endpoint = MetricsEndpoint::new(HttpMetrics::new()).with_admission(Arc::clone(&stats));
+        let text = endpoint.render();
+        assert!(
+            text.contains("engine_transport_connections_total{transport=\"h3\"} 1"),
+            "{text}"
+        );
+        assert!(
+            text.contains("engine_transport_connections_active{transport=\"h3\"} 1"),
+            "{text}"
+        );
+        assert!(
+            text.contains("engine_transport_requests_total{transport=\"h3\"} 2"),
+            "{text}"
+        );
+        assert!(
+            text.contains("engine_transport_connections_rejected_total{transport=\"h3\"} 1"),
+            "{text}"
+        );
+        assert!(
+            text.contains("engine_transport_handshake_failures_total{transport=\"h3\"} 1"),
+            "{text}"
+        );
+
+        drop(guard);
+        let text = endpoint.render();
+        assert!(
+            text.contains("engine_transport_connections_active{transport=\"h3\"} 0"),
+            "{text}"
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # 兼容性政策（SemVer、N-2 升级、锁步版本）
 
-> 基线：rust-webx 2.8.0。门禁在 `.github/workflows/ci.yml` 的 `semver`、`upgrade`、
+> 基线：rust-webx 2.9.0。门禁在 `.github/workflows/ci.yml` 的 `semver`、`upgrade`、
 > `lint`（内部版本钉）三个 job。
 
 ## 1. 三条承诺
@@ -9,8 +9,8 @@
    auto trait，不给既有函数新增 `#[deprecated]`（会让下游 `-D warnings` 构建失败）。
 2. **内部 crate 锁步发布**：`rust-webx*` 之间使用**精确版本** `=x.y.z` 依赖，
    消费者无法解析出 umbrella 与子 crate 混版本组合。
-3. **N-2 源码兼容**：同一份只使用 2.0 API 的应用源码，必须能同时编译
-   针对 `rust-webx = "=2.0.0"` 与当前工作区路径。
+3. **N-2 源码兼容**：同一份只使用 2.7 API 的应用源码，必须能同时编译
+   针对 N-2 发布 `rust-webx = "=2.7.0"`（2.9 的 N-2）与当前工作区路径。
 
 ## 2. 门禁
 
@@ -28,11 +28,12 @@ cargo semver-checks --package rust-webx        --baseline-rev v2.7.0
 
 ### upgrade（N-2 源码兼容）
 
-`compat/upgrade-smoke/src/main.rs` 只用 2.0 时代 API，分别在两个独立 workspace 编译：
+`testing/upgrade-smoke/src/main.rs` 只用 2.7 时代 API，分别在两个独立 workspace 编译。
+N-2 基线随当前版本滚动：2.9.0 的 N-2 是 **rust-webx 2.7.0**（下一个版本发布时同步前移）。
 
 ```text
-compat/upgrade-smoke/stable/Cargo.toml   → rust-webx = "=2.0.0"（固定 2.0 全套）
-compat/upgrade-smoke/current/Cargo.toml  → rust-webx = { path = "../../../crates/webx" }
+testing/upgrade-smoke/stable/Cargo.toml   → rust-webx = "=2.7.0"（固定 2.7 全套）
+testing/upgrade-smoke/current/Cargo.toml  → rust-webx = { path = "../../../crates/webx" }
 ```
 
 ### 内部版本钉一致性
@@ -67,20 +68,20 @@ compat/upgrade-smoke/current/Cargo.toml  → rust-webx = { path = "../../../crat
 `rust-webx`。持久层错误到 HTTP 的翻译属于**应用边界**，由单独的适配 crate
 `rust-webx-ef` 承担（应用按需依赖；core 与 umbrella 不链接它）：
 
-配对发布：先 rust-ef 2.8.0、后 rust-webx 2.8.0；workspace 依赖写 `rust-ef = "2.6"`
+配对发布：先 rust-ef 2.8.0、后 rust-webx 2.9.0；workspace 依赖写 `rust-ef = "2.6"`
 （semver 范围，已含 2.8.x，本版按 2.8.0 验证），不收紧为精确 pin——否则在 ORM 发布前
 `Cargo.lock` 不可解析。
 
 - 不在 `rust-webx-core` / umbrella 增加 `ef` feature 或可选 `rust-ef` 依赖。即使
   默认关闭，也会把 ORM 概念带进 core 的 feature 图与发布清单，破坏“小核心”边界。
-- 不启用 `rust-ef` 的 `features = ["webx"]`，不恢复 `compat/webx-core-shim` 或
+- 不启用 `rust-ef` 的 `features = ["webx"]`，不恢复历史上的 `webx-core-shim` 兼容层或
   `[patch.crates-io]`。
 - 应用侧不写 `impl From<EFError> for webx::Error`（孤儿规则），也不重复实现映射：
   依赖 `rust-webx-ef`，调用点写 `.map_ef()?`。
 
 ```rust
 // Cargo.toml
-rust-webx-ef = "2.8"
+rust-webx-ef = "2.9"
 
 // handlers/src/db.rs
 pub use webx_ef::{map_ef_error, EfResultExt};
@@ -111,7 +112,7 @@ ORM → Web 框架。
 
 ### 配对验证（pairing verified）的证据边界
 
-发布顺序是 **rust-ef 2.8.0 → rust-webx 2.8.0**（见上）。发布前用本地 rust-ef
+发布顺序是 **rust-ef 2.8.0 → rust-webx 2.9.0**（见上）。发布前用本地 rust-ef
 checkout 做编译级配对验证：
 
 ```bash
@@ -170,7 +171,7 @@ rust-webx 的 commit，例如 "pairing verified: rust-ef@<sha> × rust-webx@<sha
 □ 配对 ORM 已先行发布（rust-ef x.y.z → rust-webx x.y.z；`rust-ef = "2.6"` 范围覆盖 2.8.x，不收紧为精确 pin）
 □ 配对验证已跑：`RUST_EF_PATH=… bash scripts/check-pairing-rust-ef.sh`（或 CI `pairing` job）通过，证据边界见 §4
 □ semver-checks 对上一发布通过（例外仅 §3）
-□ N-2 冒烟通过（compat/upgrade-smoke）
+□ N-2 冒烟通过（testing/upgrade-smoke；2.9.0 的 N-2 = rust-webx 2.7.0）
 □ cargo audit 0 漏洞 + 内部版本钉一致
 □ LTS backport 只含安全/关键缺陷修复
 ```
@@ -182,6 +183,6 @@ rust-webx 的 commit，例如 "pairing verified: rust-ef@<sha> × rust-webx@<sha
 
 ```text
 cargo semver-checks --package rust-webx-host --baseline-rev v2.7.0
-cargo build --manifest-path compat/upgrade-smoke/stable/Cargo.toml
-cargo build --manifest-path compat/upgrade-smoke/current/Cargo.toml
+cargo build --manifest-path testing/upgrade-smoke/stable/Cargo.toml
+cargo build --manifest-path testing/upgrade-smoke/current/Cargo.toml
 ```

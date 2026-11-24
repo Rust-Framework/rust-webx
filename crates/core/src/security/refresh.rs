@@ -8,7 +8,7 @@
 //!
 //! The port is dependency-free; the in-memory implementation is for tests and
 //! single-process deployments. A persistent implementation lives in the
-//! optional `rust-webx-auth-ef` crate (M2).
+//! optional `rust-webx-auth-ef` crate.
 
 use crate::error::{Error, Result};
 use std::collections::HashMap;

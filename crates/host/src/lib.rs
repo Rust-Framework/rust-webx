@@ -7,6 +7,7 @@
 //! rate limiting).
 
 pub mod advisory_lock;
+pub mod alt_svc;
 pub mod auth;
 pub mod auth_basic;
 pub mod auth_cookie;
@@ -50,6 +51,7 @@ pub mod websocket;
 pub mod testing;
 
 pub use advisory_lock::*;
+pub use alt_svc::*;
 pub use auth::*;
 pub use auth_basic::*;
 pub use auth_cookie::*;

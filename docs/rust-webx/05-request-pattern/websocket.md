@@ -52,7 +52,7 @@ WebSocket 会话；优雅停机时引擎按排空预算等待会话结束。
 
 `IConnection::recv` 返回 `RealtimeMessage::{Text, Binary, Close}`，ping/pong 由帧层自动
 处理、不暴露给业务。`send_*` 在发送失败时返回 `Error::Internal`；背压与连接级限流
-（有界发送队列、msg/s、帧上限）属于 ，业务侧应把发送视为可能等待的异步操作。
+（有界发送队列、msg/s、帧上限）属于 `WebSocketLimits`，业务侧应把发送视为可能等待的异步操作。
 
 ## 连接作用域
 
@@ -399,6 +399,31 @@ presence 判断不再由业务自己数连接。
 两者都复用现有的唯一事件传输：`crates/queue/*` 的 broker 适配或 `crates/cache/redis`。
 `RealtimeMetrics.realtime_connections_active` 始终是**本节点**计数；全局数字由共享 store 提供，
 或在监控端按实例求和。
+
+### HTTP/3 上的 WebSocket
+
+WebSocket 会话建立在 `IUpgradeSession` + `UpgradedTransport` 之上，与传输无关。`rust-webx-h3`
+通过 RFC 9220 extended CONNECT（`:protocol: websocket`）复用同一套 handler、registry、presence
+与续传语义：
+
+- 客户端发送 HTTP/3 `CONNECT` + `:protocol: websocket`；
+- h3 adapter 把请求改写为标准 WebSocket upgrade 形式（GET + `upgrade`/`connection`）交给
+  host middleware（鉴权/身份/限制走同一中间件路径，但鉴权/限流没有单独 e2e）；RFC 合规 h3
+  客户端**不发送** h1 的 `Sec-WebSocket-Key`/`Accept` 握手头，adapter 在缺失时合成
+  `sec-websocket-key`，仅用于满足现有 host middleware 的握手实现（h1 key/accept 交换不用于 h3）；
+- 成功后 extended CONNECT 以 HTTP `200` 提交（不是 h1 的 `101`），h3 request stream 与
+  `UpgradedTransport` 双向桥接；文本/二进制帧有 e2e 回显；优雅排空会等待 active bridge
+  会话（≤5s），但 host 关闭路径（close frame）尚无专门 e2e，暂不宣称 close handshake 与
+  h1/h2 完全等价；
+- engine 非 101 的 WS extended CONNECT 变成错误/problem 响应，不写正常 2xx body；
+  普通 `CONNECT` 返回 `400`；非 WS 的 extended CONNECT 返回 `501` problem+json；
+  普通 h3 请求的 `upgrade`/`connection` 头在 adapter 入口被移除，不能伪造升级。
+
+依赖说明：2.9 的 h3 适配层使用 `trev-h3 0.3.0` fork（上游 `h3 0.0.8` 无法表达
+`:protocol: websocket`），精确钉版并隔离在可选 crate `rust-webx-h3` 内。WebTransport
+以 adapter-level MVP 交付（`H3Config::with_webtransport_handler`；`IWebTransportHandler::authorize`
+pre-accept 失败 → 403；session + bidi stream echo，datagram API 暴露但无 e2e）；面向
+`webx` 的 transport-neutral WebTransport 端口仍是后续工作。
 
 ## 实时观测
 

@@ -47,7 +47,10 @@
 //!   sets larger than 8 KiB are not stored (the body is still cached).
 //! * **Cleanup**: rows stay readable until `expires_at`; a row is deleted only
 //!   after it has been expired for the grace period. `IdempotencyHousekeeping`
-//!   does that on a periodic tick (default: hourly, grace 24h).
+//!   does that on a periodic tick (default: hourly, grace 24h) and
+//!   [`EfIdempotencyStore::purge_expired`] deletes in bounded batches
+//!   ([`PURGE_BATCH_SIZE`] rows per statement) so a large backlog never becomes
+//!   one long write lock on the hot table.
 //! * **Not a unique constraint**: a business invariant still needs a unique
 //!   index. The idempotency key only makes "the same key at most once" hold;
 //!   after `expires_at` the same key executes again.
@@ -172,6 +175,15 @@ pub const DEFAULT_CLEANUP_INTERVAL: Duration = Duration::from_secs(3_600);
 /// protocol.
 pub const DEFAULT_CLEANUP_GRACE: Duration = Duration::from_secs(24 * 3_600);
 
+/// Rows deleted per statement by [`EfIdempotencyStore::purge_expired`].
+///
+/// Cleanup never sends one unbounded `DELETE`: a large backlog is removed in
+/// bounded statements so a single tick cannot hold a long write lock on a table
+/// that is also the hot path of every state-changing request. The batch is small
+/// enough to stay under every provider's bind-parameter limit with the
+/// `IN (...)` list used to target it (SQLite 999, PostgreSQL/MySQL 65,535).
+pub const PURGE_BATCH_SIZE: usize = 500;
+
 /// One stored idempotency key.
 ///
 /// `key_hash` is the primary key (unique across all instances), so a duplicate
@@ -285,17 +297,26 @@ impl EfIdempotencyStore {
     /// Rows are kept for `older_than` seconds after `expires_at` so an operator
     /// can still inspect a recently expired key. `older_than` is clamped to `0`,
     /// so `purge_expired(now, 0)` deletes every expired row. Returns the number
-    /// of deleted rows (bounded by the database driver, one statement).
+    /// of deleted rows.
+    ///
+    /// Deletion is batched ([`PURGE_BATCH_SIZE`] rows per statement): a large
+    /// backlog becomes several bounded statements instead of one long `DELETE`
+    /// over the whole table. Each batch repeats the expiry predicate inside the
+    /// statement that deletes, so a row another instance reclaimed between the
+    /// batch read and the delete keeps its live reservation.
     pub async fn purge_expired(&self, now: i64, older_than: i64) -> Result<u64> {
-        let mut ctx = self.context()?;
         let cutoff = now.saturating_sub(older_than.max(0));
-        linq!(
-            ctx.set::<IdempotencyRecord>(),
-            |record: IdempotencyRecord| record.expires_at < cutoff
-        )
-        .execute_delete()
-        .await
-        .map_err(map_ef_error)
+        let mut ctx = self.context()?;
+        let mut deleted = 0u64;
+        loop {
+            let batch = delete_expired_batch(&mut ctx, cutoff).await?;
+            deleted = deleted.saturating_add(batch);
+            // A short batch means the table has no more expired rows to remove.
+            if batch < PURGE_BATCH_SIZE as u64 {
+                break;
+            }
+        }
+        Ok(deleted)
     }
 
     /// Open a context for one operation.
@@ -312,6 +333,38 @@ impl EfIdempotencyStore {
             ))
         })
     }
+}
+
+/// Delete one bounded batch of expired rows; returns how many rows were removed.
+///
+/// The candidate primary keys are read first (at most [`PURGE_BATCH_SIZE`] of
+/// them, so a backlog never materialises in memory) and the `DELETE` repeats the
+/// expiry predicate. That repetition is the correctness boundary of batching: a
+/// row that another instance reclaimed between the read and the delete now has a
+/// future `expires_at`, so it no longer matches and its live reservation
+/// survives.
+async fn delete_expired_batch(ctx: &mut DbContext, cutoff: i64) -> Result<u64> {
+    let hashes: Vec<String> = linq!(
+        ctx.set::<IdempotencyRecord>(),
+        |record: IdempotencyRecord| record.expires_at < cutoff;
+        take PURGE_BATCH_SIZE;
+        select (record.key_hash)
+    )
+    .to_list_typed_1::<String>()
+    .await
+    .map_err(map_ef_error)?;
+
+    if hashes.is_empty() {
+        return Ok(0);
+    }
+
+    linq!(
+        ctx.set::<IdempotencyRecord>(),
+        |record: IdempotencyRecord| hashes.contains(record.key_hash) && record.expires_at < cutoff
+    )
+    .execute_delete()
+    .await
+    .map_err(map_ef_error)
 }
 
 /// Find the row for a protocol key (looked up by its digest), if any.
@@ -618,9 +671,9 @@ impl EfIdempotencyStore {
 ///
 /// Register it with `add_background_service_with` (it implements
 /// [`PeriodicBackgroundService`]); the defaults are one tick per hour and a
-/// 24-hour grace after `expires_at`. Cleanup is a single indexed `DELETE` per
-/// tick and is safe to run on every instance — deleting the same expired row
-/// twice is a no-op.
+/// 24-hour grace after `expires_at`. Cleanup is one indexed scan per
+/// [`PURGE_BATCH_SIZE`] rows and is safe to run on every instance — deleting the
+/// same expired row twice is a no-op.
 #[derive(Clone)]
 pub struct IdempotencyHousekeeping {
     store: Arc<EfIdempotencyStore>,

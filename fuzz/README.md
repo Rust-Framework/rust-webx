@@ -30,7 +30,7 @@ Consequences, by design:
 - fuzz builds may use nightly, sanitizers and third-party `unsafe` code
   (libFuzzer) without changing how the published crates are built;
 - path dependencies point at `../crates/core`; framework crates stay pinned by
-  the main workspace's own `=2.8.0` version policy.
+  the main workspace's own `=2.9.0` version policy.
 
 ## Targets
 

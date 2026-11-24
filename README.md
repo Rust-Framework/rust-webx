@@ -27,6 +27,7 @@ A type-safe, convention-over-configuration platform where *requests are endpoint
 - [Request-as-Endpoint: Hello World](#request-as-endpoint-hello-world)
 - [Core Concepts](#core-concepts)
 - [Broker & cache adapters](#broker--cache-adapters)
+- [Optional transport adapters](#optional-transport-adapters)
 - [Example Applications](#example-applications)
 - [Quick Start](#quick-start)
 - [Development](#development)
@@ -136,7 +137,7 @@ The framework is split into a small set of focused crates, re-exported through t
 
 ```
 rust-webx/
-├── Cargo.toml                 # workspace root (v2.8.0)
+├── Cargo.toml                 # workspace root (v2.9.0)
 ├── crates/
 │   ├── core/                  # rust-webx-core  — traits, configuration
 │   ├── engine/                # rust-webx-engine — worker pool, direct dispatch
@@ -168,6 +169,8 @@ rust-webx/
 │   │   └── webx/              #   rust-webx-ef — sanitized EFError → webx::Error mapping
 │   ├── outbox/                # transactional-outbox starters
 │   │   └── ef/                #   rust-webx-outbox-ef — same-transaction enqueue + dispatch
+│   ├── transport/             # optional non-hyper listener backends
+│   │   └── h3/                #   rust-webx-h3 — HTTP/3 (QUIC + rustls + h3)
 │   └── payment/               # payment domain group (opt-in)
 │       ├── core/              #   rust-webx-pay — ports, models, Payments runtime
 │       ├── stripe/            #   rust-webx-pay-stripe
@@ -177,6 +180,9 @@ rust-webx/
 │       ├── adyen/             #   rust-webx-pay-adyen
 │       ├── square/            #   rust-webx-pay-square
 │       └── ef/                #   rust-webx-pay-ef — durable webhook inbox
+├── testing/                   # non-published test harnesses (publish = false)
+│                              #   alloc-probe / contract-tests / upgrade-smoke
+├── fuzz/                      # standalone cargo-fuzz workspace (nightly CI)
 ├── docbit/                    # reference app: portfolio + blog + RBAC + docs
 ├── dmbit/                     # reference app: device & inventory management
 └── imbit/                     # reference app: real-time IM (WS + signaling)
@@ -198,7 +204,7 @@ rust-webx/
 > `rust-webx-pay-stripe` → `webx_pay_stripe`, `rust-webx-pay-alipay` → `webx_pay_alipay`,
 > `rust-webx-pay-wechatpay` → `webx_pay_wechatpay`, `rust-webx-pay-paypal` → `webx_pay_paypal`,
 > `rust-webx-pay-adyen` → `webx_pay_adyen`, `rust-webx-pay-square` → `webx_pay_square`,
-> `rust-webx-pay-ef` → `webx_pay_ef`.
+> `rust-webx-pay-ef` → `webx_pay_ef`, `rust-webx-h3` → `webx_h3`.
 
 ## Request-as-Endpoint: Hello World
 
@@ -234,6 +240,19 @@ async fn main() {
 ```
 
 Routing discovery, handler resolution, middleware orchestration, and graceful shutdown are all handled automatically by `Host::build()`.
+
+### Composition root: two slots
+
+Every application is assembled through exactly two slots on the builder:
+
+| Slot | What belongs there | Example |
+|---|---|---|
+| `register` | DI services, ports and adapters — the object graph | `.register(|svc| svc.add_mediator())` |
+| `configure` | `AppOptions` runtime knobs for this host | `.configure(\|app\| app.use_options(\|o\| o.metrics.enabled = false))` |
+
+Typed helpers (`use_spa`, `add_authentication`, `use_http_transport`, `use_alt_svc`, ...) are
+sugar over the same builder state and never introduce a third assembly channel. Business code
+consumes interfaces; only the composition root knows concrete implementations.
 
 ## Core Concepts
 
@@ -299,6 +318,17 @@ Cache-only: `RedisOptions::cache_only()`. Publisher-only: `.publisher_only()` on
 Redis uses `.without_cache()` + `RedisEventsOptions { consumer_enabled: false, .. }`. See
 [event pub/sub](docs/rust-webx/08-mediator-events/event-pub-sub.md) and
 [caching](docs/rust-webx/11-production/caching-rate-limit.md).
+
+## Optional transport adapters
+
+Beyond the built-in hyper HTTP/1.1 + HTTP/2 listeners, the engine has a neutral transport port
+(`IHttpTransport` / `TransportRuntime`) that serves the same router, middleware, binding, error
+writer, DI, admission governor and metrics. HTTP/3 is available as an opt-in crate; default builds
+do not pull QUIC dependencies.
+
+| Crate | Entry point | Notes |
+|-------|-------------|-------|
+| [`rust-webx-h3`](https://crates.io/crates/rust-webx-h3) | `H3Transport` + `HostBuilder::use_http_transport(Arc::new(transport))`, optional `use_h3_alt_svc(udp_port)`, optional `H3Config::with_webtransport_handler` | QUIC + rustls + h3 fork (`trev-h3`), TLS 1.3 / ALPN `h3`, mTLS, SSE/streaming, per-connection GOAWAY drain, shared `App.MaxConnections` admission, `/metrics` transport labels, explicit `Alt-Svc`, **WebSocket over HTTP/3 via RFC 9220 extended CONNECT**, and **WebTransport adapter-level MVP** (session + bidi stream echo; transport-neutral port is future work). |
 
 ## Example Applications
 

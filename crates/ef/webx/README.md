@@ -48,7 +48,7 @@ begin(key) ──► Started      唯一键 INSERT 或 CAS 抢占过期行
 
 ```toml
 [dependencies]
-rust-webx-ef = "2.8"
+rust-webx-ef = "2.9"
 ```
 
 1. 模型注册 + 建表/迁移（表结构由实体声明，DDL 交给官方 rust-ef 迁移工具）：

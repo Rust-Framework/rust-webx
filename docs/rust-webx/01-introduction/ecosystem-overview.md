@@ -135,7 +135,7 @@ OpenAI 错误信封。它只做传输适配，路由/provider/配额/用量仍�
 
 ```toml
 [dependencies]
-rust-webx = "1.5"
+rust-webx = "2.9"
 ```
 
 ```rust

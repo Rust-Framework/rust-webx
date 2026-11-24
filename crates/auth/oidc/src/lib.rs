@@ -12,8 +12,8 @@
 //! ```
 //!
 //! Security defaults: HTTPS-only endpoints, S256 required, id_token `iss`/`aud`/
-//! `nonce`/`exp`/`alg` validated, JWKS through the M2 resolver (cached,
-//! single-flight, SSRF-guarded).
+//! `nonce`/`exp`/`alg` validated, JWKS resolver cached, single-flight,
+//! SSRF-guarded).
 
 pub mod client;
 pub mod discovery;

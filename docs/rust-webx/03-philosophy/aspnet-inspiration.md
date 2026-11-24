@@ -49,6 +49,26 @@ Host::builder()
     .await?;
 ```
 
+### 组合根：`register` 与 `configure` 两个槽
+
+框架把装配收敛为两个槽，业务代码不参与对象构造：
+
+| 槽 | 职责 | 典型内容 |
+|---|---|---|
+| `register(\|svc\| …)` | 注册槽：DI 对象图 | `add_mediator`、DbContext、端口适配器、`#[inject]` 解析的底层服务 |
+| `configure(\|app\| …)` | 应用槽：`AppOptions` 运行期开关 | 超时、body 上限、metrics、CORS/JWT 等配置节；`use_options` 修改本 Host 的选项 |
+
+纪律：
+
+- **同一扩展只有一个装配入口**：能用两槽表达的能力，不再新增第三种 builder 状态；`use_*` /
+  `add_*` 是写入同一 builder 状态的糖（例如 `use_http_transport` 把传输后端交给 Host 生命周期）。
+- **两个槽在 `build()` 统一生效**：先构造 DI 对象图、再应用 `AppOptions` 并做 fail-closed 校验；
+  槽内闭包按声明顺序执行，`configure` 后写覆盖先写。
+- **业务模块返回组合函数**：`fn register(svc: ServiceCollection, cfg: C) -> ServiceCollection`
+  （见[模块系统](../06-di-lifecycle/module-system.md)），组合根只做编排，业务代码只消费接口。
+
+`crates/host/tests/composition_slots_test.rs` 锁定两槽的顺序无关性、闭包执行次数与默认值边界。
+
 ### 2. 中介者解耦
 
 MediatR 让 Controller 变薄，业务逻辑进入 Handler。rust-webx 更进一步——**连 Controller 都没有**，Request 直接就是端点。

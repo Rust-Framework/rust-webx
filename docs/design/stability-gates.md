@@ -109,7 +109,9 @@ WIRE_P99_BUDGET_MS=5 cargo test --release -p rust-webx --test wire_p99_test -- -
 ## 6. 安全审计
 
 - PR CI `audit` job：`cargo install cargo-audit --locked && cargo audit`（RustSec 漏洞库），
-  当前 0 vulnerabilities / 0 warnings；
+  当前 **0 vulnerabilities** + 2 条 `unmaintained` 警告（`chrono` 经 `rskafka`/`rust-ef`
+  传递，`rustls-pemfile` 为 `rust-webx-client` 直接依赖；均为允许级警告，跟踪上游迁移，
+  不阻塞发布）；
 - 依赖来源：仅 crates.io + 锁定 `Cargo.lock`；`unsafe_code = "forbid"` 覆盖全部框架 crate
   （`alloc-probe` 为独立开发工具，显式说明其 `GlobalAlloc` 用途）；
 - 安全相关回归门禁：`session_revocation_test`、`csrf`/`cookie` 测试、`constant_time_eq`
@@ -153,7 +155,7 @@ HTTP/1.1 与真实 TLS ALPN 三条路径。
 |---|---|---|
 | tests / clippy / fmt / MSRV / docs / coverage | PR | 正确性与可维护性 |
 | semver（vs v2.7.0） | PR | 公开 API 加性演进（4 包） |
-| upgrade（N-2） | PR | 2.0.0 与当前 workspace 同源码编译 |
+| upgrade（N-2） | PR | rust-webx 2.7.0 与当前 workspace 同源码编译（`testing/upgrade-smoke`） |
 | alloc | PR | 框架税 ≤12 |
 | stability：soak / chaos / wire-perf / auth-budget / auth-interop / conformance | nightly | 长跑、性能预算与 HTTP 互操作 |
 | fuzz：cargo-fuzz（`fuzz.yml`） | nightly | 公开解析入口的覆盖引导 fuzz |

@@ -291,8 +291,11 @@ Host::builder()
 
 `IdempotencyHousekeeping` 实现 `PeriodicBackgroundService`：默认每小时 tick 一次，
 只删除「过期超过 24 小时」的行（`with_interval` / `with_grace` 可调，默认
-`DEFAULT_CLEANUP_INTERVAL` / `DEFAULT_CLEANUP_GRACE`）。tick 是一条
-`WHERE expires_at < now - grace` 的索引 `DELETE`；多个实例同时清理是安全的
+`DEFAULT_CLEANUP_INTERVAL` / `DEFAULT_CLEANUP_GRACE`）。tick 按 `PURGE_BATCH_SIZE`（500）行
+分批删除，每条语句都是 `WHERE key_hash IN (...) AND expires_at < cutoff` 的索引删除：
+积压再大也只是多条有界语句，不会压成一条长时间的写锁。删除语句里重复的
+`expires_at < cutoff` 是分批的正确性边界——若某行在「读候选」和「删除」之间被另一实例重新
+claim（`expires_at` 变成未来），它不再匹配，于是新预约不会被误删。多个实例同时清理是安全的
 （同一条过期行删两次是 no-op）。
 
 ### 租约、围栏与保留期（lease / fencing / retention）

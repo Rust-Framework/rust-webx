@@ -77,7 +77,7 @@ async fn start(&self) -> Result<()> {
 rust-ef，应用按需依赖：
 
 ```toml
-rust-webx-ef = "2.8"
+rust-webx-ef = "2.9"
 ```
 
 ```rust

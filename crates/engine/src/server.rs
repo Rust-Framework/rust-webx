@@ -118,6 +118,40 @@ impl Server {
         worker::serve_stream(Arc::clone(&self.shared), io, peer).await;
     }
 
+    /// Serve one neutral request through the engine pipeline.
+    ///
+    /// Listener backends that multiplex requests themselves (HTTP/3 streams,
+    /// in-process test servers) call this per request. Router, middleware,
+    /// handler dispatch, binding, error writer, panic boundary, response
+    /// assembly and SSE lifecycle are the production ones.
+    pub async fn serve_transport_request(
+        &self,
+        request: crate::transport::TransportRequest,
+    ) -> crate::transport::TransportResponse {
+        let terminal = connection::final_handler(Arc::clone(&self.shared));
+        connection::serve_transport(Arc::clone(&self.shared), terminal, request).await
+    }
+
+    /// Run a listener-level transport backend.
+    ///
+    /// The backend owns accept and transport-level handshakes (TLS, QUIC, ...);
+    /// the engine hands it a [`TransportRuntime`](crate::transport::TransportRuntime)
+    /// carrying the shared state, shutdown signal and the process-wide admission
+    /// governor ([`TransportRuntime::admit_connection`](crate::transport::TransportRuntime::admit_connection)). The backend
+    /// submits each decoded request through [`Self::serve_transport_request`].
+    pub async fn run_transport(
+        &self,
+        transport: Arc<dyn crate::transport::IHttpTransport>,
+    ) -> Result<()> {
+        let metrics = self.shared.admission.register_transport(transport.kind());
+        let runtime = crate::transport::TransportRuntime::new(
+            Arc::clone(&self.shared),
+            self.shared.subscribe_shutdown(),
+        )
+        .with_transport_metrics(metrics);
+        transport.run(runtime).await
+    }
+
     /// Serve one listener until shutdown.
     ///
     /// This is the single-listener convenience wrapper. `config.tls` is
@@ -189,7 +223,7 @@ impl Server {
                 .map(|worker| worker.feed.clone())
                 .collect::<Vec<_>>(),
         );
-        let governor = Arc::new(Semaphore::new(shared.config.max_connections));
+        let governor = shared.admission.governor(shared.config.max_connections);
         let mut acceptors = tokio::task::JoinSet::new();
         for listener in listeners {
             let shared = Arc::clone(&shared);
@@ -633,10 +667,9 @@ pub(crate) mod connection {
 
     use futures_util::FutureExt;
     use hyper::body::Incoming;
-    use hyper::header::{HeaderName, HeaderValue};
     use hyper::{Request, Response};
     use webx_core::error::{Error, Result};
-    use webx_core::http::{IHttpContext, CLIENT_CERT_FINGERPRINT_HEADER};
+    use webx_core::http::IHttpContext;
     use webx_core::problem::ProblemDetails;
 
     use crate::context::EngineContext;
@@ -653,7 +686,7 @@ pub(crate) mod connection {
     /// dropped connection (or a dead worker under `panic = "abort"`).
     pub(crate) async fn serve(
         shared: Arc<Shared>,
-        mut request: Request<Incoming>,
+        request: Request<Incoming>,
         peer: Option<SocketAddr>,
         streams: Arc<ActiveStreamGuard>,
         client_cert: Option<Arc<str>>,
@@ -661,26 +694,49 @@ pub(crate) mod connection {
         upgrade: Option<hyper::upgrade::OnUpgrade>,
     ) -> std::result::Result<Response<RespBody>, Infallible> {
         // The TLS terminator is the only source of truth for the client
-        // certificate: never let a plain-HTTP or upstream request spoof it.
-        request.headers_mut().remove(CLIENT_CERT_FINGERPRINT_HEADER);
-        if let Some(fingerprint) = client_cert {
-            if let Ok(value) = HeaderValue::from_str(&fingerprint) {
-                request.headers_mut().insert(
-                    HeaderName::from_static(CLIENT_CERT_FINGERPRINT_HEADER),
-                    value,
-                );
-            }
-        }
-        let mut ctx = EngineContext::new(
-            request,
+        // certificate: it is carried as the neutral "verified fingerprint"
+        // field, and `EngineContext::from_transport` performs the strip-then-write
+        // on the header for every transport (hyper included).
+        let (parts, body) = request.into_parts();
+        let neutral = match client_cert {
+            Some(fingerprint) => crate::hyper_compat::request(parts, body, peer)
+                .with_client_cert_fingerprint(fingerprint),
+            None => crate::hyper_compat::request(parts, body, peer),
+        };
+        let mut ctx = EngineContext::from_transport(
+            neutral,
             Arc::clone(&shared.body_limits),
-            peer,
-            Arc::clone(&shared.dispatch),
+            Some(Arc::clone(&shared.dispatch)),
         );
+        // Only upgrade-bearing requests need the drain tracker: a regular
+        // request must not pay an extra shared-state clone on the hot path.
+        if upgrade.is_some() {
+            ctx.track_upgrade_sessions(Arc::clone(&shared));
+        }
         if let Some(upgrade) = upgrade {
             ctx = ctx.with_upgrade(upgrade);
         }
 
+        execute_pipeline(Arc::clone(&shared), terminal, &mut ctx).await;
+
+        let response = ctx.finalize().await;
+        if is_sse_response(&response) {
+            // Mark once per connection; the guard releases the slot when the
+            // connection ends (including on abort), not when the response ends.
+            streams.mark();
+        }
+        Ok(response)
+    }
+
+    /// Run the middleware pipeline and panic boundary for one request context.
+    ///
+    /// Shared by the hyper service wrapper and the neutral transport port so
+    /// router/error/panic behavior has exactly one implementation.
+    async fn execute_pipeline(
+        shared: Arc<Shared>,
+        terminal: FinalHandler,
+        ctx: &mut EngineContext,
+    ) {
         let error_writer: crate::pipeline::ErrorHandler = {
             let shared = Arc::clone(&shared);
             Arc::new(move |ctx: &mut EngineContext, error: Error| {
@@ -693,7 +749,7 @@ pub(crate) mod connection {
         };
 
         let outcome = std::panic::AssertUnwindSafe(shared.pipeline.execute_with_error(
-            &mut ctx,
+            ctx,
             terminal,
             error_writer,
         ))
@@ -704,20 +760,36 @@ pub(crate) mod connection {
             tracing::error!(panic = %panic_message(&payload), "engine: request panicked");
             // The error writer itself may have panicked. Use a fixed
             // problem+json response, outside the failing writer path.
-            write_problem(
-                &mut ctx,
-                problem_details(500, "an unexpected error occurred"),
-            )
-            .await;
+            write_problem(ctx, problem_details(500, "an unexpected error occurred")).await;
+        }
+    }
+
+    /// Serve one neutral transport request through the same pipeline.
+    ///
+    /// The existing finalize pipeline (security headers, HEAD/204/304 handling,
+    /// file/range assembly and SSE lifecycle observation) produces the neutral
+    /// response, so a non-hyper transport gets the same bytes and lifecycle
+    /// events as the hyper path. The client-certificate strip/inject contract is
+    /// part of [`EngineContext::from_transport`], so every transport entry point
+    /// (including a custom backend calling that constructor directly) inherits
+    /// it.
+    pub(crate) async fn serve_transport(
+        shared: Arc<Shared>,
+        terminal: FinalHandler,
+        request: crate::transport::TransportRequest,
+    ) -> crate::transport::TransportResponse {
+        let has_upgrade = request.upgrade.is_some();
+        let mut ctx = EngineContext::from_transport(
+            request,
+            Arc::clone(&shared.body_limits),
+            Some(Arc::clone(&shared.dispatch)),
+        );
+        if has_upgrade {
+            ctx.track_upgrade_sessions(Arc::clone(&shared));
         }
 
-        let response = ctx.finalize().await;
-        if is_sse_response(&response) {
-            // Mark once per connection; the guard releases the slot when the
-            // connection ends (including on abort), not when the response ends.
-            streams.mark();
-        }
-        Ok(response)
+        execute_pipeline(Arc::clone(&shared), terminal, &mut ctx).await;
+        ctx.finalize_transport().await
     }
 
     /// Build the pipeline terminal for one worker.

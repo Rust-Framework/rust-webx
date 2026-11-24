@@ -28,7 +28,7 @@ lapin.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
-rust-webx-contract-tests = { path = "../../contract-tests" }
+rust-webx-contract-tests = { path = "../../../testing/contract-tests" }
 inventory.workspace = true
 
 [lints]

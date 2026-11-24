@@ -11,8 +11,10 @@
         → provider.dispose() → 退出
 ```
 
-hosted services **先于连接排空**停止：后台 worker 不会在进程已经在关闭时继续访问数据库/缓存，
-`BackgroundService` 的取消令牌在信号到达时立刻触发（长 `sleep` 用 `background::delay` 即时返回）。
+hosted services 的 `stop()` 在信号到达时由 watcher **立即并行启动**（不等待连接排空结束，通常
+先于排空完成）：后台 worker 不会在进程已经在关闭时继续访问数据库/缓存，`BackgroundService`
+的取消令牌在信号到达时立刻触发（长 `sleep` 用 `background::delay` 即时返回）。
+`provider.dispose()` 在监听器/传输后端结束之后执行。
 
 关闭信号用 `watch` 通道保存，不是一次性的唤醒：`ServerHandle::shutdown()` / `IHost::stop()` 即使在服务器开始监听之前调用也不会丢失。
 排空预算由 `Server` 配置决定：
@@ -100,6 +102,28 @@ Handler 注入 `Arc<ShutdownToken>` 并调用 `SseResult::on_server_shutdown` �
 [关闭码与排空语义](../../design/close-codes.md)；Handler 可通过
 `IConnection::close_reason()` 与 `ShutdownToken::is_draining()` 区分“客户端走了”和“主机在排空”。
 
+### 非 hyper 传输（HTTP/3）排空
+
+`IHttpTransport` 后端收到的是与 TCP listener 相同的 shutdown 信号，但要自己完成协议级排空
+（`rust-webx-h3` 的实现是唯一示例）：
+
+1. 停止接受新连接（不再 `endpoint.accept()`），已握手连接**不再**被分发请求；
+2. 每条连接发 GOAWAY（`h3.shutdown(0)`），在途请求任务最多 10s 内完成；
+3. 再等待该连接上 active WebSocket 桥接会话收尾（≤5s，让引擎会话把 close frame 写出；
+   该 host 关闭路径尚无专门 e2e）；
+4. 连接排空后关闭 QUIC endpoint（`H3_NO_ERROR`），并等待 endpoint 变 idle（≤5s，防 UDP driver 卡住）；
+5. `Host` 等待每个传输后端停止，最长预算必须覆盖后端自身最坏值（h3 为 10s + 5s + 5s，
+   常量 `TRANSPORT_STOP_BUDGET` 需大于该值，超出则 abort）；hosted services 在信号到达时
+   已由 watcher 并行停止，最后 `provider.dispose()`。
+
+`rust-webx-h3` 当前用固定的内部上限（10s 在途请求 + 5s WS bridge + 5s endpoint idle），
+**不**读取 `Server.DrainTimeoutSeconds`：传输相关配置节（含 mTLS 与排空预算）属后续小版本，
+现在通过 `H3Config` 显式配置（QUIC keep-alive / idle timeout / stream 上限已是 `H3Config`
+字段）。传输层排空不写 `Connection: close`（QUIC 没有该头），SSE 由 `ShutdownToken` 正常
+结束；`engine_transport_connections_active` 在排空期间单调下降，可用来判断是否还有在途连接
+（见[指标](metrics.md)）。h3 WS 的 host 关闭路径（close frame）尚无专门 e2e，见
+[WebSocket 会话](../05-request-pattern/websocket.md)。
+
 ## 可观测性
 
 ### 请求追踪
@@ -129,6 +153,7 @@ tracing::error!(error = %e, "Handler failed");
 - [ ] TLS 证书配置
 - [ ] 健康检查端点配置
 - [ ] `Server.DrainTimeoutSeconds` / `StreamDrainTimeoutSeconds` 按部署调整
+- [ ] 启用 HTTP/3 时确认 `Host` 的传输停止预算覆盖 h3 最坏停机（10s 请求排空 + 5s WS bridge + 5s endpoint idle）
 - [ ] `Server.RequestTimeoutSeconds` 按上游 p99 设置（默认 30；Production 不允许 0）
 - [ ] SSE `max_lifetime` 与 `on_server_shutdown` 设置
 - [ ] 日志聚合（stdout → 日志服务）

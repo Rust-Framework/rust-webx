@@ -23,11 +23,20 @@
 | `engine_admission_invariant_violations` | gauge | — | 当前被违反的准入不变量个数（0–2） |
 | `engine_admission_invariant_violations_total` | counter | — | 每次 scrape 观察到的违反数累计（瞬时违规也不丢） |
 | `engine_admission_shutting_down` | gauge | — | 引擎已进入优雅停机（0/1）；停机后 `waiting` 应回到 0 |
+| `engine_transport_connections_total` | counter | transport | 非 hyper 传输监听（如 HTTP/3）打开过的连接数 |
+| `engine_transport_connections_active` | gauge | transport | 每个传输当前打开的连接数（与 `engine_connections_active` 是同一批 permit 的传输视图） |
+| `engine_transport_requests_total` | counter | transport | 经中立传输端口分发的请求数 |
+| `engine_transport_connections_rejected_total` | counter | transport | 被引擎准入拒绝的传输连接数（QUIC 无法在握手前写 503，按连接关闭计） |
+| `engine_transport_handshake_failures_total` | counter | transport | 传输握手失败数（例如 QUIC/TLS 握手失败），不含应用层 4xx |
 
 准入不变量（不一致时框架只告警一次并累加 counter，不阻塞请求）：
 
 1. `capacity > 0` 时 `active <= capacity`：active 只能由全局准入 governor 授予，超出说明 permit 记账泄漏；
 2. `shutting_down` 后 `waiting == 0`：acceptor 结束等待前会配对 `end_wait`，残留说明等待计数泄漏。
+
+`transport` 标签来自 `IHttpTransport::kind()`（当前只有可选的 `rust-webx-h3` 提供 `h3`）。
+没有启动任何非 hyper 传输时，这五组序列不出现（没有空标签的假数据）；
+HTTP/3 的准入统计与 `engine_connections_*` 是**同一份**全局 governor，因此两个视图相加不会重复。
 
 
 `route` 使用**匹配到的路由模板**（如 `/api/users/{id}`），未匹配请求统一为 `unmatched`；

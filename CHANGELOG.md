@@ -3,6 +3,206 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [2.9.0] — 2026-11-24
+
+> **English** · **简体中文**
+
+### English
+
+Transport-architecture release: the engine gains a **transport-neutral request/response port** and
+a **listener-level `IHttpTransport` abstraction**, and the new optional `rust-webx-h3` crate serves
+HTTP/3 (QUIC + rustls + h3) through the same router, middleware, binding, error writer, SSE
+lifecycle, admission governor and DI as the hyper HTTP/1.1+2 path. Application code keeps using the
+existing `webx` API; there are **no application-facing breaking changes**.
+
+#### Added
+
+- **Request-level transport port** (`webx_engine::transport`): `TransportRequest` /
+  `TransportResponse`, neutral streaming request bodies (`Empty`/`Buffered`/`Streaming`
+  with data/trailer frames) and response bodies (`None`/`Bytes`/`Stream`);
+  `Server::serve_transport_request` runs the production pipeline for one decoded request,
+  so a multiplexing transport (HTTP/3) needs no connection-level trait.
+- **Listener-level transport port**: `IHttpTransport` + `TransportRuntime` +
+  `Server::run_transport`, neutral `TransportUpgrade` (`IUpgradeSession` contract unchanged),
+  `IHttpTransport::stop_budget()` for the host's bounded stop, and
+  `HostBuilder::use_http_transport(...)` to start/stop a backend with the host.
+- **Global admission for non-hyper transports**: `TransportRuntime::admit_connection()` shares the
+  one `App.MaxConnections` governor and admitted/rejected/active counters with the TCP acceptors;
+  h3 connections count as one connection each.
+- **Per-transport metrics**: `/metrics` exposes
+  `engine_transport_connections_total/active`, `engine_transport_requests_total`,
+  `engine_transport_connections_rejected_total` and
+  `engine_transport_handshake_failures_total` with a `transport="h3"` label.
+- **`Alt-Svc` advertisement**: `HostBuilder::use_h3_alt_svc(udp_port)` (and the generic
+  `use_alt_svc(value)`) advertises the HTTP/3 endpoint on HTTP/1.1+2 responses; nothing is
+  advertised unless configured, and clients fall back to TCP when UDP is unreachable.
+- **`rust-webx-h3` (new optional crate)**: QUIC endpoint + HTTP/3 listener with TLS 1.3-only /
+  ALPN `h3`, mTLS client-CA verification, verified client-certificate SHA-256 injection,
+  SSE/streaming responses, per-connection GOAWAY drain and engine admission. It is opt-in; default
+  builds do not pull quinn/h3.
+- **WebSocket over HTTP/3 (RFC 9220 extended CONNECT)**: the h3 adapter enables extended CONNECT,
+  rewrites `:protocol: websocket` requests into the standard WebSocket upgrade form so the existing
+  host middleware performs handshake/authentication/identity/limits, commits the successful
+  extended CONNECT as HTTP `200`, and bridges the h3 request stream to `IUpgradeSession`.
+  RFC-conformant clients that omit `Sec-WebSocket-Key` are accepted (the adapter supplies the
+  middleware's placeholder; the h1 key/accept validation is not part of extended CONNECT), and a
+  failed extended CONNECT never forwards a normal 2xx body. Real-client e2e covers text and binary
+  echo with and without the key. This required upgrading the optional dependency from upstream
+  `h3 0.0.8` to the pinned `trev-h3 0.3.0` fork.
+- **WebTransport (adapter-level MVP)**: `H3Config::with_webtransport_handler` enables
+  `:protocol: webtransport`, adopts RFC 9220 sessions and hands the application a concrete
+  `WebTransportServerSession` (bidi/unidi streams + datagrams). The handler gets a pre-accept
+  `authorize(&WebTransportRequestInfo)` hook (denial is `403` before any `200`), then
+  `on_session(info, session)`; a real h3 client opens a WebTransport bidirectional stream and
+  receives the echoed payload end to end. WebTransport CONNECT bypasses the engine HTTP
+  middleware pipeline, so the handler authorizes the session itself; a transport-neutral
+  WebTransport port for `webx`/`webx_core` remains future work.
+- **QUIC keep-alive / idle / stream limits**: `H3Config` exposes
+  `with_keep_alive_interval`, `with_max_idle_timeout` and `with_stream_limits` (defaults 15s /
+  60s / 16+16) so long-lived realtime sessions survive quinn's idle timer and the buffered-body
+  worst case stays bounded.
+- **HTTP/3 interop example and evidence**: `crates/transport/h3/examples/interop_server.rs`
+  serves the native `/health` probe and a JSON echo; it was exercised with `quiche-client`,
+  `h3spec v0.1.15` (86 cases: 64 pass / 21 upstream-fork failures / 1 pending baseline) and
+  `h3i 0.7.0` replay (GET/POST 200).
+- **Parity and regression tests**: hyper-vs-neutral external parity matrix, fake/host transport
+  end-to-end tests, and an HTTP/3 e2e suite (GET/POST/404/413, mTLS fingerprint, SSE, GOAWAY
+  in-flight drain, admission rejection, shutdown, WebSocket extended CONNECT, WebTransport bidi
+  stream echo).
+
+#### Changed
+
+- h3/h1/h2 share the same pipeline, error writer, response assembly and shutdown/drain lifecycle;
+  the hyper path keeps its byte-identical output (alloc probe unchanged: tax 10.42/12).
+- QUIC 0-RTT remains **disabled** (`max_early_data_size = 0`) until the idempotency replay story is
+  designed end to end.
+- WebSocket-over-HTTP/3 is delivered via the pinned `trev-h3 0.3.0` fork (upstream h3 0.0.8 cannot
+  express `:protocol: websocket`). **WebTransport is delivered as an adapter-level MVP** on the
+  same fork (`trev-h3-webtransport`): `H3Config::with_webtransport_handler` receives the concrete
+  session with streams/datagrams and the e2e covers a bidi stream echo. A **transport-neutral**
+  WebTransport port for `webx`/`webx_core` remains new-port work beyond 2.9.
+- **Batched idempotency cleanup**: `EfIdempotencyStore::purge_expired` removes expired
+  `webx_idempotency` rows in bounded batches (`PURGE_BATCH_SIZE`, 500 rows per statement) instead
+  of one unbounded `DELETE`, so a large backlog can no longer become a single long write lock on
+  the request hot path. Each batch re-checks `expires_at` inside the `DELETE`, so a row another
+  instance reclaimed between the batch read and the delete keeps its new reservation. Behavior of
+  `purge_expired(now, older_than)` and `IdempotencyHousekeeping` is otherwise unchanged.
+
+#### Fixed
+
+- **Graceful shutdown no longer truncates WebSocket close frames.** hyper resolves the connection
+  future right after the `101` handoff, so a detached upgrade session could outlive the worker
+  runtime that owned it and lose its `1001` close frame. `AdmissionStats` now counts live upgrade
+  sessions and each worker waits (within the drain budget) for that count to reach zero before its
+  runtime is dropped. Covered by the repeated `close_semantics_test` run.
+
+#### Breaking
+
+- **None for application code.** `webx`, `webx_core`, `webx_host` and existing engine entry points
+  keep their signatures and behavior. New transport APIs are additive; engine additions are
+  documented above.
+
+#### Notes
+
+- MSRV stays **1.95**; `rust-webx-h3` pins `quinn = 0.11.12`, `trev-h3 = 0.3.0`,
+  `trev-h3-quinn = 0.3.0` and `trev-h3-webtransport = 0.3.0` (the MIT h3 fork is isolated
+  behind `H3Config`/`H3Transport`/`IWebTransportHandler`; exact pins keep fork changes contained).
+- Cross-repo pairing: rust-ef 2.8.0 first, then rust-webx 2.9.0 (unchanged ORM boundary).
+- **Repository layout:** `crates/` is now the published surface only. The non-published
+  harnesses moved to `testing/` (`alloc-probe`, `contract-tests`, `upgrade-smoke`), and the
+  crate-layout gate rejects a `publish = false` package under `crates/`. No published API
+  changed; only in-repo paths (CI commands, docs and the `contract-tests` dev-dependency path).
+- **Composition root:** the host keeps exactly two assembly slots — `register` (DI object graph)
+  and `configure` (`AppOptions`) — and the 2.9 transport/`Alt-Svc` helpers are sugar over the
+  same builder state. `crates/host/tests/composition_slots_test.rs` pins the two-slot contract.
+
+### 简体中文
+
+传输架构版本：engine 新增**传输中立的请求/响应端口**与**监听级 `IHttpTransport` 抽象**；新增
+可选 crate `rust-webx-h3`，通过同一 router、middleware、绑定、错误写入、SSE 生命周期、
+准入 governor 与 DI 提供 HTTP/3（QUIC + rustls + h3）服务。应用代码继续使用原 `webx` API，
+**对应用代码无破坏性变更**。
+
+#### 新增
+
+- 请求级传输端口：`TransportRequest`/`TransportResponse`，中立流式请求体
+  （`Empty`/`Buffered`/`Streaming`，含 data/trailer 帧）与响应体（`None`/`Bytes`/`Stream`）；
+  `Server::serve_transport_request` 复用生产 pipeline（多路复用传输按请求提交，无需连接级 trait）。
+- 监听级传输端口：`IHttpTransport`/`TransportRuntime`/`Server::run_transport`、中立
+  `TransportUpgrade`（`IUpgradeSession` 契约不变）、`IHttpTransport::stop_budget()` 供 Host
+  有界停机、`HostBuilder::use_http_transport`。
+- 非 hyper 传输共享全局准入：`TransportRuntime::admit_connection()` 与 TCP 共用
+  `App.MaxConnections` governor 和 admitted/rejected/active 计数；一条 QUIC 连接占一个名额。
+- per-transport 指标：`/metrics` 输出 `engine_transport_*{transport="h3"}` 系列。
+- `Alt-Svc` 通告：`HostBuilder::use_h3_alt_svc(udp_port)`（以及通用 `use_alt_svc(value)`）
+  在 HTTP/1.1+2 响应上显式通告 HTTP/3 端点；未显式配置时不发送，UDP 不可达时客户端回退 TCP。
+- 新可选 crate `rust-webx-h3`：TLS1.3-only/ALPN h3、mTLS、客户端证书 SHA-256 注入、
+  SSE/流式响应、每连接 GOAWAY 排空、engine 准入。默认构建不引入 quinn/h3 依赖。
+- **WebSocket over HTTP/3（RFC 9220 extended CONNECT）**：h3 adapter 开启 extended CONNECT，
+  把 `:protocol: websocket` 改写为标准 WebSocket upgrade，复用 host 的 handshake/鉴权/身份/
+  限制中间件；成功响应按 extended CONNECT 要求返回 `200`，并把 h3 request stream 桥接到
+  `IUpgradeSession`。RFC 合规客户端可省略 `Sec-WebSocket-Key`（adapter 为现有中间件补占位，
+  extended CONNECT 不做 h1 的 key/accept 校验）；失败的 extended CONNECT 不会转发正常 2xx
+  body。真实客户端 e2e 覆盖有/无 key 的文本/二进制回显。为此依赖从上游 `h3 0.0.8` 升级到
+  精确钉版的 `trev-h3 0.3.0` fork。
+- **WebTransport（adapter-level MVP）**：`H3Config::with_webtransport_handler` 启用
+  `:protocol: webtransport`，接受 RFC 9220 session 并向应用暴露具体
+  `WebTransportServerSession`（bidi/unidi streams + datagrams）；handler 先经过
+  `authorize(&WebTransportRequestInfo)` 预授权（拒绝在 200 之前返回 403），再进入
+  `on_session(info, session)`。真实 h3 client 打开 WebTransport bidi stream 并收到回显 payload
+  的 e2e 已覆盖。WebTransport CONNECT 不经过 engine HTTP middleware，handler 需自行认证授权。
+  transport-neutral 的 WebTransport 端口仍是后续工作。
+- **QUIC keep-alive / idle / stream limits**：`H3Config` 提供
+  `with_keep_alive_interval`、`with_max_idle_timeout`、`with_stream_limits`（默认 15s/60s/16+16），
+  避免长连接撞 quinn idle timer，并限制 buffered-body 最坏内存。
+- **HTTP/3 互操作示例与证据**：`crates/transport/h3/examples/interop_server.rs` 提供
+  native `/health` 与 JSON echo；已用 `quiche-client`、`h3spec v0.1.15`（86 cases：64 pass /
+  21 个上游 fork 失败 / 1 pending 基线）和 `h3i 0.7.0` replay（GET/POST 200）验证。
+- 测试：hyper/中立端口 parity 矩阵、fake/host e2e，以及 HTTP/3 e2e
+  （GET/POST/404/413、mTLS 指纹、SSE、GOAWAY 在途请求、准入拒绝、停机、WebSocket 回显、
+  WebTransport bidi stream echo）。
+
+#### 变更
+
+- h3/h1/h2 共用 pipeline、错误写入、响应组装与停机排空；hyper 路径保持字节一致
+  （alloc 税不变：10.42/12）。
+- QUIC 0-RTT 保持关闭（`max_early_data_size = 0`），待幂等重放设计完成后再评估。
+- WebSocket over HTTP/3 通过钉版 `trev-h3 0.3.0` fork 交付（上游 h3 0.0.8 无法表达
+  `:protocol: websocket`）。WebTransport 以同一 fork 的 `trev-h3-webtransport` 交付
+  **adapter-level MVP**（session + streams/datagrams，bidi stream echo e2e）；面向
+  `webx`/`webx_core` 的 **transport-neutral** WebTransport 端口仍属后续新端口设计。
+- 幂等清理分批：`EfIdempotencyStore::purge_expired` 改为按 `PURGE_BATCH_SIZE`（500 行/语句）
+  分批删除过期 `webx_idempotency` 行，不再发一条无界 `DELETE`，积压再大也不会在请求热路径上
+  形成一条长时间写锁。每批的 `DELETE` 内重复 `expires_at` 条件，因此另一实例在「读候选」与
+  「删除」之间重新 claim 的行会保留新预约。`purge_expired(now, older_than)` 与
+  `IdempotencyHousekeeping` 的对外行为不变。
+
+#### 修复
+
+- **优雅停机不再截断 WebSocket 关闭帧。** hyper 在 `101` 交棒后立刻结束连接 future，分离的升级
+  会话可能比拥有它的 worker runtime 活得更久，从而丢失 `1001` 关闭帧。`AdmissionStats` 现在统计
+  存活的升级会话，worker 在丢弃 runtime 之前、在排空预算内等待该计数归零。由反复运行的
+  `close_semantics_test` 覆盖。
+
+#### 破坏性变更
+
+- **应用代码无破坏性变更。** `webx`/`webx_core`/`webx_host` 与既有 engine 入口签名/行为不变；
+  新传输 API 均为加性。
+
+#### 备注
+
+- MSRV 保持 **1.95**；`rust-webx-h3` 精确钉 `quinn = 0.11.12`、`trev-h3 = 0.3.0`、
+  `trev-h3-quinn = 0.3.0`、`trev-h3-webtransport = 0.3.0`（MIT h3 fork 隔离在
+  `H3Config`/`H3Transport`/`IWebTransportHandler` 后面，精确钉版限制 fork 变更的影响面）。
+- 跨仓配对：先 rust-ef 2.8.0，后 rust-webx 2.9.0（ORM 边界不变）。
+- **仓库布局：** `crates/` 现在只放可发布 crate。非发布测试工具迁移到 `testing/`
+  （`alloc-probe`、`contract-tests`、`upgrade-smoke`），布局门禁会拒绝 `crates/` 下的
+  `publish = false` 包。公开 API 无变化，仅仓库内路径（CI 命令、文档与 `contract-tests`
+  开发依赖路径）调整。
+- **组合根：** Host 只有两个装配槽——`register`（DI 对象图）与 `configure`（`AppOptions`）；
+  2.9 的传输/`Alt-Svc` helper 是同一 builder 状态的糖。
+  `crates/host/tests/composition_slots_test.rs` 锁定两槽契约。
+
 ## [2.8.0] — 2026-11-23
 
 > **English** · **简体中文**

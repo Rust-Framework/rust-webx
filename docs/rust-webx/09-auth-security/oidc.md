@@ -70,7 +70,7 @@ let issued = token_issuer.issue(session.to_token_claims()).await?;
 校验项（任一失败 → 401）：
 
 - `alg` 在 `OidcConfig::algorithms` 且被 provider 声明；
-- `kid` 经 JWKS 解析（缓存/单飞/SSRF 守卫，来自 M2-01）；
+- `kid` 经 JWKS 解析（缓存/单飞/SSRF 守卫）；
 - `iss` 精确等于 discovery issuer；`aud` 包含 client_id；
 - `exp`/`nbf` 在 leeway 内；`iat` 不超前；
 - `nonce` 与发起时一致；多 audience 时 `azp == client_id`；

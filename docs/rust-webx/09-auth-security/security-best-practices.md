@@ -126,7 +126,7 @@ if !setup.consume(candidate) {
 - **浏览器**：Cookie 用 `HttpOnly`/`Secure`/`SameSite`；Cookie scheme 必须配 `use_csrf`，否则启动失败。
 - **Basic**：只在 TLS 后使用；校验器用 `constant_time_eq`，未知用户返回 `None`。
 - **可观测**：`use_meter` 接 `auth.requests`/`auth.duration`；启动日志确认 schemes/CSRF/session store。
-- **令牌寿命**：access token 短寿命（分钟级）；长会话走 refresh rotation（M2）而不是 24 小时的 access token。
+- **令牌寿命**：access token 短寿命（分钟级）；长会话走 refresh rotation 而不是 24 小时的 access token。
 
 ## 授权安全
 

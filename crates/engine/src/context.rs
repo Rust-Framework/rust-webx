@@ -42,6 +42,7 @@ use webx_core::http::{
 
 use crate::body::{self, BodyLimits};
 use crate::response::{self, EndpointResult, RespBody, ResponseBodyState, ResponseParts};
+use crate::transport::{TransportBodyFrame, TransportRequestBody, TransportRequestBodyStream};
 
 /// Concrete implementation of `IHttpContext` for one engine request.
 pub struct EngineContext {
@@ -62,14 +63,21 @@ pub struct EngineContext {
     client_info: Option<webx_core::client_info::ClientInfo>,
     /// Pending protocol upgrade (WebSocket), when the client asked for one.
     ///
-    /// The hyper `OnUpgrade` is resolved after the `101` response is committed;
-    /// [`EngineContext::finalize`] spawns the session runner.
-    upgrade: Option<hyper::upgrade::OnUpgrade>,
+    /// Hyper `OnUpgrade` values are wrapped into this neutral future by
+    /// [`EngineContext::with_upgrade`]; a non-hyper transport supplies it on
+    /// [`crate::transport::TransportRequest::upgrade`]. [`EngineContext::finalize`]
+    /// spawns the session runner once the response is committed.
+    upgrade: Option<crate::transport::TransportUpgrade>,
     /// Upgraded session installed by middleware/handler (`set_upgrade_session`).
     upgrade_session: Option<(
         Arc<dyn webx_core::realtime::IUpgradeSession>,
         webx_core::realtime::ConnectionMeta,
     )>,
+    /// Detached upgrade-session counter owner (engine `Shared`).
+    ///
+    /// Workers use it during graceful drain so a spawned session task can flush
+    /// its close frame before the worker runtime is dropped.
+    upgrade_shared: Option<Arc<crate::shared::Shared>>,
 }
 
 impl EngineContext {
@@ -85,13 +93,57 @@ impl EngineContext {
         dispatch: Arc<DispatchRuntime>,
     ) -> Self {
         let (parts, body) = req.into_parts();
-        let mut context = Self::from_request(EngineRequest::new(
-            parts,
-            BodyState::Pending(Some(body)),
-            limits,
+        let request = crate::hyper_compat::request(parts, body, peer);
+        Self::from_transport(request, limits, Some(dispatch))
+    }
+
+    /// Create a context from a neutral transport request.
+    ///
+    /// This is the production constructor for non-hyper transports.
+    /// The hyper path funnels through it as well, via
+    /// [`EngineContext::new`], so both transports share one body state machine.
+    ///
+    /// The verified client-certificate fingerprint carried by the transport is
+    /// applied here (strip any client-supplied header, then write the verified
+    /// value), so the "TLS terminator is the only writer" contract holds for any
+    /// transport — not just for the engine's own dispatch entry point.
+    pub fn from_transport(
+        request: crate::transport::TransportRequest,
+        limits: Arc<BodyLimits>,
+        dispatch: Option<Arc<DispatchRuntime>>,
+    ) -> Self {
+        let crate::transport::TransportRequest {
+            mut parts,
+            body,
             peer,
-        ));
-        context.dispatch_runtime = Some(dispatch);
+            upgrade,
+            client_cert_fingerprint,
+        } = request;
+        // The TLS terminator is the only source of truth for the client
+        // certificate: never let a plain-HTTP or upstream request spoof it.
+        parts
+            .headers
+            .remove(webx_core::http::CLIENT_CERT_FINGERPRINT_HEADER);
+        if let Some(fingerprint) = client_cert_fingerprint.as_deref() {
+            if let Ok(value) = http::header::HeaderValue::from_str(fingerprint) {
+                parts.headers.insert(
+                    http::header::HeaderName::from_static(
+                        webx_core::http::CLIENT_CERT_FINGERPRINT_HEADER,
+                    ),
+                    value,
+                );
+            }
+        }
+        let body = match body {
+            TransportRequestBody::Empty => BodyState::Empty,
+            TransportRequestBody::Buffered(bytes) => BodyState::Buffered(bytes),
+            TransportRequestBody::Streaming { frames, exact_len } => {
+                BodyState::Pending(Some(PendingBody { frames, exact_len }))
+            }
+        };
+        let mut context = Self::from_request(EngineRequest::new(parts, body, limits, peer));
+        context.dispatch_runtime = dispatch;
+        context.upgrade = upgrade;
         context
     }
 
@@ -130,13 +182,19 @@ impl EngineContext {
             client_info: None,
             upgrade: None,
             upgrade_session: None,
+            upgrade_shared: None,
         }
     }
 
     /// Attach the connection's pending protocol upgrade.
     pub fn with_upgrade(mut self, upgrade: hyper::upgrade::OnUpgrade) -> Self {
-        self.upgrade = Some(upgrade);
+        self.upgrade = Some(crate::hyper_compat::upgrade(upgrade));
         self
+    }
+
+    /// Track detached upgrade-session tasks for graceful drain.
+    pub(crate) fn track_upgrade_sessions(&mut self, shared: Arc<crate::shared::Shared>) {
+        self.upgrade_shared = Some(shared);
     }
 
     /// Record the route matched by the router.
@@ -213,12 +271,23 @@ impl EngineContext {
             resp,
             upgrade,
             upgrade_session,
+            upgrade_shared,
             trace_id,
             ..
         } = self;
-        spawn_upgrade_session(upgrade, upgrade_session);
+        spawn_upgrade_session(upgrade, upgrade_session, upgrade_shared);
         let response = resp.finalize(&mut req).await;
         observe_sse_response(response, trace_id, req.path())
+    }
+
+    /// Finish the request and produce a neutral transport response.
+    ///
+    /// Reuses [`Self::finalize`] (security headers, body suppression,
+    /// file/range assembly, SSE lifecycle observation) and only changes the
+    /// response representation, so a non-hyper transport sees exactly the
+    /// bytes the hyper path would have written.
+    pub async fn finalize_transport(self) -> crate::transport::TransportResponse {
+        crate::hyper_compat::response(self.finalize().await)
     }
 }
 
@@ -335,23 +404,25 @@ impl Drop for SseLifecycleBody {
 /// connection remains counted by admission, metrics and graceful drain while
 /// the session runs.
 fn spawn_upgrade_session(
-    upgrade: Option<hyper::upgrade::OnUpgrade>,
+    upgrade: Option<crate::transport::TransportUpgrade>,
     session: Option<(
         Arc<dyn webx_core::realtime::IUpgradeSession>,
         webx_core::realtime::ConnectionMeta,
     )>,
+    tracker: Option<Arc<crate::shared::Shared>>,
 ) {
-    let (Some(on_upgrade), Some((session, meta))) = (upgrade, session) else {
+    let (Some(upgrade), Some((session, meta))) = (upgrade, session) else {
         return;
     };
+    // Count the session on every exit path (normal return, error, task abort).
+    let guard = tracker.map(|shared| shared.admission.track_upgrade_session());
     tokio::spawn(async move {
+        let _guard = guard;
         let transport_kind = meta.transport;
         let connection_id = meta.id;
         let trace_id = meta.trace_id.clone();
-        match on_upgrade.await {
-            Ok(upgraded) => {
-                let transport: webx_core::realtime::UpgradedTransport =
-                    Box::new(hyper_util::rt::TokioIo::new(upgraded));
+        match upgrade.io.await {
+            Ok(transport) => {
                 let started = Instant::now();
                 tracing::info!(
                     target: "webx.connection",
@@ -471,13 +542,21 @@ impl IHttpContext for EngineContext {
 
 /// State of the request body.
 enum BodyState {
+    /// Known to carry no body; reading it yields zero chunks, not one empty one.
+    Empty,
     /// Still streaming from the connection. `None` means it was already taken.
-    Pending(Option<Incoming>),
+    Pending(Option<PendingBody>),
     /// Fully buffered, replayable. `Bytes` keeps a clone cheap instead of
     /// copying the whole body again.
     Buffered(Bytes),
     /// Parsed as a multipart form.
     Form(Arc<MultipartForm>),
+}
+
+/// A live neutral request body plus its declared length.
+struct PendingBody {
+    frames: TransportRequestBodyStream,
+    exact_len: Option<u64>,
 }
 
 /// Concrete implementation of `IHttpRequest`.
@@ -655,6 +734,7 @@ impl IHttpRequest for EngineRequest {
         let outcome = async {
             self.ensure_declared_within(self.body_limit as u64)?;
             match &self.body {
+                BodyState::Empty => return Ok(Bytes::new()),
                 BodyState::Buffered(bytes) => {
                     if bytes.len() > self.body_limit {
                         return Err(Error::PayloadTooLarge(format!(
@@ -672,7 +752,7 @@ impl IHttpRequest for EngineRequest {
                 BodyState::Pending(_) => {}
             }
 
-            let incoming = match &mut self.body {
+            let pending = match &mut self.body {
                 BodyState::Pending(slot) => slot.take(),
                 _ => {
                     return Err(Error::State(
@@ -680,13 +760,13 @@ impl IHttpRequest for EngineRequest {
                     ))
                 }
             };
-            let Some(incoming) = incoming else {
+            let Some(pending) = pending else {
                 return Err(Error::State(
                     "request body has already been consumed".to_string(),
                 ));
             };
 
-            let bytes = body::read_body(incoming, self.body_limit).await?;
+            let bytes = body::read_body(pending.frames, pending.exact_len, self.body_limit).await?;
             self.body = BodyState::Buffered(bytes.clone());
             Ok(bytes)
         }
@@ -701,6 +781,10 @@ impl IHttpRequest for EngineRequest {
     async fn body_stream(&mut self) -> Result<RequestBodyStream> {
         self.ensure_declared_within(self.body_limit as u64)?;
         match &self.body {
+            BodyState::Empty => {
+                let stream: RequestBodyStream = Box::pin(futures_util::stream::empty());
+                return Ok(stream);
+            }
             BodyState::Form(_) => {
                 return Err(Error::State(
                     "request body was already read as multipart/form-data".to_string(),
@@ -715,7 +799,7 @@ impl IHttpRequest for EngineRequest {
             BodyState::Pending(_) => {}
         }
 
-        let incoming = match &mut self.body {
+        let pending = match &mut self.body {
             BodyState::Pending(slot) => slot.take(),
             _ => {
                 return Err(Error::State(
@@ -723,13 +807,13 @@ impl IHttpRequest for EngineRequest {
                 ))
             }
         };
-        let Some(incoming) = incoming else {
+        let Some(pending) = pending else {
             return Err(Error::State(
                 "request body has already been consumed".to_string(),
             ));
         };
 
-        Ok(body::stream_body(incoming, self.body_limit))
+        Ok(body::stream_body(pending.frames, self.body_limit))
     }
 
     async fn body_text(&mut self) -> Result<String> {
@@ -750,11 +834,6 @@ impl IHttpRequest for EngineRequest {
             if let BodyState::Form(form) = &self.body {
                 return Ok(Arc::clone(form));
             }
-            if let BodyState::Buffered(_) = &self.body {
-                return Err(Error::UnsupportedMediaType(
-                    "request body was already read as a non-multipart body".to_string(),
-                ));
-            }
 
             let raw_content_type = self
                 .parts
@@ -773,21 +852,36 @@ impl IHttpRequest for EngineRequest {
                 )
             })?;
 
-            let incoming = match &mut self.body {
-                BodyState::Pending(slot) => slot.take(),
+            let frames: TransportRequestBodyStream = match &mut self.body {
+                BodyState::Empty => Box::pin(futures_util::stream::empty()),
+                // A body may already be buffered when it reaches this point: a
+                // neutral transport (HTTP/3, in-process backends) delivers whole
+                // bodies, and a middleware may have read it first. The bytes are
+                // still a valid multipart payload, so replay them as one frame
+                // instead of failing the upload with `415`.
+                BodyState::Buffered(bytes) => {
+                    let frame: std::result::Result<
+                        TransportBodyFrame,
+                        crate::transport::TransportBodyError,
+                    > = Ok(TransportBodyFrame::Data(bytes.clone()));
+                    Box::pin(futures_util::stream::iter(vec![frame]))
+                }
+                BodyState::Pending(slot) => {
+                    let Some(pending) = slot.take() else {
+                        return Err(Error::State(
+                            "request body has already been consumed".to_string(),
+                        ));
+                    };
+                    pending.frames
+                }
                 _ => {
                     return Err(Error::State(
                         "request body has already been consumed".to_string(),
                     ))
                 }
             };
-            let Some(incoming) = incoming else {
-                return Err(Error::State(
-                    "request body has already been consumed".to_string(),
-                ));
-            };
 
-            let form = Arc::new(body::parse_multipart(incoming, &boundary, &self.limits).await?);
+            let form = Arc::new(body::parse_multipart(frames, &boundary, &self.limits).await?);
             self.body = BodyState::Form(Arc::clone(&form));
             Ok(form)
         }
@@ -1219,5 +1313,46 @@ mod tests {
             .await
             .expect_err("JSON is not multipart");
         assert!(matches!(error, Error::UnsupportedMediaType(_)));
+    }
+
+    #[tokio::test]
+    async fn multipart_parses_an_already_buffered_body() {
+        // Neutral transports (HTTP/3, in-process backends) hand the engine a
+        // whole body, so a multipart upload must bind from the buffered state
+        // instead of failing with `415`.
+        let mut ctx = context(
+            "POST",
+            "/upload",
+            &[("content-type", "multipart/form-data; boundary=X-BOUNDARY")],
+            b"--X-BOUNDARY\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\nhello\r\n--X-BOUNDARY--\r\n",
+        );
+        let form = ctx
+            .request_mut()
+            .multipart()
+            .await
+            .expect("a buffered multipart body parses");
+        assert_eq!(form.text("title"), Some("hello"));
+    }
+
+    #[test]
+    fn from_transport_applies_the_verified_client_cert_fingerprint() {
+        // A client-supplied header must never survive; only the value the
+        // transport's TLS terminator verified is written.
+        let request = http::Request::builder()
+            .method("GET")
+            .uri("/")
+            .header(webx_core::http::CLIENT_CERT_FINGERPRINT_HEADER, "spoofed")
+            .body(())
+            .expect("test request builds");
+        let (parts, ()) = request.into_parts();
+        let transport_request = crate::transport::TransportRequest::new(parts, Bytes::new(), None)
+            .with_client_cert_fingerprint("verified");
+        let ctx =
+            EngineContext::from_transport(transport_request, Arc::new(BodyLimits::default()), None);
+        assert_eq!(
+            ctx.request()
+                .header(webx_core::http::CLIENT_CERT_FINGERPRINT_HEADER),
+            Some("verified")
+        );
     }
 }

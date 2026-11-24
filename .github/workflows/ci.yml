@@ -265,16 +265,19 @@ jobs:
           RUST_EF_MYSQL_URL: mysql://root:test@127.0.0.1:3306/rust_webx_test
         run: cargo test -p rust-webx-ef --features postgres,mysql --locked --tests -- --ignored
 
+  # N-2 source-compatibility gate: the same smoke app is compiled against the
+  # previous-but-one published release (for 2.9.0 that is rust-webx 2.7.0) and
+  # against the current workspace path. See docs/design/compatibility.md.
   upgrade:
-    name: Upgrade smoke (N-2)
+    name: Upgrade smoke (N-2 = 2.7.0)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Build against rust-webx 2.0.0
-        run: cargo build --manifest-path compat/upgrade-smoke/stable/Cargo.toml
+      - name: Build against rust-webx 2.7.0 (N-2)
+        run: cargo build --manifest-path testing/upgrade-smoke/stable/Cargo.toml
       - name: Build the same source against the current workspace
-        run: cargo build --manifest-path compat/upgrade-smoke/current/Cargo.toml
+        run: cargo build --manifest-path testing/upgrade-smoke/current/Cargo.toml
 
   build:
     name: Build (release)
@@ -330,7 +333,7 @@ jobs:
           fi
 
   # Optional cross-repo pairing gate (release order: rust-ef 2.8.0 first, then
-  # rust-webx 2.8.0). Hosted runners cannot see a developer's local checkout, so
+  # rust-webx 2.9.0). Hosted runners cannot see a developer's local checkout, so
   # this job is inert unless explicitly configured:
   #   * repository variable RUST_EF_PATH  — an existing rust-ef checkout on a
   #     self-hosted runner;

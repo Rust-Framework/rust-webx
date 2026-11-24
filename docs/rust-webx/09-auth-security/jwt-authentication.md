@@ -178,6 +178,6 @@ Host::builder()
 
 - 未匹配路径保持完整链；匹配路径只尝试允许的 scheme（按路径段边界匹配，`/mtls` 不会捕获 `/mtlsx`）；
 - 没有允许凭证时按匿名继续，受保护端点仍由 `#[authorize]`/身份绑定返回 401；
-- 用于 `per-route scheme`（M3-04），不要用它替代授权。
+- 用于 `per-route scheme`，不要用它替代授权。
 
 下一节：[基于资源的授权](resource-authorization.md)

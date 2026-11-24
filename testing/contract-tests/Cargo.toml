@@ -12,7 +12,7 @@ path = "src/lib.rs"
 [dependencies]
 async-trait.workspace = true
 rust-dix.workspace = true
-rust-webx-core = { path = "../core" }
+rust-webx-core = { path = "../../crates/core" }
 tokio.workspace = true
 
 [dev-dependencies]

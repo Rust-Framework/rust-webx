@@ -44,7 +44,7 @@ host.shutdown();                                  // 停止 hosted services 并 
 | `chaos()` | `fail_next(n)` / `delay_next(d)` / `reset()` / `dispatched()` |
 | `shutdown(self)` | 同 `Host::shutdown` |
 
-## Wire 仿真（`connect_wire`，2.8.0）
+## Wire 仿真（`connect_wire`）
 
 `dispatch` 覆盖 Handler/DI/Mediator 层，但无法表达 keep-alive、HTTP/2、SSE 帧字节、
 畸形请求这些**协议字节级**行为。`connect_wire` 用 `tokio::io::duplex` 在进程内打开一对
@@ -73,6 +73,21 @@ conn.close().await; // 等待 engine 连接任务结束
 
 参考实现：`crates/webx/tests/wire_harness_test.rs`；engine 入口
 `crates/engine/src/server.rs` 的 `Server::serve_stream`。
+
+## 传输中立端口（`serve_transport` / `run_http_transport`）
+
+`connect_wire` 换的是 hyper 的**字节流来源**；非 hyper 传输（HTTP/3 等）需要换**帧协议**，
+因此 TestHost 直接暴露 engine 的传输中立入口，不 bind 端口、不启动真实 QUIC：
+
+| 方法 | 用途 |
+|---|---|
+| `serve_transport_request(TransportRequest) -> TransportResponse` | 经真实 pipeline 分发一个中立请求：生产 router/中间件/绑定/错误写入/panic 边界全部参与 |
+| `run_http_transport(Arc<dyn IHttpTransport>)` | 以监听级后端驱动 engine；后端通过 `TransportRuntime::server()` 逐请求提交（fake listener e2e） |
+| `engine_handle()` | `TestHost` 没有 Host 的 shutdown 桥接，用它直接触发 engine 停机以测试排空 |
+
+参考实现：`crates/webx/tests/transport_port_test.rs`（请求级 + 监听级 fake）与
+`crates/webx/tests/transport_parity_test.rs`（hyper 与中立端口外部可见行为一致）。
+真实 HTTP/3 端到端在 `crates/transport/h3/tests/h3_e2e.rs`。
 
 
 ## 时钟端口（`webx::IClock`）
@@ -105,4 +120,4 @@ handler/connection 上下文；升级握手与帧行为用现有 WS 端到端测
 
 `crates/webx/tests/test_host_test.rs`（5 项）：零端口分发、身份上下文、可控时钟
 （前进 90s 无漂移）、Scoped 每 dispatch 新鲜、chaos 注入 503/延迟且 handler 不被执行。
-实现：`crates/host/src/testhost.rs`、`crates/core/src/time.rs`。
+实现：`crates/host/src/testing.rs`、`crates/core/src/time.rs`。

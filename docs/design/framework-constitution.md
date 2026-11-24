@@ -2,7 +2,7 @@
 
 > 面向维护者、核心贡献者与架构评审。本文回答**一个决策凭什么合格**，不记录版本沿革、
 > 历史缺陷或阶段计划；当前 API 以开发者手册与 rustdoc 为准，发布内容以 `CHANGELOG.md` 为准。
-> 基线：rust-webx 2.5.0。
+> 基线：rust-webx 2.9.0。
 
 ---
 
@@ -60,10 +60,12 @@
 | 执行引擎 | 每 worker current-thread runtime + 全局准入；阻塞代码必须出 runtime | 准入/排空/过载测试 |
 | 错误模型 | 统一 `Error` + RFC 9457 `problem+json`（`code`/`retryable`/`traceId`）；`code` 必须登记进 `ERROR_CODES` | 错误映射/注册表测试 |
 | 长连接 | 一个容器两种生命周期：HTTP 请求 + WebSocket 连接；SSE 仍是一等响应；关闭原因统一为 `CloseReason` | WS/SSE 端到端与关闭语义测试 |
+| 传输后端 | engine 定义监听级 `IHttpTransport` 与每请求入口 `serve_transport_request`；非 hyper 后端（HTTP/3）是独立可选 crate，默认构建不链接 | [transport-port.md](transport-port.md)、发布顺序/布局门禁 |
 | 观测 | 框架自带 RED 指标（按路由标签计数/直方图/inflight/连接 gauge，默认 noop）；`webx.http` DEBUG span 树与 `webx.connection` 事件是兼容契约，默认路径零分配 | `/metrics` 契约测试、`observability_test`、alloc 门禁 |
 | 中间件 | 只有一种 `Next` 语义；旧式 `invoke/after` 由默认桥接保持兼容 | `middleware-next.md` |
 | 参考实现 | docbit/dmbit/imbit 必须使用框架端口，禁止手写 JWT/口令哈希/错误映射 | CI 反模式检查 |
-| 发布 | 21 个 `rust-webx*` crate 精确钉版本、依赖序发布、可重入 | `scripts/check-publish-order.py` |
+| 组合根 | 只有两个槽：`register`（DI 服务/端口，对象图唯一来源）与 `configure`（`AppOptions`/横切）；`use_*`/`add_*` 是写入同一 builder 状态的糖 | `composition_slots_test`；新增 builder 方法必须在 rustdoc 标注所属槽 |
+| 发布 | 32 个 `rust-webx*` crate 精确钉版本、依赖序发布、可重入 | `scripts/check-publish-order.py` |
 
 ---
 
@@ -95,7 +97,7 @@
 | 测试 | `ci.yml` test | `cargo test --workspace --no-fail-fast`（三平台） |
 | MSRV | `ci.yml` msrv | `cargo +1.95.0 check --workspace --locked` |
 | 安全 | `ci.yml` audit | `cargo audit`（0 漏洞） |
-| 兼容 | `ci.yml` semver/upgrade | 公开 API 对 `v2.7.0`；N-2 源码同编译 |
+| 兼容 | `ci.yml` semver/upgrade | 公开 API 对 `v2.7.0`；N-2（rust-webx 2.7.0）源码同编译 |
 | 分配 | `ci.yml` alloc | `alloc-probe compare 500 12` |
 | 稳定性 | `stability.yml` | soak / chaos / wire p99 / broker-integration / conformance（HTTP 互操作矩阵） |
 | Fuzz | `fuzz.yml` | 独立 `fuzz/` workspace 的 nightly cargo-fuzz（6 个解析 target）+ 稳定工具链不变量测试 |

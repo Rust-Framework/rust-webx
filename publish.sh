@@ -42,6 +42,7 @@
 #  29. rust-webx-pay-adyen
 #  30. rust-webx-pay-square
 #  31. rust-webx-pay-ef   (durable webhook inbox; depends on rust-webx-pay + rust-ef)
+#  32. rust-webx-h3      (optional HTTP/3 transport; depends on engine/core; dev-dep on webx)
 # 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 # `pipefail` is required: the gate commands below pipe into `tail`, and without
@@ -110,6 +111,9 @@ internal_deps() {
         rust-webx-redis|rust-webx-nats|rust-webx-rabbitmq|rust-webx-kafka) echo "rust-webx-core rust-webx-host" ;;
         rust-webx-pay) echo "rust-webx-core rust-webx-host rust-webx-client" ;;
         rust-webx-pay-stripe|rust-webx-pay-alipay|rust-webx-pay-wechatpay|rust-webx-pay-paypal|rust-webx-pay-adyen|rust-webx-pay-square|rust-webx-pay-ef) echo "rust-webx-pay" ;;
+        # `rust-webx` is a dev-dependency (the e2e tests drive a real host); it is
+        # published before this crate, so the dry run can resolve it.
+        rust-webx-h3) echo "rust-webx-core rust-webx-engine rust-webx" ;;
         rust-webx) echo "rust-webx-core rust-webx-engine rust-webx-host rust-webx-client rust-webx-macros rust-webx-spa rust-webx-openapi" ;;
     esac
 }
@@ -237,6 +241,7 @@ publish_crate "rust-webx-pay-paypal"
 publish_crate "rust-webx-pay-adyen"
 publish_crate "rust-webx-pay-square"
 publish_crate "rust-webx-pay-ef"
+publish_crate "rust-webx-h3"
 
 echo ""
 echo "鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹?

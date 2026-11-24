@@ -1,0 +1,46 @@
+[package]
+name = "rust-webx-h3"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+documentation.workspace = true
+readme = "../../../README.md"
+description = "Optional HTTP/3 listener transport for rust-webx: QUIC + rustls + h3 serving the engine's neutral request port, with WebSocket and WebTransport support"
+keywords = ["web", "http3", "quic", "h3", "rustls"]
+categories = ["web-programming", "network-programming", "asynchronous"]
+
+[lib]
+name = "webx_h3"
+
+[dependencies]
+rust-webx-core.workspace = true
+rust-webx-engine.workspace = true
+async-trait.workspace = true
+bytes.workspace = true
+futures-util.workspace = true
+h3 = { package = "trev-h3", version = "=0.3.0" }
+h3-quinn = { package = "trev-h3-quinn", version = "=0.3.0", features = ["datagram"] }
+h3-webtransport = { package = "trev-h3-webtransport", version = "=0.3.0" }
+http.workspace = true
+quinn = { version = "=0.11.12", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
+rustls.workspace = true
+rustls-pemfile.workspace = true
+sha2.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "net", "time", "sync", "macros"] }
+tracing.workspace = true
+
+[dev-dependencies]
+rust-webx = { workspace = true, features = ["testing"] }
+rcgen = "0.13"
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["full"] }
+tokio-tungstenite.workspace = true
+
+[lints]
+workspace = true

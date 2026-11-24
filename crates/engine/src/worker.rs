@@ -572,6 +572,19 @@ async fn drain_connections(
                 }
             }
         }
+        // HTTP protocol upgrades detach the session task from the connection
+        // future after the handoff; wait for those sessions so a graceful-close
+        // frame can flush before the worker runtime is dropped. An abandoned run
+        // (`immediate_watch`) must not wait out the whole drain budget for them.
+        let mut upgrades = shared.admission.subscribe_upgrade_sessions();
+        if *upgrades.borrow() > 0 {
+            tokio::select! {
+                _ = upgrades.wait_for(|count| *count == 0) => {}
+                _ = immediate.wait_for(|value| *value) => {
+                    tracing::warn!(label, "engine run was abandoned; dropping upgrade sessions");
+                }
+            }
+        }
     };
 
     match tokio::time::timeout(budget, drain).await {

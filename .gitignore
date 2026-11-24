@@ -47,8 +47,8 @@ docs/rust-gpui-rml/
 .env.*
 !.env.example
 
-# Nested standalone workspaces (compat/upgrade-smoke) own their own target/
-compat/**/target/
+# Nested standalone workspaces (testing/*) own their own target/
+testing/**/target/
 
 # Python caches from local verification scripts
 __pycache__/

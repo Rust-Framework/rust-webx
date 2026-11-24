@@ -12,6 +12,9 @@ taxonomy:
     crates/payment/<leaf>   payment domain (core/stripe/alipay/wechatpay/paypal/adyen/square/ef)
     crates/ef/<leaf>        ORM boundary adapters (webx)
     crates/outbox/<leaf>    transactional-outbox starters (ef)
+    crates/transport/<leaf> optional non-hyper listener backends (h3)
+    testing/<leaf>          non-published test/dev harnesses (alloc-probe,
+                            contract-tests, upgrade-smoke)
 
 Rules enforced here (the dependency direction is the constitution's P10
 "small core, large ecosystem"):
@@ -19,7 +22,11 @@ Rules enforced here (the dependency direction is the constitution's P10
 1. every workspace member under crates/ matches the taxonomy;
 2. every crate directory under crates/ is a workspace member (no orphans);
 3. framework crates never depend on a domain-group crate;
-4. the `rust-webx` umbrella never links ai/auth/cache/queue adapters.
+4. the `rust-webx` umbrella never links ai/auth/cache/queue adapters;
+5. `crates/` is the published surface: every member there must be publishable
+   (`publish != false`), and every non-published package must live outside it
+   (reference apps or `testing/`);
+6. `testing/` packages are never published.
 
 Run locally with `python3 scripts/check-crate-layout.py`; CI runs it in Lint
 through `scripts/check-crate-layout.sh`.
@@ -41,10 +48,13 @@ FRAMEWORK = {
     "client",
     "webx",
     "build",
-    "alloc-probe",
-    "contract-tests",
 }
-GROUPS = {"ai", "auth", "cache", "queue", "payment", "ef", "outbox"}
+GROUPS = {"ai", "auth", "cache", "queue", "payment", "ef", "outbox", "transport"}
+# Non-published test/dev harnesses: allowed as workspace members, never in
+# `crates/` (the published surface).
+TESTING = {"testing"}
+# Non-published reference applications.
+REFERENCE_APPS = {"docbit", "dmbit", "imbit"}
 
 
 def load(path: Path):
@@ -99,14 +109,30 @@ def main() -> int:
                     f"{member}: crates/ allows exactly one framework level or "
                     "crates/<group>/<leaf>"
                 )
-        elif parts[0] not in {"docbit", "dmbit", "imbit"}:
+        elif parts[0] in TESTING:
+            if len(parts) != 2:
+                errors.append(
+                    f"{member}: testing/ allows exactly testing/<leaf>"
+                )
+        elif parts[0] not in REFERENCE_APPS:
             errors.append(f"{member}: unexpected workspace member root '{parts[0]}'")
         if not (root / member / "Cargo.toml").is_file():
             errors.append(f"{member}: member directory has no Cargo.toml")
 
     # Orphans: a crate manifest on disk that the workspace does not own.
+    # `crates/` is scanned recursively because groups add a level, but only
+    # workspace members may appear there. `testing/` is scanned one level deep:
+    # harnesses such as `testing/upgrade-smoke` are standalone cargo workspaces
+    # (their nested `stable/`/`current/` manifests are intentionally not
+    # members), while `testing/<leaf>` packages must be members.
     for manifest in sorted((root / "crates").rglob("Cargo.toml")):
         rel = manifest.parent.relative_to(root).as_posix()
+        if rel not in member_set:
+            errors.append(f"{rel}: crate directory is not a workspace member")
+    for entry in sorted((root / "testing").iterdir()):
+        if not entry.is_dir() or not (entry / "Cargo.toml").is_file():
+            continue
+        rel = entry.relative_to(root).as_posix()
         if rel not in member_set:
             errors.append(f"{rel}: crate directory is not a workspace member")
 
@@ -141,6 +167,28 @@ def main() -> int:
         for name, (member, _data) in manifests.items()
         if len(Path(member).parts) == 2 and Path(member).parts[0] == "crates"
     }
+
+    testing_packages = {
+        name
+        for name, (member, _data) in manifests.items()
+        if Path(member).parts[0] in TESTING
+    }
+
+    # `crates/` is the published surface. A `publish = false` package there is
+    # release pollution: it would be shipped in the repository's framework
+    # layout but can never appear on crates.io (and publish.sh ignores it).
+    for name, (member, data) in sorted(manifests.items()):
+        publishable = data["package"].get("publish", True) is not False
+        root_segment = Path(member).parts[0]
+        if root_segment == "crates" and not publishable:
+            errors.append(
+                f"{name} ({member}): non-published crate under crates/; "
+                "crates/ is the published surface — move it to testing/"
+            )
+        if root_segment in TESTING and publishable:
+            errors.append(
+                f"{name} ({member}): testing/ packages must set publish = false"
+            )
 
     if not group_packages:
         errors.append(
@@ -180,7 +228,10 @@ def main() -> int:
     summary = " ".join(
         f"{group}={sorted(leaves)}" for group, leaves in group_leaves.items()
     )
-    print(f"crate layout OK: framework={len(framework_packages)} crates, {summary}")
+    print(
+        f"crate layout OK: framework={len(framework_packages)} published crates, "
+        f"testing={len(testing_packages)} harnesses, {summary}"
+    )
     return 0
 
 

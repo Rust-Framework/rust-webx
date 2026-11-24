@@ -1,7 +1,7 @@
-# 下游能力缺口处置结论（2.8.0）
+# 下游能力缺口处置结论
 
 > 来源：下游 RXStudio 的 `docs/design/upstream-framework-gaps.md`（基于 rust-webx 2.6.0 /
-> rust-ef 2.6.0 / rust-dix 1.0.0 的落地反馈）。处置基线：rust-webx 2.8.0 / rust-ef 2.8.0 /
+> rust-ef 2.6.0 / rust-dix 1.0.0 的落地反馈）。处置基线：rust-webx 2.9.0 / rust-ef 2.8.0 /
 > rust-dix 1.0.0。
 >
 > 本页是**处置结论**，不是手册：每项只保留判定、落点与边界；实现细节在代码、rustdoc 与
@@ -64,3 +64,31 @@
   opt-in starter，core/umbrella 不链接 rust-ef。
 - **#11 已有能力**：下游清单写于 2.6.0 之前；2.6.0 的 `ctx.migrate` + 历史表 + 快照/diff 已覆盖
   "versioned migration runner + schema drift readiness"，无需新增 API。
+
+## HTTP/3 依赖与 WebTransport 结论
+
+- **WebSocket over HTTP/3（RFC 9220 extended CONNECT）已解决**：上游 `h3 0.0.8` 的
+  `ext::Protocol` 只接受 `webtransport`/`connect-udp`，无法表达 `:protocol: websocket`；
+  切换为 `trev-h3 0.3.0` / `trev-h3-quinn 0.3.0` / `trev-h3-webtransport 0.3.0`
+  （MIT fork，精确钉版；`h3-quinn` 的 datagram feature 带入传递依赖 `trev-h3-datagram 0.3.0`），
+  新增 `Protocol::WEBSOCKET`。`rust-webx-h3` 已实现 extended CONNECT → `IUpgradeSession`
+  桥接：成功隧道提交为 HTTP `200`，RFC 合规客户端缺失的 `sec-websocket-key` 由 adapter
+  合成，非 101（含 2xx 无 upgrade）→ 错误/problem 响应，普通 `CONNECT` → 400，普通请求
+  不能伪造 `Upgrade` 头；e2e 覆盖文本/二进制回显与 extended CONNECT 负例。
+- **WebTransport（adapter-level MVP）已交付**：fork 的 `trev-h3-webtransport 0.3.0`
+  提供 session/stream/datagram API；`H3Config::with_webtransport_handler` 接受
+  `:protocol: webtransport` session 并把具体 `WebTransportServerSession` 交给应用，
+  `IWebTransportHandler::authorize(&info)` 是 pre-accept 钩子（失败 → 403 且不发送 200，
+  e2e 覆盖拒绝路径），`on_session` 返回后最多等 1s `session.closed()`；e2e 覆盖 bidi
+  stream echo，datagram API 已暴露但**尚无 e2e**。**transport-neutral** 的 WebTransport
+  端口（engine trait + host 路由/DI/生命周期/指标）仍是后续工作（future work）：
+  streams/datagrams 不能无损映射到 `IUpgradeSession` 的字节流。
+- **独立实现互操作（已跑通）**：`crates/transport/h3/examples/interop_server.rs`
+  （`/health` + `/echo`）；quiche-client smoke 与 h3i 0.7.0 replay 均 200、exit 0；
+  h3spec v0.1.15 为 **86 examples / 21 failures / 1 pending** 的**上游 `trev-h3 0.3.0`
+  基线**（失败在 H3/QPACK 错误处理与 1 个 quinn/rustls TLS 层，不在 adapter/pipeline），
+  用作回归基线而非 2.9 交付缺陷。建议进 CI 非阻塞/夜间 job 并固定版本/digest。
+- **新增风险**：`rust-webx-h3` 依赖 h3 fork，需要跟踪 fork 维护、精确钉版并在 CI
+  做回归；RustSec advisory 按 crate 名匹配，fork 包名 `trev-*` 不会命中上游
+  `h3`/`h3-quinn` 的既有 advisory，需人工跟踪上游修复。后续若上游 h3 支持 RFC 9220/
+  WebTransport 完整 API，可评估切回上游。

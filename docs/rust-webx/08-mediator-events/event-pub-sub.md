@@ -140,10 +140,10 @@ async fn handle(&mut self, req: CreateUserRequest) -> ActionResult<UserDto> {
 
 ```toml
 [dependencies]
-rust-webx-redis = "2.5"       # 分布式缓存 + Redis Streams 事件
-rust-webx-nats = "2.5"        # NATS core 事件
-rust-webx-rabbitmq = "2.5"    # RabbitMQ（AMQP）事件
-rust-webx-kafka = "2.5"       # Kafka 单分区事件（参考/起步适配器）
+rust-webx-redis = "2.9"       # 分布式缓存 + Redis Streams 事件
+rust-webx-nats = "2.9"        # NATS core 事件
+rust-webx-rabbitmq = "2.9"    # RabbitMQ（AMQP）事件
+rust-webx-kafka = "2.9"       # Kafka 单分区事件（参考/起步适配器）
 ```
 
 ### 投递语义对照

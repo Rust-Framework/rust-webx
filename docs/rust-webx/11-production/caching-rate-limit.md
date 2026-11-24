@@ -1,4 +1,4 @@
-﻿# 缓存与速率限制
+# 缓存与速率限制
 
 ## 内存缓存
 
@@ -15,7 +15,7 @@ Handler 通过 `Arc<MemoryCache>` 或 `IDistributedCache` trait 注入使用。
 
 ```toml
 [dependencies]
-rust-webx-redis = "2.8"
+rust-webx-redis = "2.9"
 ```
 
 ```rust

@@ -12,7 +12,7 @@ use webx_core::hosted::PeriodicBackgroundService;
 use webx_core::idempotency::{IIdempotencyStore, IdempotencyBegin, IdempotentResponse};
 use webx_ef::idempotency::{
     key_hash, register_idempotency_model, EfIdempotencyStore, IdempotencyHousekeeping,
-    IdempotencyRecord, STATE_COMPLETED, STATE_IN_PROGRESS,
+    IdempotencyRecord, PURGE_BATCH_SIZE, STATE_COMPLETED, STATE_IN_PROGRESS,
 };
 
 const TTL: Duration = Duration::from_secs(60);
@@ -340,6 +340,59 @@ async fn purge_expired_only_deletes_rows_past_the_grace_period() {
     let mut keys: Vec<String> = rows(&options).await.into_iter().map(|r| r.key).collect();
     keys.sort();
     assert_eq!(keys, ["live", "recent"]);
+}
+
+#[tokio::test]
+async fn purge_expired_deletes_a_backlog_in_bounded_batches() {
+    let options = in_memory_options().await;
+    prepare(&options).await;
+    let now = now_secs();
+    let grace = 24 * 3_600;
+    let cutoff = now - grace;
+
+    // One row more than a batch forces the second statement.
+    let backlog = PURGE_BATCH_SIZE + 1;
+    let mut records = Vec::with_capacity(backlog + 2);
+    for index in 0..backlog {
+        records.push(seed_record(
+            &format!("old-{index}"),
+            STATE_COMPLETED,
+            now - 200_000,
+            now - 90_000,
+        ));
+    }
+    // Exactly at the grace boundary: `expires_at < cutoff` is strict, so kept.
+    records.push(seed_record(
+        "boundary",
+        STATE_COMPLETED,
+        now - 200_000,
+        cutoff,
+    ));
+    // Live reservation: never touched.
+    records.push(seed_record("live", STATE_IN_PROGRESS, now, now + 3_600));
+    seed_rows(&options, records).await;
+
+    let purged = store(&options)
+        .purge_expired(now, grace)
+        .await
+        .expect("purge");
+    assert_eq!(
+        purged as usize, backlog,
+        "every expired row is deleted, across both batches"
+    );
+
+    let mut keys: Vec<String> = rows(&options).await.into_iter().map(|r| r.key).collect();
+    keys.sort();
+    assert_eq!(keys, ["boundary", "live"]);
+
+    // A drained table stops after the first empty batch.
+    assert_eq!(
+        store(&options)
+            .purge_expired(now, grace)
+            .await
+            .expect("second purge"),
+        0
+    );
 }
 
 #[tokio::test]

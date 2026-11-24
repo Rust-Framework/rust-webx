@@ -7,7 +7,7 @@
 
 ```toml
 [dependencies]
-rust-webx = "2.8.0"
+rust-webx = "2.9.0"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 ```

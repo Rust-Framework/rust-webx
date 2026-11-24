@@ -31,7 +31,7 @@ let verification = secret.verify(
 
 - 验证按 ±`skew_steps` 计算，常量时间比较。
 - 同一 step 或更早的 code 再次出现 → **401 重放**；`matched_step` 由调用方原子持久化（条件更新 `last_step < matched_step`）。
-- 单次失败计数建议接 `ILoginThrottle`（M1-03），防止在线爆破 6 位码。
+- 单次失败计数建议接 `ILoginThrottle`，防止在线爆破 6 位码。
 
 ## 3. 恢复码
 
@@ -113,7 +113,7 @@ if !MfaAssurance::satisfies_step_up(claims.extra.get("acr").map(String::as_str))
 
 ## 6. 边界
 
-- 不做短信/邮件 OTP、推送、WebAuthn（WebAuthn 属 M3）；不做二维码渲染。
+- 不做短信/邮件 OTP、推送、WebAuthn（WebAuthn 由独立 crate `rust-webx-webauthn` 提供）；不做二维码渲染。
 - 恢复码的持久化与并发原子更新由应用/存储层负责；框架给出 hash 契约与单次语义。
 - TOTP 种子泄露等价于第二因子失效：存储加密、日志脱敏、禁止回显。
 

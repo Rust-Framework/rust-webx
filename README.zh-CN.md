@@ -26,6 +26,7 @@
 - [请求即端点：Hello World](#请求即端点hello-world)
 - [核心概念](#核心概念)
 - [消息与缓存适配器](#消息与缓存适配器)
+- [可选传输适配器](#可选传输适配器)
 - [示例应用](#示例应用)
 - [快速开始](#快速开始)
 - [生产就绪能力](#生产就绪能力)
@@ -134,7 +135,7 @@ rust-webx **不是** 全栈 UI 框架（可搭配任意前端）、**不是** OR
 
 ```
 rust-webx/
-├── Cargo.toml                 # workspace 根 (v2.8.0)
+├── Cargo.toml                 # workspace 根 (v2.9.0)
 ├── crates/
 │   ├── core/                  # rust-webx-core  — trait 与配置
 │   ├── engine/                # rust-webx-engine — 执行引擎：worker 池、直接分发
@@ -165,6 +166,8 @@ rust-webx/
 │   │   └── webx/              #   rust-webx-ef — EFError → webx::Error 脱敏映射
 │   ├── outbox/                # 事务性 outbox starter
 │   │   └── ef/                #   rust-webx-outbox-ef — 同事务入队 + 租约派发
+│   ├── transport/             # 可选的非 hyper 监听后端
+│   │   └── h3/                #   rust-webx-h3 — HTTP/3（QUIC + rustls + h3）
 │   └── payment/               # 支付领域组（按需引入）
 │       ├── core/              #   rust-webx-pay — 统一模型/端口/Payments 运行时
 │       ├── stripe/            #   rust-webx-pay-stripe
@@ -174,6 +177,9 @@ rust-webx/
 │       ├── adyen/             #   rust-webx-pay-adyen
 │       ├── square/            #   rust-webx-pay-square
 │       └── ef/                #   rust-webx-pay-ef — 回调 inbox（rust-ef）
+├── testing/                   # 不发布的测试工具（publish = false）
+│                              #   alloc-probe / contract-tests / upgrade-smoke
+├── fuzz/                      # 独立的 cargo-fuzz workspace（nightly CI）
 ├── docbit/                    # 参考应用：作品集 + 博客 + RBAC + 文档
 ├── dmbit/                     # 参考应用：设备与库存管理
 └── imbit/                     # 参考应用：实时 IM（WS + 信令）
@@ -193,7 +199,8 @@ rust-webx/
 > `rust-webx-pay` → `webx_pay`、`rust-webx-pay-stripe` → `webx_pay_stripe`、
 > `rust-webx-pay-alipay` → `webx_pay_alipay`、`rust-webx-pay-wechatpay` → `webx_pay_wechatpay`、
 > `rust-webx-pay-paypal` → `webx_pay_paypal`、`rust-webx-pay-adyen` → `webx_pay_adyen`、
-> `rust-webx-pay-square` → `webx_pay_square`、`rust-webx-pay-ef` → `webx_pay_ef`。
+> `rust-webx-pay-square` → `webx_pay_square`、`rust-webx-pay-ef` → `webx_pay_ef`、
+> `rust-webx-h3` → `webx_h3`。
 
 ## 请求即端点：Hello World
 
@@ -229,6 +236,18 @@ async fn main() {
 ```
 
 路由发现、Handler 解析、中间件编排与优雅关闭，全部由 `Host::build()` 自动完成。
+
+### 组合根：两个槽
+
+应用的装配只经过 builder 上的两个槽：
+
+| 槽 | 放什么 | 示例 |
+|---|---|---|
+| `register` | DI 服务、端口与适配器（对象图的唯一来源） | `.register(|svc| svc.add_mediator())` |
+| `configure` | 本 Host 的 `AppOptions` 运行期开关 | `.configure(\|app\| app.use_options(\|o\| o.metrics.enabled = false))` |
+
+`use_spa`、`add_authentication`、`use_http_transport`、`use_alt_svc` 等是**同一 builder 状态的糖**，
+不引入第三套装配通道。业务代码只消费接口，只有组合根知道具体实现。
 
 ## 核心概念
 
@@ -290,6 +309,16 @@ JSON: RFC 7807 application/problem+json (4xx / 5xx)
 `.without_cache()` + `RedisEventsOptions { consumer_enabled: false, .. }`。详见
 [事件发布与订阅](docs/rust-webx/08-mediator-events/event-pub-sub.md) 与
 [缓存与速率限制](docs/rust-webx/11-production/caching-rate-limit.md)。
+
+## 可选传输适配器
+
+内置 hyper HTTP/1.1 + HTTP/2 监听之外，engine 提供传输中立的端口（`IHttpTransport` /
+`TransportRuntime`）：同一个 router、middleware、绑定、错误写入、DI、准入 governor 与指标。
+HTTP/3 是可选 crate，默认构建不会引入 QUIC 依赖。
+
+| crate | 入口 | 说明 |
+|-------|------|------|
+| [`rust-webx-h3`](https://crates.io/crates/rust-webx-h3) | `H3Transport` + `HostBuilder::use_http_transport(Arc::new(transport))`，可选 `use_h3_alt_svc(udp_port)`、可选 `H3Config::with_webtransport_handler` | QUIC + rustls + h3（`trev-h3` fork）、TLS 1.3 / ALPN `h3`、mTLS、SSE/流式响应、每连接 GOAWAY 排空、共享 `App.MaxConnections` 准入、`/metrics` 传输维度标签、显式 `Alt-Svc`、**HTTP/3 WebSocket（RFC 9220 extended CONNECT）**、**WebTransport adapter-level MVP**（session + bidi stream echo；transport-neutral 端口后续）。 |
 
 ## 示例应用
 

@@ -9,8 +9,9 @@
 //!
 //! [`EngineContext`]: crate::EngineContext
 
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use tokio::sync::{watch, OwnedSemaphorePermit};
 use webx_core::dispatch_runtime::DispatchRuntime;
@@ -77,7 +78,7 @@ pub struct Shared {
 /// admission permit, including keep-alive and streaming connections);
 /// `rejected` counts sockets that waited past `Server.AdmissionTimeoutMs` and
 /// received a `503` instead of being left in the kernel backlog.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct AdmissionStats {
     admitted: AtomicU64,
     rejected: AtomicU64,
@@ -85,6 +86,205 @@ pub struct AdmissionStats {
     active: AtomicUsize,
     capacity: AtomicUsize,
     shutting_down: AtomicBool,
+    /// Live protocol-upgrade sessions (WebSocket today), observed during drain.
+    ///
+    /// Detached from the connection `JoinSet`: hyper resolves the connection
+    /// future after the upgrade handoff, so a worker that only joins its
+    /// connections can drop the runtime before the session flushes its
+    /// graceful-close frame. Workers wait for this count to reach zero within
+    /// the drain budget.
+    upgrade_sessions: UpgradeSessionGauge,
+    /// Global connection governor shared by every listener/transport backend.
+    ///
+    /// Created lazily so a host that only runs a non-hyper transport still gets
+    /// the same `App.MaxConnections` pool and the same admitted/rejected/active
+    /// counters as the TCP acceptors. Wrapped in a mutex so the public
+    /// `AdmissionStats` keeps its historical `UnwindSafe`/`RefUnwindSafe` auto
+    /// traits (`tokio::sync::Semaphore` is not unwind-safe).
+    governor: Mutex<Option<Arc<tokio::sync::Semaphore>>>,
+    /// Per-transport listener counters, keyed by `IHttpTransport::kind`.
+    ///
+    /// Populated lazily by `Server::run_transport`; `/metrics` renders one set of
+    /// series per registered transport (`transport="h3"`, ...).
+    transports: Mutex<BTreeMap<&'static str, Arc<TransportMetrics>>>,
+}
+
+/// `watch` sender used as a race-free counter for detached upgrade sessions.
+struct UpgradeSessionGauge(watch::Sender<usize>);
+
+// `watch::Sender` internally holds a lock-protected cell that is not
+// `RefUnwindSafe`; the gauge only counts sessions and carries no unwind-sensitive
+// data, so the historical `AdmissionStats: UnwindSafe + RefUnwindSafe` contract is
+// preserved explicitly.
+impl std::panic::UnwindSafe for UpgradeSessionGauge {}
+impl std::panic::RefUnwindSafe for UpgradeSessionGauge {}
+
+impl std::fmt::Debug for UpgradeSessionGauge {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("UpgradeSessionGauge")
+    }
+}
+
+impl Default for AdmissionStats {
+    fn default() -> Self {
+        Self {
+            admitted: AtomicU64::new(0),
+            rejected: AtomicU64::new(0),
+            waiting: AtomicU64::new(0),
+            active: AtomicUsize::new(0),
+            capacity: AtomicUsize::new(0),
+            shutting_down: AtomicBool::new(false),
+            upgrade_sessions: UpgradeSessionGauge(watch::channel(0).0),
+            governor: Mutex::new(None),
+            transports: Mutex::new(BTreeMap::new()),
+        }
+    }
+}
+
+/// Live transport listener counters (one instance per `IHttpTransport::kind`).
+///
+/// Registered lazily by `Server::run_transport`; the listener backend records
+/// connections/requests through the handle exposed on
+/// [`crate::TransportRuntime::transport_metrics`].
+#[derive(Debug, Default)]
+pub struct TransportMetrics {
+    connections_active: AtomicUsize,
+    connections_total: AtomicU64,
+    requests_total: AtomicU64,
+    rejected_total: AtomicU64,
+    handshake_failures: AtomicU64,
+}
+
+/// Read-only sample of one transport's counters.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct TransportStats {
+    /// Connections currently open.
+    pub active: usize,
+    /// Connections opened since the transport started.
+    pub connections: u64,
+    /// Requests served through the neutral port.
+    pub requests: u64,
+    /// Connections rejected by engine admission.
+    pub rejected: u64,
+    /// Transport handshakes that failed before a connection existed.
+    pub handshake_failures: u64,
+}
+
+impl TransportMetrics {
+    /// Record one opened connection and return its active-connection guard.
+    pub fn connection_opened(self: &Arc<Self>) -> TransportConnectionGuard {
+        self.connections_total.fetch_add(1, Ordering::Relaxed);
+        self.connections_active.fetch_add(1, Ordering::Relaxed);
+        TransportConnectionGuard {
+            metrics: Arc::clone(self),
+        }
+    }
+
+    /// Record one request served through the neutral engine port.
+    pub fn record_request(&self) {
+        self.requests_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record one connection rejected by the engine's admission governor.
+    pub fn record_rejected(&self) {
+        self.rejected_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record one transport handshake failure.
+    pub fn record_handshake_failure(&self) {
+        self.handshake_failures.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// One consistent read of every counter.
+    pub fn snapshot(&self) -> TransportStats {
+        TransportStats {
+            active: self.connections_active.load(Ordering::Relaxed),
+            connections: self.connections_total.load(Ordering::Relaxed),
+            requests: self.requests_total.load(Ordering::Relaxed),
+            rejected: self.rejected_total.load(Ordering::Relaxed),
+            handshake_failures: self.handshake_failures.load(Ordering::Relaxed),
+        }
+    }
+}
+
+/// Keeps a transport's active-connection gauge accurate for one connection.
+#[derive(Debug)]
+pub struct TransportConnectionGuard {
+    metrics: Arc<TransportMetrics>,
+}
+
+impl Drop for TransportConnectionGuard {
+    fn drop(&mut self) {
+        self.metrics
+            .connections_active
+            .fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+impl AdmissionStats {
+    /// Register (or look up) the counters for one transport kind.
+    pub fn register_transport(&self, kind: &'static str) -> Arc<TransportMetrics> {
+        let mut transports = self
+            .transports
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Arc::clone(
+            transports
+                .entry(kind)
+                .or_insert_with(|| Arc::new(TransportMetrics::default())),
+        )
+    }
+
+    /// Snapshot every registered transport, ordered by kind.
+    pub fn transport_snapshots(&self) -> Vec<(&'static str, TransportStats)> {
+        self.transports
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .iter()
+            .map(|(kind, metrics)| (*kind, metrics.snapshot()))
+            .collect()
+    }
+
+    /// The process-wide connection governor, created on first use.
+    ///
+    /// Every transport backend and the TCP acceptors share this one semaphore,
+    /// so `App.MaxConnections` is a connection budget, not a per-listener
+    /// multiplication.
+    pub(crate) fn governor(&self, max_connections: usize) -> Arc<tokio::sync::Semaphore> {
+        let mut governor = self
+            .governor
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Arc::clone(governor.get_or_insert_with(|| {
+            self.capacity.store(max_connections, Ordering::Relaxed);
+            Arc::new(tokio::sync::Semaphore::new(max_connections))
+        }))
+    }
+
+    /// Count one more live protocol-upgrade session.
+    pub(crate) fn track_upgrade_session(&self) -> UpgradeSessionGuard {
+        self.upgrade_sessions.0.send_modify(|count| {
+            *count = count.saturating_add(1);
+        });
+        UpgradeSessionGuard(watch::Sender::clone(&self.upgrade_sessions.0))
+    }
+
+    /// A receiver that observes the live protocol-upgrade session count.
+    pub(crate) fn subscribe_upgrade_sessions(&self) -> watch::Receiver<usize> {
+        self.upgrade_sessions.0.subscribe()
+    }
+}
+
+/// Decrements the live upgrade-session count on drop.
+pub(crate) struct UpgradeSessionGuard(watch::Sender<usize>);
+
+impl Drop for UpgradeSessionGuard {
+    fn drop(&mut self) {
+        self.0.send_modify(|count| {
+            *count = count.saturating_sub(1);
+        });
+    }
 }
 
 /// Read-only sample of the process-wide admission state.

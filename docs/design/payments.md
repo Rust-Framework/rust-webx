@@ -1,6 +1,6 @@
-# 支付域架构级封装方案（研究）
+# 支付域架构
 
-> 状态：2.7.0 已落地静态 + 运行时配置路径。运行时按 `PaymentScope`
+> 状态：静态 + 运行时配置路径均已落地。运行时按 `PaymentScope`
 > （provider/tenant/account）解析 provider 的服务工厂见
 > [运行时支付服务工厂](payment-runtime-factory.md)；实现与用法以
 > [手册支付章](../rust-webx/13-extensibility/payments.md)为准；本文保留架构取舍与供应商协议依据。
@@ -24,7 +24,7 @@
 5. 回调入口**不隐式注册路由**：crate 提供 `PaymentWebhook`（原始 body + 头部）、
    `verify_webhook` 与 `ack`，应用用 3 行声明路由、10 行写 Handler。这样既开箱即用，
    又不违反「依赖库不得隐式注入路由」。
-6. 首批范围：**Stripe + 支付宝 + 微信支付 v3**；第二批 PayPal + Adyen；Square / 银联按需求排期。
+6. 范围：Stripe、支付宝、微信支付 v3、PayPal、Adyen、Square；银联全渠道暂不提供。
 
 ---
 
@@ -87,7 +87,7 @@
 缺口：
 
 1. 没有支付端口、统一模型、回调入口与 provider 注册。
-2. （2.7.0 已补齐）`IHttpRequest` 新增对象安全的 `header_pairs()`，回调验签可读取全部请求头；
+2. `IHttpRequest` 提供对象安全的 `header_pairs()`，回调验签可读取全部请求头；
    `webx-engine` 用原始 `HeaderMap` 零拷贝实现，替代/test 主机保持默认空迭代器。
 3. 没有 X.509 证书解析依赖（微信平台证书、支付宝证书模式需要从证书取公钥）。
 4. 没有支付域的契约测试与沙箱 CI。
@@ -473,7 +473,7 @@ payment_webhook!(AccountWebhook, "/webhooks/payments/{provider}/{account}");
 回调路由不加 `#[authorize]`、不依赖 cookie 会话（签名即认证）；若全局限流开启，
 需要确认回调路径的阈值不会误伤供应商重试流量。
 
-**头部枚举（2.7.0 已落地）**：`webx-core` 为 `IHttpRequest` 增加了对象安全的
+**头部枚举**：`webx-core` 为 `IHttpRequest` 提供了对象安全的
 `header_pairs()`；`webx-engine` 用现成的 `HeaderMap` 实现，零拷贝；默认空迭代器保证
 其他/测试主机不破坏。`PaymentWebhook` 优先用它，并对内置供应商头做按名兜底，
 兼容未实现枚举的替代主机。
@@ -497,7 +497,7 @@ payment_webhook!(AccountWebhook, "/webhooks/payments/{provider}/{account}");
 | 事件外发 | 应用内事务写 outbox 或 inbox，再由后台任务发布；不在回调线程里直接做重业务 |
 | ACK 时机 | 验签 + 持久化（inbox 落库）后立即 ACK；业务处理异步。供应商超时时间普遍 5–30s |
 
-`payment/ef`（M3）提供通用 inbox 表：`provider + dedupe_key` 唯一、`payload`、`attempts`、
+`payment/ef` 提供通用 inbox 表：`provider + dedupe_key` 唯一、`payload`、`attempts`、
 `locked_until`、`processed_at`；后台 worker 领取、调用应用 `IPaymentEventHandler`、失败退避、
 超限进死信。订单/退款表属于应用领域，**不进框架**。
 
@@ -522,8 +522,8 @@ payment_webhook!(AccountWebhook, "/webhooks/payments/{provider}/{account}");
 
 - `tracing`：每次操作一个 span（provider、operation、order_id 哈希、http_status、耗时、
   供应商 request id），与 `RequestContext::trace_id()` 同源；不记录 openid、手机号等买家标识。
-- 指标（第二阶段）：`payments_operations_total{provider,operation,result}`、
-  `payments_operation_seconds`；用 `IMeter`，不新建指标后端。
+- 指标：`payments_operations_total{provider,operation,result}`、`payments_operation_seconds`
+  尚未接入；需要时用 `IMeter`，不新建指标后端。
 - 健康：`provider {id}` 检查「配置已校验 + 证书缓存非空且未过期 + 上次成功调用时间」；
   不做每次探测都打供应商 API。启动校验与 readiness 分离：配置错误启动失败，网络问题只降级。
 
@@ -545,9 +545,9 @@ payment_webhook!(AccountWebhook, "/webhooks/payments/{provider}/{account}");
   PayPal 覆盖无卡钱包用户，Adyen 面向企业多渠道路由，Square 面向北美线下/线上小商户。
 - **文档与参照优先**：六个供应商都有完整官方文档与官方 SDK 源码，协议边界清晰，
   可以被契约测试锁定；银联全渠道虽然也有文档，但证书/表单协议成本明显更高，放在第三批。
-- **复杂度分层排期**：Stripe/Square（JSON + HMAC）→ PayPal（OAuth + API 验签）→
-  支付宝（RSA2 + 响应子串）→ 微信（RSA + 证书 + AES-GCM）→ 银联（证书 + 表单），
-  先用简单协议验证统一模型，再处理硬协议。
+- **复杂度分层**：Stripe/Square（JSON + HMAC）→ PayPal（OAuth + API 验签）→
+  支付宝（RSA2 + 响应子串）→ 微信（RSA + 证书 + AES-GCM），先用简单协议验证统一模型，
+  再处理硬协议。
 - **不做聚合支付**：Ping++/Airwallex 等属于应用层选型；框架只提供 `IPaymentProvider` 端口，
   应用可自行包一层。出海业务也可以先用 Stripe/Adyen/PayPal 的 Alipay/WeChat 支付方式，
   再按需接直连。
@@ -639,42 +639,7 @@ let intent = payments
 
 ---
 
-## 9. 分阶段落地计划
-
-2.7.0 一次性交付了 M0–M4（inbox 与多账户分别随 M3/M0 落地）；下表保留范围拆分，用于评审与
-后续 minor 的能力扩展。
-
-| 阶段 | 范围 | 关键文件 | 验收 |
-|---|---|---|---|
-| **M0** 核心 + Stripe | `webx_pay` 模型/端口/回调请求/错误/校验；`webx_pay_stripe` 下单/查询/取消/退款/回调 | `crates/payment/{core,stripe}/**`、`Cargo.toml`、`scripts/check-crate-layout.py`、`publish.sh`、`publish.yml` | `cargo test -p rust-webx-pay -p rust-webx-pay-stripe`；Stripe 测试模式端到端；MockUpstream 回放；启动校验失败用例 |
-| **M1** 支付宝 | RSA2 签名、响应子串验签、page/wap/app/precreate、查询/关闭/退款、notify | `crates/payment/alipay/**` | 官方 demo 向量验签；沙箱（`openapi-sandbox`）下单+回调；`success` ACK |
-| **M2** 微信支付 v3 | 5 行请求签名、平台证书/公钥模式、AES-GCM 解密、Native/JSAPI/App/H5、查询/关闭/退款、回调 | `crates/payment/wechatpay/**` | 官方 SDK 测试向量；证书轮换用例（未知 serial）；`{"code":"SUCCESS"}` ACK |
-| **M3** PayPal + Adyen + inbox | OAuth 令牌缓存、Orders/capture/refund、验签 API；Adyen 多 item HMAC；`webx_pay_ef` inbox + worker | `crates/payment/{paypal,adyen,ef}/**` | 沙箱（PayPal sandbox / Adyen test）；inbox 唯一约束 + 重试/死信 |
-| **M4** 文档与 GA | 手册页、INDEX/SUMMARY、README、契约测试、门禁 | `docs/rust-webx/13-extensibility/payments.md`、`docs/rust-webx/INDEX.json`、`.github/workflows/stability.yml` | `scripts/check-docs.sh`、`check-crate-layout`、`check-publish-order`、六门禁全绿 |
-
-估算（单人，含测试与文档）：M0 ≈ 2 周，M1 ≈ 2 周，M2 ≈ 2.5 周，M3 ≈ 3 周，M4 ≈ 1 周；
-M1/M2 可并行（互不依赖），总日历时间约 8–9 周。
-
-M0 开工前先做 1 天编译 spike，验证三个关键假设（任一不成立就调整设计）：
-手写 `RequestModel` 能在不解析 JSON 的前提下拿到原始 body；`#[post]` 路由能绑定
-`PaymentWebhook` 并由框架写出 `Response`；`dyn IPaymentProvider` 的
-`get_all_any` 聚合与 `ProviderId` 路径参数解析可用。
-
-新增/修改文件清单（除上表 crate 目录外）：
-
-- 根 `Cargo.toml`：members + `[workspace.dependencies]`（`rust-webx-pay* = { version = "=2.7.0", path = ... }`）。
-- `scripts/check-crate-layout.py`：`GROUPS` 增加 `pay`；报错文案同步。
-- `publish.sh` / `.github/workflows/publish.yml`：按 core → 适配器 → ef 顺序加条目。
-- `CHANGELOG.md`：加性条目。
-- `docs/rust-webx/04-architecture/crate-layout.md`：补 `pay` 组。
-- `docs/rust-webx/13-extensibility/payments.md`（新）+ `INDEX.json`/`SUMMARY.md`/`INDEX.md`。
-- `crates/payment/core/src/testing.rs`（新，`payment_provider_contract` 契约套件）。
-- `.github/workflows/stability.yml`：`payment-sandbox` job 需要各供应商沙箱凭证，本次未接入；
-  离线测试已覆盖协议向量与回放，接入凭证后再补 nightly job（无 secrets 时跳过）。
-
----
-
-## 10. 测试与验收策略
+## 9. 测试与验收策略
 
 1. **纯函数向量测试**：签名串构造（微信 5 行/3 行、支付宝排序、Stripe `t.body`、Adyen 转义、
    Square URL+body）、金额解析、状态映射。向量来源：官方文档示例 + 官方 SDK 测试代码
@@ -694,18 +659,18 @@ M0 开工前先做 1 天编译 spike，验证三个关键假设（任一不成�
 
 ---
 
-## 11. 风险与决策记录
+## 10. 风险与决策记录
 
-### 2.7.0 已拍板
+### 已拍板决策
 
 1. `IHttpRequest::header_pairs()` 进入 `webx-core`（已实现 + 测试）。
-2. RSA/证书工具：2.7.0 先在支付宝/微信适配器内封装（接口一致：PEM 规范化、SHA256withRSA
+2. RSA/证书工具：先在支付宝/微信适配器内封装（接口一致：PEM 规范化、SHA256withRSA
    签/验、证书公钥提取）；`oauth2` 的支付宝登录保持原实现，统一到 `webx_core::security`
    留到后续 minor（core 避免新增重量级 RSA 依赖）。
-3. `payment_webhook!` 路由宏随 2.7.0 提供（孤儿规则要求应用侧本地包装类型）；
+3. `payment_webhook!` 路由宏随框架提供（孤儿规则要求应用侧本地包装类型）；
    不提供通用 Handler 自动分发，业务分发仍在应用 Handler。
-4. `payment/ef` inbox 随 2.7.0 交付（生产强建议）。
-5. 多账户/服务商模式随 2.7.0 交付（`AccountId` + `AccountSet` + `PaymentScope`；账户段
+4. `payment/ef` inbox 已交付（生产强建议）。
+5. 多账户/服务商模式已交付（`AccountId` + `AccountSet` + `PaymentScope`；账户段
    回调复用同一个 `PaymentWebhook`）。
 6. **API 收敛**：`add_payments()` 删除，由 `add_*` 自动幂等装配 `Payments`；静态配置统一为
    `add_*_with(options)`，运行时配置为 `add_*()`；`add_*_from_config`/`add_*_with_client`
@@ -716,8 +681,8 @@ M0 开工前先做 1 天编译 spike，验证三个关键假设（任一不成�
 8. **前端支付目录**：`PaymentOption` + `PaymentFlowKind` + `Payments::payment_options(_for)`
    暴露已启用 provider/account/method/flow 与公开 client_config；适配器不得输出密钥；
    多租户目录由自定义 `IPaymentServiceFactory::payment_options` 提供。
-9. 银联全渠道暂不做（协议/证书成本最高，按需求排期）。
-10. 版本号 2.7.0，保持 2.x 加性策略。
+9. 银联全渠道暂不做（协议/证书成本最高，按需求评估）。
+10. 保持 2.x 加性策略。
 
 实现与原设计的差异（均已写入适配器文档）：
 
@@ -738,11 +703,11 @@ M0 开工前先做 1 天编译 spike，验证三个关键假设（任一不成�
 | 微信证书轮换/公钥模式 | 验签失败 | 缓存 + 未知 serial 刷新 + 过期告警；双模式支持 |
 | 回调乱序/重复 | 订单状态错乱 | 单调状态机 + dedupe + 必要时回查权威状态 |
 | 金额精度 | 对账差异 | 最小单位整数 + 指数表 + 严格解析；拒绝浮点 |
-| 多商户/服务商模式 | 无法服务 SaaS | 2.7.0 已交付多账户：`AccountId` + `AccountSet` + 双段回调路由 |
+| 多商户/服务商模式 | 无法服务 SaaS | 已交付多账户：`AccountId` + `AccountSet` + 双段回调路由 |
 | 自研维护成本 | 长期负担 | 操作面最小化；每供应商单一 owner；文档写清「不做全量 API」 |
 | 体积/编译 | 应用变慢 | 适配器独立 crate、opt-in；不引入 async-stripe |
 
-上述 9 项决策均已在 2.7.0 落地（银联全渠道除外，按需求排期）；后续 minor 只做适配器能力扩展
+上述决策均已落地（银联全渠道除外，按需求评估）；后续 minor 只做适配器能力扩展
 （订阅/分账/银联）与协议版本跟进。
 
 **运行时配置已实现**：`IPaymentServiceFactory` 在运行时按 `PaymentScope`
@@ -751,11 +716,11 @@ M0 开工前先做 1 天编译 spike，验证三个关键假设（任一不成�
 
 ---
 
-## 12. 参考
+## 11. 参考
 
 - 框架内部：[框架宪法](framework-constitution.md)、[crate 分层](../rust-webx/04-architecture/crate-layout.md)、
   [出站 HTTP](../rust-webx/13-extensibility/outbound-http.md)、[配置](../rust-webx/10-configuration/appsettings.md)、
-  [稳定性门禁](stability-gates.md)、[支付迭代核验记录](payments-verification.md)。
+  [稳定性门禁](stability-gates.md)。
 - Stripe：[SDK 列表](https://docs.stripe.com/sdks)、[Webhook 签名](https://docs.stripe.com/webhooks/signature)、
   [幂等请求](https://docs.stripe.com/api/idempotent_requests)。
 - 支付宝：[自行实现签名](https://opendocs.alipay.com/common/057k53)、

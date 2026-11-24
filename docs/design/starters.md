@@ -6,7 +6,7 @@
 
 ## 1. 已交付：可复用契约测试
 
-新增 crate **`crates/contract-tests`**（`rust-webx-contract-tests`，不发布）：为纯端口提供
+新增 crate **`testing/contract-tests`**（`rust-webx-contract-tests`，不发布）：为纯端口提供
 行为级契约套件，任何适配器（内存实现/S3/SFU）都跑同一套断言。
 
 | 套件 | 端口 | 断言 |
@@ -26,7 +26,7 @@ consumer 路由；适配器级契约由本 crate 的 **`EventTransportContract`*
 
 ```toml
 [dev-dependencies]
-rust-webx-contract-tests = { path = "../../contract-tests" }
+rust-webx-contract-tests = { path = "../../../testing/contract-tests" }
 ```
 
 ```rust
@@ -144,7 +144,8 @@ crate 归属数量不随第三方产品数量线性增长：
 
 | 位置 | 成员 | 说明 |
 |---|---|---|
-| `crates/<framework>` | core / engine / host / macros / spa / openapi / client / webx / build / alloc-probe / contract-tests | 框架本体，依赖方向只向内 |
+| `crates/<framework>` | core / engine / host / macros / spa / openapi / client / webx / build | 已发布的框架本体，依赖方向只向内 |
+| `crates/transport/` | h3 | 可选的非 hyper 监听后端（HTTP/3） |
 | `crates/ai/` | core / ef / gateway | AI 网关领域：端口与 IR、EF 账本、OpenAI 兼容表面 |
 | `crates/auth/` | ef / oidc / oauth2 / mfa / webauthn | 认证协议适配器；HTTP 认证 scheme 管线仍在 `host`（框架内聚） |
 | `crates/cache/` | redis | 第三方缓存；Redis 同时提供事件传输，但只保留一个驱动依赖 |
@@ -158,7 +159,8 @@ crate 归属数量不随第三方产品数量线性增长：
 - 框架 crate 与 umbrella **不得**依赖任何领域组 crate（适配器必须 opt-in）；
 - 领域组 crate 只依赖 `rust-webx-core`/`rust-webx-client`/`rust-webx-host` 的端口；
   只有 `ai/gateway` 这类应用表面允许依赖 umbrella；
-- 组内 crate 通过相对 `path` 复用 `crates/contract-tests`，不复制契约套件。
+- 组内 crate 通过相对 `path` 复用 `testing/contract-tests`，不复制契约套件。
 
 门禁：`scripts/check-crate-layout.py`（CI Lint 调用 `scripts/check-crate-layout.sh`）校验
-成员分类、孤儿 crate、框架→领域反向依赖与 umbrella 是否链接适配器；放错位置即 CI 失败。
+成员分类、孤儿 crate、框架→领域反向依赖、umbrella 是否链接适配器，以及 **`crates/` 只含
+可发布 crate、非发布的测试工具必须位于 `testing/`**；放错位置即 CI 失败。

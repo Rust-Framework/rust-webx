@@ -15,13 +15,13 @@
 
 use bytes::{Bytes, BytesMut};
 use futures_util::StreamExt;
-use http_body_util::BodyExt;
-use hyper::body::{Body, Incoming};
 use std::path::PathBuf;
 use webx_core::config::AppOptions;
 use webx_core::error::{Error, Result};
 use webx_core::form::{FormFileBuilder, MultipartForm};
 use webx_core::http::RequestBodyStream;
+
+use crate::transport::{TransportBodyFrame, TransportRequestBodyStream};
 
 /// Limits applied while reading a request body.
 ///
@@ -90,7 +90,7 @@ impl BodyLimits {
     }
 }
 
-/// Buffer a body into `Bytes`, enforcing `limit`.
+/// Buffer a body stream into `Bytes`, enforcing `limit`.
 ///
 /// The common small-body case is one data frame: that frame's `Bytes` is
 /// returned directly instead of being copied into a new buffer. Larger bodies
@@ -100,12 +100,12 @@ impl BodyLimits {
 /// frame is polled. Chunked bodies have no exact size hint and are bounded while
 /// reading; the total is checked before a chunk is appended, so the buffer never
 /// grows past the limit by more than the rejected chunk itself.
-pub(crate) async fn read_body<B>(mut body: B, limit: usize) -> Result<Bytes>
-where
-    B: Body<Data = Bytes> + Unpin,
-    B::Error: std::fmt::Display,
-{
-    if let Some(exact) = body.size_hint().exact() {
+pub(crate) async fn read_body(
+    mut frames: TransportRequestBodyStream,
+    exact_len: Option<u64>,
+    limit: usize,
+) -> Result<Bytes> {
+    if let Some(exact) = exact_len {
         if exact > limit as u64 {
             return Err(payload_too_large(limit));
         }
@@ -115,11 +115,13 @@ where
     let mut first: Option<Bytes> = None;
     let mut buffer: Option<BytesMut> = None;
 
-    while let Some(frame) = body.frame().await {
+    while let Some(frame) = frames.next().await {
         let frame = frame.map_err(map_body_error)?;
-        let Ok(chunk) = frame.into_data() else {
-            // Trailer frames carry no payload; they are legal and ignored.
-            continue;
+        let chunk = match frame {
+            TransportBodyFrame::Data(chunk) => chunk,
+            // Trailer frames carry no payload; they are legal and ignored by a
+            // buffered reader (the hyper path always behaved this way).
+            TransportBodyFrame::Trailers(_) => continue,
         };
 
         total = total.saturating_add(chunk.len());
@@ -135,9 +137,6 @@ where
             combined.extend_from_slice(&first_frame);
             combined.extend_from_slice(&chunk);
             buffer = Some(combined);
-        } else if body.is_end_stream() {
-            // The whole body was this one frame: hand it out without copying.
-            return Ok(chunk);
         } else {
             first = Some(chunk);
         }
@@ -154,22 +153,24 @@ where
 ///
 /// Trailer frames are rejected: a proxy endpoint forwards data, and silently
 /// dropping trailers would lose information the client encoded.
-pub(crate) fn stream_body(incoming: Incoming, limit: usize) -> RequestBodyStream {
+pub(crate) fn stream_body(frames: TransportRequestBodyStream, limit: usize) -> RequestBodyStream {
     let limit = limit as u64;
     let mut seen = 0u64;
-    let stream = http_body_util::BodyStream::new(incoming).map(move |frame| {
-        let frame = frame.map_err(|error| {
-            tracing::debug!(error = %error, "failed to read request body");
-            Error::Http(format!("request body stream: {error}"))
-        })?;
-        let bytes = frame
-            .into_data()
-            .map_err(|_| Error::Http("unexpected trailer frame in request body".to_string()))?;
-        seen = seen.saturating_add(bytes.len() as u64);
-        if seen > limit {
-            return Err(Error::Status(413, "request body too large".to_string()));
+    let stream = frames.map(move |frame| match frame {
+        Ok(TransportBodyFrame::Data(bytes)) => {
+            seen = seen.saturating_add(bytes.len() as u64);
+            if seen > limit {
+                return Err(Error::Status(413, "request body too large".to_string()));
+            }
+            Ok(bytes)
         }
-        Ok(bytes)
+        Ok(TransportBodyFrame::Trailers(_)) => Err(Error::Http(
+            "unexpected trailer frame in request body".to_string(),
+        )),
+        Err(error) => {
+            tracing::debug!(error = %error, "failed to read request body");
+            Err(Error::Http(format!("request body stream: {error}")))
+        }
     });
     Box::pin(stream)
 }
@@ -223,12 +224,20 @@ pub(crate) fn multipart_boundary(content_type: &str) -> Option<String> {
 /// ones to disk. Nothing is copied twice, so peak memory stays bounded no
 /// matter how large the upload is.
 pub(crate) async fn parse_multipart(
-    incoming: Incoming,
+    frames: TransportRequestBodyStream,
     boundary: &str,
     limits: &BodyLimits,
 ) -> Result<MultipartForm> {
-    let stream = incoming.into_data_stream();
-    let mut multipart = multer::Multipart::new(stream, boundary);
+    // `multer` consumes a data-only stream; trailer frames are skipped, matching
+    // hyper's old `into_data_stream()` behavior.
+    let data = frames.filter_map(|frame| async move {
+        match frame {
+            Ok(TransportBodyFrame::Data(bytes)) => Some(Ok(bytes)),
+            Ok(TransportBodyFrame::Trailers(_)) => None,
+            Err(error) => Some(Err(error)),
+        }
+    });
+    let mut multipart = multer::Multipart::new(data, boundary);
     let mut form = MultipartForm::new();
     let mut total: u64 = 0;
 
@@ -307,10 +316,22 @@ fn multer_error(err: multer::Error) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transport::TransportBodyError;
     use futures_util::stream;
-    use http_body_util::{Full, StreamBody};
-    use hyper::body::Frame;
-    use std::convert::Infallible;
+    use http::HeaderMap;
+
+    fn frames(items: Vec<TransportBodyFrame>) -> TransportRequestBodyStream {
+        Box::pin(stream::iter(
+            items
+                .into_iter()
+                .map(Ok::<_, TransportBodyError>)
+                .collect::<Vec<_>>(),
+        ))
+    }
+
+    fn data(bytes: &'static [u8]) -> TransportBodyFrame {
+        TransportBodyFrame::Data(Bytes::from_static(bytes))
+    }
 
     #[test]
     fn parses_the_boundary_parameter() {
@@ -339,9 +360,13 @@ mod tests {
     #[tokio::test]
     async fn read_body_returns_a_single_frame_without_copying() {
         let input = Bytes::from_static(b"{\"id\":1}");
-        let out = read_body(Full::new(input.clone()), 1024)
-            .await
-            .expect("body reads");
+        let out = read_body(
+            frames(vec![TransportBodyFrame::Data(input.clone())]),
+            None,
+            1024,
+        )
+        .await
+        .expect("body reads");
         assert_eq!(
             input.as_ptr(),
             out.as_ptr(),
@@ -351,19 +376,30 @@ mod tests {
 
     #[tokio::test]
     async fn read_body_joins_multiple_frames() {
-        let frames = stream::iter([
-            Ok::<_, Infallible>(Frame::data(Bytes::from_static(b"ab"))),
-            Ok(Frame::data(Bytes::from_static(b"cd"))),
-        ]);
-        let out = read_body(StreamBody::new(frames), 1024)
+        let out = read_body(frames(vec![data(b"ab"), data(b"cd")]), None, 1024)
             .await
             .expect("body reads");
         assert_eq!(&out[..], b"abcd");
     }
 
     #[tokio::test]
+    async fn read_body_ignores_trailer_frames() {
+        let out = read_body(
+            frames(vec![
+                data(b"ab"),
+                TransportBodyFrame::Trailers(HeaderMap::new()),
+            ]),
+            None,
+            1024,
+        )
+        .await
+        .expect("body reads");
+        assert_eq!(&out[..], b"ab");
+    }
+
+    #[tokio::test]
     async fn read_body_enforces_the_limit() {
-        let err = read_body(Full::new(Bytes::from_static(b"0123456789")), 4)
+        let err = read_body(frames(vec![data(b"0123456789")]), None, 4)
             .await
             .expect_err("the body exceeds the limit");
         assert!(matches!(err, Error::PayloadTooLarge(_)));
@@ -372,7 +408,7 @@ mod tests {
 
     #[tokio::test]
     async fn read_body_accepts_a_body_at_the_limit() {
-        let out = read_body(Full::new(Bytes::from_static(b"0123456789")), 10)
+        let out = read_body(frames(vec![data(b"0123456789")]), None, 10)
             .await
             .expect("body at the limit is accepted");
         assert_eq!(&out[..], b"0123456789");
@@ -380,11 +416,9 @@ mod tests {
 
     #[tokio::test]
     async fn read_body_rejects_a_declared_oversized_body() {
-        // `Full` reports its exact size in the hint, exactly like an HTTP/1
-        // `Content-Length` body: the limit is enforced before any poll.
-        let body = Full::new(Bytes::from_static(b"0123456789"));
-        assert_eq!(body.size_hint().exact(), Some(10));
-        let err = read_body(body, 4)
+        // `exact_len` is the neutral equivalent of an exact `Content-Length`
+        // size hint: the limit is enforced before any poll.
+        let err = read_body(frames(vec![data(b"0123456789")]), Some(10), 4)
             .await
             .expect_err("declared size over the limit is rejected");
         assert_eq!(err.status_code(), 413);

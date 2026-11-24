@@ -78,7 +78,7 @@ jobs:
           . scripts/crates-index.sh
 
           # Publish order: dependencies must appear before their dependents.
-          CRATES="rust-webx-macros rust-webx-core rust-webx-engine rust-webx-client rust-webx-ef rust-webx-ai rust-webx-ai-ef rust-webx-build rust-webx-spa rust-webx-openapi rust-webx-host rust-webx-auth-ef rust-webx-mfa rust-webx-webauthn rust-webx rust-webx-outbox-ef rust-webx-oauth2 rust-webx-oidc rust-webx-redis rust-webx-nats rust-webx-rabbitmq rust-webx-kafka rust-webx-ai-gateway rust-webx-pay rust-webx-pay-stripe rust-webx-pay-alipay rust-webx-pay-wechatpay rust-webx-pay-paypal rust-webx-pay-adyen rust-webx-pay-square rust-webx-pay-ef"
+          CRATES="rust-webx-macros rust-webx-core rust-webx-engine rust-webx-client rust-webx-ef rust-webx-ai rust-webx-ai-ef rust-webx-build rust-webx-spa rust-webx-openapi rust-webx-host rust-webx-auth-ef rust-webx-mfa rust-webx-webauthn rust-webx rust-webx-outbox-ef rust-webx-oauth2 rust-webx-oidc rust-webx-redis rust-webx-nats rust-webx-rabbitmq rust-webx-kafka rust-webx-ai-gateway rust-webx-pay rust-webx-pay-stripe rust-webx-pay-alipay rust-webx-pay-wechatpay rust-webx-pay-paypal rust-webx-pay-adyen rust-webx-pay-square rust-webx-pay-ef rust-webx-h3"
           metadata="$(cargo metadata --no-deps --format-version 1)"
 
           # The tag must match every crate version. Skipping mismatches would

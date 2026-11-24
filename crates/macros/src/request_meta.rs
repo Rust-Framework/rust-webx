@@ -18,6 +18,7 @@ use syn::{
 /// |-----------|--------|
 /// | `#[frompath("id")]` | the `{id}` route segment |
 /// | `#[fromquery("q")]` | query string (repeatable, comma lists expand) |
+/// | `#[fromquery(nested)]` | bind the field as its own `RequestModel` from the request |
 /// | `#[frombody]` | the JSON body (key from `#[serde(rename)]`) |
 /// | `#[fromform("title")]` | a `multipart/form-data` text part |
 /// | `#[fromfile("avatar")]` | a `multipart/form-data` file part |
@@ -538,6 +539,8 @@ struct SourceDecl {
     /// An `IdentityUser` field already binds from the principal; the keyword is
     /// parsed now so the syntax stays stable, and it is rejected elsewhere.
     identity: bool,
+    /// `#[fromquery(nested)]`: bind the field as its own `RequestModel`.
+    nested: bool,
 }
 
 impl SourceDecl {
@@ -547,6 +550,7 @@ impl SourceDecl {
             key: None,
             optional: false,
             identity: false,
+            nested: false,
         }
     }
 }
@@ -667,7 +671,29 @@ fn declared_source(field: &Field) -> syn::Result<Option<SourceDecl>> {
                     "`#[fromclient]` takes no key; the whole ClientInfo is bound from the request",
                 ))
             }
+            Meta::List(list) if src == Src::Query => {
+                let tokens: TokenStream2 = list.parse_args()?;
+                if tokens.to_string() == "nested" {
+                    decl.nested = true;
+                } else {
+                    let lit: LitStr = syn::parse2(tokens)?;
+                    let value = lit.value();
+                    if value.is_empty() {
+                        return Err(syn::Error::new_spanned(
+                            &lit,
+                            "a source key must not be empty",
+                        ));
+                    }
+                    decl.key = Some(value);
+                }
+            }
             Meta::List(list) => {
+                if list.tokens.to_string() == "nested" {
+                    return Err(syn::Error::new_spanned(
+                        list,
+                        "`nested` is only supported on `#[fromquery(nested)]`",
+                    ));
+                }
                 let lit: LitStr = list.parse_args()?;
                 let value = lit.value();
                 if value.is_empty() {
@@ -958,6 +984,8 @@ struct FieldSpec {
     validation: Vec<ValidationRule>,
     /// Name of the hidden helper struct for flatten / custom deserializers.
     helper: Ident,
+    /// `#[fromquery(nested)]`: the field binds as its own `RequestModel`.
+    nested: bool,
 }
 
 impl FieldSpec {
@@ -1212,6 +1240,30 @@ fn build_fields(
             ident.span(),
         );
 
+        let nested = declared.as_ref().is_some_and(|decl| decl.nested);
+        if nested {
+            if src != Src::Query {
+                return Err(syn::Error::new_spanned(
+                    field,
+                    "`nested` applies only to `#[fromquery(nested)]`",
+                ));
+            }
+            if !matches!(&shape, Shape::Scalar(_)) {
+                return Err(syn::Error::new_spanned(
+                    field,
+                    "`#[fromquery(nested)]` requires a plain nested request model; \
+                     `Option<...>` and collections are not supported",
+                ));
+            }
+            if !validation.is_empty() {
+                return Err(syn::Error::new_spanned(
+                    field,
+                    "declare validation on the nested request model itself, not on the \
+                     `#[fromquery(nested)]` field",
+                ));
+            }
+        }
+
         specs.push(FieldSpec {
             required: !skipped && !shape.is_optional() && default.is_none(),
             ident,
@@ -1231,6 +1283,7 @@ fn build_fields(
             custom: serde.custom,
             validation,
             helper,
+            nested,
         });
     }
 
@@ -1309,6 +1362,18 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
 
     let has_flatten = fields.iter().any(|f| !f.skipped && f.flattened);
     let meta = param_meta(&fields, has_form);
+    let nested_meta: Vec<TokenStream2> = fields
+        .iter()
+        .filter(|f| !f.skipped && f.nested)
+        .map(|f| {
+            let ty = &f.ty;
+            quote! {
+                __meta.extend_from_slice(
+                    <#ty as ::webx::RequestModel>::param_meta(),
+                );
+            }
+        })
+        .collect();
 
     let plan = BindingPlan {
         has_form,
@@ -1350,7 +1415,14 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
 
         impl ::webx::RequestModel for #type_ident {
             fn param_meta() -> &'static [::webx::ParamMeta] {
-                &[#(#meta),*]
+                static __META: ::std::sync::OnceLock<
+                    ::std::vec::Vec<::webx::ParamMeta>,
+                > = ::std::sync::OnceLock::new();
+                __META.get_or_init(|| {
+                    let mut __meta = ::std::vec![#(#meta),*];
+                    #(#nested_meta)*
+                    __meta
+                })
             }
 
             #binder
@@ -1362,7 +1434,7 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
             ::webx::RequestParamEntry {
                 request_type: ::core::stringify!(#type_ident),
                 req_type_id: ::std::any::TypeId::of::<#type_ident>(),
-                params: &[#(#meta),*],
+                params: <#type_ident as ::webx::RequestModel>::param_meta,
             }
         }
     })
@@ -1470,6 +1542,11 @@ fn param_meta(fields: &[FieldSpec], has_form: bool) -> Vec<TokenStream2> {
     let mut entries = Vec::new();
 
     for f in fields.iter().filter(|f| !f.skipped) {
+        // A nested model contributes its own parameters through the lazy splice
+        // in `param_meta()`, not as a parameter named after the field.
+        if f.nested {
+            continue;
+        }
         if is_current_user(&f.ty) {
             continue;
         }
@@ -1706,6 +1783,11 @@ fn bind_fn(fields: &[FieldSpec], plan: &BindingPlan) -> TokenStream2 {
         .filter(|f| !f.skipped)
         .map(|f| bind_field(f, plan))
         .collect();
+    let nested_statements: Vec<TokenStream2> = fields
+        .iter()
+        .filter(|f| !f.skipped && f.nested)
+        .map(bind_nested_field)
+        .collect();
 
     let unknown_check = if plan.deny_unknown_fields {
         quote! {
@@ -1754,6 +1836,7 @@ fn bind_fn(fields: &[FieldSpec], plan: &BindingPlan) -> TokenStream2 {
 
                 let mut __binder = ::webx::binding::Binder::new();
                 #(#statements)*
+                #(#nested_statements)*
                 #unknown_check
 
                 if __binder.has_errors() {
@@ -1921,6 +2004,30 @@ fn validation_checks(f: &FieldSpec) -> TokenStream2 {
     }
 }
 
+/// Bind one `#[fromquery(nested)]` field through its own `RequestModel`.
+///
+/// Runs after the ordinary fields, once the shared `BindInput` borrow has ended,
+/// so the nested model can take `&mut ctx`. A nested `400` is folded into the
+/// outer binder's `errors` map; a non-field/fatal failure is kept verbatim.
+fn bind_nested_field(f: &FieldSpec) -> TokenStream2 {
+    let ident = &f.ident;
+    let local = format_ident!("__f_{}", ident);
+    let ty = match &f.shape {
+        Shape::Scalar(ty) => ty,
+        _ => unreachable!("nested fields are validated as Shape::Scalar"),
+    };
+    quote! {
+        let #local: ::core::option::Option<#ty> =
+            match <#ty as ::webx::RequestModel>::bind_inline(ctx).await {
+                ::core::result::Result::Ok(__value) => ::core::option::Option::Some(__value),
+                ::core::result::Result::Err(__error) => {
+                    __binder.nested(__error);
+                    ::core::option::Option::None
+                }
+            };
+    }
+}
+
 fn bind_field(f: &FieldSpec, plan: &BindingPlan) -> TokenStream2 {
     let ident = &f.ident;
     let local = format_ident!("__f_{}", ident);
@@ -1934,6 +2041,12 @@ fn bind_field(f: &FieldSpec, plan: &BindingPlan) -> TokenStream2 {
         Shape::Files => quote! { ::std::vec::Vec<::webx::FormFile> },
     };
     let checks = validation_checks(f);
+
+    if f.nested {
+        // The value is bound after the ordinary fields so the `BindInput` borrow
+        // has ended and the nested model can take `&mut ctx`.
+        return quote! { let #local: #local_ty = ::core::option::Option::None; };
+    }
 
     if is_client_info(&f.ty) {
         // The host resolves the client address before the endpoint runs; the

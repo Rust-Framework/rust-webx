@@ -185,11 +185,12 @@ impl RequestParams {
         let mut by_type = HashMap::new();
         let mut by_name = HashMap::new();
         for entry in inventory::iter::<RequestParamEntry> {
-            by_name.insert(entry.request_type, entry.params);
+            let params = (entry.params)();
+            by_name.insert(entry.request_type, params);
             // `TypeId::of::<()>()` is the "no type id" sentinel of hand-written
             // entries (`RouteEntry::new`); it must not shadow a real type.
             if entry.req_type_id != std::any::TypeId::of::<()>() {
-                by_type.insert(entry.req_type_id, entry.params);
+                by_type.insert(entry.req_type_id, params);
             }
         }
         Self { by_type, by_name }

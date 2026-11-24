@@ -497,6 +497,30 @@ fn find_free_port() -> u16 {
     listener.local_addr().unwrap().port()
 }
 
+// Nested request model: `#[fromquery(nested)]` delegates to
+// `impl RequestModel for PagedRequest` in webx-core.
+#[derive(WebxRequestMeta)]
+struct NestedPagingQuery {
+    #[fromquery(nested)]
+    paging: PagedRequest,
+}
+
+#[get("/bind/nested")]
+impl IRequest<serde_json::Value> for NestedPagingQuery {}
+
+#[derive(Default)]
+struct NestedPagingHandler;
+
+#[handler]
+#[async_trait::async_trait]
+impl IRequestHandler<NestedPagingQuery, serde_json::Value> for NestedPagingHandler {
+    async fn handle(&mut self, req: NestedPagingQuery) -> ActionResult<serde_json::Value> {
+        Ok(serde_json::json!({
+            "page": req.paging.page,
+            "page_size": req.paging.page_size,
+        }))
+    }
+}
 async fn spawn_host() -> String {
     let port = find_free_port();
     let addr = format!("127.0.0.1:{port}");
@@ -917,4 +941,60 @@ async fn a_field_named_claims_binds_like_any_other() {
 
     assert_eq!(body["id"], "9");
     assert_eq!(body["claims"], "payload");
+}
+#[tokio::test]
+async fn nested_paging_binds_from_query() {
+    let base = spawn_host().await;
+    let body: serde_json::Value = reqwest::get(format!("{base}/bind/nested?page=2&page_size=5"))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(body["page"], 2);
+    assert_eq!(body["page_size"], 5);
+}
+
+#[tokio::test]
+async fn nested_paging_defaults_when_absent() {
+    let base = spawn_host().await;
+    let body: serde_json::Value = reqwest::get(format!("{base}/bind/nested"))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(body["page"], 1);
+    assert_eq!(body["page_size"], 20);
+}
+
+#[tokio::test]
+async fn nested_paging_rejects_out_of_range_values() {
+    let base = spawn_host().await;
+    let resp = reqwest::get(format!("{base}/bind/nested?page=0&page_size=101"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 400);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert!(body["errors"]["page"].is_array());
+    assert!(body["errors"]["page_size"].is_array());
+}
+
+#[tokio::test]
+async fn nested_paging_rejects_unparsable_values() {
+    let base = spawn_host().await;
+    let resp = reqwest::get(format!("{base}/bind/nested?page=abc"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 400);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert!(body["errors"]["page"].is_array());
+}
+#[test]
+fn nested_paging_parameters_are_spliced_into_openapi_meta() {
+    let names: Vec<&str> = <NestedPagingQuery as RequestModel>::param_meta()
+        .iter()
+        .map(|param| param.name)
+        .collect();
+    assert_eq!(names, ["page", "page_size"]);
 }

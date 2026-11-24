@@ -14,6 +14,83 @@ pub use rust_core::pagination::{
     PagedRequest, PagedResult, DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE,
 };
 
+use std::future::Future;
+
+use crate::route::binding::{Binder, RequestModel};
+use crate::route::scan::ParamMeta;
+
+/// Bind a nested `#[fromquery(nested)] paging: PagedRequest` field.
+///
+/// Defaults and range checks live here, once: absent `page`/`page_size` use
+/// [`DEFAULT_PAGE`] / [`DEFAULT_PAGE_SIZE`]; `page < 1` and `page_size` outside
+/// `1..=MAX_PAGE_SIZE` are `400` field errors (never a silent clamp). Its
+/// [`ParamMeta`] slice is spliced into the outer request's OpenAPI parameters
+/// lazily by the derive (A2), so `page`/`page_size` stay documented.
+impl RequestModel for PagedRequest {
+    fn param_meta() -> &'static [ParamMeta] {
+        const PARAMS: &[ParamMeta] = &[
+            ParamMeta {
+                name: "page",
+                source: "query",
+                type_hint: "integer",
+                required: false,
+                constraints: &[],
+                json_key: None,
+            },
+            ParamMeta {
+                name: "page_size",
+                source: "query",
+                type_hint: "integer",
+                required: false,
+                constraints: &[],
+                json_key: None,
+            },
+        ];
+        PARAMS
+    }
+
+    #[allow(clippy::manual_async_fn)]
+    fn bind_inline(
+        ctx: &mut dyn crate::http::IHttpContext,
+    ) -> impl Future<Output = crate::error::Result<Self>> + Send + '_ {
+        async move {
+            let mut binder = Binder::new();
+            let query = ctx.request().query();
+
+            let page = match query.get("page") {
+                None => DEFAULT_PAGE,
+                Some(raw) => binder
+                    .required::<u32>(Some(raw), "page", "integer")
+                    .unwrap_or(DEFAULT_PAGE),
+            };
+            if page < 1 {
+                binder.validation("page", "The `page` field must be at least 1.");
+            }
+
+            let page_size = match query.get("page_size") {
+                None => DEFAULT_PAGE_SIZE,
+                Some(raw) => binder
+                    .required::<u32>(Some(raw), "page_size", "integer")
+                    .unwrap_or(DEFAULT_PAGE_SIZE),
+            };
+            if !(1..=MAX_PAGE_SIZE).contains(&page_size) {
+                binder.validation(
+                    "page_size",
+                    format!("The `page_size` field must be between 1 and {MAX_PAGE_SIZE}."),
+                );
+            }
+
+            if binder.has_errors() {
+                return Err(binder.into_error());
+            }
+            Ok(PagedRequest {
+                page: page.max(1),
+                page_size: page_size.clamp(1, MAX_PAGE_SIZE),
+            })
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

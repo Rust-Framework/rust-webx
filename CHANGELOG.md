@@ -37,7 +37,7 @@ writer renders every error through it.
 - **`x-webx-*` extensions are reserved**: custom `IErrorResponseWriter` implementations must use
   `webx_core::problem::extensions_for_wire`; the default writer writes `Retry-After` from
   `retry_after_of`.
-- **Verification**: `cargo test --workspace` (257 test result blocks) and
+- **Verification**: `cargo test --workspace` (255 test result blocks after E2) and
   `cargo clippy --workspace --all-targets -- -D warnings` pass on this branch.
 
 ##### Structure
@@ -54,6 +54,21 @@ writer renders every error through it.
 - **Root workspace is not yet ef-free**: the `*-ef` starters and the docbit/dmbit demos are still
   members; moving them to a separate starter workspace is the next step (acceptance:
   `cargo tree --workspace | rg rust-ef` is empty).
+
+##### Nested request models (E2)
+
+- **`#[fromquery(nested)] field: RequestModel`** binds a field through its own
+  `RequestModel::bind_inline`. `Option<Nested>`, collections and body nesting are rejected at
+  compile time; validation belongs on the nested model.
+- **`impl RequestModel for PagedRequest`** lives in webx-core (the trait's crate): absent
+  `page`/`page_size` use the shared defaults, `page < 1` / `page_size` outside `1..=100` are `400`
+  field errors, and `page`/`page_size` are documented in OpenAPI.
+- **Nested errors aggregate**: `Binder::nested` folds a nested `400` into the same `errors` map as
+  the outer fields; a 401/403/5xx nested failure is kept as a fatal error that wins when the binder
+  is consumed. `RequestParamEntry::params` is now `fn() -> &'static [ParamMeta]` so the derive can
+  splice nested metadata through a `OnceLock` (OpenAPI A2); the hand-written fixtures use closures.
+- **E2 acceptance**: `binding_test` 27 passed (nested bind/defaults/out-of-range/unparsable + OpenAPI
+  meta splice); OpenAPI `spec_test` 13 passed.
 
 ##### Added
 
@@ -128,6 +143,20 @@ writer renders every error through it.
   3.0 删除。
 - **根 workspace 尚未去 ef**：`*-ef` starters 与 docbit/dmbit demo 仍是成员；把它们移到独立
   starter workspace 是下一步（验收：`cargo tree --workspace | rg rust-ef` 为空）。
+
+##### 嵌套请求模型（E2）
+
+- **`#[fromquery(nested)] field: RequestModel`** 通过该模型自己的 `RequestModel::bind_inline`
+  绑定；`Option<Nested>`、集合与 body 嵌套在编译期拒绝，校验写在嵌套模型自身。
+- **`impl RequestModel for PagedRequest`** 放在 webx-core（trait 所在 crate）：缺省
+  `page`/`page_size` 用共享默认值，`page < 1` / `page_size` 超出 `1..=100` 为 400 字段错误，
+  `page`/`page_size` 会进入 OpenAPI。
+- **嵌套错误聚合**：`Binder::nested` 把嵌套 400 合并进同一个 `errors` 映射；401/403/5xx 作为
+  fatal error 保留，消费 binder 时优先返回。`RequestParamEntry::params` 改为
+  `fn() -> &'static [ParamMeta]`，derive 用 `OnceLock` 懒拼接嵌套元数据（OpenAPI A2），手写
+  fixture 改用闭包。
+- **E2 验收**：`binding_test` 27 passed（嵌套绑定/默认值/越界/非法值 + OpenAPI 元数据拼接）；
+  OpenAPI `spec_test` 13 passed。
 
 ##### 新增
 

@@ -243,7 +243,11 @@ pub struct RequestParamEntry {
     /// name.
     pub req_type_id: std::any::TypeId,
 
-    pub params: &'static [ParamMeta],
+    /// Parameter metadata for the request type.
+    ///
+    /// A function (not a static slice) so a derived request can splice a nested
+    /// model's parameters lazily while keeping the inventory value const.
+    pub params: fn() -> &'static [ParamMeta],
 }
 
 inventory::collect!(RequestParamEntry);

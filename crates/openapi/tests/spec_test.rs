@@ -163,7 +163,7 @@ inventory::submit! {
     RequestParamEntry {
         request_type: "QualifierRequest",
         req_type_id: TypeId::of::<qualified::QualifierRequest>(),
-        params: &[ParamMeta {
+        params: || &[ParamMeta {
             name: "term",
             source: "query",
             type_hint: "string",
@@ -178,7 +178,7 @@ inventory::submit! {
     RequestParamEntry {
         request_type: "ListOrdersRequest",
         req_type_id: TypeId::of::<contracts::ListOrdersRequest>(),
-        params: &[ParamMeta {
+        params: || &[ParamMeta {
             name: "contract",
             source: "query",
             type_hint: "string",
@@ -193,7 +193,7 @@ inventory::submit! {
     RequestParamEntry {
         request_type: "ListOrdersRequest",
         req_type_id: TypeId::of::<billing::ListOrdersRequest>(),
-        params: &[ParamMeta {
+        params: || &[ParamMeta {
             name: "invoice",
             source: "query",
             type_hint: "string",
@@ -209,7 +209,7 @@ inventory::submit! {
         request_type: "SearchRequest",
         // Hand-written entry without a type identity: falls back to the name.
         req_type_id: TypeId::of::<()>(),
-        params: &[
+        params: || &[
             ParamMeta {
                 name: "q",
                 source: "query",
@@ -234,7 +234,7 @@ inventory::submit! {
     RequestParamEntry {
         request_type: "CreateBlogRequest",
         req_type_id: TypeId::of::<()>(),
-        params: &[
+        params: || &[
             ParamMeta {
                 name: "title",
                 source: "body",
@@ -294,7 +294,7 @@ inventory::submit! {
     RequestParamEntry {
         request_type: "UpdateSettingsRequest",
         req_type_id: TypeId::of::<()>(),
-        params: &[
+        params: || &[
             ParamMeta {
                 name: "theme",
                 source: "body",
@@ -319,7 +319,7 @@ inventory::submit! {
     RequestParamEntry {
         request_type: "LegacyBodyRequest",
         req_type_id: TypeId::of::<()>(),
-        params: &[ParamMeta {
+        params: || &[ParamMeta {
             name: "payload",
             source: "body",
             type_hint: "object",

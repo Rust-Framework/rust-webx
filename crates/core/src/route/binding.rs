@@ -393,6 +393,10 @@ fn split_values(values: &[String]) -> Vec<&str> {
 #[derive(Default)]
 pub struct Binder {
     errors: Vec<FieldError>,
+    /// A nested model failure that is not a field-level `400` (for example a
+    /// dependency-injection or authorization error) must win over the aggregate
+    /// binding error.
+    fatal: Option<Error>,
 }
 
 impl Binder {
@@ -403,7 +407,7 @@ impl Binder {
 
     /// Whether any field failed.
     pub fn has_errors(&self) -> bool {
-        !self.errors.is_empty()
+        self.fatal.is_some() || !self.errors.is_empty()
     }
 
     /// The recorded failures, in binding order.
@@ -415,7 +419,36 @@ impl Binder {
     ///
     /// The response body carries `errors` as `{ "field": ["message"] }`.
     pub fn into_error(self) -> Error {
+        if let Some(error) = self.fatal {
+            return error;
+        }
         ProblemDetails::validation(self.errors).to_error()
+    }
+
+    /// Merge a nested request model failure.
+    ///
+    /// A `400` field-validation error is folded into the same aggregate
+    /// `errors` map as the outer fields; anything else (401/403/5xx) is kept as
+    /// a fatal error and wins when the binder is consumed.
+    pub fn nested(&mut self, error: Error) {
+        if error.status_code() == 400 && !error.fields().is_empty() {
+            for problem in error.fields() {
+                self.errors.push(FieldError::new(
+                    problem.field.clone(),
+                    problem.message.clone(),
+                ));
+            }
+        } else if error.status_code() == 400 {
+            self.validation(
+                "",
+                error
+                    .public_detail()
+                    .unwrap_or_else(|| error.code())
+                    .to_string(),
+            );
+        } else {
+            self.fatal = Some(error);
+        }
     }
 
     /// Record the canonical "required" failure for `field`.

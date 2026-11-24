@@ -27,14 +27,14 @@ pub fn verify_registration(
     verify_client_data(config, challenge, client_data_json, "webauthn.create")?;
 
     let attestation: Value = ciborium::de::from_reader(attestation_object)
-        .map_err(|_| Error::Validation("invalid WebAuthn attestation object".to_string()))?;
+        .map_err(|_| Error::validation("invalid WebAuthn attestation object".to_string()))?;
     let map = attestation
         .as_map()
-        .ok_or_else(|| Error::Validation("attestation object is not a map".to_string()))?;
+        .ok_or_else(|| Error::validation("attestation object is not a map".to_string()))?;
     let fmt = map_text(map, "fmt")
-        .ok_or_else(|| Error::Validation("attestation fmt is missing".to_string()))?;
+        .ok_or_else(|| Error::validation("attestation fmt is missing".to_string()))?;
     if fmt != "none" {
-        return Err(Error::Validation(format!(
+        return Err(Error::validation(format!(
             "unsupported WebAuthn attestation format '{fmt}'"
         )));
     }
@@ -44,21 +44,21 @@ pub fn verify_registration(
         .and_then(|(_, value)| value.as_map())
         .is_some_and(|statement| statement.is_empty());
     if !empty_att_stmt {
-        return Err(Error::Validation(
+        return Err(Error::validation(
             "none attestation requires an empty attStmt".to_string(),
         ));
     }
     let auth_data = map_bytes(map, "authData")
-        .ok_or_else(|| Error::Validation("attestation authData is missing".to_string()))?;
+        .ok_or_else(|| Error::validation("attestation authData is missing".to_string()))?;
 
     let parsed = parse_auth_data(config, auth_data, true)?;
     let Some(attested) = parsed.attested else {
-        return Err(Error::Validation(
+        return Err(Error::validation(
             "registration authData has no attested credential data".to_string(),
         ));
     };
     if !constant_time_eq(&attested.credential_id, credential_id) {
-        return Err(Error::Unauthorized(
+        return Err(Error::unauthorized(
             "WebAuthn credential id mismatch".to_string(),
         ));
     }
@@ -86,7 +86,7 @@ pub fn verify_assertion(
 ) -> Result<AssertionResult> {
     verify_client_data(config, challenge, client_data_json, "webauthn.get")?;
     if !constant_time_eq(&credential.credential_id, credential_id) {
-        return Err(Error::Unauthorized(
+        return Err(Error::unauthorized(
             "WebAuthn credential id mismatch".to_string(),
         ));
     }
@@ -98,22 +98,22 @@ pub fn verify_assertion(
     sec1.extend_from_slice(&x);
     sec1.extend_from_slice(&y);
     let verifying_key = VerifyingKey::from_sec1_bytes(&sec1)
-        .map_err(|_| Error::Validation("invalid WebAuthn public key".to_string()))?;
+        .map_err(|_| Error::validation("invalid WebAuthn public key".to_string()))?;
     let signature = Signature::from_der(signature)
-        .map_err(|_| Error::Unauthorized("invalid WebAuthn signature".to_string()))?;
+        .map_err(|_| Error::unauthorized("invalid WebAuthn signature".to_string()))?;
 
     let mut message = authenticator_data.to_vec();
     message.extend_from_slice(&Sha256::digest(client_data_json.as_bytes()));
     verifying_key
         .verify(&message, &signature)
-        .map_err(|_| Error::Unauthorized("WebAuthn assertion signature is invalid".to_string()))?;
+        .map_err(|_| Error::unauthorized("WebAuthn assertion signature is invalid".to_string()))?;
 
     // A zero counter on both sides is allowed for authenticators that do not
     // implement counters; otherwise it must advance.
     if !(parsed.sign_count == 0 && credential.sign_count == 0)
         && parsed.sign_count <= credential.sign_count
     {
-        return Err(Error::Unauthorized(
+        return Err(Error::unauthorized(
             "WebAuthn signature counter did not advance".to_string(),
         ));
     }
@@ -139,14 +139,14 @@ fn verify_client_data(
     expected_type: &str,
 ) -> Result<()> {
     let client_data: ClientData = serde_json::from_str(client_data_json)
-        .map_err(|_| Error::Validation("invalid WebAuthn clientDataJSON".to_string()))?;
+        .map_err(|_| Error::validation("invalid WebAuthn clientDataJSON".to_string()))?;
     if client_data.typ != expected_type {
-        return Err(Error::Validation(format!(
+        return Err(Error::validation(format!(
             "WebAuthn type must be {expected_type}"
         )));
     }
     if !challenge.verify(&client_data.challenge) {
-        return Err(Error::Unauthorized(
+        return Err(Error::unauthorized(
             "WebAuthn challenge mismatch".to_string(),
         ));
     }
@@ -155,12 +155,12 @@ fn verify_client_data(
         .iter()
         .any(|origin| origin == &client_data.origin)
     {
-        return Err(Error::Unauthorized(
+        return Err(Error::unauthorized(
             "WebAuthn origin is not allowed".to_string(),
         ));
     }
     if client_data.cross_origin == Some(true) {
-        return Err(Error::Unauthorized(
+        return Err(Error::unauthorized(
             "cross-origin WebAuthn is not allowed".to_string(),
         ));
     }
@@ -184,24 +184,24 @@ fn parse_auth_data(
     expect_attested: bool,
 ) -> Result<ParsedAuthData> {
     if auth_data.len() < 37 {
-        return Err(Error::Validation(
+        return Err(Error::validation(
             "WebAuthn authData is too short".to_string(),
         ));
     }
     let rp_hash = &auth_data[..32];
     if !constant_time_eq(rp_hash, &config.rp_id_hash()) {
-        return Err(Error::Unauthorized(
+        return Err(Error::unauthorized(
             "WebAuthn rpIdHash mismatch".to_string(),
         ));
     }
     let flags = auth_data[32];
     if flags & FLAG_UP == 0 {
-        return Err(Error::Unauthorized(
+        return Err(Error::unauthorized(
             "WebAuthn user presence flag is missing".to_string(),
         ));
     }
     if config.require_user_verification && flags & FLAG_UV == 0 {
-        return Err(Error::Unauthorized(
+        return Err(Error::unauthorized(
             "WebAuthn user verification flag is missing".to_string(),
         ));
     }
@@ -209,7 +209,7 @@ fn parse_auth_data(
 
     if !expect_attested {
         if flags & FLAG_AT != 0 {
-            return Err(Error::Validation(
+            return Err(Error::validation(
                 "assertion authData unexpectedly contains attested data".to_string(),
             ));
         }
@@ -220,7 +220,7 @@ fn parse_auth_data(
     }
 
     if flags & FLAG_AT == 0 || auth_data.len() < 55 {
-        return Err(Error::Validation(
+        return Err(Error::validation(
             "registration authData has no attested credential data".to_string(),
         ));
     }
@@ -229,19 +229,19 @@ fn parse_auth_data(
     let credential_start: usize = 55;
     let credential_end = credential_start
         .checked_add(credential_len)
-        .ok_or_else(|| Error::Validation("invalid credential length".to_string()))?;
+        .ok_or_else(|| Error::validation("invalid credential length".to_string()))?;
     if auth_data.len() <= credential_end {
-        return Err(Error::Validation(
+        return Err(Error::validation(
             "truncated WebAuthn credential data".to_string(),
         ));
     }
     let credential_id = auth_data[credential_start..credential_end].to_vec();
     let cose: Value = ciborium::de::from_reader(&auth_data[credential_end..])
-        .map_err(|_| Error::Validation("invalid WebAuthn COSE key".to_string()))?;
+        .map_err(|_| Error::validation("invalid WebAuthn COSE key".to_string()))?;
     parse_cose_es256_value(&cose)?;
     let mut cose_key = Vec::new();
     ciborium::ser::into_writer(&cose, &mut cose_key)
-        .map_err(|_| Error::Validation("cannot re-encode WebAuthn COSE key".to_string()))?;
+        .map_err(|_| Error::validation("cannot re-encode WebAuthn COSE key".to_string()))?;
 
     Ok(ParsedAuthData {
         sign_count,
@@ -255,14 +255,14 @@ fn parse_auth_data(
 
 fn parse_cose_es256(bytes: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
     let value: Value = ciborium::de::from_reader(bytes)
-        .map_err(|_| Error::Validation("invalid WebAuthn COSE key".to_string()))?;
+        .map_err(|_| Error::validation("invalid WebAuthn COSE key".to_string()))?;
     parse_cose_es256_value(&value)
 }
 
 fn parse_cose_es256_value(value: &Value) -> Result<(Vec<u8>, Vec<u8>)> {
     let map = value
         .as_map()
-        .ok_or_else(|| Error::Validation("WebAuthn COSE key is not a map".to_string()))?;
+        .ok_or_else(|| Error::validation("WebAuthn COSE key is not a map".to_string()))?;
     let kty = map_integer(map, 1).ok_or_else(unsupported_key)?;
     let alg = map_integer(map, 3).ok_or_else(unsupported_key)?;
     let crv = map_integer(map, -1).ok_or_else(unsupported_key)?;
@@ -282,7 +282,7 @@ fn parse_cose_es256_value(value: &Value) -> Result<(Vec<u8>, Vec<u8>)> {
 }
 
 fn unsupported_key() -> Error {
-    Error::Validation("unsupported WebAuthn credential key (expected EC2/P-256 ES256)".to_string())
+    Error::validation("unsupported WebAuthn credential key (expected EC2/P-256 ES256)".to_string())
 }
 
 fn map_integer(map: &[(Value, Value)], key: i128) -> Option<i128> {

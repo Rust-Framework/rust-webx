@@ -21,11 +21,11 @@ struct FailingStore;
 #[async_trait]
 impl ISessionStore for FailingStore {
     async fn revoke(&self, _jti: &str) -> Result<()> {
-        Err(Error::Internal("store down".to_string()))
+        Err(Error::internal("store down".to_string()))
     }
 
     async fn is_revoked(&self, _jti: &str) -> Result<bool> {
-        Err(Error::Internal("store down".to_string()))
+        Err(Error::internal("store down".to_string()))
     }
 }
 
@@ -51,7 +51,7 @@ async fn jwt_scheme_propagates_a_store_failure_instead_of_authenticating() {
         .err()
         .expect("a store failure must fail the request");
 
-    assert!(matches!(error, Error::Internal(_)), "got {error:?}");
+    assert!(error.code() == "internal_error", "got {error:?}");
 }
 
 #[tokio::test]
@@ -61,5 +61,5 @@ async fn cached_store_does_not_cache_backend_errors() {
         .is_revoked("jti-a")
         .await
         .expect_err("backend error must propagate");
-    assert!(matches!(error, Error::Internal(_)), "got {error:?}");
+    assert!(error.code() == "internal_error", "got {error:?}");
 }

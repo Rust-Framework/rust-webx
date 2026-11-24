@@ -59,7 +59,7 @@ impl InMemoryAdvisoryLock {
 
 fn validate_ttl(ttl: Duration) -> Result<()> {
     if ttl.is_zero() {
-        return Err(Error::Validation(
+        return Err(Error::validation(
             "advisory lock ttl must be positive".to_string(),
         ));
     }

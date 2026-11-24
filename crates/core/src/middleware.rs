@@ -90,7 +90,7 @@ impl NextStage {
 ///     async fn invoke_next(&self, ctx: &mut dyn IHttpContext, next: NextStage) -> Result<()> {
 ///         tokio::time::timeout(self.timeout, next.run(ctx))
 ///             .await
-///             .map_err(|_| Error::Status(504, "timeout".into()))?
+///             .map_err(|_| Error::status(504, "timeout"))?
 ///     }
 /// }
 /// ```

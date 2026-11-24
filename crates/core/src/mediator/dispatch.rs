@@ -28,7 +28,7 @@ where
     let req_type_id = std::any::TypeId::of::<T>();
 
     let entry = handler_cache.get_by_type_id(req_type_id).ok_or_else(|| {
-        Error::Di(format!(
+        Error::di(format!(
             "No #[handler] registered for request type '{}'",
             std::any::type_name::<T>()
         ))
@@ -49,7 +49,7 @@ where
         Box::pin(async move {
             let out = (entry_call)(handler, Box::new(typed_req) as Box<dyn Any + Send>).await?;
             out.downcast::<R>().map(|value| *value).map_err(|_| {
-                Error::Internal(format!(
+                Error::internal(format!(
                     "Handler for `{}` returned a different response type than `{}`",
                     std::any::type_name::<T>(),
                     std::any::type_name::<R>()

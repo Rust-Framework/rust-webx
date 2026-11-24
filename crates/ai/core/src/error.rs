@@ -159,10 +159,8 @@ mod tests {
 
     #[test]
     fn five_hundreds_do_not_echo_internal_detail() {
-        let error = OpenAiError::from_error(
-            500,
-            &Error::Internal("db password in /var/lib/secret".into()),
-        );
+        let error =
+            OpenAiError::from_error(500, &Error::internal("db password in /var/lib/secret"));
         assert_eq!(error.error.message, "an unexpected error occurred");
         assert_eq!(error.error.kind, "server_error");
         assert!(!error.error.message.contains("secret"));
@@ -170,7 +168,7 @@ mod tests {
 
     #[test]
     fn client_errors_keep_public_detail() {
-        let error = OpenAiError::from_error(400, &Error::Validation("model is required".into()));
+        let error = OpenAiError::from_error(400, &Error::validation("model is required"));
         assert_eq!(error.error.message, "model is required");
         assert_eq!(error.error.kind, "invalid_request_error");
     }

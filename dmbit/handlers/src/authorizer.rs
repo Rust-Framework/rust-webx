@@ -22,7 +22,7 @@ impl IDynamicAuthorizer for RoleAuthorizer {
             return Ok(());
         }
 
-        Err(Error::Http(format!(
+        Err(Error::bad_request(format!(
             "无权限访问「{route_pattern}」，需要管理员角色"
         )))
     }

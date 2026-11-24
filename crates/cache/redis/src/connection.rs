@@ -89,7 +89,7 @@ impl RedisConnection {
 
 /// Map a Redis command failure to a retryable framework error.
 pub(crate) fn transport_error(context: &str, error: impl std::fmt::Display) -> Error {
-    Error::Status(503, format!("{context}: {error}"))
+    Error::status(503, format!("{context}: {error}"))
 }
 
 /// Hide the password in a Redis URL before it reaches logs/health details.

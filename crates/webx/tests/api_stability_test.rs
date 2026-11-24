@@ -26,13 +26,13 @@ fn problem_details_layout_is_stable() {
 #[test]
 fn error_variants_and_accessors_are_stable() {
     let errors = [
-        Error::Validation("x".into()),
-        Error::NotFound("x".into()),
-        Error::Conflict("x".into()),
-        Error::Unauthorized("x".into()),
-        Error::Forbidden("x".into()),
-        Error::Internal("x".into()),
-        Error::Status(503, "down".into()),
+        Error::validation("x"),
+        Error::not_found("x"),
+        Error::conflict("x"),
+        Error::unauthorized("x"),
+        Error::forbidden("x"),
+        Error::internal("x"),
+        Error::status(503, "down"),
     ];
     for error in errors {
         let _ = error.status_code();
@@ -70,7 +70,7 @@ fn documented_constructors_still_exist() {
     let _: &dyn IRateLimiter = &store;
 
     // 2.9.1 typed errors: rate limiting carries its `Retry-After` value, and a
-    // waitable conflict is distinct from the permanent `Error::Conflict`.
+    // waitable conflict is distinct from the permanent `Error::conflict`.
     assert_eq!(Error::too_many_requests(5, "slow down").status_code(), 429);
     assert_eq!(
         Error::conflict_retryable("in flight").code(),

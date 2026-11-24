@@ -24,7 +24,7 @@ impl IEventPublisher for LoopbackPublisher {
     async fn publish(&self, message: EventMessage) -> Result<()> {
         self.tx
             .send(message)
-            .map_err(|_| Error::Internal("loopback consumer is gone".to_string()))
+            .map_err(|_| Error::internal("loopback consumer is gone".to_string()))
     }
 }
 
@@ -60,7 +60,7 @@ struct BrokenPublisher;
 #[async_trait]
 impl IEventPublisher for BrokenPublisher {
     async fn publish(&self, _message: EventMessage) -> Result<()> {
-        Err(Error::Status(503, "transport is down".to_string()))
+        Err(Error::status(503, "transport is down".to_string()))
     }
 }
 

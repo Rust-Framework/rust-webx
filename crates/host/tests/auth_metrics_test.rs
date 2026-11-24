@@ -68,8 +68,8 @@ impl IAuthenticationScheme for FakeScheme {
         match self.behavior {
             Behavior::Claims => Ok(Some(Box::new(FakeClaims))),
             Behavior::Anonymous => Ok(None),
-            Behavior::Unauthorized => Err(Error::Unauthorized("bad token".to_string())),
-            Behavior::BackendError => Err(Error::Internal("store down".to_string())),
+            Behavior::Unauthorized => Err(Error::unauthorized("bad token".to_string())),
+            Behavior::BackendError => Err(Error::internal("store down".to_string())),
         }
     }
 }
@@ -123,7 +123,7 @@ async fn rejected_credentials_record_unauthorized() {
     let mw = middleware(Behavior::Unauthorized, true, &meter);
     let mut ctx = test_utils::TestHttpContext::new("GET", "/protected");
     let error = mw.invoke(&mut ctx).await.expect_err("must reject");
-    assert!(matches!(error, Error::Unauthorized(_)));
+    assert!(error.code() == "unauthorized");
     assert_eq!(
         meter.counter_value(
             AUTH_REQUESTS_METRIC,

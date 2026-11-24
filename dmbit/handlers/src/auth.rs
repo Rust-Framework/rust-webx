@@ -76,7 +76,7 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
     async fn handle(&mut self, req: LoginRequest) -> ActionResult<AuthResponse> {
         let user = load_user_by_email(&mut self.ctx, &req.email)
             .await?
-            .ok_or_else(|| Error::Http("邮箱或密码错误".into()))?;
+            .ok_or_else(|| Error::bad_request("邮箱或密码错误"))?;
 
         if user.password_hash.is_empty()
             || !self
@@ -84,7 +84,7 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
                 .verify(&req.password, &user.password_hash)
                 .await?
         {
-            return Err(Error::Http("邮箱或密码错误".into()));
+            return Err(Error::bad_request("邮箱或密码错误"));
         }
 
         let model = user_to_view(user);
@@ -98,10 +98,10 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
 #[async_trait]
 impl IRequestHandler<AuthMeRequest, UserView> for AuthMeHandler {
     async fn handle(&mut self, _req: AuthMeRequest) -> ActionResult<UserView> {
-        let uid = operator_id().ok_or_else(|| Error::Http("未登录".into()))?;
+        let uid = operator_id().ok_or_else(|| Error::bad_request("未登录"))?;
         let user = load_user_by_id(&mut self.ctx, &uid)
             .await?
-            .ok_or_else(|| Error::Http("用户不存在".into()))?;
+            .ok_or_else(|| Error::bad_request("用户不存在"))?;
         Ok(user_to_view(user))
     }
 }
@@ -111,20 +111,20 @@ impl IRequestHandler<AuthMeRequest, UserView> for AuthMeHandler {
 impl IRequestHandler<ChangePasswordRequest, ChangePasswordResponse> for ChangePasswordHandler {
     async fn handle(&mut self, req: ChangePasswordRequest) -> ActionResult<ChangePasswordResponse> {
         if req.new_password.len() < 6 {
-            return Err(Error::Http("新密码至少 6 位".into()));
+            return Err(Error::bad_request("新密码至少 6 位"));
         }
 
-        let uid = operator_id().ok_or_else(|| Error::Http("未登录".into()))?;
+        let uid = operator_id().ok_or_else(|| Error::bad_request("未登录"))?;
         let mut user = load_user_by_id(&mut self.ctx, &uid)
             .await?
-            .ok_or_else(|| Error::Http("用户不存在".into()))?;
+            .ok_or_else(|| Error::bad_request("用户不存在"))?;
 
         if !self
             .hasher
             .verify(&req.old_password, &user.password_hash)
             .await?
         {
-            return Err(Error::Http("原密码不正确".into()));
+            return Err(Error::bad_request("原密码不正确"));
         }
 
         let hashed = self.hasher.hash(&req.new_password).await?;

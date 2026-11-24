@@ -188,7 +188,7 @@ impl EfRefreshTokenStore {
 impl IRefreshTokenStore for EfRefreshTokenStore {
     async fn insert(&self, record: RefreshTokenRecord) -> Result<()> {
         if record.token_id.trim().is_empty() {
-            return Err(Error::Validation(
+            return Err(Error::validation(
                 "a refresh token id must not be empty".to_string(),
             ));
         }
@@ -196,7 +196,7 @@ impl IRefreshTokenStore for EfRefreshTokenStore {
         ctx.add(RefreshTokenEntity::from_record(&record));
         ctx.save_changes().await.map_err(|error| match error {
             EFError::UniqueViolation { .. } => {
-                Error::Internal("refresh token id collision; retry token generation".to_string())
+                Error::internal("refresh token id collision; retry token generation".to_string())
             }
             other => unavailable(other),
         })?;
@@ -325,7 +325,7 @@ impl IRefreshTokenStore for EfRefreshTokenStore {
 }
 
 fn unavailable(error: EFError) -> Error {
-    Error::Status(503, format!("refresh token store unavailable: {error}"))
+    Error::status(503, format!("refresh token store unavailable: {error}"))
 }
 
 pub(crate) fn to_i64(value: u64) -> i64 {

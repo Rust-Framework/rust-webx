@@ -140,7 +140,7 @@ async fn bind_parts(
         )
     };
     if provider.trim().is_empty() {
-        return Err(Error::Validation(
+        return Err(Error::validation(
             "webhook route is missing the `{provider}` path segment".to_string(),
         ));
     }

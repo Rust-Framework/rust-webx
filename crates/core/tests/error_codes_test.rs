@@ -51,77 +51,40 @@ fn serde_error() -> serde_json::Error {
 
 /// One representative value for every `Error` variant.
 ///
-/// `assert_variant_covered` below is an exhaustive match over `Error`, so
-/// adding a variant fails this test file's build until the variant is listed
-/// here; the registry test then fails until its code is registered.
+/// The registry test checks every representative value and the status fallbacks.
 fn representative_errors() -> Vec<Error> {
     let mut errors = vec![
-        Error::Http("bad request".into()),
-        Error::Unauthorized("missing token".into()),
-        Error::Forbidden("policy".into()),
-        Error::Di("missing registration".into()),
-        Error::Routing("no route".into()),
-        Error::Serialization(serde_error()),
-        Error::ResponseSerialization(serde_error()),
-        Error::State("response already written".into()),
-        Error::Internal("boom".into()),
-        Error::Message("message".into()),
-        Error::Validation("field".into()),
-        Error::NotFound("resource".into()),
-        Error::Conflict("version".into()),
+        Error::bad_request("bad request"),
+        Error::unauthorized("missing token"),
+        Error::forbidden("policy"),
+        Error::di("missing registration"),
+        Error::route_not_found("no route"),
+        Error::invalid_json(serde_error()),
+        Error::response_serialization(serde_error()),
+        Error::state("response already written"),
+        Error::internal("boom"),
+        Error::internal("message"),
+        Error::validation("field"),
+        Error::not_found("resource"),
+        Error::conflict("version"),
         Error::too_many_requests(7, "slow down"),
         Error::conflict_retryable("another request is in flight"),
-        Error::PayloadTooLarge("too big".into()),
-        Error::UnsupportedMediaType("xml".into()),
-        Error::Problem(Box::new(ProblemDetails::new(418, "I'm a teapot"))),
-        Error::Problem(Box::new(ProblemDetails::validation(vec![FieldError::new(
-            "page",
-            "must be positive",
-        )]))),
+        Error::payload_too_large("too big"),
+        Error::unsupported_media_type("xml"),
+        ProblemDetails::new(418, "I'm a teapot").into(),
+        ProblemDetails::validation(vec![FieldError::new("page", "must be positive")]).into(),
     ];
-    // Cover every status with a dedicated fallback code through `Error::Status`.
+    // Cover every status with a dedicated fallback code through `Error::status`.
     for &(status, _) in DEFAULT_STATUSES {
-        errors.push(Error::Status(status, "upstream".into()));
+        errors.push(Error::status(status, "upstream"));
     }
     errors
-}
-
-/// Compile-time tripwire: the match is exhaustive, so a new `Error` variant
-/// breaks the build here until it is covered by `representative_errors`.
-fn assert_variant_covered(error: &Error) {
-    match error {
-        Error::Http(_)
-        | Error::Status(_, _)
-        | Error::Unauthorized(_)
-        | Error::Forbidden(_)
-        | Error::Di(_)
-        | Error::Routing(_)
-        | Error::Serialization(_)
-        | Error::ResponseSerialization(_)
-        | Error::State(_)
-        | Error::Internal(_)
-        | Error::Message(_)
-        | Error::Validation(_)
-        | Error::NotFound(_)
-        | Error::Conflict(_)
-        | Error::TooManyRequests { .. }
-        | Error::ConflictRetryable(_)
-        | Error::PayloadTooLarge(_)
-        | Error::UnsupportedMediaType(_)
-        | Error::Problem(_) => {}
-    }
-    assert!(
-        !error.code().is_empty(),
-        "every Error variant must carry a stable code"
-    );
 }
 
 #[test]
 fn every_error_variant_code_is_registered() {
     for error in representative_errors() {
-        assert_variant_covered(&error);
-
-        let spec = spec(error.code().as_ref());
+        let spec = spec(error.code());
         if spec.status != FALLBACK_STATUS {
             assert_eq!(
                 spec.status,
@@ -156,9 +119,9 @@ fn default_status_codes_are_registered_with_their_status_and_retryability() {
             "retryable must mirror status_is_retryable for `{code}`"
         );
 
-        // The runtime `Error::Status` path must agree with the registry.
-        let error = Error::Status(status, "upstream".into());
-        assert_eq!(error.code().as_ref(), code);
+        // The runtime `Error::status` path must agree with the registry.
+        let error = Error::status(status, "upstream");
+        assert_eq!(error.code(), code);
         assert_eq!(error.status_code(), status);
         assert_eq!(error.retryable(), spec.retryable);
     }
@@ -175,8 +138,8 @@ fn unknown_status_falls_back_to_the_registered_error_code() {
             "the generic fallback is never retryable (transient statuses have dedicated codes)"
         );
 
-        let error = Error::Status(status, "teapot".into());
-        assert_eq!(error.code().as_ref(), "error");
+        let error = Error::status(status, "teapot");
+        assert_eq!(error.code(), "error");
         assert!(!error.retryable());
     }
 }
@@ -241,7 +204,7 @@ fn registry_covers_exactly_the_runtime_reachable_codes() {
     // Every code the runtime can emit...
     let mut expected: BTreeSet<String> = representative_errors()
         .iter()
-        .map(|error| error.code().into_owned())
+        .map(|error| error.code().to_string())
         .collect();
     for &(status, _) in DEFAULT_STATUSES {
         expected.insert(default_code_for_status(status).to_string());
@@ -266,7 +229,7 @@ fn application_defined_problem_codes_are_not_framework_entries() {
         .with_code("rate_limited")
         .with_retryable(true)
         .to_error();
-    assert_eq!(error.code().as_ref(), "rate_limited");
+    assert_eq!(error.code(), "rate_limited");
     assert!(
         ERROR_CODES.iter().all(|spec| spec.code != "rate_limited"),
         "an application-defined code must not be registered as a framework code"

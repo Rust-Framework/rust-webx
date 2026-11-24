@@ -156,7 +156,7 @@ impl RefreshTokenService {
         let now = unix_now();
         let subject = subject.into();
         if subject.trim().is_empty() {
-            return Err(Error::Validation(
+            return Err(Error::validation(
                 "refresh token subject must not be empty".to_string(),
             ));
         }
@@ -198,16 +198,16 @@ impl RefreshTokenService {
     pub async fn rotate(&self, presented: &str) -> Result<IssuedRefreshToken> {
         match self.rotate_outcome(presented).await? {
             RotateOutcome::Rotated(issued) => Ok(issued),
-            RotateOutcome::Reused { .. } => Err(Error::Unauthorized(
+            RotateOutcome::Reused { .. } => Err(Error::unauthorized(
                 "refresh token reuse detected; session revoked".to_string(),
             )),
             RotateOutcome::Expired => {
-                Err(Error::Unauthorized("refresh token has expired".to_string()))
+                Err(Error::unauthorized("refresh token has expired".to_string()))
             }
-            RotateOutcome::Revoked => Err(Error::Unauthorized(
+            RotateOutcome::Revoked => Err(Error::unauthorized(
                 "refresh token has been revoked".to_string(),
             )),
-            RotateOutcome::Invalid => Err(Error::Unauthorized("invalid refresh token".to_string())),
+            RotateOutcome::Invalid => Err(Error::unauthorized("invalid refresh token".to_string())),
         }
     }
 
@@ -354,9 +354,9 @@ impl RefreshTokenService {
 fn split_token(presented: &str) -> Result<(&str, &str)> {
     let (token_id, secret) = presented
         .split_once('.')
-        .ok_or_else(|| Error::Unauthorized("invalid refresh token".to_string()))?;
+        .ok_or_else(|| Error::unauthorized("invalid refresh token".to_string()))?;
     if token_id.is_empty() || secret.is_empty() {
-        return Err(Error::Unauthorized("invalid refresh token".to_string()));
+        return Err(Error::unauthorized("invalid refresh token".to_string()));
     }
     Ok((token_id, secret))
 }

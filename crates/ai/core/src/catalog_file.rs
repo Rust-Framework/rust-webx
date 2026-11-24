@@ -366,7 +366,7 @@ impl PeriodicBackgroundService for CatalogFileWatcher {
 
     async fn tick(&self) -> webx_core::error::Result<()> {
         self.reload_now().map(|_| ()).map_err(|error| {
-            webx_core::error::Error::Validation(format!("catalog reload failed: {error}"))
+            webx_core::error::Error::validation(format!("catalog reload failed: {error}"))
         })
     }
 }

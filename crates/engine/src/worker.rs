@@ -150,7 +150,7 @@ pub(crate) fn spawn(index: usize, shared: Arc<Shared>, ready: ReadySender) -> Re
         .spawn(move || {
             worker_main(index, thread_shared, rx, active, pending, ready);
         })
-        .map_err(|err| Error::Internal(format!("failed to spawn engine worker {index}: {err}")))?;
+        .map_err(|err| Error::internal(format!("failed to spawn engine worker {index}: {err}")))?;
 
     Ok(Worker { feed, join })
 }

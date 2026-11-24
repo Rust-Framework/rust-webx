@@ -44,5 +44,5 @@ fn main() {
     let _offset = paging.offset();
     let limiter = RateLimiter::new(10.0, 20, 1_000);
     let _retry_after = limiter.retry_after_secs();
-    let _status = Error::Internal("boom".into()).status_code();
+    let _status = Error::internal("boom").status_code();
 }

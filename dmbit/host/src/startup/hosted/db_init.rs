@@ -16,12 +16,12 @@ async fn ensure_schema(ctx: &mut DbContext) -> Result<()> {
             );
             ctx.ensure_deleted()
                 .await
-                .map_err(|e| Error::Internal(format!("ensure_deleted failed: {}", e)))?;
+                .map_err(|e| Error::internal(format!("ensure_deleted failed: {}", e)))?;
             ctx.ensure_created()
                 .await
-                .map_err(|e| Error::Internal(format!("ensure_created failed: {}", e)))
+                .map_err(|e| Error::internal(format!("ensure_created failed: {}", e)))
         }
-        Err(e) => Err(Error::Internal(format!("ensure_created failed: {}", e))),
+        Err(e) => Err(Error::internal(format!("ensure_created failed: {}", e))),
     }
 }
 
@@ -46,7 +46,7 @@ impl IHostedService for DbInitService {
         let scope = self.services.create_scope();
         let mut ctx: DbContext = scope
             .get_owned()
-            .map_err(|e| Error::Internal(format!("DbContext resolution failed: {}", e)))?;
+            .map_err(|e| Error::internal(format!("DbContext resolution failed: {}", e)))?;
 
         configure_for_init(&mut ctx);
         ensure_schema(&mut ctx).await?;

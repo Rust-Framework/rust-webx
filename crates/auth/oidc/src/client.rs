@@ -70,20 +70,20 @@ impl OidcConfig {
     /// Fail-closed bounds for RP configuration.
     pub fn validate(&self) -> Result<()> {
         if self.algorithms.is_empty() {
-            return Err(Error::Di("OIDC algorithms must not be empty".to_string()));
+            return Err(Error::di("OIDC algorithms must not be empty".to_string()));
         }
         if self.leeway > Duration::from_secs(300) {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "OIDC leeway must be at most 300 seconds".to_string(),
             ));
         }
         if self.jwks_ttl.is_zero() || self.jwks_ttl > Duration::from_secs(3600) {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "OIDC jwks_ttl must be between 1 and 3600 seconds".to_string(),
             ));
         }
         if self.max_keys == 0 || self.max_keys > 128 {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "OIDC max_keys must be between 1 and 128".to_string(),
             ));
         }
@@ -137,7 +137,7 @@ impl OidcClient {
         let client_id = client_id.into();
         config.validate()?;
         if client_id.trim().is_empty() {
-            return Err(Error::Di("OIDC client_id must not be empty".to_string()));
+            return Err(Error::di("OIDC client_id must not be empty".to_string()));
         }
         let discovery =
             OidcDiscovery::fetch_with(http.as_ref(), &issuer, config.require_pkce_advertised)
@@ -153,7 +153,7 @@ impl OidcClient {
                     .any(|supported| supported == algorithm.as_str())
         });
         if config.algorithms.is_empty() {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "OIDC provider and OidcConfig share no asymmetric id_token algorithm".to_string(),
             ));
         }
@@ -181,7 +181,7 @@ impl OidcClient {
     /// Build an authorization URL and the server-side values to remember.
     pub fn authorization_url(&self, request: AuthorizationRequest) -> Result<AuthorizationUrl> {
         if matches!(self.client_auth, ClientAuth::None) && !request.pkce {
-            return Err(Error::Validation(
+            return Err(Error::validation(
                 "public OIDC clients must enable PKCE S256".to_string(),
             ));
         }
@@ -194,7 +194,7 @@ impl OidcClient {
         }
 
         let mut url = Url::parse(&self.discovery.authorization_endpoint)
-            .map_err(|error| Error::Di(format!("invalid OIDC authorization endpoint: {error}")))?;
+            .map_err(|error| Error::di(format!("invalid OIDC authorization endpoint: {error}")))?;
         {
             let mut query = url.query_pairs_mut();
             query.append_pair("response_type", "code");
@@ -231,14 +231,14 @@ impl OidcClient {
         expected_nonce: Option<&str>,
     ) -> Result<OidcSession> {
         if code.trim().is_empty() {
-            return Err(Error::Validation(
+            return Err(Error::validation(
                 "authorization code must not be empty".to_string(),
             ));
         }
         // Public clients are PKCE-only: without a verifier the token request
         // (and therefore the code) is replayable by anyone who intercepts it.
         if matches!(self.client_auth, ClientAuth::None) && pkce_verifier.is_none() {
-            return Err(Error::Validation(
+            return Err(Error::validation(
                 "public OIDC clients must send a PKCE code_verifier".to_string(),
             ));
         }
@@ -270,9 +270,9 @@ impl OidcClient {
             .post_form(&self.discovery.token_endpoint, &form, &headers)
             .await?;
         let token: TokenResponse = serde_json::from_value(value)
-            .map_err(|error| Error::Status(502, format!("invalid OIDC token response: {error}")))?;
+            .map_err(|error| Error::status(502, format!("invalid OIDC token response: {error}")))?;
         let id_token = token.id_token.ok_or_else(|| {
-            Error::Status(502, "OIDC token response is missing id_token".to_string())
+            Error::status(502, "OIDC token response is missing id_token".to_string())
         })?;
 
         let claims = self
@@ -323,14 +323,14 @@ impl OidcClient {
         access_token: Option<&str>,
     ) -> Result<IdTokenClaims> {
         let header = decode_header(id_token)
-            .map_err(|error| Error::Unauthorized(format!("invalid id_token header: {error}")))?;
+            .map_err(|error| Error::unauthorized(format!("invalid id_token header: {error}")))?;
         if !self
             .config
             .algorithms
             .iter()
             .any(|algorithm| jsonwebtoken_algorithm(*algorithm) == header.alg)
         {
-            return Err(Error::Unauthorized(format!(
+            return Err(Error::unauthorized(format!(
                 "id_token algorithm {:?} is not allowed",
                 header.alg
             )));
@@ -341,7 +341,7 @@ impl OidcClient {
             Ok(key) => key,
             Err(error) if error.status_code() == 503 => return Err(error),
             Err(_) => {
-                return Err(Error::Unauthorized(
+                return Err(Error::unauthorized(
                     "id_token key id is unknown".to_string(),
                 ))
             }
@@ -358,42 +358,42 @@ impl OidcClient {
             .collect::<HashSet<_>>();
 
         let data = decode::<IdTokenClaims>(id_token, key.as_ref(), &validation)
-            .map_err(|error| Error::Unauthorized(format!("id_token rejected: {error}")))?;
+            .map_err(|error| Error::unauthorized(format!("id_token rejected: {error}")))?;
         let claims = data.claims;
 
         if claims.sub.trim().is_empty() {
-            return Err(Error::Unauthorized(
+            return Err(Error::unauthorized(
                 "id_token has an empty subject".to_string(),
             ));
         }
         if let Some(expected) = expected_nonce {
             if claims.nonce.as_deref() != Some(expected) {
-                return Err(Error::Unauthorized("id_token nonce mismatch".to_string()));
+                return Err(Error::unauthorized("id_token nonce mismatch".to_string()));
             }
         }
         let multiple_audiences =
             matches!(&claims.aud, Value::Array(audiences) if audiences.len() > 1);
         if multiple_audiences && claims.azp.as_deref() != Some(self.client_id.as_str()) {
-            return Err(Error::Unauthorized(
+            return Err(Error::unauthorized(
                 "id_token azp does not match the client".to_string(),
             ));
         }
         if let Some(issued_at) = claims.iat {
             if issued_at > unix_now().saturating_add(self.config.leeway.as_secs()) {
-                return Err(Error::Unauthorized(
+                return Err(Error::unauthorized(
                     "id_token was issued in the future".to_string(),
                 ));
             }
         }
         if let Some(at_hash) = &claims.at_hash {
             let Some(access_token) = access_token else {
-                return Err(Error::Unauthorized(
+                return Err(Error::unauthorized(
                     "id_token at_hash is present but no access_token was returned".to_string(),
                 ));
             };
             let expected = access_token_hash(header.alg, access_token)?;
             if !constant_time_eq(at_hash.as_bytes(), expected.as_bytes()) {
-                return Err(Error::Unauthorized("id_token at_hash mismatch".to_string()));
+                return Err(Error::unauthorized("id_token at_hash mismatch".to_string()));
             }
         }
         Ok(claims)
@@ -600,7 +600,7 @@ impl IJwksFetcher for OidcJwksFetcher {
     async fn fetch(&self) -> Result<JwkSet> {
         let value = self.http.get_json(&self.url).await?;
         serde_json::from_value(value)
-            .map_err(|error| Error::Status(503, format!("invalid OIDC JWKS: {error}")))
+            .map_err(|error| Error::status(503, format!("invalid OIDC JWKS: {error}")))
     }
 }
 
@@ -622,7 +622,7 @@ fn access_token_hash(algorithm: Algorithm, access_token: &str) -> Result<String>
             Sha256::digest(access_token.as_bytes()).to_vec()
         }
         _ => {
-            return Err(Error::Unauthorized(
+            return Err(Error::unauthorized(
                 "unsupported id_token algorithm for at_hash".to_string(),
             ))
         }

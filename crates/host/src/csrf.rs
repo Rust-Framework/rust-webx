@@ -76,25 +76,25 @@ impl CsrfConfig {
         validate_name("session_cookie_name", &self.session_cookie_name)?;
         validate_name("cookie_name", &self.cookie_name)?;
         if self.header_name.trim().is_empty() {
-            return Err(Error::Di("csrf header_name must not be empty".to_string()));
+            return Err(Error::di("csrf header_name must not be empty".to_string()));
         }
         if !self.path.starts_with('/') {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "csrf cookie path must start with '/'".to_string(),
             ));
         }
         if self.same_site == SameSite::None && !self.secure {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "SameSite=None requires a Secure CSRF cookie".to_string(),
             ));
         }
         if self.cookie_name.starts_with("__Host-") && (!self.secure || self.path != "/") {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "__Host- CSRF cookies require Secure and Path=/".to_string(),
             ));
         }
         if self.max_age.is_zero() {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "csrf max_age must be greater than zero".to_string(),
             ));
         }
@@ -142,13 +142,13 @@ impl CsrfConfig {
 
 fn validate_name(label: &str, name: &str) -> Result<()> {
     if name.trim().is_empty() {
-        return Err(Error::Di(format!("csrf {label} must not be empty")));
+        return Err(Error::di(format!("csrf {label} must not be empty")));
     }
     if name
         .chars()
         .any(|c| c.is_control() || matches!(c, ' ' | ';' | '=' | ','))
     {
-        return Err(Error::Di(format!(
+        return Err(Error::di(format!(
             "csrf {label} '{name}' contains an invalid character"
         )));
     }
@@ -192,7 +192,7 @@ impl IMiddleware for CsrfMiddleware {
         if self.config.check_fetch_metadata {
             if let Some(site) = ctx.request().header("sec-fetch-site") {
                 if site.eq_ignore_ascii_case("cross-site") {
-                    return Err(Error::Forbidden(
+                    return Err(Error::forbidden(
                         "cross-site request rejected by CSRF protection".to_string(),
                     ));
                 }
@@ -200,18 +200,18 @@ impl IMiddleware for CsrfMiddleware {
         }
 
         let token = cookie_value(cookie_header, &self.config.cookie_name).ok_or_else(|| {
-            Error::Forbidden("CSRF cookie missing on a cookie-authenticated request".to_string())
+            Error::forbidden("CSRF cookie missing on a cookie-authenticated request".to_string())
         })?;
         let presented = ctx
             .request()
             .header(&self.config.header_name)
             .ok_or_else(|| {
-                Error::Forbidden(
+                Error::forbidden(
                     "CSRF header missing on a cookie-authenticated request".to_string(),
                 )
             })?;
         if !constant_time_eq(token.as_bytes(), presented.as_bytes()) {
-            return Err(Error::Forbidden("CSRF token mismatch".to_string()));
+            return Err(Error::forbidden("CSRF token mismatch".to_string()));
         }
         Ok(ControlFlow::Continue(()))
     }

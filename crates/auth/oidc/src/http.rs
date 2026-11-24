@@ -60,7 +60,7 @@ impl HttpOidcHttp {
         root_certificates: Option<PathBuf>,
     ) -> Result<Self> {
         if !issuer_base.starts_with("https://") {
-            return Err(Error::Di(format!(
+            return Err(Error::di(format!(
                 "OIDC issuer must be https:// (got '{issuer_base}')"
             )));
         }
@@ -76,7 +76,7 @@ impl HttpOidcHttp {
         options.http2_only = false;
         options.root_certificates = root_certificates;
         let client = HttpClient::new("oidc", options)
-            .map_err(|error| Error::Di(format!("invalid OIDC issuer URL: {error}")))?;
+            .map_err(|error| Error::di(format!("invalid OIDC issuer URL: {error}")))?;
         Ok(Self { client })
     }
 }
@@ -90,7 +90,7 @@ impl IOidcHttp for HttpOidcHttp {
             .await
             .map_err(unavailable)?;
         if !response.is_success() {
-            return Err(Error::Status(
+            return Err(Error::status(
                 503,
                 format!("OIDC endpoint returned HTTP {}", response.status),
             ));
@@ -101,7 +101,7 @@ impl IOidcHttp for HttpOidcHttp {
             .await
             .map_err(unavailable)?;
         serde_json::from_slice(&body)
-            .map_err(|error| Error::Status(503, format!("invalid OIDC JSON: {error}")))
+            .map_err(|error| Error::status(503, format!("invalid OIDC JSON: {error}")))
     }
 
     async fn post_form(
@@ -125,12 +125,12 @@ impl IOidcHttp for HttpOidcHttp {
             // (invalid_grant, invalid_client), not a bad gateway. Only an
             // upstream 5xx is a transient availability problem.
             if response.status >= 500 {
-                return Err(Error::Status(
+                return Err(Error::status(
                     503,
                     format!("OIDC token endpoint returned HTTP {}", response.status),
                 ));
             }
-            return Err(Error::Unauthorized(
+            return Err(Error::unauthorized(
                 "OIDC token endpoint rejected the request".to_string(),
             ));
         }
@@ -140,10 +140,10 @@ impl IOidcHttp for HttpOidcHttp {
             .await
             .map_err(unavailable)?;
         serde_json::from_slice(&body)
-            .map_err(|error| Error::Status(502, format!("invalid token JSON: {error}")))
+            .map_err(|error| Error::status(502, format!("invalid token JSON: {error}")))
     }
 }
 
 fn unavailable(error: webx_client::HttpClientError) -> Error {
-    Error::Status(503, format!("OIDC transport failed: {error}"))
+    Error::status(503, format!("OIDC transport failed: {error}"))
 }

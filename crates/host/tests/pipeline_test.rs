@@ -207,7 +207,7 @@ async fn pipeline_short_circuit_on_invoke_error() {
     #[async_trait::async_trait]
     impl IMiddleware for FailingMiddleware {
         async fn invoke(&self, _ctx: &mut dyn IHttpContext) -> LrwfResult<ControlFlow<()>> {
-            Err(webx_core::error::Error::Http("blocked".into()))
+            Err(webx_core::error::Error::bad_request("blocked"))
         }
     }
 
@@ -264,11 +264,7 @@ async fn pipeline_after_hooks_run_on_final_handler_error() {
     let mut ctx = test_utils::TestHttpContext::new("GET", "/test");
 
     let final_handler: HandlerFn = Arc::new(move |_ctx: &mut dyn IHttpContext| {
-        Box::pin(async move {
-            Err(webx_core::error::Error::Internal(
-                "final handler error".into(),
-            ))
-        })
+        Box::pin(async move { Err(webx_core::error::Error::internal("final handler error")) })
     });
 
     let result = pipeline.execute(&mut ctx, final_handler).await;

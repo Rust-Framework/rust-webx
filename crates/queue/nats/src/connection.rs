@@ -38,7 +38,7 @@ impl NatsConnection {
                     .connect(self.url.clone())
                     .await
                     .map_err(|error| {
-                        Error::Status(
+                        Error::status(
                             503,
                             format!(
                                 "cannot connect to NATS '{}': {error}",
@@ -57,7 +57,7 @@ impl NatsConnection {
         client
             .flush()
             .await
-            .map_err(|error| Error::Status(503, format!("NATS flush failed: {error}")))
+            .map_err(|error| Error::status(503, format!("NATS flush failed: {error}")))
     }
 }
 

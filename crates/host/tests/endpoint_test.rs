@@ -78,7 +78,7 @@ impl IDynamicAuthorizer for DenyAllAuthorizer {
         resource_key: &str,
         _method: &str,
     ) -> LrwfResult<()> {
-        Err(Error::Http(format!(
+        Err(Error::bad_request(format!(
             "Forbidden: access denied to {}",
             resource_key
         )))
@@ -192,12 +192,12 @@ async fn endpoint_auth_required_without_claims_bubbles_unauthorized_error() {
     let result = endpoint.handle(&mut ctx).await;
 
     // Single 401 write path: the endpoint does not write the 401 itself, it
-    // returns `Error::Unauthorized` so the host writes the status, the
+    // returns `Error::unauthorized` so the host writes the status, the
     // problem+json body and the `WWW-Authenticate` challenge in one place.
-    let err = result.expect_err("missing claims must bubble as Error::Unauthorized");
+    let err = result.expect_err("missing claims must bubble as Error::unauthorized");
     assert!(
-        matches!(&err, Error::Unauthorized(detail) if detail == "authentication required"),
-        "expected Error::Unauthorized(\"authentication required\"), got {err:?}"
+        err.code() == "unauthorized" && err.public_detail() == Some("authentication required"),
+        "expected Error::unauthorized(\"authentication required\"), got {err:?}"
     );
 
     let (status, _, body) = ctx.into_response_parts();
@@ -672,7 +672,7 @@ impl IDynamicAuthorizer for ForbiddenAuthorizer {
         _route_pattern: &str,
         _method: &str,
     ) -> LrwfResult<()> {
-        Err(Error::Forbidden("dynamic denial".to_string()))
+        Err(Error::forbidden("dynamic denial".to_string()))
     }
 }
 
@@ -780,8 +780,8 @@ async fn dynamic_endpoint_without_claims_returns_401() {
         .await
         .expect_err("dynamic mode does not make a route anonymous");
     assert!(
-        matches!(&err, Error::Unauthorized(detail) if detail == "authentication required"),
-        "expected Error::Unauthorized, got {err:?}"
+        err.code() == "unauthorized" && err.public_detail() == Some("authentication required"),
+        "expected Error::unauthorized, got {err:?}"
     );
     let (status, _, body) = ctx.into_response_parts();
     assert_eq!(status, 200);
@@ -813,7 +813,10 @@ async fn dynamic_endpoint_without_registered_authorizer_fails_closed() {
         .await
         .expect_err("dynamic mode without an authorizer must not run the handler");
     assert!(
-        matches!(&err, Error::Internal(detail) if detail.contains("IDynamicAuthorizer")),
+        err.code() == "internal_error"
+            && err
+                .operator()
+                .is_some_and(|detail| detail.contains("IDynamicAuthorizer")),
         "expected a fail-closed internal error, got {err:?}"
     );
     let (status, _, body) = ctx.into_response_parts();
@@ -880,7 +883,7 @@ async fn dynamic_flag_without_rules_still_requires_authentication() {
         .handle(&mut anonymous)
         .await
         .expect_err("a dynamic endpoint without declared rules still requires authentication");
-    assert!(matches!(&err, Error::Unauthorized(_)), "got {err:?}");
+    assert!(err.code() == "unauthorized", "got {err:?}");
 
     let mut authenticated = test_utils::TestHttpContext::new("POST", "/orders");
     authenticated.set_claims(Box::new(claims_without_permissions()));

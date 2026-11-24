@@ -49,7 +49,7 @@ impl IRequestHandler<LoginRequest, LoginResponse> for LoginHandler {
             .verify(&request.password, DEMO_PASSWORD_HASH)
             .await?
         {
-            return Err(Error::Unauthorized("invalid credentials".into()));
+            return Err(Error::unauthorized("invalid credentials"));
         }
         let issued = self
             .tokens

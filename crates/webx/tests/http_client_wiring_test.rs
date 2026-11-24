@@ -26,7 +26,7 @@ impl IRequestHandler<ProbeRequest, String> for ProbeHandler {
         let client = self
             .factory
             .create("mock")
-            .map_err(|error| Error::Internal(error.to_string()))?;
+            .map_err(|error| Error::internal(error.to_string()))?;
         Ok(client.name().to_string())
     }
 }

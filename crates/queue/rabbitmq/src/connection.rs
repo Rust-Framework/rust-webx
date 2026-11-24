@@ -44,7 +44,7 @@ impl RabbitConnection {
         let connection = tokio::time::timeout(self.connect_timeout, connecting)
             .await
             .map_err(|_| {
-                Error::Status(
+                Error::status(
                     503,
                     format!(
                         "connecting to RabbitMQ '{}' timed out after {:?}",
@@ -54,7 +54,7 @@ impl RabbitConnection {
                 )
             })?
             .map_err(|error| {
-                Error::Status(
+                Error::status(
                     503,
                     format!(
                         "cannot connect to RabbitMQ '{}': {error}",
@@ -73,7 +73,7 @@ impl RabbitConnection {
         if connection.status().connected() {
             Ok(())
         } else {
-            Err(Error::Status(
+            Err(Error::status(
                 503,
                 "RabbitMQ connection is closed".to_string(),
             ))

@@ -70,10 +70,10 @@ fn call(
     Box::pin(async move {
         let mut handler = *handler
             .downcast::<PingHandler>()
-            .map_err(|_| Error::Internal("handler downcast failed".into()))?;
+            .map_err(|_| Error::internal("handler downcast failed"))?;
         let req = *request
             .downcast::<PingRequest>()
-            .map_err(|_| Error::Internal("request downcast failed".into()))?;
+            .map_err(|_| Error::internal("request downcast failed"))?;
         let response = handler.handle(req).await?;
         Ok(Box::new(response) as Box<dyn Any + Send>)
     })

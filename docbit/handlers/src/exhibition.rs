@@ -68,7 +68,7 @@ impl IRequestHandler<GetExhibitionRequest, ExhibitionModel> for GetExhibitionHan
                 .first_or_default()
                 .await
                 .map_ef()?
-                .ok_or_else(|| Error::NotFound(format!("Exhibition not found: {}", slug)))?;
+                .ok_or_else(|| Error::not_found(format!("Exhibition not found: {}", slug)))?;
 
         Ok(ExhibitionModel::from(item))
     }
@@ -111,7 +111,7 @@ impl IRequestHandler<UpsertExhibitionRequest, ExhibitionModel> for UpsertExhibit
             self.ctx,
             Exhibition,
             saved_id,
-            Error::NotFound("Exhibition not found after save".into());
+            Error::not_found("Exhibition not found after save");
             include row.category
         );
 
@@ -134,7 +134,7 @@ impl IRequestHandler<DeleteExhibitionRequest, String> for DeleteExhibitionHandle
             .map_ef()?;
 
         if items.is_empty() {
-            return Err(Error::NotFound(format!("Exhibition not found: {}", slug)));
+            return Err(Error::not_found(format!("Exhibition not found: {}", slug)));
         }
 
         for mut item in items {

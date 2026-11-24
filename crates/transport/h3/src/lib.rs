@@ -125,7 +125,7 @@
 //! [`H3Transport::new`] reads the certificate chain (`cert_path`, one or more
 //! PEM `CERTIFICATE` blocks) and the private key (`key_path`, PKCS#8, PKCS#1 or
 //! SEC1 PEM) once at startup and reports unreadable, malformed or mismatched
-//! material as [`webx_core::error::Error::Http`] without ever logging key bytes.
+//! material as [`webx_core::error::Error::bad_request`] without ever logging key bytes.
 //! Certificates and keys are reload-on-restart, not hot-reloaded.
 
 mod config;

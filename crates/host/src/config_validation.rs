@@ -245,17 +245,15 @@ pub(crate) fn violation_from_error(
 
 /// Strip the error-variant prefix so violations read like configuration text.
 ///
-/// `Error::Di("x")` renders as `"DI error: x"`; the aggregate report already
+/// `Error::di("x")` renders as `"DI error: x"`; the aggregate report already
 /// says this is a startup configuration failure, so the variant prefix is noise
 /// for an operator (and would hide the `Jwt.`/`Turn.` key prefix).
 fn error_detail(error: &Error) -> String {
-    match error {
-        Error::Di(message)
-        | Error::Internal(message)
-        | Error::Http(message)
-        | Error::Message(message) => message.clone(),
-        other => other.to_string(),
-    }
+    error
+        .public_detail()
+        .or_else(|| error.operator())
+        .map(str::to_string)
+        .unwrap_or_else(|| error.to_string())
 }
 
 fn collect_tls_client_auth(options: &AppOptions, violations: &mut Vec<ConfigViolation>) {

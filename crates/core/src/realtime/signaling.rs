@@ -125,15 +125,15 @@ impl TurnRestConfig {
     /// logs them at startup/request time), not as client validation failures.
     pub fn validate(&self) -> Result<()> {
         if self.secret.is_empty() {
-            return Err(Error::Internal("Turn.Secret must not be empty".to_string()));
+            return Err(Error::internal("Turn.Secret must not be empty".to_string()));
         }
         if self.urls.is_empty() {
-            return Err(Error::Internal(
+            return Err(Error::internal(
                 "Turn.Urls must contain at least one TURN/STUN URL".to_string(),
             ));
         }
         if self.ttl_seconds == 0 || self.ttl_seconds > MAX_TURN_TTL_SECONDS {
-            return Err(Error::Internal(format!(
+            return Err(Error::internal(format!(
                 "Turn.TtlSeconds must be in 1..={MAX_TURN_TTL_SECONDS}"
             )));
         }
@@ -164,7 +164,7 @@ impl TurnRestConfig {
     pub fn credentials_for_at(&self, user_id: &str, now_unix: u64) -> Result<TurnCredentials> {
         self.validate()?;
         if user_id.is_empty() {
-            return Err(Error::Validation("turn user id is required".to_string()));
+            return Err(Error::validation("turn user id is required".to_string()));
         }
         let expiry = now_unix.saturating_add(self.ttl_seconds);
         let username = format!("{expiry}:{user_id}");
@@ -198,7 +198,7 @@ pub struct TurnCredentials {
 /// `base64(HMAC-SHA1(secret, message))` as used by the coturn REST API.
 pub fn hmac_sha1_base64(secret: &str, message: &str) -> Result<String> {
     let mut mac = HmacSha1::new_from_slice(secret.as_bytes())
-        .map_err(|error| Error::Internal(format!("TURN HMAC key is invalid: {error}")))?;
+        .map_err(|error| Error::internal(format!("TURN HMAC key is invalid: {error}")))?;
     mac.update(message.as_bytes());
     Ok(data_encoding::BASE64.encode(&mac.finalize().into_bytes()))
 }
@@ -250,17 +250,17 @@ mod tests {
     #[test]
     fn turn_config_validation_rejects_unusable_values() {
         let empty_secret = TurnRestConfig::new("", vec!["turn:x".to_string()]);
-        assert!(matches!(empty_secret.validate(), Err(Error::Internal(_))));
+        assert!(matches!(empty_secret.validate(), Err(error) if error.code() == "internal_error"));
 
         let empty_urls = TurnRestConfig::new("secret", Vec::new());
-        assert!(matches!(empty_urls.validate(), Err(Error::Internal(_))));
+        assert!(matches!(empty_urls.validate(), Err(error) if error.code() == "internal_error"));
 
         let zero_ttl = TurnRestConfig::new("secret", vec!["turn:x".to_string()]).with_ttl(0);
-        assert!(matches!(zero_ttl.validate(), Err(Error::Internal(_))));
+        assert!(matches!(zero_ttl.validate(), Err(error) if error.code() == "internal_error"));
 
         let too_long = TurnRestConfig::new("secret", vec!["turn:x".to_string()])
             .with_ttl(MAX_TURN_TTL_SECONDS + 1);
-        assert!(matches!(too_long.validate(), Err(Error::Internal(_))));
+        assert!(matches!(too_long.validate(), Err(error) if error.code() == "internal_error"));
 
         let valid = TurnRestConfig::new("secret", vec!["turn:x".to_string()]);
         valid.validate().expect("valid config");

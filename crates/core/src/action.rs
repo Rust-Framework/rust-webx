@@ -98,7 +98,7 @@ impl<T: Serialize + Send> IActionResult for JsonResult<T> {
         // Serialize before touching the response: the body must be a Send
         // buffer, and the DTO itself does not need to be `Sync` to be written.
         let json = crate::json::encode_json(&self.value)
-            .map_err(crate::error::Error::ResponseSerialization)?;
+            .map_err(crate::error::Error::response_serialization)?;
         let response = ctx.response_mut();
         response.set_status(self.status);
         response.set_header("content-type", "application/json");

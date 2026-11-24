@@ -124,7 +124,7 @@ impl StubEndpoint {
         ctx.request_mut().validate_declared_body_limit()?;
         if !self.authorization.is_empty() || self.authorization_dynamic {
             if ctx.claims().is_none() {
-                return Err(webx_core::error::Error::Unauthorized(
+                return Err(webx_core::error::Error::unauthorized(
                     "authentication required".to_string(),
                 ));
             }
@@ -156,7 +156,7 @@ impl StubEndpoint {
                     .as_ref()
                     .filter(|set| !set.is_empty())
                     .ok_or_else(|| {
-                        webx_core::error::Error::Internal(
+                        webx_core::error::Error::internal(
                             "dynamic authorization requires a registered IDynamicAuthorizer"
                                 .to_string(),
                         )
@@ -413,7 +413,9 @@ impl IEndpoint for SpaFallbackEndpoint {
         if self.spa.try_index_fallback(ctx).await? {
             Ok(())
         } else {
-            Err(webx_core::error::Error::Routing("Not Found".to_string()))
+            Err(webx_core::error::Error::route_not_found(
+                "Not Found".to_string(),
+            ))
         }
     }
 }

@@ -196,7 +196,7 @@ impl IntrospectionBasicAuth {
         let client_id = client_id.into();
         let client_secret = client_secret.into();
         if client_id.trim().is_empty() || client_secret.is_empty() {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "introspection client id/secret must not be empty".to_string(),
             ));
         }

@@ -194,13 +194,15 @@ impl Server {
     /// multiplying both by the number of listeners.
     pub async fn run_listeners(self, listeners: Vec<Listener>) -> Result<()> {
         if listeners.is_empty() {
-            return Err(Error::Http("engine has no listener to serve".to_string()));
+            return Err(Error::bad_request(
+                "engine has no listener to serve".to_string(),
+            ));
         }
         crate::config::validate_max_connections(self.shared.config.max_connections)?;
 
         let shared = Arc::clone(&self.shared);
         if shared.started.swap(true, Ordering::AcqRel) {
-            return Err(Error::State(
+            return Err(Error::state(
                 "engine Shared is single-use; build a new engine for another run".to_string(),
             ));
         }
@@ -257,7 +259,7 @@ impl Server {
                     tracing::error!(error = %error, "engine acceptor task failed");
                     shared.trigger_shutdown();
                     if accept_error.is_none() {
-                        accept_error = Some(Error::Internal(format!(
+                        accept_error = Some(Error::internal(format!(
                             "engine acceptor task failed: {error}"
                         )));
                     }
@@ -274,7 +276,7 @@ impl Server {
 
         match (accept_error, join_failure) {
             (Some(error), _) => Err(error),
-            (None, Some(message)) => Err(Error::Internal(message)),
+            (None, Some(message)) => Err(Error::internal(message)),
             (None, None) => Ok(()),
         }
     }
@@ -305,12 +307,12 @@ impl Server {
             match tokio::time::timeout(WORKER_STARTUP_TIMEOUT, ready_rx.recv()).await {
                 Ok(Some(Ok(()))) => {}
                 Ok(Some(Err(message))) => {
-                    return (handles, Some(Error::Internal(message)));
+                    return (handles, Some(Error::internal(message)));
                 }
                 Ok(None) => {
                     return (
                         handles,
-                        Some(Error::Internal(
+                        Some(Error::internal(
                             "an engine worker died before reporting ready".to_string(),
                         )),
                     );
@@ -318,7 +320,7 @@ impl Server {
                 Err(_) => {
                     return (
                         handles,
-                        Some(Error::Internal(format!(
+                        Some(Error::internal(format!(
                             "an engine worker did not start within {}s",
                             WORKER_STARTUP_TIMEOUT.as_secs()
                         ))),
@@ -388,12 +390,13 @@ async fn accept_loop(
         tls: explicit_tls,
     } = listener;
     raw_listener.set_nonblocking(true).map_err(|err| {
-        Error::Http(format!(
+        Error::bad_request(format!(
             "engine listener could not be put in nonblocking mode: {err}"
         ))
     })?;
-    let listener = TcpListener::from_std(raw_listener)
-        .map_err(|err| Error::Http(format!("engine listener could not join the runtime: {err}")))?;
+    let listener = TcpListener::from_std(raw_listener).map_err(|err| {
+        Error::bad_request(format!("engine listener could not join the runtime: {err}"))
+    })?;
     // `Server::run` resolves the default listener's TLS before calling here;
     // `run_listeners` is explicit so one listener's config never leaks onto
     // another (for example an https URL's certificate onto an http URL).
@@ -447,7 +450,7 @@ async fn accept_loop(
                         continue;
                     }
                     Admission::Closed => {
-                        return Err(Error::Internal("connection governor closed".to_string()));
+                        return Err(Error::internal("connection governor closed".to_string()));
                     }
                 }
             }
@@ -554,7 +557,7 @@ async fn handoff(
     shutdown: &mut watch::Receiver<bool>,
 ) -> Result<()> {
     if workers.is_empty() {
-        return Err(Error::Internal(
+        return Err(Error::internal(
             "engine has no worker to accept connections".to_string(),
         ));
     }
@@ -600,12 +603,12 @@ async fn handoff(
                 _ = worker::wait_for_shutdown(shutdown) => Ok(()),
                 sent = worker.tx.send(handoff) => match sent {
                     Ok(()) => Ok(()),
-                    Err(_) => Err(Error::Internal("engine worker channel closed".to_string())),
+                    Err(_) => Err(Error::internal("engine worker channel closed".to_string())),
                 },
             }
         }
         Err(mpsc::error::TrySendError::Closed(_)) => {
-            Err(Error::Internal("engine worker channel closed".to_string()))
+            Err(Error::internal("engine worker channel closed".to_string()))
         }
     }
 }
@@ -683,7 +686,7 @@ pub(crate) mod connection {
     use hyper::{Request, Response};
     use webx_core::error::{Error, Result};
     use webx_core::http::IHttpContext;
-    use webx_core::problem::ProblemDetails;
+    use webx_core::problem::{retry_after_of, ProblemDetails, X_WEBX_TITLE};
 
     use crate::context::EngineContext;
     use crate::pipeline::FinalHandler;
@@ -860,7 +863,7 @@ pub(crate) mod connection {
                                 .await
                             {
                                 Ok(result) => result,
-                                Err(_) => Err(Error::Status(504, "request timed out".to_string())),
+                                Err(_) => Err(Error::status(504, "request timed out".to_string())),
                             }
                         }
                         None => dispatch_target(&*hit.target, ctx).await,
@@ -924,7 +927,7 @@ pub(crate) mod connection {
         match writer {
             Some(writer) => {
                 writer
-                    .write(ctx, &Error::Routing("Not Found".to_string()))
+                    .write(ctx, &Error::route_not_found("Not Found".to_string()))
                     .await
             }
             None => write_problem(ctx, problem_details(404, "Not Found")).await,
@@ -960,59 +963,40 @@ pub(crate) mod connection {
     ///
     /// 5xx details are logged and replaced with a stable message; 401 carries
     /// the `Bearer` challenge every framework 401 must have.
+    /// Minimal RFC 7807 writer used when the host registered no writer.
+    ///
+    /// 5xx details are logged and replaced with a stable message; 401 carries
+    /// the `Bearer` challenge every framework 401 must have. A problem that was
+    /// pre-built by the application (verbatim `x-webx-title`) keeps its exact
+    /// shape: no sanitization, no 401/429 headers, no 5xx log.
     async fn write_default_problem(ctx: &mut EngineContext, error: &Error) {
         let path = ctx.request().path().to_string();
         let trace_id = ctx.trace_id().map(str::to_string);
-
-        if let Error::Problem(problem) = error {
-            // A binding/validation failure already carries its full payload
-            // (status and the `errors` extension); keep it and fill only the
-            // framework-guaranteed members the caller left empty.
-            let mut problem = (**problem).clone();
-            if problem.code().is_none() {
-                problem = problem.with_code(error.code().into_owned());
-            }
-            if problem.retryable().is_none() {
-                problem = problem.with_retryable(error.retryable());
-            }
-            problem.complete(Some(&path), trace_id.as_deref());
-            write_problem(ctx, problem).await;
-            return;
-        }
-
         let status = error.status_code();
-        if status == 401 {
-            ctx.response_mut()
-                .set_header("www-authenticate", "Bearer realm=\"rust-webx\"");
-        }
-        // A typed rate-limit error carries the RFC 6585 wait value; this is the
-        // only writer that turns a handler `Error` into a response, so the
-        // header is written exactly once. A bare `Error::Status(429, …)` has no
-        // wait value and keeps its previous behavior.
-        if status == 429 {
-            if let Some(retry_after_secs) = error.retry_after_secs() {
+        let verbatim = error.extensions().contains_key(X_WEBX_TITLE);
+
+        if !verbatim {
+            if status == 401 {
                 ctx.response_mut()
-                    .set_header("retry-after", &retry_after_secs.to_string());
+                    .set_header("www-authenticate", "Bearer realm=\"rust-webx\"");
+            }
+            // A typed rate-limit error carries the RFC 6585 wait value; this is
+            // the only writer that turns a handler `Error` into a response, so
+            // the header is written exactly once.
+            if status == 429 {
+                if let Some(retry_after_secs) = retry_after_of(error) {
+                    ctx.response_mut()
+                        .set_header("retry-after", &retry_after_secs.to_string());
+                }
+            }
+            if status >= 500 {
+                tracing::error!(status, error = %error, "engine: unhandled server error");
             }
         }
 
-        let detail = if status >= 500 {
-            tracing::error!(status, error = %error, "engine: unhandled server error");
-            "an unexpected error occurred".to_string()
-        } else {
-            error
-                .public_detail()
-                .unwrap_or_else(|| status_title(status))
-                .to_string()
-        };
-
-        let mut problem = problem_details(status, detail)
-            .with_code(error.code().into_owned())
-            .with_retryable(error.retryable());
-        problem.complete(Some(&path), trace_id.as_deref());
+        let problem = ProblemDetails::from_app_error(error, &path, trace_id.as_deref());
         write_problem(ctx, problem).await;
     }
-
     async fn write_problem(ctx: &mut EngineContext, mut problem: ProblemDetails) {
         // Problems built by internal helpers (404/405/deadline) have no `Error`
         // to derive from; fill the guaranteed extension members here.

@@ -79,7 +79,7 @@ impl ChaosControl {
                 Ordering::SeqCst,
             ) {
                 Ok(_) => {
-                    return Err(Error::Status(
+                    return Err(Error::status(
                         503,
                         "injected fault (TestHost chaos)".to_string(),
                     ))
@@ -305,11 +305,11 @@ mod tests {
         control.fail_next(2);
         assert!(matches!(
             control.before_dispatch().await,
-            Err(Error::Status(503, _))
+            Err(error) if error.status_code() == 503
         ));
         assert!(matches!(
             control.before_dispatch().await,
-            Err(Error::Status(503, _))
+            Err(error) if error.status_code() == 503
         ));
         assert!(control.before_dispatch().await.is_ok());
         assert_eq!(control.dispatched(), 3);
@@ -317,7 +317,7 @@ mod tests {
         control.fail_next(1);
         assert!(matches!(
             control.before_dispatch().await,
-            Err(Error::Status(503, _))
+            Err(error) if error.status_code() == 503
         ));
         assert!(control.before_dispatch().await.is_ok());
         control.reset();

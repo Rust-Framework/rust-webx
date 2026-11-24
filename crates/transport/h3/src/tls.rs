@@ -35,13 +35,13 @@ pub(crate) fn build_server_config(
     client_auth: TlsClientAuth,
 ) -> Result<Arc<ServerConfig>> {
     if !cert_path.is_file() {
-        return Err(Error::Http(format!(
+        return Err(Error::bad_request(format!(
             "cannot open HTTP/3 TLS certificate '{}': file does not exist",
             cert_path.display()
         )));
     }
     if !key_path.is_file() {
-        return Err(Error::Http(format!(
+        return Err(Error::bad_request(format!(
             "cannot open HTTP/3 TLS private key '{}': file does not exist",
             key_path.display()
         )));
@@ -53,12 +53,12 @@ pub(crate) fn build_server_config(
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let builder = ServerConfig::builder_with_provider(Arc::clone(&provider))
         .with_protocol_versions(&[&rustls::version::TLS13])
-        .map_err(|err| Error::Http(format!("HTTP/3 requires TLS 1.3: {err}")))?;
+        .map_err(|err| Error::bad_request(format!("HTTP/3 requires TLS 1.3: {err}")))?;
     let builder = match client_auth {
         TlsClientAuth::Off => builder.with_no_client_auth(),
         TlsClientAuth::Optional | TlsClientAuth::Required => {
             if !client_ca_path.is_file() {
-                return Err(Error::Http(format!(
+                return Err(Error::bad_request(format!(
                     "HTTP/3 mTLS requires a readable client CA bundle; '{}' does not exist",
                     client_ca_path.display()
                 )));
@@ -70,7 +70,7 @@ pub(crate) fn build_server_config(
                 _ => verifier,
             };
             let verifier = verifier.build().map_err(|err| {
-                Error::Http(format!(
+                Error::bad_request(format!(
                     "cannot build the HTTP/3 client-certificate verifier from '{}': {err}",
                     client_ca_path.display()
                 ))
@@ -79,7 +79,7 @@ pub(crate) fn build_server_config(
         }
     };
     let mut config = builder.with_single_cert(certificates, key).map_err(|err| {
-        Error::Http(format!(
+        Error::bad_request(format!(
             "HTTP/3 TLS configuration rejected the certificate/key pair ({}, {}): {err}",
             cert_path.display(),
             key_path.display()
@@ -95,7 +95,7 @@ fn load_client_roots(path: &Path) -> Result<Arc<RootCertStore>> {
     let mut roots = RootCertStore::empty();
     for certificate in certificates {
         roots.add(certificate).map_err(|err| {
-            Error::Http(format!(
+            Error::bad_request(format!(
                 "cannot use a certificate from HTTP/3 client CA '{}': {err}",
                 path.display()
             ))
@@ -106,7 +106,7 @@ fn load_client_roots(path: &Path) -> Result<Arc<RootCertStore>> {
 
 fn load_certificates(path: &Path) -> Result<Vec<CertificateDer<'static>>> {
     let file = File::open(path).map_err(|err| {
-        Error::Http(format!(
+        Error::bad_request(format!(
             "cannot open HTTP/3 TLS certificate '{}': {err}",
             path.display()
         ))
@@ -116,14 +116,14 @@ fn load_certificates(path: &Path) -> Result<Vec<CertificateDer<'static>>> {
     let mut certificates = Vec::new();
     for item in CertificateDer::pem_reader_iter(&mut reader) {
         certificates.push(item.map_err(|err| {
-            Error::Http(format!(
+            Error::bad_request(format!(
                 "cannot parse HTTP/3 TLS certificate '{}': {err}",
                 path.display()
             ))
         })?);
     }
     if certificates.is_empty() {
-        return Err(Error::Http(format!(
+        return Err(Error::bad_request(format!(
             "no PEM CERTIFICATE block found in HTTP/3 TLS certificate '{}'",
             path.display()
         )));
@@ -134,7 +134,7 @@ fn load_certificates(path: &Path) -> Result<Vec<CertificateDer<'static>>> {
 
 fn load_private_key(path: &Path) -> Result<PrivateKeyDer<'static>> {
     let file = File::open(path).map_err(|err| {
-        Error::Http(format!(
+        Error::bad_request(format!(
             "cannot open HTTP/3 TLS private key '{}': {err}",
             path.display()
         ))
@@ -144,11 +144,11 @@ fn load_private_key(path: &Path) -> Result<PrivateKeyDer<'static>> {
     // `PrivateKeyDer::from_pem_reader` accepts PKCS#8, PKCS#1 and SEC1 blocks.
     match PrivateKeyDer::from_pem_reader(&mut reader) {
         Ok(key) => Ok(key),
-        Err(rustls_pki_types::pem::Error::NoItemsFound) => Err(Error::Http(format!(
+        Err(rustls_pki_types::pem::Error::NoItemsFound) => Err(Error::bad_request(format!(
             "no PKCS#8, PKCS#1 or SEC1 private key found in HTTP/3 TLS private key '{}'",
             path.display()
         ))),
-        Err(err) => Err(Error::Http(format!(
+        Err(err) => Err(Error::bad_request(format!(
             "cannot parse HTTP/3 TLS private key '{}': {err}",
             path.display()
         ))),

@@ -117,7 +117,7 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
             format_ident!("__rdi_try_construct_{}", handler_ty_name.replace("::", "_"));
         quote! {
             let __runtime = ctx.dispatch_runtime().ok_or_else(|| {
-                ::webx::Error::Internal(
+                ::webx::Error::internal(
                     "direct dispatch requires a request context built by webx::Host".to_string()
                 )
             })?;
@@ -125,7 +125,7 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
             let __arc = match #try_constructor_fn(&__scope) {
                 ::core::result::Result::Ok(arc) => arc,
                 ::core::result::Result::Err(error) => {
-                    return ::core::result::Result::Err(::webx::Error::Di(
+                    return ::core::result::Result::Err(::webx::Error::di(
                         format!("cannot construct handler {}: {error}", #handler_ty_name)
                     ));
                 }
@@ -133,7 +133,7 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
             let mut __handler: #handler_ty = match ::std::sync::Arc::try_unwrap(__arc) {
                 ::core::result::Result::Ok(handler) => handler,
                 ::core::result::Result::Err(_) => {
-                    return ::core::result::Result::Err(::webx::Error::Internal(
+                    return ::core::result::Result::Err(::webx::Error::internal(
                         format!(
                             "handler Arc must be uniquely owned after fresh construction: {}",
                             #handler_ty_name
@@ -177,14 +177,14 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
             let arc: ::std::sync::Arc<#handler_ty> = match #try_constructor_fn(resolver) {
                 ::std::result::Result::Ok(arc) => arc,
                 ::std::result::Result::Err(error) => {
-                    return ::std::result::Result::Err(::webx::Error::Di(
+                    return ::std::result::Result::Err(::webx::Error::di(
                         format!("cannot construct handler {}: {error}", #handler_ty_name)
                     ));
                 }
             };
             match ::std::sync::Arc::try_unwrap(arc) {
                 Ok(owned) => Ok(::std::boxed::Box::new(owned) as ::std::boxed::Box<dyn ::std::any::Any + Send>),
-                Err(_) => Err(::webx::Error::Internal(
+                Err(_) => Err(::webx::Error::internal(
                     format!("handler Arc must be uniquely owned after fresh construction: {}", #handler_ty_name)
                 )),
             }
@@ -268,12 +268,12 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
             Box::pin(async move {
                 let mut h = *handler
                     .downcast::<#handler_ty>()
-                    .map_err(|_| ::webx::Error::Internal(
+                    .map_err(|_| ::webx::Error::internal(
                         format!("Handler downcast failed for: {}", #handler_ty_name)
                     ))?;
                 let req = *request
                     .downcast::<#req_ty>()
-                    .map_err(|_| ::webx::Error::Internal(
+                    .map_err(|_| ::webx::Error::internal(
                         format!("Request downcast failed for: {}", #req_ty_name)
                     ))?;
                 let result: #rsp_ty = h.handle(req).await?;
@@ -298,7 +298,7 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
         ) -> ::webx::BoxedDispatchFuture {
             ::std::boxed::Box::pin(async move {
                 let req = *request.downcast::<#req_ty>().map_err(|_| {
-                    ::webx::Error::Internal(format!(
+                    ::webx::Error::internal(format!(
                         "Request downcast failed for: {}",
                         #req_ty_name
                     ))
@@ -373,7 +373,7 @@ fn event_handler_impl(attr: TokenStream, item_impl: ItemImpl) -> TokenStream {
                 let arc = match #try_constructor_fn(resolver) {
                     ::core::result::Result::Ok(arc) => arc,
                     ::core::result::Result::Err(error) => {
-                        return ::core::result::Result::Err(::webx::Error::Di(format!(
+                        return ::core::result::Result::Err(::webx::Error::di(format!(
                             "cannot construct event handler {}: {error}",
                             ::std::stringify!(#handler_ty)
                         )));
@@ -405,13 +405,13 @@ fn event_handler_impl(attr: TokenStream, item_impl: ItemImpl) -> TokenStream {
             ::std::boxed::Box::pin(async move {
                 let handler = handler
                     .downcast::<#handler_ty>()
-                    .map_err(|_| ::webx::Error::Internal(format!(
+                    .map_err(|_| ::webx::Error::internal(format!(
                         "event handler type mismatch for {}",
                         ::std::stringify!(#handler_ty)
                     )))?;
                 let event = event
                     .downcast::<#event_ty>()
-                    .map_err(|_| ::webx::Error::Internal(format!(
+                    .map_err(|_| ::webx::Error::internal(format!(
                         "event type mismatch for {}",
                         ::std::stringify!(#event_ty)
                     )))?;
@@ -440,7 +440,7 @@ fn event_handler_impl(attr: TokenStream, item_impl: ItemImpl) -> TokenStream {
         ) -> ::webx::BoxedEventDispatch {
             ::std::boxed::Box::pin(async move {
                 let event: #event_ty = ::webx::serde_json::from_slice(&payload)
-                    .map_err(|error| ::webx::Error::Internal(format!(
+                    .map_err(|error| ::webx::Error::internal(format!(
                         "event payload for '{}' is not valid JSON: {error}",
                         <#event_ty as ::webx::IEventRequest>::event_name()
                     )))?;

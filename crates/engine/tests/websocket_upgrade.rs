@@ -56,15 +56,15 @@ impl IUpgradeSession for EchoSession {
                         .write_all(&buffer[..read])
                         .await
                         .map_err(|error| {
-                            Error::Internal(format!("upgraded transport write failed: {error}"))
+                            Error::internal(format!("upgraded transport write failed: {error}"))
                         })?;
                     transport.flush().await.map_err(|error| {
-                        Error::Internal(format!("upgraded transport flush failed: {error}"))
+                        Error::internal(format!("upgraded transport flush failed: {error}"))
                     })?;
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(()),
                 Err(error) => {
-                    return Err(Error::Internal(format!(
+                    return Err(Error::internal(format!(
                         "upgraded transport read failed: {error}"
                     )))
                 }

@@ -84,32 +84,32 @@ impl PasswordPolicy {
 
     /// Validate one candidate password.
     ///
-    /// Errors are `Error::Validation` with a user-facing reason; a login
+    /// Errors are `Error::validation` with a user-facing reason; a login
     /// endpoint should map them to its generic "invalid credentials" response,
     /// while a registration endpoint can return the reason.
     pub fn validate(&self, password: &str) -> Result<()> {
         let chars = password.chars().count();
         if chars < self.min_len {
-            return Err(Error::Validation(format!(
+            return Err(Error::validation(format!(
                 "password must be at least {} characters",
                 self.min_len
             )));
         }
         if chars > self.max_len {
-            return Err(Error::Validation(format!(
+            return Err(Error::validation(format!(
                 "password must be at most {} characters",
                 self.max_len
             )));
         }
         if password.len() > MAX_PASSWORD_BYTES {
-            return Err(Error::Validation(format!(
+            return Err(Error::validation(format!(
                 "password must be at most {MAX_PASSWORD_BYTES} bytes"
             )));
         }
         if !self.blocklist.is_empty() {
             let candidate = password.to_ascii_lowercase();
             if self.blocklist.iter().any(|entry| entry == &candidate) {
-                return Err(Error::Validation(
+                return Err(Error::validation(
                     "password is too common; choose another one".to_string(),
                 ));
             }
@@ -362,12 +362,12 @@ impl BoundedPasswordHasher {
         tokio::time::timeout(self.queue_timeout, self.permits.acquire())
             .await
             .map_err(|_| {
-                Error::Status(
+                Error::status(
                     503,
                     "password hashing is saturated; retry later".to_string(),
                 )
             })?
-            .map_err(|_| Error::Internal("password hasher semaphore closed".to_string()))
+            .map_err(|_| Error::internal("password hasher semaphore closed".to_string()))
     }
 }
 

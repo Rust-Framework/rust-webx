@@ -417,14 +417,14 @@ pub async fn bind_request<T: Send + 'static>(
         .get(&std::any::TypeId::of::<T>())
         .copied()
         .ok_or_else(|| {
-            crate::error::Error::Internal(format!(
+            crate::error::Error::internal(format!(
                 "no HTTP request binder registered for {}",
                 std::any::type_name::<T>()
             ))
         })?;
     let boxed = binder(ctx).await?;
     boxed.downcast::<T>().map(|boxed| *boxed).map_err(|_| {
-        crate::error::Error::Internal(format!(
+        crate::error::Error::internal(format!(
             "request binder returned the wrong type for {}",
             std::any::type_name::<T>()
         ))
@@ -728,7 +728,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            matches!(err, crate::error::Error::ResponseSerialization(_)),
+            err.code() == "response_serialization",
             "response serialization must not reuse the request-parse variant: {err:?}"
         );
         assert_eq!(err.status_code(), 500);

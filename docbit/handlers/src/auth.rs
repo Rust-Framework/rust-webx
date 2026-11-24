@@ -114,7 +114,7 @@ impl IRequestHandler<RegisterRequest, AuthResponse> for RegisterHandler {
             .await?
             .is_some()
         {
-            return Err(Error::Http("Email already registered".into()));
+            return Err(Error::bad_request("Email already registered"));
         }
 
         let hashed = self.hasher.hash(&req.password).await?;
@@ -149,7 +149,7 @@ impl IRequestHandler<RegisterRequest, AuthResponse> for RegisterHandler {
             self.ctx,
             User,
             user_id,
-            Error::NotFound("User not found after register".into());
+            Error::not_found("User not found after register");
             include row.roles
         );
         let model = user_to_view(saved);
@@ -166,7 +166,7 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
     async fn handle(&mut self, req: LoginRequest) -> ActionResult<AuthResponse> {
         let user = load_user_by_email(&mut self.ctx, &req.email)
             .await?
-            .ok_or_else(|| Error::Http("Invalid email or password".into()))?;
+            .ok_or_else(|| Error::bad_request("Invalid email or password"))?;
 
         let verified = if user.password_hash.is_empty() {
             false
@@ -176,7 +176,7 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
                 .await?
         };
         if !verified {
-            return Err(Error::Http("Invalid email or password".into()));
+            return Err(Error::bad_request("Invalid email or password"));
         }
 
         let model = user_to_view(user);
@@ -191,11 +191,11 @@ impl IRequestHandler<LoginRequest, AuthResponse> for LoginHandler {
 #[async_trait]
 impl IRequestHandler<AuthMeRequest, UserView> for AuthMeHandler {
     async fn handle(&mut self, _req: AuthMeRequest) -> ActionResult<UserView> {
-        let uid = operator_id().ok_or_else(|| Error::Http("Not authenticated".into()))?;
+        let uid = operator_id().ok_or_else(|| Error::bad_request("Not authenticated"))?;
 
         let user = load_user_by_id(&mut self.ctx, &uid)
             .await?
-            .ok_or_else(|| Error::Http("User not found".into()))?;
+            .ok_or_else(|| Error::bad_request("User not found"))?;
 
         Ok(user_to_view(user))
     }
@@ -249,7 +249,7 @@ impl IRequestHandler<ForgotPasswordRequest, ForgotPasswordResponse> for ForgotPa
 impl IRequestHandler<ResetPasswordRequest, ResetPasswordResponse> for ResetPasswordHandler {
     async fn handle(&mut self, req: ResetPasswordRequest) -> ActionResult<ResetPasswordResponse> {
         if req.password.len() < 6 {
-            return Err(Error::Http("Password must be at least 6 characters".into()));
+            return Err(Error::bad_request("Password must be at least 6 characters"));
         }
 
         let q = req.token.clone();
@@ -260,13 +260,13 @@ impl IRequestHandler<ResetPasswordRequest, ResetPasswordResponse> for ResetPassw
         .first_or_default()
         .await
         .map_ef()?
-        .ok_or_else(|| Error::Http("Invalid or expired reset token".into()))?;
+        .ok_or_else(|| Error::bad_request("Invalid or expired reset token"))?;
 
         if record.used != 0 {
-            return Err(Error::Http("Reset token already used".into()));
+            return Err(Error::bad_request("Reset token already used"));
         }
         if now_secs() > record.expires_at {
-            return Err(Error::Http("Reset token expired".into()));
+            return Err(Error::bad_request("Reset token expired"));
         }
 
         let hashed = self.hasher.hash(&req.password).await?;
@@ -274,7 +274,7 @@ impl IRequestHandler<ResetPasswordRequest, ResetPasswordResponse> for ResetPassw
         let user_id = record.user_id.clone();
         let mut user = load_user_by_id(&mut self.ctx, &user_id)
             .await?
-            .ok_or_else(|| Error::Http("User not found".into()))?;
+            .ok_or_else(|| Error::bad_request("User not found"))?;
 
         user.password_hash = hashed;
         user.updated_at = now_secs();

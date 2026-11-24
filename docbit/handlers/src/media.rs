@@ -88,7 +88,7 @@ pub struct UploadMediaHandler;
 impl IRequestHandler<UploadMediaRequest, MediaAsset> for UploadMediaHandler {
     async fn handle(&mut self, req: UploadMediaRequest) -> ActionResult<MediaAsset> {
         if req.file.is_empty() {
-            return Err(Error::Validation("no file was uploaded".into()));
+            return Err(Error::validation("no file was uploaded"));
         }
 
         let content_type = req
@@ -107,17 +107,17 @@ impl IRequestHandler<UploadMediaRequest, MediaAsset> for UploadMediaHandler {
 
         let relative = format!("{}/{}/{}.{}", bucket, shard, id, ext);
         let target = resolve_inside_uploads(&relative)
-            .ok_or_else(|| Error::Internal("generated media path was rejected".into()))?;
+            .ok_or_else(|| Error::internal("generated media path was rejected"))?;
 
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent)
-                .map_err(|e| Error::Internal(format!("Cannot create media directory: {}", e)))?;
+                .map_err(|e| Error::internal(format!("Cannot create media directory: {}", e)))?;
         }
 
         req.file
             .save_as(&target)
             .await
-            .map_err(|e| Error::Internal(format!("Cannot store media file: {}", e)))?;
+            .map_err(|e| Error::internal(format!("Cannot store media file: {}", e)))?;
 
         let url = format!("/api/media/{}", relative);
         let markdown = if is_image {
@@ -151,10 +151,10 @@ pub struct GetMediaHandler;
 impl IRequestHandler<GetMediaRequest, Response> for GetMediaHandler {
     async fn handle(&mut self, req: GetMediaRequest) -> ActionResult<Response> {
         let path = resolve_inside_uploads(&req.path)
-            .ok_or_else(|| Error::Validation("invalid media path".into()))?;
+            .ok_or_else(|| Error::validation("invalid media path"))?;
 
         if !path.is_file() {
-            return Err(Error::NotFound("Media not found".into()));
+            return Err(Error::not_found("Media not found"));
         }
 
         let ext = path

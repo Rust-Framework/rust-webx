@@ -1,9 +1,8 @@
 //! Startup configuration aggregation (2.8): `HostBuilder::try_build` reports
-//! **every** invalid configuration value in one `Error::Di`, deterministically
+//! **every** invalid configuration value in one `Error::di`, deterministically
 //! ordered, instead of stopping at the first `?`.
 
 use webx_core::config::{AppOptions, TlsClientAuth};
-use webx_core::error::Error;
 use webx_core::mode::AppMode;
 use webx_host::config_validation::{format_violations, validate_options, ConfigViolation};
 use webx_host::cors::CorsConfig;
@@ -140,8 +139,8 @@ fn try_build_reports_every_violation_at_once() {
         .expect("invalid Production configuration must fail startup");
 
     assert!(
-        matches!(error, Error::Di(_)),
-        "expected Error::Di, got {error:?}"
+        error.code() == "dependency_injection",
+        "expected Error::di, got {error:?}"
     );
     let message = error.to_string();
     assert_eq!(
@@ -280,8 +279,8 @@ fn build_panics_with_the_same_aggregate_message() {
     }
 
     let expected = match invalid().try_build().err() {
-        Some(Error::Di(message)) => message,
-        other => panic!("expected Error::Di, got {other:?}"),
+        Some(error) => error.operator().unwrap_or_default().to_string(),
+        other => panic!("expected Error::di, got {other:?}"),
     };
 
     let panic = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| invalid().build())) {

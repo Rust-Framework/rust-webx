@@ -1587,7 +1587,7 @@ fn bind_fn(fields: &[FieldSpec], plan: &BindingPlan) -> TokenStream2 {
                     ::webx::serde_json::from_slice(__slice)
                         .map_err(::webx::binding::body_error)?;
                 if !__value.is_object() {
-                    return ::core::result::Result::Err(::webx::Error::Http(
+                    return ::core::result::Result::Err(::webx::Error::bad_request(
                         "the request body must be a JSON object".to_string(),
                     ));
                 }
@@ -1613,7 +1613,7 @@ fn bind_fn(fields: &[FieldSpec], plan: &BindingPlan) -> TokenStream2 {
     let form_guard = if plan.has_form {
         quote! {
             if !__is_multipart {
-                return ::core::result::Result::Err(::webx::Error::UnsupportedMediaType(
+                return ::core::result::Result::Err(::webx::Error::unsupported_media_type(
                     "this endpoint binds `multipart/form-data`; send the request as a form"
                         .to_string(),
                 ));
@@ -1627,7 +1627,7 @@ fn bind_fn(fields: &[FieldSpec], plan: &BindingPlan) -> TokenStream2 {
         let explicit_body = plan.has_explicit_body;
         quote! {
             if __is_multipart && (#explicit_body || __is_body_method) {
-                return ::core::result::Result::Err(::webx::Error::UnsupportedMediaType(
+                return ::core::result::Result::Err(::webx::Error::unsupported_media_type(
                     "this endpoint binds a JSON body; `multipart/form-data` is not supported"
                         .to_string(),
                 ));
@@ -1640,7 +1640,7 @@ fn bind_fn(fields: &[FieldSpec], plan: &BindingPlan) -> TokenStream2 {
     let explicit_body_guard = if plan.has_explicit_body {
         quote! {
             if !__is_body_method && !__is_multipart {
-                return ::core::result::Result::Err(::webx::Error::Http(
+                return ::core::result::Result::Err(::webx::Error::bad_request(
                     "`#[frombody]` fields require a POST, PUT or PATCH request".to_string(),
                 ));
             }
@@ -1663,7 +1663,7 @@ fn bind_fn(fields: &[FieldSpec], plan: &BindingPlan) -> TokenStream2 {
         let names = complex_fields.join(", ");
         quote! {
             if !__is_body_method && !__is_multipart {
-                return ::core::result::Result::Err(::webx::Error::Http(format!(
+                return ::core::result::Result::Err(::webx::Error::bad_request(format!(
                     "composite fields [{}] can only bind from a JSON body, and this \
                      request method has no body; use POST/PUT/PATCH, or mark them \
                      `#[fromquery]`/`#[frompath]` and implement `FromStr`",
@@ -1692,7 +1692,7 @@ fn bind_fn(fields: &[FieldSpec], plan: &BindingPlan) -> TokenStream2 {
     let claim_guard = if plan.needs_claim {
         quote! {
             if __in.claims.is_none() {
-                return ::core::result::Result::Err(::webx::Error::Unauthorized(
+                return ::core::result::Result::Err(::webx::Error::unauthorized(
                     "this endpoint binds claims; authenticate the request".to_string(),
                 ));
             }
@@ -1969,7 +1969,7 @@ fn bind_field(f: &FieldSpec, plan: &BindingPlan) -> TokenStream2 {
                             )
                         }
                         ::core::option::Option::None => {
-                            return ::core::result::Result::Err(::webx::Error::Unauthorized(
+                            return ::core::result::Result::Err(::webx::Error::unauthorized(
                                 "authentication required".to_string(),
                             ));
                         }

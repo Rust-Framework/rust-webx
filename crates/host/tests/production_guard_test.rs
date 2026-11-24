@@ -96,8 +96,8 @@ fn try_build_returns_err_instead_of_panicking() {
         .err()
         .expect("weak JWT in Production must be rejected");
     assert!(
-        matches!(error, webx_core::error::Error::Di(_)),
-        "expected Error::Di, got {error:?}"
+        error.code() == "dependency_injection",
+        "expected Error::di, got {error:?}"
     );
     assert!(
         error

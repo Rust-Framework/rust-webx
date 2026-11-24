@@ -33,7 +33,7 @@ impl IRequestHandler<ListItemsRequest, CursorPage<Item>> for ListItemsHandler {
         let start = match paging.decoded()?.first() {
             Some(value) => value
                 .parse::<u32>()
-                .map_err(|_| Error::Validation("invalid cursor".to_string()))?,
+                .map_err(|_| Error::validation("invalid cursor".to_string()))?,
             None => 0,
         };
         let rows: Vec<Item> = (start + 1..=5)

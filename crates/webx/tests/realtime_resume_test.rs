@@ -54,7 +54,7 @@ impl IWebSocketHandler for ResumeHandler {
             };
             let frame = store.resume(request).await?;
             let body = serde_json::to_string(&frame)
-                .map_err(|error| Error::Internal(format!("frame encode failed: {error}")))?;
+                .map_err(|error| Error::internal(format!("frame encode failed: {error}")))?;
             connection.send_text(body).await?;
         }
         Ok(())

@@ -229,7 +229,7 @@ pub async fn resync_catalog(
     wwwroot: &Path,
 ) -> Result<ResyncSummary> {
     docs.ensure_all_indexes()
-        .map_err(|e| Error::Internal(format!("Doc index generation failed: {}", e)))?;
+        .map_err(|e| Error::internal(format!("Doc index generation failed: {}", e)))?;
 
     let mut summary = sync_exhibitions(ctx, docs).await?;
 
@@ -251,7 +251,7 @@ pub async fn resync_catalog(
 /// many logos the destination holds after the pass.
 fn sync_logos(docs: &dyn IDocumentService, wwwroot: &Path) -> Result<usize> {
     docs.sync_portfolio_assets(wwwroot)
-        .map_err(|e| Error::Internal(format!("Portfolio asset sync failed: {}", e)))?;
+        .map_err(|e| Error::internal(format!("Portfolio asset sync failed: {}", e)))?;
 
     let count = std::fs::read_dir(wwwroot.join("assets/works"))
         .map(|entries| entries.flatten().filter(|e| e.path().is_file()).count())

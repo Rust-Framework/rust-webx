@@ -10,7 +10,6 @@ use jsonwebtoken::{encode, Algorithm, DecodingKey, EncodingKey, Header, Validati
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use webx_core::auth::IAuthenticationScheme;
-use webx_core::error::Error;
 use webx_host::auth_dpop::{DpopConfig, DpopScheme, InMemoryDpopReplayStore};
 use webx_host::auth_jwks::Jwk;
 use webx_host::auth_jwt::JwtAuth;
@@ -177,7 +176,7 @@ async fn replay_and_mismatches_are_rejected() {
         .await
         .err()
         .expect("replay");
-    assert!(matches!(error, Error::Unauthorized(_)), "{error:?}");
+    assert!(error.code() == "unauthorized", "{error:?}");
 
     for (label, candidate) in [
         (
@@ -222,10 +221,7 @@ async fn replay_and_mismatches_are_rejected() {
             .await
             .err()
             .unwrap_or_else(|| panic!("{label} must fail"));
-        assert!(
-            matches!(error, Error::Unauthorized(_)),
-            "{label}: {error:?}"
-        );
+        assert!(error.code() == "unauthorized", "{label}: {error:?}");
     }
 }
 
@@ -252,7 +248,7 @@ async fn key_binding_and_ath_are_enforced() {
         .await
         .err()
         .expect("key mismatch");
-    assert!(matches!(error, Error::Unauthorized(_)), "{error:?}");
+    assert!(error.code() == "unauthorized", "{error:?}");
 
     // Access token without cnf is not DPoP-bound.
     let unbound = access_token(None);
@@ -270,7 +266,7 @@ async fn key_binding_and_ath_are_enforced() {
         .await
         .err()
         .expect("unbound token");
-    assert!(matches!(error, Error::Unauthorized(_)), "{error:?}");
+    assert!(error.code() == "unauthorized", "{error:?}");
 
     // Proof bound to a different access token (ath mismatch).
     let other_token = access_token(Some(&thumbprint(&jwk)));

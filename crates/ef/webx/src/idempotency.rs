@@ -327,7 +327,7 @@ impl EfIdempotencyStore {
     /// query itself as mapped framework errors.
     fn context(&self) -> Result<DbContext> {
         DbContext::from_options(&self.options).map_err(|error| {
-            Error::Internal(format!(
+            Error::internal(format!(
                 "the idempotency store could not create a DbContext from the configured \
                  options: {error}"
             ))

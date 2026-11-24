@@ -338,7 +338,7 @@ impl IAuthenticationScheme for ApiKeyScheme {
         if let Some((limiter, bucket)) = &throttle {
             if !limiter.allow(bucket) {
                 ctx.response_mut().set_header("retry-after", "60");
-                return Err(Error::Status(
+                return Err(Error::status(
                     429,
                     "too many invalid API key attempts".to_string(),
                 ));
@@ -357,7 +357,7 @@ impl IAuthenticationScheme for ApiKeyScheme {
                 if let Some((limiter, bucket)) = &throttle {
                     limiter.record_failure(bucket);
                 }
-                Err(Error::Unauthorized("invalid API key".to_string()))
+                Err(Error::unauthorized("invalid API key".to_string()))
             }
         }
     }

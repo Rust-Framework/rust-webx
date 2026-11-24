@@ -7,7 +7,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use webx_core::auth::{IAuthenticationScheme, IClaims};
 use webx_core::config::TlsClientAuth;
-use webx_core::error::{Error, Result};
+use webx_core::error::Result;
 use webx_core::http::CLIENT_CERT_FINGERPRINT_HEADER;
 use webx_core::mode::AppMode;
 use webx_host::auth_jwt::JwtClaims;
@@ -54,7 +54,7 @@ async fn unknown_certificate_is_401_not_anonymous() {
         .await
         .err()
         .expect("unknown certificate");
-    assert!(matches!(error, Error::Unauthorized(_)), "{error:?}");
+    assert!(error.code() == "unauthorized", "{error:?}");
 }
 
 #[tokio::test]

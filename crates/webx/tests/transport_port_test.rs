@@ -97,7 +97,7 @@ struct BoomHandler;
 #[async_trait::async_trait]
 impl IRequestHandler<BoomRequest, Response> for BoomHandler {
     async fn handle(&mut self, _req: BoomRequest) -> ActionResult<Response> {
-        Err(Error::Forbidden("no access".to_string()))
+        Err(Error::forbidden("no access".to_string()))
     }
 }
 

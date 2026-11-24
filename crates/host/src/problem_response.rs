@@ -76,7 +76,7 @@ pub const AUTH_REALM: &str = "rust-webx";
 ///
 /// This is the only place a 401 is produced: every caller (declarative
 /// authorization, dynamic authorization, JWT middleware, identity binding)
-/// funnels its `Error::Unauthorized` through here, so the status, the
+/// funnels its `Error::unauthorized` through here, so the status, the
 /// `application/problem+json` body and the `WWW-Authenticate` challenge stay
 /// consistent.
 pub async fn write_unauthorized(ctx: &mut dyn IHttpContext, detail: impl Into<String>) {

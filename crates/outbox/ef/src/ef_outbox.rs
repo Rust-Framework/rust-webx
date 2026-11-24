@@ -147,7 +147,7 @@ impl EfOutbox {
     fn context(&self) -> Result<DbContext> {
         let scope = self.services.create_scope();
         scope.get_owned::<DbContext>().map_err(|error| {
-            Error::Internal(format!(
+            Error::internal(format!(
                 "outbox needs a scoped DbContext registered with rust-ef `add_dbcontext`; \
                  resolving it from a fresh DI scope failed: {error}"
             ))

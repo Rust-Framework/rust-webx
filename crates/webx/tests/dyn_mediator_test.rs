@@ -70,7 +70,7 @@ async fn send_boxed_with(
             response
                 .downcast::<DynResponse>()
                 .map(|boxed| *boxed)
-                .map_err(|_| Error::Internal("send_boxed returned the wrong response type".into()))
+                .map_err(|_| Error::internal("send_boxed returned the wrong response type"))
         })
 }
 

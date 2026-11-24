@@ -51,13 +51,13 @@ pub trait ISessionStore: Send + Sync {
     /// Revoke every token of `subject` ("sign out everywhere").
     ///
     /// Optional capability: the default implementation returns
-    /// `501 Not Implemented` ([`Error::Status`]) instead of silently succeeding,
+    /// `501 Not Implemented` ([`Error::status`]) instead of silently succeeding,
     /// because a store that cannot enumerate a subject's sessions would
     /// otherwise report a logout that did not happen. `501` lets the caller (and
     /// the logs) tell "not supported" from a real server failure. Override it
     /// when the backing store keeps a subject-to-session index.
     async fn revoke_all_for_subject(&self, subject: &str) -> Result<()> {
-        Err(Error::Status(
+        Err(Error::status(
             501,
             format!(
                 "this ISessionStore cannot revoke every token of '{subject}'; override revoke_all_for_subject"
@@ -125,7 +125,7 @@ impl ISessionStore for InMemorySessionStore {
         if jti.is_empty() {
             // An empty `jti` never identifies a token: storing it would revoke
             // nothing while reporting success.
-            return Err(Error::Validation("jti must not be empty".to_string()));
+            return Err(Error::validation("jti must not be empty".to_string()));
         }
         self.revoked
             .write()
@@ -136,7 +136,7 @@ impl ISessionStore for InMemorySessionStore {
 
     async fn revoke_until(&self, jti: &str, expires_at_unix_secs: u64) -> Result<()> {
         if jti.is_empty() {
-            return Err(Error::Validation("jti must not be empty".to_string()));
+            return Err(Error::validation("jti must not be empty".to_string()));
         }
         // A token that is already past `exp` does not need a revocation record.
         if expires_at_unix_secs != 0 && expires_at_unix_secs <= now_unix_secs() {
@@ -206,9 +206,9 @@ mod tests {
     async fn empty_jti_is_a_typed_error() {
         let store = InMemorySessionStore::new();
         let err = store.revoke("").await.unwrap_err();
-        assert!(matches!(err, Error::Validation(_)), "got {err:?}");
+        assert!(err.code() == "validation_failed", "got {err:?}");
         let err = store.revoke_until("", 10).await.unwrap_err();
-        assert!(matches!(err, Error::Validation(_)), "got {err:?}");
+        assert!(err.code() == "validation_failed", "got {err:?}");
     }
 
     #[tokio::test]
@@ -259,7 +259,7 @@ mod tests {
             .await
             .expect_err("the dependency-free store has no subject index");
         assert!(
-            matches!(err, Error::Status(501, _)),
+            err.status_code() == 501,
             "an unsupported capability is 501, not a generic 500: {err:?}"
         );
         assert_eq!(err.status_code(), 501);

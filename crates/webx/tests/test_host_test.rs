@@ -168,7 +168,7 @@ async fn chaos_injects_failures_and_latency_deterministically() {
         })
         .await;
     assert!(
-        matches!(&failure, Err(Error::Status(503, _))),
+        matches!(&failure, Err(error) if error.status_code() == 503),
         "injected fault must be a typed 503: {failure:?}"
     );
     assert_eq!(calls.load(Ordering::SeqCst), 0, "handler never ran");

@@ -88,7 +88,7 @@ fn csv_header_line() -> String {
 fn check_headers(header: &str) -> Result<()> {
     let cols = parse_csv_line(header);
     if cols.len() < CSV_HEADERS.len() {
-        return Err(Error::Validation(format!(
+        return Err(Error::validation(format!(
             "CSV 表头只有 {} 列，需要 {} 列。请用导出功能获取正确格式的CSV文件。",
             cols.len(),
             CSV_HEADERS.len()
@@ -98,8 +98,8 @@ fn check_headers(header: &str) -> Result<()> {
         .iter()
         .any(|c| !c.trim().is_empty())
     {
-        return Err(Error::Validation(
-            "CSV 表头有多余列。请确保列数与导出文件一致，不要添加额外列。".into(),
+        return Err(Error::validation(
+            "CSV 表头有多余列。请确保列数与导出文件一致，不要添加额外列。",
         ));
     }
     let mut mismatches = Vec::new();
@@ -121,7 +121,7 @@ fn check_headers(header: &str) -> Result<()> {
     if mismatches.is_empty() {
         Ok(())
     } else {
-        Err(Error::Validation(format!(
+        Err(Error::validation(format!(
             "CSV 表头不匹配（共{}处）：\n{}\n\n提示：请用系统的「导出」功能获取正确格式的CSV，在导出的基础上修改数据。",
             mismatches.len(),
             mismatches.join("\n")
@@ -214,15 +214,13 @@ fn col(cols: &[String], i: usize) -> &str {
 }
 
 fn annotate_line(line_no: usize, err: Error) -> Error {
-    match err {
-        Error::Validation(msg) => {
-            if msg.starts_with("第 ") {
-                Error::Validation(msg)
-            } else {
-                Error::Validation(format!("第 {line_no} 行：{msg}"))
-            }
-        }
-        other => other,
+    let Some(msg) = err.public_detail().map(str::to_string) else {
+        return err;
+    };
+    if msg.starts_with("第") {
+        Error::validation(msg)
+    } else {
+        Error::validation(format!("第{line_no} 行：{msg}"))
     }
 }
 
@@ -484,7 +482,7 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
     async fn handle(&mut self, req: ImportInventoryRequest) -> ActionResult<ImportInventoryResult> {
         let bytes = req.file.read_bytes().await?;
         let raw = String::from_utf8(bytes).map_err(|_| {
-            Error::Validation(
+            Error::validation(
                 "导入文件不是有效的 UTF-8 文本，请用 Excel 另存为 UTF-8 CSV".to_string(),
             )
         })?;
@@ -502,7 +500,7 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
                 continue;
             }
             if cols.len() < 4 {
-                return Err(Error::Validation(format!(
+                return Err(Error::validation(format!(
                     "第 {line_no} 行：只有 {} 列数据，至少需要 4 列（产品名称、产品编码、类别、规格编码）。\n可能是：1) 该行是空行请删除；2) CSV 格式被破坏，请用 Excel 重新保存为 UTF-8 CSV",
                     cols.len()
                 )));
@@ -545,17 +543,17 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
             } else {
                 planned_qty_raw
                     .parse()
-                    .map_err(|_| Error::Validation(format!("第 {line_no} 行：数量必须是整数")))?
+                    .map_err(|_| Error::validation(format!("第 {line_no} 行：数量必须是整数")))?
             };
             if planned_quantity < 0 {
-                return Err(Error::Validation(format!("第 {line_no} 行：数量不能为负")));
+                return Err(Error::validation(format!("第 {line_no} 行：数量不能为负")));
             }
             let product_sort: Option<i32> =
                 if product_sort_raw.is_empty() {
                     None
                 } else {
                     Some(product_sort_raw.parse().map_err(|_| {
-                        Error::Validation(format!("第 {line_no} 行：排序必须是整数"))
+                        Error::validation(format!("第 {line_no} 行：排序必须是整数"))
                     })?)
                 };
 
@@ -565,12 +563,12 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
             let mut component: Option<ComponentModel> = None;
             if has_comp {
                 if comp_model_raw.is_empty() {
-                    return Err(Error::Validation(format!(
+                    return Err(Error::validation(format!(
                         "第 {line_no} 行：部件类型已填写但部件型号为空。\n如果该行不需要部件，请把「部件类型」列也留空。"
                     )));
                 }
                 let kind = normalize_comp_kind(comp_kind_raw).map_err(|_| {
-                    Error::Validation(format!(
+                    Error::validation(format!(
                         "第 {line_no} 行：部件类型「{comp_kind_raw}」无法识别。\n支持的类型：加速卡 / 硬盘（或 accelerator / disk / gpu / npu / hdd / ssd）"
                     ))
                 })?;
@@ -578,7 +576,7 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
                     parse_capacity_label_to_gb(comp_capacity_raw)
                         .map_err(|e| annotate_line(line_no, e))?
                 } else if !comp_capacity_raw.is_empty() {
-                    return Err(Error::Validation(format!(
+                    return Err(Error::validation(format!(
                         "第 {line_no} 行：加速卡部件不应填写容量"
                     )));
                 } else {
@@ -588,11 +586,11 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
                     0
                 } else {
                     comp_qty_raw.parse().map_err(|_| {
-                        Error::Validation(format!("第 {line_no} 行：单台数量必须是整数"))
+                        Error::validation(format!("第 {line_no} 行：单台数量必须是整数"))
                     })?
                 };
                 if comp_qty < 1 {
-                    return Err(Error::Validation(format!(
+                    return Err(Error::validation(format!(
                         "第 {line_no} 行：单台数量至少为 1"
                     )));
                 }
@@ -616,7 +614,7 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
             if let Some(i) = existing_idx {
                 let slot = &mut acc[i];
                 if !product_name.is_empty() && slot.product_name != product_name {
-                    return Err(Error::Validation(format!(
+                    return Err(Error::validation(format!(
                         "第 {line_no} 行：同一规格的产品名称与首行不一致（续行请留空继承）"
                     )));
                 }
@@ -624,18 +622,18 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
                     let cat =
                         normalize_category(category_raw).map_err(|e| annotate_line(line_no, e))?;
                     if cat != slot.category {
-                        return Err(Error::Validation(format!(
+                        return Err(Error::validation(format!(
                             "第 {line_no} 行：同一规格的类别与首行不一致（续行请留空继承）"
                         )));
                     }
                 }
                 if !brand_raw.is_empty() && brand_raw.trim() != slot.brand {
-                    return Err(Error::Validation(format!(
+                    return Err(Error::validation(format!(
                         "第 {line_no} 行：同一规格的品牌与首行不一致（续行请留空继承）"
                     )));
                 }
                 if !parameters.is_empty() && parameters != slot.parameters {
-                    return Err(Error::Validation(format!(
+                    return Err(Error::validation(format!(
                         "第 {line_no} 行：同一规格的参数与首行不一致（续行请留空继承）"
                     )));
                 }
@@ -643,24 +641,24 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
                     let unit = require_text("单位", unit_raw, MAX_UNIT)
                         .map_err(|e| annotate_line(line_no, e))?;
                     if unit != slot.unit {
-                        return Err(Error::Validation(format!(
+                        return Err(Error::validation(format!(
                             "第 {line_no} 行：同一规格的单位与首行不一致"
                         )));
                     }
                 }
                 if !planned_qty_raw.is_empty() && planned_quantity != slot.planned_quantity {
-                    return Err(Error::Validation(format!(
+                    return Err(Error::validation(format!(
                         "第 {line_no} 行：同一规格的数量与首行不一致"
                     )));
                 }
                 if !remark.is_empty() && remark != slot.remark {
-                    return Err(Error::Validation(format!(
+                    return Err(Error::validation(format!(
                         "第 {line_no} 行：同一规格的备注与首行不一致"
                     )));
                 }
                 if let Some(ps) = product_sort {
                     if ps != slot.product_sort {
-                        return Err(Error::Validation(format!("第 {line_no} 行：排序不一致")));
+                        return Err(Error::validation(format!("第 {line_no} 行：排序不一致")));
                     }
                 }
                 if has_comp {
@@ -716,7 +714,7 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
                     x.kind == c.kind && x.model == c.model && x.capacity_gb == c.capacity_gb
                 });
                 if dup {
-                    return Err(Error::Validation(format!(
+                    return Err(Error::validation(format!(
                         "第 {line_no} 行：部件重复。\n该规格已存在：{}/{}/{}GB，请检查是否误填了重复的部件行。",
                         c.kind, c.model, c.capacity_gb
                     )));
@@ -814,7 +812,7 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
                     self.ctx.add(entity);
                     products_upserted += 1;
                 } else {
-                    return Err(Error::Validation(format!(
+                    return Err(Error::validation(format!(
                         "产品编码「{0}」在系统中不存在。新建产品时需要同时填写「产品名称」列。\n当前CSV中该列值为空。",
                         row.product_code
                     )));

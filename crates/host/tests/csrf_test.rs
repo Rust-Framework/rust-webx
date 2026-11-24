@@ -5,7 +5,6 @@ mod test_utils;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
-use webx_core::error::Error;
 use webx_core::middleware::IMiddleware;
 use webx_core::mode::AppMode;
 use webx_core::security::InMemorySessionRepository;
@@ -45,7 +44,7 @@ async fn missing_header_is_forbidden() {
         .invoke(&mut ctx)
         .await
         .expect_err("must reject");
-    assert!(matches!(error, Error::Forbidden(_)), "got {error:?}");
+    assert!(error.code() == "forbidden", "got {error:?}");
 }
 
 #[tokio::test]
@@ -55,7 +54,7 @@ async fn missing_cookie_is_forbidden() {
         .invoke(&mut ctx)
         .await
         .expect_err("must reject");
-    assert!(matches!(error, Error::Forbidden(_)), "got {error:?}");
+    assert!(error.code() == "forbidden", "got {error:?}");
 }
 
 #[tokio::test]
@@ -65,7 +64,7 @@ async fn mismatched_token_is_forbidden() {
         .invoke(&mut ctx)
         .await
         .expect_err("must reject");
-    assert!(matches!(error, Error::Forbidden(_)), "got {error:?}");
+    assert!(error.code() == "forbidden", "got {error:?}");
 }
 
 #[tokio::test]
@@ -95,7 +94,7 @@ async fn cross_site_fetch_metadata_is_rejected() {
         .invoke(&mut ctx)
         .await
         .expect_err("must reject");
-    assert!(matches!(error, Error::Forbidden(_)), "got {error:?}");
+    assert!(error.code() == "forbidden", "got {error:?}");
 }
 
 #[test]
@@ -111,7 +110,7 @@ fn host_refuses_cookie_auth_without_csrf() {
         .try_build()
         .err()
         .expect("cookie auth without CSRF must abort startup");
-    assert!(matches!(error, Error::Di(_)), "got {error:?}");
+    assert!(error.code() == "dependency_injection", "got {error:?}");
     assert!(
         error.to_string().contains("CSRF"),
         "the error must name the fix: {error}"

@@ -367,7 +367,7 @@ impl JwtValidationBuilder {
     /// Validate cross-field constraints and produce the configuration.
     pub fn build(self) -> Result<JwtValidation> {
         if self.algorithms.is_empty() {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "Jwt.Algorithms must not be empty; set at least [\"HS256\"]".to_string(),
             ));
         }
@@ -376,7 +376,7 @@ impl JwtValidationBuilder {
             .as_deref()
             .is_some_and(|issuer| issuer.trim().is_empty())
         {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "Jwt.Issuer must not be empty when configured".to_string(),
             ));
         }
@@ -385,7 +385,7 @@ impl JwtValidationBuilder {
             .as_deref()
             .is_some_and(|audience| audience.trim().is_empty())
         {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "Jwt.Audience must not be empty when configured".to_string(),
             ));
         }
@@ -394,30 +394,30 @@ impl JwtValidationBuilder {
             .iter()
             .any(|algorithm| *algorithm != JwtAlgorithm::Hs256);
         if has_asymmetric && self.jwks.is_none() {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "Jwt.Algorithms contains an asymmetric algorithm but Jwt.Jwks is not configured"
                     .to_string(),
             ));
         }
         if let Some(jwks) = &self.jwks {
             if !jwks.url.starts_with("https://") {
-                return Err(Error::Di(format!(
+                return Err(Error::di(format!(
                     "Jwt.Jwks.Url must be https:// (got '{}')",
                     jwks.url
                 )));
             }
             if jwks.cache_seconds == 0 || jwks.cache_seconds > 86_400 {
-                return Err(Error::Di(
+                return Err(Error::di(
                     "Jwt.Jwks.CacheSeconds must be between 1 and 86400".to_string(),
                 ));
             }
             if !(100..=10_000).contains(&jwks.timeout_ms) {
-                return Err(Error::Di(
+                return Err(Error::di(
                     "Jwt.Jwks.TimeoutMs must be between 100 and 10000".to_string(),
                 ));
             }
             if !(1..=256).contains(&jwks.max_keys) {
-                return Err(Error::Di(
+                return Err(Error::di(
                     "Jwt.Jwks.MaxKeys must be between 1 and 256".to_string(),
                 ));
             }
@@ -427,13 +427,13 @@ impl JwtValidationBuilder {
         let audience = normalize_claim_value("Jwt.Audience", self.audience)?;
 
         if self.leeway > Duration::from_secs(MAX_JWT_CLOCK_SKEW_SECONDS) {
-            return Err(Error::Di(format!(
+            return Err(Error::di(format!(
                 "Jwt.ClockSkewSeconds must be <= {MAX_JWT_CLOCK_SKEW_SECONDS} (got {})",
                 self.leeway.as_secs()
             )));
         }
         if self.max_token_bytes == 0 || self.max_token_bytes > MAX_JWT_TOKEN_BYTES {
-            return Err(Error::Di(format!(
+            return Err(Error::di(format!(
                 "Jwt.MaxTokenBytes must be between 1 and {MAX_JWT_TOKEN_BYTES} (got {})",
                 self.max_token_bytes
             )));
@@ -466,12 +466,12 @@ fn normalize_claim_value(label: &str, value: Option<String>) -> Result<Option<St
     };
     let trimmed = value.trim();
     if trimmed.is_empty() {
-        return Err(Error::Di(format!(
+        return Err(Error::di(format!(
             "{label} must not be empty when configured; remove the key or set a value"
         )));
     }
     if trimmed.len() > 1024 {
-        return Err(Error::Di(format!("{label} must be at most 1024 bytes")));
+        return Err(Error::di(format!("{label} must be at most 1024 bytes")));
     }
     Ok(Some(trimmed.to_string()))
 }
@@ -561,7 +561,7 @@ impl JwtAuth {
         tracing::debug!(reason, "JWT rejected");
         match self.invalid_token_behavior {
             InvalidTokenBehavior::Anonymous => Ok(None),
-            InvalidTokenBehavior::Reject => Err(Error::Unauthorized("invalid token".to_string())),
+            InvalidTokenBehavior::Reject => Err(Error::unauthorized("invalid token".to_string())),
         }
     }
 
@@ -748,7 +748,7 @@ impl ITokenIssuer for JwtTokenIssuer {
     async fn issue(&self, claims: TokenClaims) -> Result<IssuedToken> {
         let subject = claims.subject.trim();
         if subject.is_empty() {
-            return Err(Error::Validation(
+            return Err(Error::validation(
                 "token subject must not be empty".to_string(),
             ));
         }
@@ -784,7 +784,7 @@ impl ITokenIssuer for JwtTokenIssuer {
             &serde_json::Value::Object(payload),
             &self.encoding_key,
         )
-        .map_err(|error| Error::Internal(format!("JWT signing failed: {error}")))?;
+        .map_err(|error| Error::internal(format!("JWT signing failed: {error}")))?;
 
         Ok(IssuedToken {
             token,
@@ -819,7 +819,7 @@ pub(crate) async fn authenticate_with_revocation(
                 // Revoked credentials are a credentials problem, not an
                 // anonymous request: fail here so the host writes its single
                 // 401 (problem+json + `WWW-Authenticate`).
-                return Err(Error::Unauthorized("token has been revoked".to_string()));
+                return Err(Error::unauthorized("token has been revoked".to_string()));
             }
         }
     }
@@ -972,9 +972,9 @@ impl JwtSecret {
 ///   unset/blank, so existing appsettings are unaffected.
 /// * The file's content is trimmed; its surrounding whitespace (e.g. the
 ///   trailing newline `echo` writes) is not part of the key.
-/// * Fails with [`Error::Di`] — a host startup error, never a panic — when the
+/// * Fails with [`Error::di`] — a host startup error, never a panic — when the
 ///   file is missing/unreadable, empty, shorter than [`MIN_JWT_SECRET_LEN`]
-///   bytes, or (on Unix) accessible by group/other. `Error::Di` is what the
+///   bytes, or (on Unix) accessible by group/other. `Error::di` is what the
 ///   existing Production configuration guards return; the message names the
 ///   path and the fix so an operator can act on it.
 /// * **Windows:** the ACL is *not* validated — the POSIX mode model does not
@@ -1045,7 +1045,7 @@ fn read_jwt_secret_file(path: &Path) -> Result<String> {
     verify_secret_file_permissions(path)?;
 
     let content = std::fs::read_to_string(path).map_err(|error| {
-        Error::Di(format!(
+        Error::di(format!(
             "JWT secret file '{}' could not be read: {error}. \
              Provision a readable file (at least {MIN_JWT_SECRET_LEN} bytes, Unix mode 0600), \
              or set Jwt.Secret / APP__Jwt__Secret / JWT_SECRET.",
@@ -1054,13 +1054,13 @@ fn read_jwt_secret_file(path: &Path) -> Result<String> {
     })?;
     let secret = content.trim();
     if secret.is_empty() {
-        return Err(Error::Di(format!(
+        return Err(Error::di(format!(
             "JWT secret file '{}' is empty; it must contain at least {MIN_JWT_SECRET_LEN} bytes of secret material.",
             path.display()
         )));
     }
     if secret.len() < MIN_JWT_SECRET_LEN {
-        return Err(Error::Di(format!(
+        return Err(Error::di(format!(
             "JWT secret file '{}' contains only {} bytes; at least {MIN_JWT_SECRET_LEN} bytes are required.",
             path.display(),
             secret.len()
@@ -1079,7 +1079,7 @@ fn verify_secret_file_permissions(path: &Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
     let metadata = std::fs::metadata(path).map_err(|error| {
-        Error::Di(format!(
+        Error::di(format!(
             "JWT secret file '{}' could not be inspected: {error}. \
              Provision it (at least {MIN_JWT_SECRET_LEN} bytes, Unix mode 0600), \
              or set Jwt.Secret / APP__Jwt__Secret / JWT_SECRET.",
@@ -1089,7 +1089,7 @@ fn verify_secret_file_permissions(path: &Path) -> Result<()> {
     let mode = metadata.permissions().mode();
     // 0o077 covers group/other read, write and execute bits.
     if mode & 0o077 != 0 {
-        return Err(Error::Di(format!(
+        return Err(Error::di(format!(
             "JWT secret file '{}' has mode {mode:04o}; group/other access must be removed (`chmod 600`).",
             path.display()
         )));

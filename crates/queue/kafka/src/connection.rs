@@ -43,7 +43,7 @@ impl KafkaConnection {
         let client = tokio::time::timeout(self.connect_timeout, connecting)
             .await
             .map_err(|_| {
-                Error::Status(
+                Error::status(
                     503,
                     format!(
                         "connecting to Kafka {:?} timed out after {:?}",
@@ -52,7 +52,7 @@ impl KafkaConnection {
                 )
             })?
             .map_err(|error| {
-                Error::Status(
+                Error::status(
                     503,
                     format!("cannot connect to Kafka {:?}: {error}", self.brokers),
                 )
@@ -69,6 +69,6 @@ impl KafkaConnection {
             .list_topics()
             .await
             .map(|_| ())
-            .map_err(|error| Error::Status(503, format!("Kafka metadata request failed: {error}")))
+            .map_err(|error| Error::status(503, format!("Kafka metadata request failed: {error}")))
     }
 }

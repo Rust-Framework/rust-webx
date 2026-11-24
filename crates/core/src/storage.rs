@@ -117,11 +117,11 @@ fn sha1_hex(bytes: &[u8]) -> String {
 
 fn validate_key(key: &str) -> Result<()> {
     if key.is_empty() {
-        return Err(Error::Validation("object key must not be empty".into()));
+        return Err(Error::validation("object key must not be empty"));
     }
     if key.starts_with('/') || key.contains("..") || key.contains('\\') {
-        return Err(Error::Validation(
-            "object key must be a relative path without '..' or backslashes".into(),
+        return Err(Error::validation(
+            "object key must be a relative path without '..' or backslashes",
         ));
     }
     Ok(())
@@ -129,13 +129,13 @@ fn validate_key(key: &str) -> Result<()> {
 
 fn expected_parts(parts: &[PartEtag]) -> Result<u32> {
     if parts.is_empty() {
-        return Err(Error::Validation("upload has no parts".into()));
+        return Err(Error::validation("upload has no parts"));
     }
     let mut sorted: Vec<u32> = parts.iter().map(|part| part.part).collect();
     sorted.sort_unstable();
     if sorted.first() != Some(&1) || sorted.windows(2).any(|pair| pair[1] != pair[0] + 1) {
-        return Err(Error::Validation(
-            "upload parts must be consecutive starting at 1".into(),
+        return Err(Error::validation(
+            "upload parts must be consecutive starting at 1",
         ));
     }
     Ok(*sorted.last().expect("non-empty"))
@@ -239,13 +239,13 @@ impl IObjectStore for InMemoryObjectStore {
 
     async fn put_part(&self, upload: &UploadId, part: u32, bytes: Vec<u8>) -> Result<PartEtag> {
         if part == 0 {
-            return Err(Error::Validation("part numbers start at 1".into()));
+            return Err(Error::validation("part numbers start at 1"));
         }
         let mut state = self.lock();
         let session = state
             .uploads
             .get_mut(upload)
-            .ok_or_else(|| Error::NotFound(format!("upload '{}' not found", upload.as_str())))?;
+            .ok_or_else(|| Error::not_found(format!("upload '{}' not found", upload.as_str())))?;
         let etag = sha1_hex(&bytes);
         let size = bytes.len() as u64;
         session.parts.insert(part, bytes);
@@ -257,7 +257,7 @@ impl IObjectStore for InMemoryObjectStore {
         let session = state
             .uploads
             .get(upload)
-            .ok_or_else(|| Error::NotFound(format!("upload '{}' not found", upload.as_str())))?;
+            .ok_or_else(|| Error::not_found(format!("upload '{}' not found", upload.as_str())))?;
         let mut parts: Vec<PartEtag> = session
             .parts
             .iter()
@@ -276,7 +276,7 @@ impl IObjectStore for InMemoryObjectStore {
         let session = state
             .uploads
             .remove(&upload)
-            .ok_or_else(|| Error::NotFound(format!("upload '{}' not found", upload.as_str())))?;
+            .ok_or_else(|| Error::not_found(format!("upload '{}' not found", upload.as_str())))?;
         let parts: Vec<PartEtag> = session
             .parts
             .iter()
@@ -348,7 +348,7 @@ impl FileSystemObjectStore {
         match tokio::fs::read(path).await {
             Ok(bytes) => Ok(Some(bytes)),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(error) => Err(Error::Internal(format!(
+            Err(error) => Err(Error::internal(format!(
                 "object store read failed: {error}"
             ))),
         }
@@ -356,7 +356,7 @@ impl FileSystemObjectStore {
 
     async fn meta_of(&self, key: &str, path: &Path, content_type: &str) -> Result<ObjectMeta> {
         let bytes = tokio::fs::read(path).await.map_err(|error| {
-            Error::Internal(format!("object store metadata read failed: {error}"))
+            Error::internal(format!("object store metadata read failed: {error}"))
         })?;
         Ok(ObjectMeta {
             key: key.to_string(),
@@ -377,12 +377,12 @@ impl IObjectStore for FileSystemObjectStore {
         let path = self.object_path(key)?;
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await.map_err(|error| {
-                Error::Internal(format!("object store directory create failed: {error}"))
+                Error::internal(format!("object store directory create failed: {error}"))
             })?;
         }
         tokio::fs::write(&path, &bytes)
             .await
-            .map_err(|error| Error::Internal(format!("object store write failed: {error}")))?;
+            .map_err(|error| Error::internal(format!("object store write failed: {error}")))?;
         Ok(ObjectMeta {
             key: key.to_string(),
             size: bytes.len() as u64,
@@ -410,7 +410,7 @@ impl IObjectStore for FileSystemObjectStore {
         match tokio::fs::metadata(&path).await {
             Ok(_) => Ok(Some(self.meta_of(key, &path, "").await?)),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(error) => Err(Error::Internal(format!(
+            Err(error) => Err(Error::internal(format!(
                 "object store head failed: {error}"
             ))),
         }
@@ -421,7 +421,7 @@ impl IObjectStore for FileSystemObjectStore {
         match tokio::fs::remove_file(&path).await {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(Error::Internal(format!(
+            Err(error) => Err(Error::internal(format!(
                 "object store delete failed: {error}"
             ))),
         }
@@ -433,26 +433,26 @@ impl IObjectStore for FileSystemObjectStore {
         let dir = self.upload_dir(&upload);
         tokio::fs::create_dir_all(&dir)
             .await
-            .map_err(|error| Error::Internal(format!("upload directory create failed: {error}")))?;
+            .map_err(|error| Error::internal(format!("upload directory create failed: {error}")))?;
         tokio::fs::write(self.content_type_path(&upload), content_type.as_bytes())
             .await
-            .map_err(|error| Error::Internal(format!("upload metadata write failed: {error}")))?;
+            .map_err(|error| Error::internal(format!("upload metadata write failed: {error}")))?;
         tokio::fs::write(dir.join("target"), key)
             .await
-            .map_err(|error| Error::Internal(format!("upload metadata write failed: {error}")))?;
+            .map_err(|error| Error::internal(format!("upload metadata write failed: {error}")))?;
         Ok(upload)
     }
 
     async fn put_part(&self, upload: &UploadId, part: u32, bytes: Vec<u8>) -> Result<PartEtag> {
         if part == 0 {
-            return Err(Error::Validation("part numbers start at 1".into()));
+            return Err(Error::validation("part numbers start at 1"));
         }
         let dir = self.upload_dir(upload);
         if !tokio::fs::try_exists(dir.join("target"))
             .await
             .unwrap_or(false)
         {
-            return Err(Error::NotFound(format!(
+            return Err(Error::not_found(format!(
                 "upload '{}' not found",
                 upload.as_str()
             )));
@@ -460,7 +460,7 @@ impl IObjectStore for FileSystemObjectStore {
         let path = dir.join(format!("part-{part:05}"));
         tokio::fs::write(&path, &bytes)
             .await
-            .map_err(|error| Error::Internal(format!("upload part write failed: {error}")))?;
+            .map_err(|error| Error::internal(format!("upload part write failed: {error}")))?;
         Ok(PartEtag {
             part,
             etag: sha1_hex(&bytes),
@@ -474,7 +474,7 @@ impl IObjectStore for FileSystemObjectStore {
             .await
             .unwrap_or(false)
         {
-            return Err(Error::NotFound(format!(
+            return Err(Error::not_found(format!(
                 "upload '{}' not found",
                 upload.as_str()
             )));
@@ -482,11 +482,11 @@ impl IObjectStore for FileSystemObjectStore {
         let mut parts = Vec::new();
         let mut entries = tokio::fs::read_dir(&dir)
             .await
-            .map_err(|error| Error::Internal(format!("upload directory read failed: {error}")))?;
+            .map_err(|error| Error::internal(format!("upload directory read failed: {error}")))?;
         while let Some(entry) = entries
             .next_entry()
             .await
-            .map_err(|error| Error::Internal(format!("upload directory read failed: {error}")))?
+            .map_err(|error| Error::internal(format!("upload directory read failed: {error}")))?
         {
             let name = entry.file_name();
             let Some(name) = name.to_str() else { continue };
@@ -498,7 +498,7 @@ impl IObjectStore for FileSystemObjectStore {
             };
             let bytes = tokio::fs::read(entry.path())
                 .await
-                .map_err(|error| Error::Internal(format!("upload part read failed: {error}")))?;
+                .map_err(|error| Error::internal(format!("upload part read failed: {error}")))?;
             parts.push(PartEtag {
                 part,
                 etag: sha1_hex(&bytes),
@@ -513,7 +513,7 @@ impl IObjectStore for FileSystemObjectStore {
         let dir = self.upload_dir(&upload);
         let key = tokio::fs::read_to_string(dir.join("target"))
             .await
-            .map_err(|_| Error::NotFound(format!("upload '{}' not found", upload.as_str())))?;
+            .map_err(|_| Error::not_found(format!("upload '{}' not found", upload.as_str())))?;
         let content_type = tokio::fs::read_to_string(self.content_type_path(&upload))
             .await
             .unwrap_or_default();
@@ -523,30 +523,30 @@ impl IObjectStore for FileSystemObjectStore {
         let target = self.object_path(&key)?;
         if let Some(parent) = target.parent() {
             tokio::fs::create_dir_all(parent).await.map_err(|error| {
-                Error::Internal(format!("object store directory create failed: {error}"))
+                Error::internal(format!("object store directory create failed: {error}"))
             })?;
         }
         let mut output = tokio::fs::File::create(&target)
             .await
-            .map_err(|error| Error::Internal(format!("upload target create failed: {error}")))?;
+            .map_err(|error| Error::internal(format!("upload target create failed: {error}")))?;
         let mut hasher = sha1::Sha1::new();
         let mut size = 0u64;
         for part in 1..=last {
             let path = dir.join(format!("part-{part:05}"));
             let mut input = tokio::fs::File::open(&path)
                 .await
-                .map_err(|error| Error::Internal(format!("upload part open failed: {error}")))?;
+                .map_err(|error| Error::internal(format!("upload part open failed: {error}")))?;
             let mut buffer = vec![0u8; 64 * 1024];
             loop {
                 let read = input.read(&mut buffer).await.map_err(|error| {
-                    Error::Internal(format!("upload part read failed: {error}"))
+                    Error::internal(format!("upload part read failed: {error}"))
                 })?;
                 if read == 0 {
                     break;
                 }
                 hasher.update(&buffer[..read]);
                 output.write_all(&buffer[..read]).await.map_err(|error| {
-                    Error::Internal(format!("upload target write failed: {error}"))
+                    Error::internal(format!("upload target write failed: {error}"))
                 })?;
                 size += read as u64;
             }
@@ -554,7 +554,7 @@ impl IObjectStore for FileSystemObjectStore {
         output
             .flush()
             .await
-            .map_err(|error| Error::Internal(format!("upload target flush failed: {error}")))?;
+            .map_err(|error| Error::internal(format!("upload target flush failed: {error}")))?;
         let meta = ObjectMeta {
             key,
             size,
@@ -753,7 +753,7 @@ mod tests {
             .expect("part");
         assert!(matches!(
             store.complete_upload(upload).await,
-            Err(Error::Validation(_))
+            Err(error) if error.code() == "validation_failed"
         ));
 
         // Abort removes the session.
@@ -764,13 +764,13 @@ mod tests {
         store.abort_upload(upload.clone()).await.expect("abort");
         assert!(matches!(
             store.list_parts(&upload).await,
-            Err(Error::NotFound(_))
+            Err(error) if error.code() == "not_found"
         ));
 
         // Key traversal is rejected.
         assert!(matches!(
             store.put("../escape", Vec::new(), "text/plain").await,
-            Err(Error::Validation(_))
+            Err(error) if error.code() == "validation_failed"
         ));
 
         store.delete("cover.json").await.expect("delete");

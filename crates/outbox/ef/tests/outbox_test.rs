@@ -60,7 +60,7 @@ struct FailingHandler;
 #[async_trait::async_trait]
 impl IEventHandler<OrderFailed> for FailingHandler {
     async fn handle(&self, _event: OrderFailed) -> Result<()> {
-        Err(Error::Internal("handler boom".to_string()))
+        Err(Error::internal("handler boom".to_string()))
     }
 }
 

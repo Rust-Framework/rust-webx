@@ -25,10 +25,11 @@ use webx_core::route::scan::{
 pub fn assert_route_configuration_valid() {
     if let Err(error) = validate_route_configuration() {
         // Keep the historical panic text: the raw report, no `Error` prefix.
-        let message = match error {
-            webx_core::error::Error::Di(message) => message,
-            other => other.to_string(),
-        };
+        let message = error
+            .public_detail()
+            .or_else(|| error.operator())
+            .map(str::to_string)
+            .unwrap_or_else(|| error.to_string());
         panic!("{message}");
     }
 }
@@ -172,7 +173,7 @@ pub fn validate_route_configuration() -> webx_core::error::Result<()> {
         }
     }
     message.push_str("\nRun: cargo run -p <host-crate> -- --doctor");
-    Err(webx_core::error::Error::Di(message))
+    Err(webx_core::error::Error::di(message))
 }
 
 /// Log the route table; route-less (mediator-only) handlers are debug-level.

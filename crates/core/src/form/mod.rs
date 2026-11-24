@@ -304,7 +304,7 @@ fn staging_path(destination: &Path) -> PathBuf {
 }
 
 fn io_error(err: std::io::Error) -> Error {
-    Error::Internal(format!("file I/O error: {err}"))
+    Error::internal(format!("file I/O error: {err}"))
 }
 
 /// Incrementally builds a [`FormFile`] while a multipart part streams in.
@@ -364,7 +364,7 @@ impl FormFileBuilder {
 
     /// Maximum accepted size for this file. Default: 128 MiB.
     ///
-    /// Exceeding it fails the upload with [`Error::PayloadTooLarge`].
+    /// Exceeding it fails the upload with [`Error::payload_too_large`].
     pub fn max_size(mut self, bytes: u64) -> Self {
         self.max_size = bytes;
         self
@@ -378,7 +378,7 @@ impl FormFileBuilder {
 
     /// Append a chunk of the current part.
     ///
-    /// Returns [`Error::PayloadTooLarge`] as soon as the file exceeds
+    /// Returns [`Error::payload_too_large`] as soon as the file exceeds
     /// [`FormFileBuilder::max_size`], so an oversized upload is rejected
     /// without buffering the whole body.
     pub async fn write(&mut self, chunk: &[u8]) -> Result<()> {
@@ -387,7 +387,7 @@ impl FormFileBuilder {
         }
         self.written = self.written.saturating_add(chunk.len() as u64);
         if self.written > self.max_size {
-            return Err(Error::PayloadTooLarge(format!(
+            return Err(Error::payload_too_large(format!(
                 "file field `{}` exceeds the {}-byte limit",
                 self.field_name, self.max_size
             )));
@@ -645,7 +645,7 @@ mod tests {
     async fn builder_enforces_max_size() {
         let mut builder = FormFileBuilder::new("f", "f.bin", None).max_size(4);
         let err = builder.write(b"12345").await.unwrap_err();
-        assert!(matches!(err, Error::PayloadTooLarge(_)), "got {err:?}");
+        assert!(err.code() == "payload_too_large", "got {err:?}");
         assert_eq!(err.status_code(), 413);
     }
 

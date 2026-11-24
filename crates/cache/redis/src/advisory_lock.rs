@@ -93,13 +93,13 @@ impl RedisAdvisoryLock {
 
 fn ttl_millis(ttl: Duration) -> Result<u64> {
     if ttl.is_zero() {
-        return Err(Error::Validation(
+        return Err(Error::validation(
             "advisory lock ttl must be positive".to_string(),
         ));
     }
     let millis = ttl.as_millis();
     if millis == 0 {
-        return Err(Error::Validation(
+        return Err(Error::validation(
             "advisory lock ttl must be at least 1 ms".to_string(),
         ));
     }

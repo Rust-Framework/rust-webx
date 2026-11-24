@@ -148,7 +148,7 @@ pub trait ISessionRepository: Send + Sync {
     /// The default returns `501 Not Implemented` rather than pretending a
     /// backend that cannot enumerate subject sessions performed the logout.
     async fn delete_all_for_subject(&self, subject: &str) -> Result<u64> {
-        Err(Error::Status(
+        Err(Error::status(
             501,
             format!(
                 "this ISessionRepository cannot delete every session of '{subject}'; override delete_all_for_subject"
@@ -215,7 +215,7 @@ fn now_unix_secs() -> u64 {
 impl ISessionRepository for InMemorySessionRepository {
     async fn create(&self, record: SessionRecord) -> Result<()> {
         if record.id.trim().is_empty() {
-            return Err(Error::Validation(
+            return Err(Error::validation(
                 "a session id must not be empty".to_string(),
             ));
         }
@@ -298,7 +298,7 @@ mod tests {
     async fn empty_id_is_rejected() {
         let repo = InMemorySessionRepository::new();
         let error = repo.create(record("  ", "user-1")).await.unwrap_err();
-        assert!(matches!(error, Error::Validation(_)), "got {error:?}");
+        assert!(error.code() == "validation_failed", "got {error:?}");
     }
 
     #[tokio::test]

@@ -63,7 +63,7 @@ impl InMemoryDpopReplayStore {
 impl IDpopReplayStore for InMemoryDpopReplayStore {
     async fn check_and_record(&self, jti: &str, expires_at_unix_secs: u64) -> Result<bool> {
         if jti.is_empty() {
-            return Err(Error::Validation("DPoP jti must not be empty".to_string()));
+            return Err(Error::validation("DPoP jti must not be empty".to_string()));
         }
         let now = unix_now();
         let mut entries = self.entries.lock().unwrap_or_else(PoisonError::into_inner);
@@ -107,12 +107,12 @@ impl DpopConfig {
     /// Validate fail-closed startup constraints.
     pub fn validate(&self) -> Result<()> {
         if !self.expected_origin.starts_with("https://") {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "DPoP expected_origin must be https://".to_string(),
             ));
         }
         if self.max_age.is_zero() || self.max_age > Duration::from_secs(600) {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "DPoP max_age must be between 1 and 600 seconds".to_string(),
             ));
         }
@@ -124,7 +124,7 @@ impl DpopConfig {
                 )
             })
         {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "DPoP algorithms must be non-empty and asymmetric".to_string(),
             ));
         }
@@ -165,15 +165,15 @@ impl DpopScheme {
         let header_part = proof
             .split_once('.')
             .map(|(header, _)| header)
-            .ok_or_else(|| Error::Unauthorized("invalid DPoP proof".to_string()))?;
+            .ok_or_else(|| Error::unauthorized("invalid DPoP proof".to_string()))?;
         let header_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
             .decode(header_part)
-            .map_err(|_| Error::Unauthorized("invalid DPoP proof header".to_string()))?;
+            .map_err(|_| Error::unauthorized("invalid DPoP proof header".to_string()))?;
         let header: Value = serde_json::from_slice(&header_bytes)
-            .map_err(|_| Error::Unauthorized("invalid DPoP proof header".to_string()))?;
+            .map_err(|_| Error::unauthorized("invalid DPoP proof header".to_string()))?;
 
         if header.get("typ").and_then(Value::as_str) != Some("dpop+jwt") {
-            return Err(Error::Unauthorized(
+            return Err(Error::unauthorized(
                 "DPoP proof typ must be dpop+jwt".to_string(),
             ));
         }
@@ -181,42 +181,42 @@ impl DpopScheme {
             .get("alg")
             .and_then(Value::as_str)
             .and_then(parse_algorithm)
-            .ok_or_else(|| Error::Unauthorized("unsupported DPoP proof algorithm".to_string()))?;
+            .ok_or_else(|| Error::unauthorized("unsupported DPoP proof algorithm".to_string()))?;
         if !self.config.algorithms.contains(&algorithm) {
-            return Err(Error::Unauthorized(
+            return Err(Error::unauthorized(
                 "DPoP proof algorithm is not allowed".to_string(),
             ));
         }
         let jwk_value = header
             .get("jwk")
             .cloned()
-            .ok_or_else(|| Error::Unauthorized("DPoP proof is missing jwk".to_string()))?;
+            .ok_or_else(|| Error::unauthorized("DPoP proof is missing jwk".to_string()))?;
         let jwk: Jwk = serde_json::from_value(jwk_value)
-            .map_err(|_| Error::Unauthorized("invalid DPoP jwk".to_string()))?;
+            .map_err(|_| Error::unauthorized("invalid DPoP jwk".to_string()))?;
         let (jwk_algorithm, key) = jwk
             .decoding_key()
-            .ok_or_else(|| Error::Unauthorized("unsupported DPoP jwk".to_string()))?;
+            .ok_or_else(|| Error::unauthorized("unsupported DPoP jwk".to_string()))?;
         if jwk_algorithm != algorithm {
-            return Err(Error::Unauthorized(
+            return Err(Error::unauthorized(
                 "DPoP jwk does not match the proof algorithm".to_string(),
             ));
         }
         let thumbprint = jwk
             .thumbprint()
-            .ok_or_else(|| Error::Unauthorized("unsupported DPoP jwk".to_string()))?;
+            .ok_or_else(|| Error::unauthorized("unsupported DPoP jwk".to_string()))?;
 
         let confirmation = claims
             .claims()
             .get("cnf")
-            .ok_or_else(|| Error::Unauthorized("access token is not DPoP-bound".to_string()))?;
+            .ok_or_else(|| Error::unauthorized("access token is not DPoP-bound".to_string()))?;
         let confirmation: Value = serde_json::from_str(confirmation)
-            .map_err(|_| Error::Unauthorized("invalid cnf claim".to_string()))?;
+            .map_err(|_| Error::unauthorized("invalid cnf claim".to_string()))?;
         let expected_thumbprint = confirmation
             .get("jkt")
             .and_then(Value::as_str)
-            .ok_or_else(|| Error::Unauthorized("cnf.jkt is missing".to_string()))?;
+            .ok_or_else(|| Error::unauthorized("cnf.jkt is missing".to_string()))?;
         if !constant_time_eq(expected_thumbprint.as_bytes(), thumbprint.as_bytes()) {
-            return Err(Error::Unauthorized(
+            return Err(Error::unauthorized(
                 "DPoP key does not match the access token".to_string(),
             ));
         }
@@ -227,11 +227,11 @@ impl DpopScheme {
         validation.validate_nbf = false;
         validation.validate_aud = false;
         let proof_claims = decode::<DpopClaims>(proof, &key, &validation)
-            .map_err(|_| Error::Unauthorized("invalid DPoP proof signature".to_string()))?
+            .map_err(|_| Error::unauthorized("invalid DPoP proof signature".to_string()))?
             .claims;
 
         if !proof_claims.htm.eq_ignore_ascii_case(method) {
-            return Err(Error::Unauthorized("DPoP htm mismatch".to_string()));
+            return Err(Error::unauthorized("DPoP htm mismatch".to_string()));
         }
         let expected_htu = format!(
             "{}{}",
@@ -239,21 +239,21 @@ impl DpopScheme {
             path
         );
         if proof_claims.htu != expected_htu {
-            return Err(Error::Unauthorized("DPoP htu mismatch".to_string()));
+            return Err(Error::unauthorized("DPoP htu mismatch".to_string()));
         }
         let now = unix_now();
         if proof_claims.iat > now.saturating_add(60)
             || now.saturating_sub(proof_claims.iat) > self.config.max_age.as_secs()
         {
-            return Err(Error::Unauthorized("DPoP proof is stale".to_string()));
+            return Err(Error::unauthorized("DPoP proof is stale".to_string()));
         }
         if proof_claims.jti.trim().is_empty() {
-            return Err(Error::Unauthorized("DPoP jti is missing".to_string()));
+            return Err(Error::unauthorized("DPoP jti is missing".to_string()));
         }
         let expected_ath = access_token_hash(access_token);
         match proof_claims.ath.as_deref() {
             Some(ath) if constant_time_eq(ath.as_bytes(), expected_ath.as_bytes()) => {}
-            _ => return Err(Error::Unauthorized("DPoP ath mismatch".to_string())),
+            _ => return Err(Error::unauthorized("DPoP ath mismatch".to_string())),
         }
 
         let expires_at = now.saturating_add(self.config.max_age.as_secs());
@@ -262,7 +262,7 @@ impl DpopScheme {
             .check_and_record(&proof_claims.jti, expires_at)
             .await?
         {
-            return Err(Error::Unauthorized(
+            return Err(Error::unauthorized(
                 "DPoP proof has already been used".to_string(),
             ));
         }
@@ -289,10 +289,10 @@ impl IAuthenticationScheme for DpopScheme {
             return Ok(None);
         };
         let Some(proof) = ctx.request().header("dpop") else {
-            return Err(Error::Unauthorized("missing DPoP proof".to_string()));
+            return Err(Error::unauthorized("missing DPoP proof".to_string()));
         };
         let Some(claims) = self.jwt_auth.validate_token(token).await? else {
-            return Err(Error::Unauthorized("invalid DPoP access token".to_string()));
+            return Err(Error::unauthorized("invalid DPoP access token".to_string()));
         };
         self.validate_proof(
             &*claims,

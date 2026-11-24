@@ -100,7 +100,7 @@ fn now_unix() -> u64 {
 
 fn require_member(store: &ImStore, room_id: &str, user_id: &str) -> Result<()> {
     if !store.is_member(room_id, user_id) {
-        return Err(Error::Forbidden(format!(
+        return Err(Error::forbidden(format!(
             "user is not a member of room '{room_id}'"
         )));
     }
@@ -132,7 +132,7 @@ impl IRequestHandler<StartRecordingRequest, RecordingView> for StartRecordingHan
         let room = self
             .store
             .room(&req.room_id)
-            .ok_or_else(|| Error::NotFound(format!("room '{}' not found", req.room_id)))?;
+            .ok_or_else(|| Error::not_found(format!("room '{}' not found", req.room_id)))?;
         require_member(&self.store, &room.id, &req.user.id)?;
         let content_type = req
             .content_type
@@ -161,21 +161,21 @@ pub struct UploadSegmentHandler {
 impl IRequestHandler<UploadSegmentRequest, RecordingView> for UploadSegmentHandler {
     async fn handle(&mut self, req: UploadSegmentRequest) -> ActionResult<RecordingView> {
         let meta = self.recordings.get(&req.recording_id).ok_or_else(|| {
-            Error::NotFound(format!("recording '{}' not found", req.recording_id))
+            Error::not_found(format!("recording '{}' not found", req.recording_id))
         })?;
         require_member(&self.store, &meta.room_id, &req.user.id)?;
         if meta.status != RecordingStatus::Recording {
-            return Err(Error::Conflict(format!(
+            return Err(Error::conflict(format!(
                 "recording '{}' is not accepting segments",
                 req.recording_id
             )));
         }
         if req.part == 0 {
-            return Err(Error::Validation("part numbers start at 1".into()));
+            return Err(Error::validation("part numbers start at 1"));
         }
         let bytes = data_encoding::BASE64
             .decode(req.data_base64.as_bytes())
-            .map_err(|_| Error::Validation("data_base64 is not valid base64".into()))?;
+            .map_err(|_| Error::validation("data_base64 is not valid base64"))?;
         let key = segment_key(&meta.id, req.part);
         let stored = self
             .storage
@@ -194,7 +194,7 @@ impl IRequestHandler<UploadSegmentRequest, RecordingView> for UploadSegmentHandl
                 // Retrying a part replaces its previous entry (idempotent resume).
                 meta.replace_segment(segment);
             })
-            .ok_or_else(|| Error::NotFound(format!("recording '{}' not found", meta.id)))?;
+            .ok_or_else(|| Error::not_found(format!("recording '{}' not found", meta.id)))?;
         Ok(view(&updated))
     }
 }
@@ -212,19 +212,17 @@ pub struct CompleteRecordingHandler {
 impl IRequestHandler<CompleteRecordingRequest, RecordingView> for CompleteRecordingHandler {
     async fn handle(&mut self, req: CompleteRecordingRequest) -> ActionResult<RecordingView> {
         let meta = self.recordings.get(&req.recording_id).ok_or_else(|| {
-            Error::NotFound(format!("recording '{}' not found", req.recording_id))
+            Error::not_found(format!("recording '{}' not found", req.recording_id))
         })?;
         require_member(&self.store, &meta.room_id, &req.user.id)?;
         if meta.segments.is_empty() {
-            return Err(Error::Validation(
-                "recording has no uploaded segments".into(),
-            ));
+            return Err(Error::validation("recording has no uploaded segments"));
         }
         let updated = self
             .recordings
             .update(&req.recording_id, |meta| meta.complete())
             .ok_or_else(|| {
-                Error::NotFound(format!("recording '{}' not found", req.recording_id))
+                Error::not_found(format!("recording '{}' not found", req.recording_id))
             })?;
         Ok(view(&updated))
     }
@@ -243,7 +241,7 @@ pub struct GetRecordingHandler {
 impl IRequestHandler<GetRecordingRequest, RecordingView> for GetRecordingHandler {
     async fn handle(&mut self, req: GetRecordingRequest) -> ActionResult<RecordingView> {
         let meta = self.recordings.get(&req.recording_id).ok_or_else(|| {
-            Error::NotFound(format!("recording '{}' not found", req.recording_id))
+            Error::not_found(format!("recording '{}' not found", req.recording_id))
         })?;
         require_member(&self.store, &meta.room_id, &req.user.id)?;
         Ok(view(&meta))
@@ -265,7 +263,7 @@ pub struct GetSegmentHandler {
 impl IRequestHandler<GetSegmentRequest, Response> for GetSegmentHandler {
     async fn handle(&mut self, req: GetSegmentRequest) -> ActionResult<Response> {
         let meta = self.recordings.get(&req.recording_id).ok_or_else(|| {
-            Error::NotFound(format!("recording '{}' not found", req.recording_id))
+            Error::not_found(format!("recording '{}' not found", req.recording_id))
         })?;
         require_member(&self.store, &meta.room_id, &req.user.id)?;
         let segment = meta
@@ -273,7 +271,7 @@ impl IRequestHandler<GetSegmentRequest, Response> for GetSegmentHandler {
             .iter()
             .find(|segment| segment.part == req.part)
             .ok_or_else(|| {
-                Error::NotFound(format!(
+                Error::not_found(format!(
                     "recording '{}' has no segment {}",
                     req.recording_id, req.part
                 ))
@@ -282,7 +280,7 @@ impl IRequestHandler<GetSegmentRequest, Response> for GetSegmentHandler {
             .storage
             .get(&segment.key)
             .await?
-            .ok_or_else(|| Error::NotFound("segment object is missing from storage".into()))?;
+            .ok_or_else(|| Error::not_found("segment object is missing from storage"))?;
         Ok(Box::new(ContentResult::bytes(
             object.bytes,
             meta.content_type.clone(),

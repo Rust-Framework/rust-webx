@@ -142,32 +142,32 @@ fn is_transient(info: &DatabaseErrorInfo) -> bool {
 pub fn map_ef_error(error: EFError) -> Error {
     match error {
         // Business conclusions authored by the caller keep their own message.
-        EFError::NotFound(message, _) => Error::NotFound(message),
-        EFError::ModelValidation(message, _) => Error::Validation(message),
-        EFError::ConcurrencyConflict(message, _) => Error::Conflict(message),
+        EFError::NotFound(message, _) => Error::not_found(message),
+        EFError::ModelValidation(message, _) => Error::validation(message),
+        EFError::ConcurrencyConflict(message, _) => Error::conflict(message),
 
         // Database-derived payloads that must not be echoed.
         EFError::Query(..) | EFError::TypeConversion(..) => {
-            Error::Validation(DETAIL_INVALID_REQUEST.to_string())
+            Error::validation(DETAIL_INVALID_REQUEST.to_string())
         }
-        EFError::UniqueViolation { .. } => Error::Conflict(DETAIL_UNIQUE_VIOLATION.to_string()),
+        EFError::UniqueViolation { .. } => Error::conflict(DETAIL_UNIQUE_VIOLATION.to_string()),
 
         // Transient infrastructure failures: retryable 503 with fixed text.
         EFError::Connection(..) | EFError::Transaction(..) => {
-            Error::Status(503, DETAIL_UNAVAILABLE.to_string())
+            Error::status(503, DETAIL_UNAVAILABLE.to_string())
         }
 
         // Driver-reported transient conditions (connection loss, deadlock,
         // SQLite busy/locked) are the same retryable conclusion, just wrapped
         // in structured diagnostics by the provider.
         EFError::Database(info, _) if is_transient(&info) => {
-            Error::Status(503, DETAIL_UNAVAILABLE.to_string())
+            Error::status(503, DETAIL_UNAVAILABLE.to_string())
         }
 
         // `Database`/`Migration`/`Configuration`/`Provider`/`ChangeTracking`/
         // `Other`: sanitized 500 (`public_detail()` is `None`); the original
         // message and its source chain only reach the operator log.
-        other => Error::Internal(operator_detail(&other)),
+        other => Error::internal(operator_detail(&other)),
     }
 }
 

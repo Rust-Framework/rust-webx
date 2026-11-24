@@ -7,7 +7,6 @@
 //! actually takes at start-up.
 
 use webx_core::config::AppOptions;
-use webx_core::error::Error;
 use webx_core::mode::AppMode;
 use webx_host::auth_jwt::{apply_jwt_secret_file, MIN_JWT_SECRET_LEN};
 use webx_host::server::Host;
@@ -126,7 +125,7 @@ fn missing_file_fails_fast() {
     let mut options = options_with_file(&missing);
     let error = apply_jwt_secret_file(&mut options).expect_err("a missing secret file is fatal");
 
-    assert!(matches!(error, Error::Di(_)), "got {error:?}");
+    assert!(error.code() == "dependency_injection", "got {error:?}");
     let message = error.to_string();
     assert!(
         message.contains("missing.key"),
@@ -147,7 +146,7 @@ fn directory_instead_of_file_fails_fast() {
     let dir = temporary_dir();
     let mut options = options_with_file(dir.path());
     let error = apply_jwt_secret_file(&mut options).expect_err("a directory is not a secret file");
-    assert!(matches!(error, Error::Di(_)), "got {error:?}");
+    assert!(error.code() == "dependency_injection", "got {error:?}");
 }
 
 #[test]
@@ -157,7 +156,7 @@ fn empty_file_fails_fast() {
 
     let mut options = options_with_file(&path);
     let error = apply_jwt_secret_file(&mut options).expect_err("an empty secret file is fatal");
-    assert!(matches!(error, Error::Di(_)), "got {error:?}");
+    assert!(error.code() == "dependency_injection", "got {error:?}");
     assert!(
         error.to_string().contains("empty"),
         "the message explains the failure: {error}"
@@ -171,7 +170,7 @@ fn whitespace_only_file_fails_fast() {
 
     let mut options = options_with_file(&path);
     let error = apply_jwt_secret_file(&mut options).expect_err("blank content is not a secret");
-    assert!(matches!(error, Error::Di(_)), "got {error:?}");
+    assert!(error.code() == "dependency_injection", "got {error:?}");
 }
 
 #[test]
@@ -182,7 +181,7 @@ fn too_short_file_fails_fast() {
 
     let mut options = options_with_file(&path);
     let error = apply_jwt_secret_file(&mut options).expect_err("a weak key is fatal");
-    assert!(matches!(error, Error::Di(_)), "got {error:?}");
+    assert!(error.code() == "dependency_injection", "got {error:?}");
     assert!(
         error.to_string().contains("only 31 bytes"),
         "the message reports the observed length: {error}"
@@ -211,7 +210,7 @@ fn group_or_other_accessible_file_is_rejected() {
         let mut options = options_with_file(&path);
         let error = apply_jwt_secret_file(&mut options).expect_err("group/other access is refused");
         assert!(
-            matches!(error, Error::Di(_)),
+            error.code() == "dependency_injection",
             "mode {mode:04o}: got {error:?}"
         );
         assert!(
@@ -288,7 +287,7 @@ fn host_build_fails_fast_when_the_secret_file_is_missing() {
         .err()
         .expect("a missing secret file must abort start-up");
 
-    assert!(matches!(error, Error::Di(_)), "got {error:?}");
+    assert!(error.code() == "dependency_injection", "got {error:?}");
     // Unix inspects the mode first ("could not be inspected"); Windows opens the
     // file directly ("could not be read"). Both are the actionable message.
     let message = error.to_string();
@@ -312,7 +311,7 @@ fn host_build_fails_fast_when_the_secret_file_is_too_short() {
         .err()
         .expect("a weak secret file must abort start-up");
 
-    assert!(matches!(error, Error::Di(_)), "got {error:?}");
+    assert!(error.code() == "dependency_injection", "got {error:?}");
     assert!(
         error.to_string().contains("at least 32 bytes"),
         "the message states the requirement: {error}"

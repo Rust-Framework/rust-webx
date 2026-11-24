@@ -44,7 +44,7 @@ impl IMiddleware for PoisonHeaders {
 #[async_trait::async_trait]
 impl IRequestHandler<FailRequest, FailView> for FailHandler {
     async fn handle(&mut self, _req: FailRequest) -> ActionResult<FailView> {
-        Err(Error::Internal("intentional failure".to_string()))
+        Err(Error::internal("intentional failure".to_string()))
     }
 }
 

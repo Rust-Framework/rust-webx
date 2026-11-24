@@ -81,7 +81,7 @@ impl IRequestHandler<UpdateRoleRequest, RoleModel> for UpdateRoleHandler {
             .find(id.clone())
             .await
             .map_ef()?
-            .ok_or_else(|| Error::NotFound("Role not found".into()))?;
+            .ok_or_else(|| Error::not_found("Role not found"))?;
 
         req.apply_to(&mut role, now_secs());
 
@@ -106,7 +106,7 @@ impl IRequestHandler<DeleteRoleRequest, String> for DeleteRoleHandler {
             .find(id.clone())
             .await
             .map_ef()?
-            .ok_or_else(|| Error::NotFound("Role not found".into()))?;
+            .ok_or_else(|| Error::not_found("Role not found"))?;
 
         role.is_deleted = true;
         role.updated_id = operator_id();
@@ -265,7 +265,7 @@ impl IRequestHandler<UpdateResourceRequest, ResourceModel> for UpdateResourceHan
             .find(id.clone())
             .await
             .map_ef()?
-            .ok_or_else(|| Error::NotFound("Resource not found".into()))?;
+            .ok_or_else(|| Error::not_found("Resource not found"))?;
 
         req.apply_to(&mut res, now_secs());
 
@@ -290,7 +290,7 @@ impl IRequestHandler<DeleteResourceRequest, String> for DeleteResourceHandler {
             .find(id.clone())
             .await
             .map_ef()?
-            .ok_or_else(|| Error::NotFound("Resource not found".into()))?;
+            .ok_or_else(|| Error::not_found("Resource not found"))?;
 
         res.is_deleted = true;
         res.updated_id = operator_id();
@@ -388,7 +388,7 @@ impl IRequestHandler<DeleteAuthorizeRequest, String> for DeleteAuthorizeHandler 
         if affected > 0 {
             Ok(format!("Deleted authorize {}", id))
         } else {
-            Err(Error::NotFound("Authorize not found".into()))
+            Err(Error::not_found("Authorize not found"))
         }
     }
 }

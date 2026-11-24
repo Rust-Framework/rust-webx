@@ -76,7 +76,7 @@ fn dispatch_realtime_fanout(
 ) -> BoxedEventDispatch {
     Box::pin(async move {
         let event: RealtimeFanoutEvent = serde_json::from_slice(&payload).map_err(|error| {
-            crate::error::Error::Internal(format!(
+            crate::error::Error::internal(format!(
                 "realtime fan-out payload is not valid JSON: {error}"
             ))
         })?;

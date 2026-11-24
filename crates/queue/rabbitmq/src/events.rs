@@ -52,7 +52,7 @@ impl RabbitMqEventPublisher {
         }
 
         let channel = connection.create_channel().await.map_err(|error| {
-            Error::Status(503, format!("RabbitMQ channel open failed: {error}"))
+            Error::status(503, format!("RabbitMQ channel open failed: {error}"))
         })?;
         ensure_topology(&channel, &self.options).await?;
 
@@ -61,7 +61,7 @@ impl RabbitMqEventPublisher {
             .confirm_select(lapin::options::ConfirmSelectOptions::default())
             .await
             .map_err(|error| {
-                Error::Status(503, format!("RabbitMQ confirm.select failed: {error}"))
+                Error::status(503, format!("RabbitMQ confirm.select failed: {error}"))
             })?;
 
         *slot = Some(CachedChannel {
@@ -91,26 +91,26 @@ impl IEventPublisher for RabbitMqEventPublisher {
                 BasicProperties::default().with_delivery_mode(2),
             )
             .await
-            .map_err(|error| Error::Status(503, format!("RabbitMQ publish failed: {error}")))?
+            .map_err(|error| Error::status(503, format!("RabbitMQ publish failed: {error}")))?
             .await
             .map_err(|error| {
-                Error::Status(503, format!("RabbitMQ publisher confirm failed: {error}"))
+                Error::status(503, format!("RabbitMQ publisher confirm failed: {error}"))
             })?;
 
         match confirmation {
             Confirmation::Ack(None) => Ok(()),
-            Confirmation::Ack(Some(returned)) => Err(Error::Status(
+            Confirmation::Ack(Some(returned)) => Err(Error::status(
                 503,
                 format!(
                     "RabbitMQ could not route the event: {}",
                     returned.reply_text
                 ),
             )),
-            Confirmation::Nack(_) => Err(Error::Status(
+            Confirmation::Nack(_) => Err(Error::status(
                 503,
                 "RabbitMQ rejected the event".to_string(),
             )),
-            Confirmation::NotRequested => Err(Error::Status(
+            Confirmation::NotRequested => Err(Error::status(
                 503,
                 "RabbitMQ publisher confirms are not enabled".to_string(),
             )),
@@ -142,12 +142,12 @@ impl RabbitMqEventConsumer {
     async fn run_once(&self, ct: &CancellationToken) -> Result<()> {
         let connection = self.connection.connection().await?;
         let channel = connection.create_channel().await.map_err(|error| {
-            Error::Status(503, format!("RabbitMQ channel open failed: {error}"))
+            Error::status(503, format!("RabbitMQ channel open failed: {error}"))
         })?;
         channel
             .basic_qos(self.options.prefetch.max(1), BasicQosOptions::default())
             .await
-            .map_err(|error| Error::Status(503, format!("RabbitMQ basic.qos failed: {error}")))?;
+            .map_err(|error| Error::status(503, format!("RabbitMQ basic.qos failed: {error}")))?;
         ensure_topology(&channel, &self.options).await?;
 
         let mut consumer = channel
@@ -159,7 +159,7 @@ impl RabbitMqEventConsumer {
             )
             .await
             .map_err(|error| {
-                Error::Status(503, format!("RabbitMQ basic.consume failed: {error}"))
+                Error::status(503, format!("RabbitMQ basic.consume failed: {error}"))
             })?;
 
         loop {
@@ -169,7 +169,7 @@ impl RabbitMqEventConsumer {
                     match delivery {
                         Some(Ok(delivery)) => self.handle(delivery).await?,
                         Some(Err(error)) => {
-                            return Err(Error::Status(
+                            return Err(Error::status(
                                 503,
                                 format!("RabbitMQ consumer error: {error}"),
                             ));
@@ -193,7 +193,7 @@ impl RabbitMqEventConsumer {
                     .ack(BasicAckOptions::default())
                     .await
                     .map_err(|error| {
-                        Error::Status(503, format!("RabbitMQ basic.ack failed: {error}"))
+                        Error::status(503, format!("RabbitMQ basic.ack failed: {error}"))
                     })?;
                 return Ok(());
             }
@@ -206,7 +206,7 @@ impl RabbitMqEventConsumer {
                     .ack(BasicAckOptions::default())
                     .await
                     .map_err(|error| {
-                        Error::Status(503, format!("RabbitMQ basic.ack failed: {error}"))
+                        Error::status(503, format!("RabbitMQ basic.ack failed: {error}"))
                     })?;
             }
             Err(error) => {
@@ -223,7 +223,7 @@ impl RabbitMqEventConsumer {
                     })
                     .await
                     .map_err(|error| {
-                        Error::Status(503, format!("RabbitMQ basic.nack failed: {error}"))
+                        Error::status(503, format!("RabbitMQ basic.nack failed: {error}"))
                     })?;
                 // Avoid a tight redelivery loop for a persistently failing
                 // handler; the message is still at-least-once.
@@ -310,7 +310,7 @@ async fn ensure_topology(channel: &Channel, options: &RabbitMqOptions) -> Result
         )
         .await
         .map_err(|error| {
-            Error::Status(503, format!("RabbitMQ exchange.declare failed: {error}"))
+            Error::status(503, format!("RabbitMQ exchange.declare failed: {error}"))
         })?;
 
     channel
@@ -323,7 +323,7 @@ async fn ensure_topology(channel: &Channel, options: &RabbitMqOptions) -> Result
             queue_arguments(options),
         )
         .await
-        .map_err(|error| Error::Status(503, format!("RabbitMQ queue.declare failed: {error}")))?;
+        .map_err(|error| Error::status(503, format!("RabbitMQ queue.declare failed: {error}")))?;
 
     channel
         .queue_bind(
@@ -334,7 +334,7 @@ async fn ensure_topology(channel: &Channel, options: &RabbitMqOptions) -> Result
             FieldTable::default(),
         )
         .await
-        .map_err(|error| Error::Status(503, format!("RabbitMQ queue.bind failed: {error}")))?;
+        .map_err(|error| Error::status(503, format!("RabbitMQ queue.bind failed: {error}")))?;
 
     Ok(())
 }

@@ -27,7 +27,7 @@ impl IRequestHandler<CacheStatsRequest, String> for CacheStatsHandler {
             .cache
             .get_or_create("demo:status", || async { "cached".to_string() }, &opts)
             .await
-            .map_err(|e| Error::Internal(e.to_string()))?;
+            .map_err(|e| Error::internal(e.to_string()))?;
 
         let entries = self.cache.count().await;
 

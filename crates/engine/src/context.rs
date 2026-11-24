@@ -631,7 +631,7 @@ impl EngineRequest {
 
     fn ensure_declared_within(&self, limit: u64) -> Result<()> {
         match self.declared_length {
-            Some(declared) if declared > limit => Err(Error::PayloadTooLarge(format!(
+            Some(declared) if declared > limit => Err(Error::payload_too_large(format!(
                 "request body exceeds the {limit}-byte limit"
             ))),
             _ => Ok(()),
@@ -737,7 +737,7 @@ impl IHttpRequest for EngineRequest {
                 BodyState::Empty => return Ok(Bytes::new()),
                 BodyState::Buffered(bytes) => {
                     if bytes.len() > self.body_limit {
-                        return Err(Error::PayloadTooLarge(format!(
+                        return Err(Error::payload_too_large(format!(
                             "request body exceeds the {}-byte limit",
                             self.body_limit
                         )));
@@ -745,7 +745,7 @@ impl IHttpRequest for EngineRequest {
                     return Ok(bytes.clone());
                 }
                 BodyState::Form(_) => {
-                    return Err(Error::State(
+                    return Err(Error::state(
                         "request body was already read as multipart/form-data".to_string(),
                     ))
                 }
@@ -755,13 +755,13 @@ impl IHttpRequest for EngineRequest {
             let pending = match &mut self.body {
                 BodyState::Pending(slot) => slot.take(),
                 _ => {
-                    return Err(Error::State(
+                    return Err(Error::state(
                         "request body has already been consumed".to_string(),
                     ))
                 }
             };
             let Some(pending) = pending else {
-                return Err(Error::State(
+                return Err(Error::state(
                     "request body has already been consumed".to_string(),
                 ));
             };
@@ -786,7 +786,7 @@ impl IHttpRequest for EngineRequest {
                 return Ok(stream);
             }
             BodyState::Form(_) => {
-                return Err(Error::State(
+                return Err(Error::state(
                     "request body was already read as multipart/form-data".to_string(),
                 ))
             }
@@ -795,7 +795,7 @@ impl IHttpRequest for EngineRequest {
                 // check (e.g. an already-decoded transport request), so apply
                 // the same route/app cap here as `body_bytes_shared`.
                 if bytes.len() > self.body_limit {
-                    return Err(Error::PayloadTooLarge(format!(
+                    return Err(Error::payload_too_large(format!(
                         "request body exceeds the {}-byte limit",
                         self.body_limit
                     )));
@@ -811,13 +811,13 @@ impl IHttpRequest for EngineRequest {
         let pending = match &mut self.body {
             BodyState::Pending(slot) => slot.take(),
             _ => {
-                return Err(Error::State(
+                return Err(Error::state(
                     "request body has already been consumed".to_string(),
                 ))
             }
         };
         let Some(pending) = pending else {
-            return Err(Error::State(
+            return Err(Error::state(
                 "request body has already been consumed".to_string(),
             ));
         };
@@ -828,7 +828,7 @@ impl IHttpRequest for EngineRequest {
     async fn body_text(&mut self) -> Result<String> {
         let bytes = self.body_bytes_shared().await?;
         String::from_utf8(bytes.to_vec())
-            .map_err(|_| Error::Validation("request body is not valid UTF-8".to_string()))
+            .map_err(|_| Error::validation("request body is not valid UTF-8".to_string()))
     }
 
     async fn multipart(&mut self) -> Result<Arc<MultipartForm>> {
@@ -851,12 +851,12 @@ impl IHttpRequest for EngineRequest {
                 .and_then(|value| value.to_str().ok())
                 .unwrap_or("");
             if !body::is_multipart_content_type(Some(raw_content_type)) {
-                return Err(Error::UnsupportedMediaType(
+                return Err(Error::unsupported_media_type(
                     "expected Content-Type: multipart/form-data".to_string(),
                 ));
             }
             let boundary = body::multipart_boundary(raw_content_type).ok_or_else(|| {
-                Error::Validation(
+                Error::validation(
                     "multipart/form-data request is missing its boundary parameter".to_string(),
                 )
             })?;
@@ -873,7 +873,7 @@ impl IHttpRequest for EngineRequest {
                     // no Content-Length to check, so enforce the multipart cap
                     // on the buffered payload itself.
                     if bytes.len() as u64 > self.limits.multipart_body {
-                        return Err(Error::PayloadTooLarge(format!(
+                        return Err(Error::payload_too_large(format!(
                             "multipart body exceeds the {}-byte limit",
                             self.limits.multipart_body
                         )));
@@ -886,14 +886,14 @@ impl IHttpRequest for EngineRequest {
                 }
                 BodyState::Pending(slot) => {
                     let Some(pending) = slot.take() else {
-                        return Err(Error::State(
+                        return Err(Error::state(
                             "request body has already been consumed".to_string(),
                         ));
                     };
                     pending.frames
                 }
                 _ => {
-                    return Err(Error::State(
+                    return Err(Error::state(
                         "request body has already been consumed".to_string(),
                     ))
                 }
@@ -1308,10 +1308,11 @@ mod tests {
         let mut ctx = context("POST", "/upload", &[("content-length", "999999999")], b"");
         // The default limit is 10 MiB; the check now runs after the route has
         // had a chance to apply `#[max_body_size]`.
-        assert!(matches!(
-            ctx.request_mut().validate_declared_body_limit(),
-            Err(Error::PayloadTooLarge(_))
-        ));
+        let error = ctx
+            .request_mut()
+            .validate_declared_body_limit()
+            .expect_err("declared length exceeds the limit");
+        assert_eq!(error.code(), "payload_too_large");
         // The response was never written eagerly.
         assert_eq!(ctx.response().status(), 200);
         assert!(ctx.take_early_error().is_none());
@@ -1330,7 +1331,7 @@ mod tests {
             .multipart()
             .await
             .expect_err("JSON is not multipart");
-        assert!(matches!(error, Error::UnsupportedMediaType(_)));
+        assert_eq!(error.code(), "unsupported_media_type");
     }
 
     #[tokio::test]

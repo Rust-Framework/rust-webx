@@ -37,7 +37,7 @@ pub fn normalize_status(raw: &str) -> Result<String> {
     if STATUSES.contains(&t) {
         return Ok(t.to_string());
     }
-    Err(Error::Validation(format!(
+    Err(Error::validation(format!(
         "状态无效「{t}」（支持：{}）",
         STATUSES.join(" / ")
     )))
@@ -51,7 +51,7 @@ pub fn normalize_category(raw: &str) -> Result<String> {
     match t.to_ascii_lowercase().as_str() {
         "storage" | "存储" => Ok("storage".into()),
         "compute" | "算力" => Ok("compute".into()),
-        _ => Err(Error::Validation(format!(
+        _ => Err(Error::validation(format!(
             "类别无效「{t}」（支持：算力/存储，或 compute/storage）"
         ))),
     }
@@ -61,8 +61,8 @@ pub fn normalize_comp_kind(raw: &str) -> Result<String> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "accelerator" | "gpu" | "npu" | "加速卡" | "卡" => Ok("accelerator".into()),
         "disk" | "hdd" | "ssd" | "硬盘" | "盘" => Ok("disk".into()),
-        "" => Err(Error::Validation("部件类型不能为空".into())),
-        _ => Err(Error::Validation(format!(
+        "" => Err(Error::validation("部件类型不能为空")),
+        _ => Err(Error::validation(format!(
             "部件类型无效: {raw}（支持：加速卡/硬盘，或 accelerator/disk）"
         ))),
     }
@@ -71,10 +71,10 @@ pub fn normalize_comp_kind(raw: &str) -> Result<String> {
 pub fn require_text(field: &str, raw: &str, max: usize) -> Result<String> {
     let t = raw.trim();
     if t.is_empty() {
-        return Err(Error::Validation(format!("{field}不能为空")));
+        return Err(Error::validation(format!("{field}不能为空")));
     }
     if t.chars().count() > max {
-        return Err(Error::Validation(format!("{field}长度不能超过 {max}")));
+        return Err(Error::validation(format!("{field}长度不能超过 {max}")));
     }
     Ok(t.to_string())
 }
@@ -82,14 +82,14 @@ pub fn require_text(field: &str, raw: &str, max: usize) -> Result<String> {
 pub fn optional_text(field: &str, raw: &str, max: usize) -> Result<String> {
     let t = raw.trim();
     if t.chars().count() > max {
-        return Err(Error::Validation(format!("{field}长度不能超过 {max}")));
+        return Err(Error::validation(format!("{field}长度不能超过 {max}")));
     }
     Ok(t.to_string())
 }
 
 pub fn require_non_negative(field: &str, n: i32) -> Result<i32> {
     if n < 0 {
-        return Err(Error::Validation(format!("{field}不能为负")));
+        return Err(Error::validation(format!("{field}不能为负")));
     }
     Ok(n)
 }
@@ -112,11 +112,11 @@ pub fn format_capacity_label(gb: i64) -> String {
 pub fn parse_capacity_label_to_gb(raw: &str) -> Result<i64> {
     let t = raw.trim();
     if t.is_empty() {
-        return Err(Error::Validation("容量不能为空".into()));
+        return Err(Error::validation("容量不能为空"));
     }
     if let Ok(n) = t.parse::<i64>() {
         if n <= 0 {
-            return Err(Error::Validation(format!("容量必须为正整数 GB「{t}」")));
+            return Err(Error::validation(format!("容量必须为正整数 GB「{t}」")));
         }
         return Ok(n);
     }
@@ -127,10 +127,10 @@ pub fn parse_capacity_label_to_gb(raw: &str) -> Result<i64> {
         .unwrap_or(t.len());
     let (num_part, unit_part) = t.split_at(split);
     let num: f64 = num_part.trim().parse().map_err(|_| {
-        Error::Validation(format!("容量数值无效「{t}」（示例：8TB / 960GB / 8000）"))
+        Error::validation(format!("容量数值无效「{t}」（示例：8TB / 960GB / 8000）"))
     })?;
     if !num.is_finite() || num <= 0.0 {
-        return Err(Error::Validation(format!("容量必须为正数「{t}」")));
+        return Err(Error::validation(format!("容量必须为正数「{t}」")));
     }
     let unit = unit_part.trim().to_ascii_uppercase();
     let gb_f = match unit.as_str() {
@@ -138,31 +138,31 @@ pub fn parse_capacity_label_to_gb(raw: &str) -> Result<i64> {
         "TB" | "T" => num * 1000.0,
         "PB" | "P" => num * 1_000_000.0,
         "" => {
-            return Err(Error::Validation(format!(
+            return Err(Error::validation(format!(
                 "容量缺少单位「{t}」（需带 TB/GB/PB，或直接写整数 GB）"
             )));
         }
         _ => {
-            return Err(Error::Validation(format!(
+            return Err(Error::validation(format!(
                 "容量单位无效「{t}」（支持：TB / GB / PB）"
             )));
         }
     };
     let gb = gb_f.round();
     if (gb_f - gb).abs() > 1e-6 {
-        return Err(Error::Validation(format!("容量必须能换算为整数 GB「{t}」")));
+        return Err(Error::validation(format!("容量必须能换算为整数 GB「{t}」")));
     }
     let gb = gb as i64;
     if gb <= 0 {
-        return Err(Error::Validation(format!("容量必须为正「{t}」")));
+        return Err(Error::validation(format!("容量必须为正「{t}」")));
     }
     Ok(gb)
 }
 
 pub fn require_disk_capacity_gb(gb: i64) -> Result<i64> {
     if gb <= 0 {
-        return Err(Error::Validation(
-            "硬盘容量必须为正整数（单位 GB，例如 8TB 请填 8000）".into(),
+        return Err(Error::validation(
+            "硬盘容量必须为正整数（单位 GB，例如 8TB 请填 8000）",
         ));
     }
     Ok(gb)
@@ -283,7 +283,7 @@ pub async fn assert_product_code_available(
         .map_ef()?;
     if let Some(p) = rows.into_iter().next() {
         if exclude_id.map(|id| id != p.id.as_str()).unwrap_or(true) {
-            return Err(Error::Conflict(format!("产品编码「{code}」已存在")));
+            return Err(Error::conflict(format!("产品编码「{code}」已存在")));
         }
     }
     Ok(())
@@ -301,7 +301,7 @@ pub async fn assert_spec_code_available(
         .map_ef()?;
     if let Some(s) = rows.into_iter().next() {
         if exclude_id.map(|id| id != s.id.as_str()).unwrap_or(true) {
-            return Err(Error::Conflict(format!("规格编码「{code}」已存在")));
+            return Err(Error::conflict(format!("规格编码「{code}」已存在")));
         }
     }
     Ok(())
@@ -319,7 +319,7 @@ pub async fn assert_device_asset_code_available(
         .map_ef()?;
     if let Some(d) = rows.into_iter().next() {
         if exclude_id.map(|id| id != d.id.as_str()).unwrap_or(true) {
-            return Err(Error::Conflict(format!("资产编码「{asset_code}」已存在")));
+            return Err(Error::conflict(format!("资产编码「{asset_code}」已存在")));
         }
     }
     Ok(())
@@ -408,26 +408,26 @@ pub async fn replace_spec_components(
             continue;
         }
         if model.chars().count() > MAX_COMP_MODEL {
-            return Err(Error::Validation(format!(
+            return Err(Error::validation(format!(
                 "部件型号长度不能超过 {MAX_COMP_MODEL}"
             )));
         }
         let kind = normalize_comp_kind(&raw.kind)?;
         if raw.qty_per_unit < 1 {
-            return Err(Error::Validation("部件单台数量至少为 1".into()));
+            return Err(Error::validation("部件单台数量至少为 1"));
         }
         let capacity_gb = if kind == "disk" {
             require_disk_capacity_gb(raw.capacity_gb)?
         } else if raw.capacity_gb != 0 {
-            return Err(Error::Validation(
-                "加速卡部件不应填写容量（capacity_gb 须为 0）".into(),
+            return Err(Error::validation(
+                "加速卡部件不应填写容量（capacity_gb 须为 0）",
             ));
         } else {
             0
         };
         let dedupe = format!("{kind}|{model}|{capacity_gb}");
         if !seen.insert(dedupe) {
-            return Err(Error::Validation(format!(
+            return Err(Error::validation(format!(
                 "同一规格下部件重复：{kind} / {model} / {capacity_gb}GB"
             )));
         }

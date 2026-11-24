@@ -108,7 +108,7 @@ fn engine_context(ctx: &mut dyn IHttpContext) -> Result<&mut EngineContext> {
     ctx.as_any_mut()
         .and_then(|any| any.downcast_mut::<EngineContext>())
         .ok_or_else(|| {
-            Error::Internal("continuation middleware requires the engine HTTP context".to_string())
+            Error::internal("continuation middleware requires the engine HTTP context".to_string())
         })
 }
 
@@ -643,7 +643,7 @@ mod tests {
             match self.invoke {
                 Invoke::Continue => Ok(ControlFlow::Continue(())),
                 Invoke::Break => Ok(ControlFlow::Break(())),
-                Invoke::Fail => Err(Error::Status(500, format!("{} failed", self.before))),
+                Invoke::Fail => Err(Error::status(500, format!("{} failed", self.before))),
             }
         }
 
@@ -651,7 +651,7 @@ mod tests {
             self.log.lock().unwrap().push(self.after);
             match self.after_result {
                 After::Ok => Ok(()),
-                After::Fail => Err(Error::Status(500, format!("{} failed", self.after))),
+                After::Fail => Err(Error::status(500, format!("{} failed", self.after))),
             }
         }
     }
@@ -686,12 +686,12 @@ mod tests {
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
         Box::pin(async move {
             ctx.log.lock().unwrap().push("final");
-            Err(Error::Status(500, "final failed".to_string()))
+            Err(Error::status(500, "final failed".to_string()))
         })
     }
 
     fn status_500(error: &Error, message: &str) -> bool {
-        matches!(error, Error::Status(500, detail) if detail.as_str() == message)
+        error.status_code() == 500 && error.public_detail() == Some(message)
     }
 
     #[tokio::test]

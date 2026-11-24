@@ -134,13 +134,13 @@ impl InMemoryRefreshTokenStore {
 impl IRefreshTokenStore for InMemoryRefreshTokenStore {
     async fn insert(&self, record: RefreshTokenRecord) -> Result<()> {
         if record.token_id.trim().is_empty() {
-            return Err(Error::Validation(
+            return Err(Error::validation(
                 "a refresh token id must not be empty".to_string(),
             ));
         }
         let mut tokens = self.tokens.lock().unwrap_or_else(PoisonError::into_inner);
         if tokens.contains_key(&record.token_id) {
-            return Err(Error::Internal(
+            return Err(Error::internal(
                 "refresh token id collision; retry token generation".to_string(),
             ));
         }
@@ -179,7 +179,7 @@ impl IRefreshTokenStore for InMemoryRefreshTokenStore {
         }
 
         if tokens.contains_key(&replacement.token_id) {
-            return Err(Error::Internal(
+            return Err(Error::internal(
                 "refresh token id collision; retry token generation".to_string(),
             ));
         }

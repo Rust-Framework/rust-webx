@@ -119,7 +119,7 @@ impl EfSessionRepository {
 impl ISessionRepository for EfSessionRepository {
     async fn create(&self, record: SessionRecord) -> Result<()> {
         if record.id.trim().is_empty() {
-            return Err(Error::Validation(
+            return Err(Error::validation(
                 "a session id must not be empty".to_string(),
             ));
         }
@@ -187,7 +187,7 @@ impl ISessionRepository for EfSessionRepository {
 }
 
 fn unavailable(error: EFError) -> Error {
-    Error::Status(503, format!("session store unavailable: {error}"))
+    Error::status(503, format!("session store unavailable: {error}"))
 }
 
 fn from_i64(value: i64) -> u64 {

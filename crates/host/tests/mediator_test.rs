@@ -69,10 +69,10 @@ fn __call_hello_handler(
     Box::pin(async move {
         let mut h = *handler
             .downcast::<HelloHandler>()
-            .map_err(|_| Error::Internal("Handler downcast failed".into()))?;
+            .map_err(|_| Error::internal("Handler downcast failed"))?;
         let req = *request
             .downcast::<HelloRequest>()
-            .map_err(|_| Error::Internal("Request downcast failed".into()))?;
+            .map_err(|_| Error::internal("Request downcast failed"))?;
         let result: HelloResponse = h.handle(req).await?;
         Ok(Box::new(result) as Box<dyn std::any::Any + Send>)
     })
@@ -98,7 +98,7 @@ struct FailingHandler;
 #[async_trait::async_trait]
 impl IRequestHandler<FailingHelloRequest, HelloResponse> for FailingHandler {
     async fn handle(&mut self, _req: FailingHelloRequest) -> ActionResult<HelloResponse> {
-        Err(Error::Internal("handler failure".into()))
+        Err(Error::internal("handler failure"))
     }
 }
 
@@ -117,10 +117,10 @@ fn __call_failing_handler(
     Box::pin(async move {
         let mut h = *handler
             .downcast::<FailingHandler>()
-            .map_err(|_| Error::Internal("Handler downcast failed".into()))?;
+            .map_err(|_| Error::internal("Handler downcast failed"))?;
         let req = *request
             .downcast::<FailingHelloRequest>()
-            .map_err(|_| Error::Internal("Request downcast failed".into()))?;
+            .map_err(|_| Error::internal("Request downcast failed"))?;
         let result: HelloResponse = h.handle(req).await?;
         Ok(Box::new(result) as Box<dyn std::any::Any + Send>)
     })
@@ -190,10 +190,8 @@ async fn mediator_send_handler_failure() {
     let mediator = TestMediator::new(build_provider());
     let result = mediator.send(FailingHelloRequest).await;
     assert!(result.is_err());
-    match result.unwrap_err() {
-        Error::Internal(msg) => assert_eq!(msg, "handler failure"),
-        other => panic!("Expected Internal error, got {:?}", other),
-    }
+    let error = result.unwrap_err();
+    assert_eq!(error.operator(), Some("handler failure"), "got {error:?}");
 }
 
 // Dedicated request type with NO handler registration.
@@ -207,10 +205,13 @@ async fn mediator_send_handler_not_registered() {
     let mediator = TestMediator::new(build_provider());
     let result = mediator.send(UnregisteredRequest).await;
     assert!(result.is_err());
-    match result.unwrap_err() {
-        Error::Di(msg) => assert!(msg.contains("No #[handler] registered")),
-        other => panic!("Expected Di error, got {:?}", other),
-    }
+    let error = result.unwrap_err();
+    assert!(
+        error
+            .operator()
+            .is_some_and(|message| message.contains("No #[handler] registered")),
+        "got {error:?}"
+    );
 }
 
 // --- Mediator::publish tests ---
@@ -270,10 +271,12 @@ async fn mediator_publish_without_a_publisher_is_a_typed_configuration_error() {
         })
         .await
         .expect_err("publishing without a transport must fail closed");
-    match error {
-        Error::Di(message) => assert!(message.contains("IEventPublisher"), "{message}"),
-        other => panic!("expected a DI configuration error, got {other:?}"),
-    }
+    assert!(
+        error
+            .operator()
+            .is_some_and(|message| message.contains("IEventPublisher")),
+        "expected a DI configuration error, got {error:?}"
+    );
 }
 
 // --- Mediator::send scope provider test ---
@@ -317,12 +320,12 @@ fn __factory_scope_probe_handler(
         .get_any(key)
         .and_then(|a| a.downcast::<Arc<ScopedService>>().ok())
         .map(|d| Arc::clone(&*d))
-        .ok_or_else(|| Error::Internal("ScopedService not registered".into()))?;
+        .ok_or_else(|| Error::internal("ScopedService not registered"))?;
     let b: Arc<ScopedService> = resolver
         .get_any(key)
         .and_then(|a| a.downcast::<Arc<ScopedService>>().ok())
         .map(|d| Arc::clone(&*d))
-        .ok_or_else(|| Error::Internal("ScopedService not registered".into()))?;
+        .ok_or_else(|| Error::internal("ScopedService not registered"))?;
     let within_call = if std::ptr::eq(Arc::as_ptr(&a), Arc::as_ptr(&b)) {
         "same"
     } else {
@@ -349,7 +352,7 @@ fn __call_scope_probe_handler(
     Box::pin(async move {
         let h = *handler
             .downcast::<ScopeProbeResult>()
-            .map_err(|_| Error::Internal("ScopeProbeResult downcast failed".into()))?;
+            .map_err(|_| Error::internal("ScopeProbeResult downcast failed"))?;
         let rsp = ScopeProbeResponse {
             within_call: h.within_call,
             first_id: h.first_id,

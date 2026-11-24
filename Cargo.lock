@@ -3710,13 +3710,12 @@ dependencies = [
 
 [[package]]
 name = "rust-dix"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b4860f8536b1a2663a63dee1de2a648f6ba83fcb177580684bf451f69dde618"
+version = "1.1.0"
 dependencies = [
  "futures",
  "inventory",
- "rust-dix-macros",
+ "rust-core",
+ "rust-dix-macros 1.1.0",
  "thiserror 1.0.69",
 ]
 
@@ -3725,6 +3724,16 @@ name = "rust-dix-macros"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e5cef1fcc7e37a53f717927f4f611f37c9c54690b6bdadf71fcb450dfa265a6"
+dependencies = [
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "rust-dix-macros"
+version = "1.1.0"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -3829,7 +3838,7 @@ dependencies = [
  "proptest",
  "reqwest",
  "rust-dix",
- "rust-dix-macros",
+ "rust-dix-macros 1.0.0",
  "rust-webx-client",
  "rust-webx-core",
  "rust-webx-engine",

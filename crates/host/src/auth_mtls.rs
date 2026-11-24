@@ -49,7 +49,7 @@ impl IAuthenticationScheme for MtlsScheme {
         };
         match self.resolver.resolve(fingerprint.trim()).await? {
             Some(claims) => Ok(Some(claims)),
-            None => Err(Error::Unauthorized(
+            None => Err(Error::unauthorized(
                 "client certificate is not registered".to_string(),
             )),
         }

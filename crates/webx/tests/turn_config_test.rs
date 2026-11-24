@@ -53,12 +53,8 @@ async fn partial_turn_section_fails_host_startup() {
         .try_build()
         .err()
         .expect("a partial Turn section must not start");
-    match error {
-        Error::Di(message) | Error::Internal(message) => {
-            assert!(message.contains("Turn"), "unexpected error: {message}")
-        }
-        other => panic!("unexpected error variant: {other:?}"),
-    }
+    let message = error.operator().unwrap_or_default();
+    assert!(message.contains("Turn"), "unexpected error: {message}");
 }
 
 #[tokio::test]

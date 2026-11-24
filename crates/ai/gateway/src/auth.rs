@@ -56,7 +56,7 @@ impl IApiKeyValidator for StoreApiKeyValidator {
             Ok(Some(record)) => record,
             Ok(None) => return Ok(None),
             Err(error) => {
-                return Err(Error::Internal(format!(
+                return Err(Error::internal(format!(
                     "api key store unavailable: {error}"
                 )));
             }

@@ -585,7 +585,9 @@ fn enqueue_frame(
     message: Message,
 ) -> Result<()> {
     if closed {
-        return Err(Error::Http("websocket connection is closed".to_string()));
+        return Err(Error::bad_request(
+            "websocket connection is closed".to_string(),
+        ));
     }
     let bytes = payload_bytes(&message);
     // A close frame is protocol state, not data: it must reach the peer or be
@@ -608,19 +610,19 @@ fn enqueue_frame(
                     metrics.record_dropped_outbound();
                 }
                 if is_close {
-                    return Err(Error::Http(
+                    return Err(Error::bad_request(
                         "websocket backpressure: outbound queue full, close frame not delivered"
                             .to_string(),
                     ));
                 }
                 Ok(())
             }
-            BackpressurePolicy::Disconnect => Err(Error::Http(
+            BackpressurePolicy::Disconnect => Err(Error::bad_request(
                 "websocket backpressure: outbound queue full".to_string(),
             )),
         },
         Err(mpsc::error::TrySendError::Closed(_)) => {
-            Err(Error::Http("websocket writer stopped".to_string()))
+            Err(Error::bad_request("websocket writer stopped".to_string()))
         }
     }
 }
@@ -778,7 +780,7 @@ impl IConnection for WebSocketConnection {
             let message = match next {
                 Ok(message) => message,
                 Err(error) => {
-                    return Some(Err(Error::Internal(format!(
+                    return Some(Err(Error::internal(format!(
                         "websocket receive failed: {error}"
                     ))))
                 }
@@ -912,7 +914,7 @@ where
 {
     async fn on_connect(&self, connection: Arc<dyn IConnection>) -> Result<()> {
         let mediator = connection.context().resolve::<Mediator>().ok_or_else(|| {
-            Error::Internal(
+            Error::internal(
                 "WebSocket request handler needs the mediator; call add_mediator() \
                  (the host registers it by default)"
                     .to_string(),
@@ -977,14 +979,14 @@ where
             match result {
                 Ok(reply) => {
                     let body = serde_json::to_string(&reply).map_err(|error| {
-                        Error::Internal(format!("reply encode failed: {error}"))
+                        Error::internal(format!("reply encode failed: {error}"))
                     })?;
                     connection.send_text(body).await?;
                 }
                 Err(error) => {
                     send_error_frame(
                         connection.as_ref(),
-                        error.code().as_ref(),
+                        error.code(),
                         error.public_detail().unwrap_or("request failed"),
                         error.retryable(),
                         None,

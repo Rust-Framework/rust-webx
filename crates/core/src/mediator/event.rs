@@ -72,7 +72,7 @@ impl EventMessage {
     pub fn from_event<T: IEventRequest + serde::Serialize>(event: &T) -> Result<Self> {
         let event_name = T::event_name();
         let payload = serde_json::to_vec(event).map_err(|error| {
-            Error::Internal(format!("failed to serialize event '{event_name}': {error}"))
+            Error::internal(format!("failed to serialize event '{event_name}': {error}"))
         })?;
         Ok(Self {
             event_name: event_name.to_string(),
@@ -83,7 +83,7 @@ impl EventMessage {
     /// Decode the payload into `T`.
     pub fn decode<T: IEventRequest + serde::de::DeserializeOwned>(&self) -> Result<T> {
         serde_json::from_slice(&self.payload).map_err(|error| {
-            Error::Internal(format!(
+            Error::internal(format!(
                 "event '{}' payload is not valid JSON for {}: {error}",
                 self.event_name,
                 std::any::type_name::<T>()
@@ -102,13 +102,13 @@ impl EventMessage {
     pub fn to_wire(&self) -> Result<Vec<u8>> {
         let name = self.event_name.as_bytes();
         if name.len() > MAX_EVENT_NAME_BYTES {
-            return Err(Error::Internal(format!(
+            return Err(Error::internal(format!(
                 "event name is {} bytes; the wire limit is {MAX_EVENT_NAME_BYTES}",
                 name.len()
             )));
         }
         let name_len = u32::try_from(name.len())
-            .map_err(|_| Error::Internal("event name is too long".to_string()))?;
+            .map_err(|_| Error::internal("event name is too long".to_string()))?;
         let mut out = Vec::with_capacity(5 + name.len() + self.payload.len());
         out.push(EVENT_WIRE_VERSION);
         out.extend_from_slice(&name_len.to_be_bytes());
@@ -121,30 +121,30 @@ impl EventMessage {
     pub fn from_wire(bytes: &[u8]) -> Result<Self> {
         const HEADER_LEN: usize = 5;
         if bytes.len() < HEADER_LEN {
-            return Err(Error::Internal(
+            return Err(Error::internal(
                 "event frame is truncated: missing version/name length".to_string(),
             ));
         }
         if bytes[0] != EVENT_WIRE_VERSION {
-            return Err(Error::Internal(format!(
+            return Err(Error::internal(format!(
                 "unsupported event wire version {}",
                 bytes[0]
             )));
         }
         let name_len = u32::from_be_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]) as usize;
         if name_len > MAX_EVENT_NAME_BYTES {
-            return Err(Error::Internal(format!(
+            return Err(Error::internal(format!(
                 "event frame names {name_len} bytes; the wire limit is {MAX_EVENT_NAME_BYTES}"
             )));
         }
         let name_end = HEADER_LEN + name_len;
         if bytes.len() < name_end {
-            return Err(Error::Internal(
+            return Err(Error::internal(
                 "event frame is truncated: incomplete event name".to_string(),
             ));
         }
         let event_name = std::str::from_utf8(&bytes[HEADER_LEN..name_end])
-            .map_err(|error| Error::Internal(format!("event name is not UTF-8: {error}")))?
+            .map_err(|error| Error::internal(format!("event name is not UTF-8: {error}")))?
             .to_string();
         Ok(Self {
             event_name,
@@ -490,7 +490,7 @@ impl IEventPublisher for InMemoryEventPublisher {
         // would be silently dropped, which is exactly the failure mode this
         // design is meant to make visible.
         if !self.local_handlers.contains(&message.event_name) {
-            return Err(Error::Di(format!(
+            return Err(Error::di(format!(
                 "no #[handler] event registration for '{}': the in-memory transport \
                  has no local handler. Add #[handler] to the event-handler impl or \
                  register another IEventPublisher",
@@ -499,12 +499,12 @@ impl IEventPublisher for InMemoryEventPublisher {
         }
 
         self.sender.try_send(message).map_err(|error| match error {
-            mpsc::error::TrySendError::Full(_) => Error::Status(
+            mpsc::error::TrySendError::Full(_) => Error::status(
                 503,
                 "event queue is full; the event was not accepted".to_string(),
             ),
             mpsc::error::TrySendError::Closed(_) => {
-                Error::State("event queue is closed".to_string())
+                Error::state("event queue is closed".to_string())
             }
         })
     }
@@ -660,12 +660,12 @@ pub async fn dispatch_event_handlers<T: IEventRequest>(scope: &Scope, event: T) 
 
     match failures.len() {
         0 => Ok(()),
-        1 => Err(Error::Internal(format!(
+        1 => Err(Error::internal(format!(
             "event '{}' handler failed: {}",
             T::event_name(),
             failures[0]
         ))),
-        count => Err(Error::Internal(format!(
+        count => Err(Error::internal(format!(
             "event '{}': {count} handlers failed: {}",
             T::event_name(),
             failures.join("; ")
@@ -703,7 +703,7 @@ mod tests {
     fn dispatch_test_event(provider: Arc<ServiceProvider>, payload: Vec<u8>) -> BoxedEventDispatch {
         Box::pin(async move {
             let event: TestEvent = serde_json::from_slice(&payload).map_err(|error| {
-                Error::Internal(format!("test event payload is invalid: {error}"))
+                Error::internal(format!("test event payload is invalid: {error}"))
             })?;
             let scope = provider.create_scope();
             dispatch_event_handlers(&scope, event).await
@@ -733,7 +733,7 @@ mod tests {
     #[async_trait::async_trait]
     impl IEventHandler<TestEvent> for Failing {
         async fn handle(&self, _event: TestEvent) -> Result<()> {
-            Err(Error::Internal("handler failure".to_string()))
+            Err(Error::internal("handler failure".to_string()))
         }
     }
 
@@ -938,7 +938,7 @@ mod tests {
     #[async_trait::async_trait]
     impl IEventPublisher for RejectingPublisher {
         async fn publish(&self, _message: EventMessage) -> Result<()> {
-            Err(Error::Status(503, "broker unavailable".to_string()))
+            Err(Error::status(503, "broker unavailable".to_string()))
         }
     }
 

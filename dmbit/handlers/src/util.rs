@@ -14,10 +14,10 @@ pub fn now_secs() -> i64 {
 pub fn parse_id(s: &str) -> Result<String> {
     let t = s.trim();
     if t.is_empty() {
-        return Err(Error::Validation("标识不能为空".into()));
+        return Err(Error::validation("标识不能为空"));
     }
     if t.chars().count() > 36 {
-        return Err(Error::Validation("标识格式无效".into()));
+        return Err(Error::validation("标识格式无效"));
     }
     Ok(t.to_string())
 }

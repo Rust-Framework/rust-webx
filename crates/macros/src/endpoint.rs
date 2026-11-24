@@ -292,19 +292,19 @@ fn generate_encoder_fn(
         // The direct bridge writes these as `Action`/`Empty` without calling
         // the encoder; keep a typed fallback for the impossible call.
         quote! {
-            ::core::result::Result::Err(::webx::Error::Internal(
+            ::core::result::Result::Err(::webx::Error::internal(
                 "a raw/unit response does not use the JSON encoder".to_string()
             ))
         }
     } else {
         quote! {
             let value = value.downcast_ref::<#rsp_type>().ok_or_else(|| {
-                ::webx::Error::Internal(
+                ::webx::Error::internal(
                     "direct response encoder received an unexpected response type".to_string()
                 )
             })?;
             let body = ::webx::json::encode_json(value)
-                .map_err(::webx::Error::ResponseSerialization)?;
+                .map_err(::webx::Error::response_serialization)?;
             ::core::result::Result::Ok(::webx::EndpointResult::Json {
                 status: 200,
                 body: ::webx::bytes::Bytes::from(body),
@@ -396,7 +396,7 @@ fn generate_dispatch_fn(
                     // provider: the request context owns the handle.
                     let (provider, handler_cache) = {
                         let runtime = ctx.dispatch_runtime().ok_or_else(|| {
-                            ::webx::Error::Internal(
+                            ::webx::Error::internal(
                                 "HTTP dispatch requires a request context built by webx::Host".to_string(),
                             )
                         })?;

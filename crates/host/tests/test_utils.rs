@@ -166,7 +166,7 @@ impl IHttpRequest for TestHttpRequest {
 
     async fn body_text(&mut self) -> webx_core::error::Result<String> {
         String::from_utf8(self.body_bytes.clone())
-            .map_err(|e| webx_core::error::Error::Http(e.to_string()))
+            .map_err(|e| webx_core::error::Error::bad_request(e.to_string()))
     }
 }
 

@@ -5,7 +5,6 @@ use p256::ecdsa::signature::Signer as _;
 use p256::ecdsa::{Signature, SigningKey};
 use p256::elliptic_curve::Generate as _;
 use sha2::{Digest as _, Sha256};
-use webx_core::error::Error;
 use webx_webauthn::verify::{verify_assertion, verify_registration};
 use webx_webauthn::{WebAuthnChallenge, WebAuthnConfig};
 
@@ -337,7 +336,7 @@ fn none_attestation_requires_an_empty_att_stmt() {
     ciborium::ser::into_writer(&object, &mut bytes).expect("attestation");
     let error = verify_registration(&config(), &challenge, &client, &bytes, &credential_id)
         .expect_err("non-empty attStmt");
-    assert!(matches!(error, Error::Validation(_)), "{error:?}");
+    assert!(error.code() == "validation_failed", "{error:?}");
 }
 
 #[test]
@@ -365,7 +364,7 @@ fn registration_rejects_non_none_attestation_and_short_data() {
     ciborium::ser::into_writer(&packed, &mut bytes).expect("packed");
     let error = verify_registration(&config(), &challenge, &client, &bytes, &credential_id)
         .expect_err("packed must be rejected");
-    assert!(matches!(error, Error::Validation(_)), "{error:?}");
+    assert!(error.code() == "validation_failed", "{error:?}");
 
     assert!(
         verify_registration(&config(), &challenge, &client, b"not-cbor", &credential_id).is_err()

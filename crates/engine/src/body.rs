@@ -160,30 +160,30 @@ pub(crate) fn stream_body(frames: TransportRequestBodyStream, limit: usize) -> R
         Ok(TransportBodyFrame::Data(bytes)) => {
             seen = seen.saturating_add(bytes.len() as u64);
             if seen > limit {
-                return Err(Error::Status(413, "request body too large".to_string()));
+                return Err(Error::status(413, "request body too large".to_string()));
             }
             Ok(bytes)
         }
-        Ok(TransportBodyFrame::Trailers(_)) => Err(Error::Http(
+        Ok(TransportBodyFrame::Trailers(_)) => Err(Error::bad_request(
             "unexpected trailer frame in request body".to_string(),
         )),
         Err(error) => {
             tracing::debug!(error = %error, "failed to read request body");
-            Err(Error::Http(format!("request body stream: {error}")))
+            Err(Error::bad_request(format!("request body stream: {error}")))
         }
     });
     Box::pin(stream)
 }
 
 fn payload_too_large(limit: usize) -> Error {
-    Error::PayloadTooLarge(format!("request body exceeds the {limit}-byte limit"))
+    Error::payload_too_large(format!("request body exceeds the {limit}-byte limit"))
 }
 
 fn map_body_error(err: impl std::fmt::Display) -> Error {
     // Transport failure while reading the body: the client went away or the
     // framing is broken. Log the details, never serve them.
     tracing::debug!(error = %err, "failed to read request body");
-    Error::State("failed to read request body".to_string())
+    Error::state("failed to read request body".to_string())
 }
 
 /// Whether a raw `Content-Type` header value declares a multipart form.
@@ -269,7 +269,7 @@ pub(crate) async fn parse_multipart(
                 while let Some(chunk) = field.chunk().await.map_err(multer_error)? {
                     total = charge(&mut total, chunk.len(), limits.multipart_body)?;
                     if value.len() + chunk.len() > limits.field {
-                        return Err(Error::PayloadTooLarge(format!(
+                        return Err(Error::payload_too_large(format!(
                             "form field `{field_name}` exceeds the {}-byte limit",
                             limits.field
                         )));
@@ -277,7 +277,7 @@ pub(crate) async fn parse_multipart(
                     value.extend_from_slice(&chunk);
                 }
                 let text = String::from_utf8(value).map_err(|_| {
-                    Error::Validation(format!("form field `{field_name}` is not valid UTF-8"))
+                    Error::validation(format!("form field `{field_name}` is not valid UTF-8"))
                 })?;
                 form.push_field(field_name, text);
             }
@@ -291,7 +291,7 @@ pub(crate) async fn parse_multipart(
 fn charge(total: &mut u64, len: usize, limit: u64) -> Result<u64> {
     *total = total.saturating_add(len as u64);
     if *total > limit {
-        return Err(Error::PayloadTooLarge(format!(
+        return Err(Error::payload_too_large(format!(
             "multipart request exceeds the {limit}-byte limit"
         )));
     }
@@ -301,15 +301,15 @@ fn charge(total: &mut u64, len: usize, limit: u64) -> Result<u64> {
 fn multer_error(err: multer::Error) -> Error {
     match err {
         multer::Error::FieldSizeExceeded { limit, .. } => {
-            Error::PayloadTooLarge(format!("multipart field exceeds the {limit}-byte limit"))
+            Error::payload_too_large(format!("multipart field exceeds the {limit}-byte limit"))
         }
         multer::Error::StreamSizeExceeded { limit } => {
-            Error::PayloadTooLarge(format!("multipart request exceeds the {limit}-byte limit"))
+            Error::payload_too_large(format!("multipart request exceeds the {limit}-byte limit"))
         }
         multer::Error::IncompleteFieldData { .. } | multer::Error::IncompleteStream => {
-            Error::Validation("multipart body ended unexpectedly".to_string())
+            Error::validation("multipart body ended unexpectedly".to_string())
         }
-        other => Error::Validation(format!("invalid multipart body: {other}")),
+        other => Error::validation(format!("invalid multipart body: {other}")),
     }
 }
 
@@ -402,7 +402,7 @@ mod tests {
         let err = read_body(frames(vec![data(b"0123456789")]), None, 4)
             .await
             .expect_err("the body exceeds the limit");
-        assert!(matches!(err, Error::PayloadTooLarge(_)));
+        assert!(err.code() == "payload_too_large");
         assert_eq!(err.status_code(), 413);
     }
 

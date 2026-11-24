@@ -66,10 +66,10 @@ impl IRequestHandler<CreateCommentRequest, CommentModel> for CreateCommentHandle
 
         let content = req.content.trim().to_string();
         if content.is_empty() {
-            return Err(Error::Http("Comment cannot be empty".into()));
+            return Err(Error::bad_request("Comment cannot be empty"));
         }
         if content.len() > 4000 {
-            return Err(Error::Http("Comment too long".into()));
+            return Err(Error::bad_request("Comment too long"));
         }
 
         let now = now_secs();
@@ -106,14 +106,14 @@ impl IRequestHandler<DeleteCommentRequest, String> for DeleteCommentHandler {
             .find(id.clone())
             .await
             .map_ef()?
-            .ok_or_else(|| Error::NotFound("Comment not found".into()))?;
+            .ok_or_else(|| Error::not_found("Comment not found"))?;
 
         let user = req.require_user()?;
         let uid = user.id.clone();
         let is_admin = user.is_in_role("admin");
 
         if !is_admin && comment.user_id != uid {
-            return Err(Error::Forbidden("can only delete your own comments".into()));
+            return Err(Error::forbidden("can only delete your own comments"));
         }
 
         comment.is_deleted = true;

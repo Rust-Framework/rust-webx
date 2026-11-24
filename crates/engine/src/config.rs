@@ -209,7 +209,7 @@ pub const DEFAULT_ADMISSION_TIMEOUT_MS: u64 = 1_000;
 /// Reject an unbounded admission queue in Production.
 pub fn validate_admission_timeout(mode: AppMode, millis: u64) -> webx_core::error::Result<()> {
     if mode == AppMode::Production && millis == 0 {
-        return Err(webx_core::error::Error::Di(
+        return Err(webx_core::error::Error::di(
             "Server.AdmissionTimeoutMs=0 waits forever for an admission slot; Production \
              requires a bounded queue (default 1000 ms). Set a value or remove the key."
                 .to_string(),
@@ -225,7 +225,7 @@ pub fn validate_admission_timeout(mode: AppMode, millis: u64) -> webx_core::erro
 /// admission permit forever.
 pub fn validate_request_timeout(mode: AppMode, seconds: u64) -> webx_core::error::Result<()> {
     if mode == AppMode::Production && seconds == 0 {
-        return Err(webx_core::error::Error::Di(
+        return Err(webx_core::error::Error::di(
             "Server.RequestTimeoutSeconds=0 disables the inbound deadline; Production requires a \
              non-zero budget (default 30s). Set a value or remove the key."
                 .to_string(),
@@ -237,7 +237,7 @@ pub fn validate_request_timeout(mode: AppMode, seconds: u64) -> webx_core::error
 /// Validate configuration values that feed allocation/admission primitives.
 pub fn validate_max_connections(max_connections: usize) -> webx_core::error::Result<()> {
     if max_connections == 0 || max_connections > MAX_SEMAPHORE_PERMITS {
-        return Err(webx_core::error::Error::Http(format!(
+        return Err(webx_core::error::Error::bad_request(format!(
             "App.MaxConnections={max_connections} is outside the supported range 1..={MAX_SEMAPHORE_PERMITS}"
         )));
     }

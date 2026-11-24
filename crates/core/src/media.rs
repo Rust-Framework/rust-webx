@@ -229,7 +229,7 @@ impl InMemoryMediaPlaneAdapter {
         state
             .sessions
             .get(session_id)
-            .ok_or_else(|| Error::NotFound(format!("media session '{session_id}' not found")))
+            .ok_or_else(|| Error::not_found(format!("media session '{session_id}' not found")))
     }
 }
 
@@ -237,8 +237,8 @@ impl InMemoryMediaPlaneAdapter {
 impl IMediaPlaneAdapter for InMemoryMediaPlaneAdapter {
     async fn join(&self, room_id: &str, user_id: &str) -> Result<MediaSession> {
         if room_id.trim().is_empty() || user_id.trim().is_empty() {
-            return Err(Error::Validation(
-                "room_id and user_id are required to join a media session".into(),
+            return Err(Error::validation(
+                "room_id and user_id are required to join a media session",
             ));
         }
         let mut state = self.lock();
@@ -336,7 +336,7 @@ mod tests {
         assert_eq!(first.room_id, "room-1");
         assert!(matches!(
             adapter.join("", "eve").await,
-            Err(Error::Validation(_))
+            Err(error) if error.code() == "validation_failed"
         ));
 
         // Publish/subscribe replace the track sets.
@@ -361,7 +361,7 @@ mod tests {
                     vec![MediaTrackInfo::new("x", MediaTrackKind::Audio)]
                 )
                 .await,
-            Err(Error::NotFound(_))
+            Err(error) if error.code() == "not_found"
         ));
 
         // Baseline stats are well-formed; loss is clamped into 0..=1.
@@ -370,7 +370,7 @@ mod tests {
         assert!((0.0..=1.0).contains(&stats.packet_loss_ratio));
         assert!(matches!(
             adapter.stats("missing").await,
-            Err(Error::NotFound(_))
+            Err(error) if error.code() == "not_found"
         ));
 
         // QoS ingestion writes the framework's media_* series.
@@ -410,12 +410,12 @@ mod tests {
         adapter.leave(&first.session_id).await.expect("leave twice");
         assert!(matches!(
             adapter.stats(&first.session_id).await,
-            Err(Error::NotFound(_))
+            Err(error) if error.code() == "not_found"
         ));
         adapter.close_room("room-1").await.expect("close room");
         assert!(matches!(
             adapter.stats(&second.session_id).await,
-            Err(Error::NotFound(_))
+            Err(error) if error.code() == "not_found"
         ));
     }
 

@@ -30,9 +30,7 @@ struct BoomHandler;
 #[async_trait::async_trait]
 impl IRequestHandler<BoomRequest, BoomView> for BoomHandler {
     async fn handle(&mut self, _req: BoomRequest) -> ActionResult<BoomView> {
-        Err(Error::Internal(
-            "connection string must stay in logs".into(),
-        ))
+        Err(Error::internal("connection string must stay in logs"))
     }
 }
 

@@ -146,10 +146,10 @@ impl IJwksFetcher for FakeFetcher {
     async fn fetch(&self) -> Result<JwkSet> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         if self.fail {
-            return Err(Error::Status(503, "jwks down".to_string()));
+            return Err(Error::status(503, "jwks down".to_string()));
         }
         serde_json::from_str(&self.document)
-            .map_err(|error| Error::Status(503, format!("bad jwks: {error}")))
+            .map_err(|error| Error::status(503, format!("bad jwks: {error}")))
     }
 }
 
@@ -173,7 +173,7 @@ async fn jwks_cache_hits_and_unknown_kid_refreshes_once() {
         .await
         .err()
         .expect("unknown kid");
-    assert!(matches!(error, Error::Unauthorized(_)), "got {error:?}");
+    assert!(error.code() == "unauthorized", "got {error:?}");
     assert_eq!(
         fetcher.calls.load(Ordering::SeqCst),
         2,
@@ -202,7 +202,7 @@ async fn jwks_fetch_failure_is_503_not_anonymous() {
         .await
         .err()
         .expect("fetch failure");
-    assert!(matches!(error, Error::Status(503, _)), "got {error:?}");
+    assert!(error.status_code() == 503, "got {error:?}");
 }
 
 #[test]
@@ -309,7 +309,7 @@ async fn unknown_kid_refresh_is_rate_limited() {
         .await
         .err()
         .expect("unknown kid");
-    assert!(matches!(error, Error::Unauthorized(_)), "got {error:?}");
+    assert!(error.code() == "unauthorized", "got {error:?}");
     assert_eq!(fetcher.calls.load(Ordering::SeqCst), 2);
 
     // Every further unknown kid inside the interval is rejected without a fetch.
@@ -319,7 +319,7 @@ async fn unknown_kid_refresh_is_rate_limited() {
             .await
             .err()
             .expect("unknown kid");
-        assert!(matches!(error, Error::Unauthorized(_)), "got {error:?}");
+        assert!(error.code() == "unauthorized", "got {error:?}");
     }
     assert_eq!(
         fetcher.calls.load(Ordering::SeqCst),

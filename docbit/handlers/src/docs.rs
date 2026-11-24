@@ -34,7 +34,7 @@ pub struct GetDocContentHandler {
 #[async_trait]
 impl IRequestHandler<ListDocWorksRequest, Vec<String>> for ListDocWorksHandler {
     async fn handle(&mut self, _: ListDocWorksRequest) -> ActionResult<Vec<String>> {
-        self.docs.list_works().map_err(Error::Internal)
+        self.docs.list_works().map_err(Error::internal)
     }
 }
 
@@ -42,7 +42,7 @@ impl IRequestHandler<ListDocWorksRequest, Vec<String>> for ListDocWorksHandler {
 #[async_trait]
 impl IRequestHandler<GetDocIndexRequest, DocIndex> for GetDocIndexHandler {
     async fn handle(&mut self, req: GetDocIndexRequest) -> ActionResult<DocIndex> {
-        self.docs.index(&req.work).map_err(Error::NotFound)
+        self.docs.index(&req.work).map_err(Error::not_found)
     }
 }
 
@@ -53,7 +53,9 @@ impl IRequestHandler<GetDocContentRequest, DocContent> for GetDocContentHandler 
         // `{*path}` captures real slashes; legacy clients used `:` as `/`.
         let path = percent_decode(&req.path).replace(':', "/");
 
-        self.docs.content(&req.work, &path).map_err(Error::NotFound)
+        self.docs
+            .content(&req.work, &path)
+            .map_err(Error::not_found)
     }
 }
 

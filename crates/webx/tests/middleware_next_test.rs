@@ -106,7 +106,7 @@ struct BoomHandler;
 #[async_trait::async_trait]
 impl IRequestHandler<BoomRequest, OkView> for BoomHandler {
     async fn handle(&mut self, _req: BoomRequest) -> ActionResult<OkView> {
-        Err(Error::Internal("boom".to_string()))
+        Err(Error::internal("boom".to_string()))
     }
 }
 

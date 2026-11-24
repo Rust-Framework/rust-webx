@@ -391,7 +391,7 @@ impl ProblemDetails {
     /// The host writes it verbatim (status, `application/problem+json`, and the
     /// `errors` extension), so binding failures keep their per-field detail.
     pub fn to_error(self) -> crate::error::Error {
-        crate::error::Error::Problem(Box::new(self))
+        self.into()
     }
 }
 

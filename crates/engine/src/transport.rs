@@ -277,7 +277,7 @@ impl TransportRuntime {
         // `Server.AdmissionTimeoutMs = 0`.
         let mut shutdown = self.shared.subscribe_shutdown();
         if *shutdown.borrow() {
-            return Err(Error::Http("server is shutting down".to_string()));
+            return Err(Error::bad_request("server is shutting down".to_string()));
         }
         let stats = Arc::clone(&self.shared.admission);
         let governor = stats.governor(self.shared.config.max_connections);
@@ -317,13 +317,15 @@ impl TransportRuntime {
             }
             TransportAdmission::TimedOut => {
                 stats.record_rejected();
-                Err(Error::Http("connection admission timed out".to_string()))
+                Err(Error::bad_request(
+                    "connection admission timed out".to_string(),
+                ))
             }
             TransportAdmission::ShuttingDown => {
-                Err(Error::Http("server is shutting down".to_string()))
+                Err(Error::bad_request("server is shutting down".to_string()))
             }
             TransportAdmission::Closed => {
-                Err(Error::Internal("connection governor closed".to_string()))
+                Err(Error::internal("connection governor closed".to_string()))
             }
         }
     }

@@ -15,7 +15,7 @@ pub fn now_secs() -> i64 {
 /// 将路径参数解析为 UUID 字符串主键。
 pub fn parse_id(s: &str) -> Result<String> {
     if s.is_empty() {
-        return Err(Error::Http(format!("Invalid id: {}", s)));
+        return Err(Error::bad_request(format!("Invalid id: {}", s)));
     }
     Ok(s.to_string())
 }

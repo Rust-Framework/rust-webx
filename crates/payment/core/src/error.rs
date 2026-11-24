@@ -261,11 +261,11 @@ impl From<PaymentError> for webx_core::error::Error {
             .map(str::to_string)
             .unwrap_or_else(|| "payment operation failed".to_string());
         match status {
-            400 => webx_core::error::Error::Validation(detail),
-            404 => webx_core::error::Error::NotFound(detail),
-            409 => webx_core::error::Error::Conflict(detail),
-            503 => webx_core::error::Error::Status(503, detail),
-            _ => webx_core::error::Error::Internal(detail),
+            400 => webx_core::error::Error::validation(detail),
+            404 => webx_core::error::Error::not_found(detail),
+            409 => webx_core::error::Error::conflict(detail),
+            503 => webx_core::error::Error::status(503, detail),
+            _ => webx_core::error::Error::internal(detail),
         }
     }
 }

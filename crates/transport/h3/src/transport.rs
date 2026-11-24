@@ -121,7 +121,7 @@ impl H3Transport {
     /// 3. convert it to a QUIC server configuration and bind
     ///    [`quinn::Endpoint::server`].
     ///
-    /// All failures are returned as readable [`webx_core::error::Error::Http`]
+    /// All failures are returned as readable [`webx_core::error::Error::bad_request`]
     /// values naming the address or PEM file the operator has to fix; the key
     /// material itself is never part of an error message or log record.
     ///
@@ -130,7 +130,7 @@ impl H3Transport {
     /// a runtime context fails with a bind/`no async runtime found` error.
     pub fn new(config: H3Config) -> Result<Self> {
         let bind: SocketAddr = config.bind.parse().map_err(|_| {
-            Error::Http(format!(
+            Error::bad_request(format!(
                 "HTTP/3 bind address '{}' is not an IP:port socket address",
                 config.bind
             ))
@@ -144,7 +144,7 @@ impl H3Transport {
         )?;
         let quic_crypto =
             quinn::crypto::rustls::QuicServerConfig::try_from(tls_config).map_err(|err| {
-                Error::Http(format!(
+                Error::bad_request(format!(
                     "HTTP/3 TLS configuration is not QUIC-compatible: {err}"
                 ))
             })?;
@@ -152,7 +152,7 @@ impl H3Transport {
         quic_transport.keep_alive_interval(config.keep_alive_interval);
         if let Some(timeout) = config.max_idle_timeout {
             let idle_timeout = quinn::IdleTimeout::try_from(timeout).map_err(|err| {
-                Error::Http(format!(
+                Error::bad_request(format!(
                     "HTTP/3 idle timeout {timeout:?} is not a valid QUIC timeout: {err}"
                 ))
             })?;
@@ -165,10 +165,11 @@ impl H3Transport {
         let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(quic_crypto));
         server_config.transport_config(Arc::new(quic_transport));
 
-        let endpoint = quinn::Endpoint::server(server_config, bind)
-            .map_err(|err| Error::Http(format!("cannot bind HTTP/3 endpoint to {bind}: {err}")))?;
+        let endpoint = quinn::Endpoint::server(server_config, bind).map_err(|err| {
+            Error::bad_request(format!("cannot bind HTTP/3 endpoint to {bind}: {err}"))
+        })?;
         let local_addr = endpoint.local_addr().map_err(|err| {
-            Error::Http(format!("cannot read the HTTP/3 endpoint address: {err}"))
+            Error::bad_request(format!("cannot read the HTTP/3 endpoint address: {err}"))
         })?;
 
         Ok(Self {

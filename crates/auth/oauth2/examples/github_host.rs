@@ -96,18 +96,18 @@ impl IRequestHandler<GitHubCallback, Response> for GitHubCallbackHandler {
         let state = request
             .state
             .filter(|state| !state.is_empty())
-            .ok_or_else(|| Error::Unauthorized("missing OAuth state".to_string()))?;
+            .ok_or_else(|| Error::unauthorized("missing OAuth state".to_string()))?;
         let verifier = self
             .pending
             .0
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .remove(&state)
-            .ok_or_else(|| Error::Unauthorized("unknown or reused OAuth state".to_string()))?;
+            .ok_or_else(|| Error::unauthorized("unknown or reused OAuth state".to_string()))?;
         let code = request
             .code
             .filter(|code| !code.is_empty())
-            .ok_or_else(|| Error::Unauthorized("missing OAuth code".to_string()))?;
+            .ok_or_else(|| Error::unauthorized("missing OAuth code".to_string()))?;
 
         let token = self
             .client
@@ -130,10 +130,10 @@ impl IRequestHandler<GitHubCallback, Response> for GitHubCallbackHandler {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let client_id = std::env::var("GITHUB_CLIENT_ID")
-        .map_err(|_| Error::Di("GITHUB_CLIENT_ID is required".into()))?;
+    let client_id =
+        std::env::var("GITHUB_CLIENT_ID").map_err(|_| Error::di("GITHUB_CLIENT_ID is required"))?;
     let client_secret = std::env::var("GITHUB_CLIENT_SECRET")
-        .map_err(|_| Error::Di("GITHUB_CLIENT_SECRET is required".into()))?;
+        .map_err(|_| Error::di("GITHUB_CLIENT_SECRET is required"))?;
     let redirect = std::env::var("GITHUB_REDIRECT_URI")
         .unwrap_or_else(|_| "http://localhost:5000/auth/github/callback".to_string());
     let client = Arc::new(OAuth2Client::new(

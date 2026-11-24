@@ -67,7 +67,7 @@ pub trait IWebTransportHandler: Send + Sync {
     /// `403 application/problem+json` and tear the CONNECT stream down without
     /// establishing a WebTransport session (no 200 is sent).
     async fn authorize(&self, _info: &WebTransportRequestInfo) -> Result<()> {
-        Err(Error::Forbidden(
+        Err(Error::forbidden(
             "WebTransport handler did not authorize the session".to_string(),
         ))
     }

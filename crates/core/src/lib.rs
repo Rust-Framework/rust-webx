@@ -6,6 +6,11 @@
 //! `AppMode` — with **no HTTP engine dependency**. Custom middleware and tests
 //! can depend on `webx_core` alone.
 
+// `Error` is now the shared `AppError` carrier (kind/code/detail/fields/
+// extensions); boxing it at every signature would add noise without changing
+// the wire or the single-carrier contract.
+#![allow(clippy::result_large_err)]
+
 pub mod action;
 pub mod app;
 pub mod auth;

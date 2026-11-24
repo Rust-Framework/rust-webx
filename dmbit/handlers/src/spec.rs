@@ -16,12 +16,7 @@ use crate::mapping::{
 use crate::util::{now_secs, operator_id, parse_id};
 
 async fn product_name(ctx: &mut DbContext, product_id: &str) -> Result<String> {
-    let p = crate::ef_require_by_id!(
-        ctx,
-        Product,
-        product_id,
-        Error::NotFound("所属产品不存在".into())
-    );
+    let p = crate::ef_require_by_id!(ctx, Product, product_id, Error::not_found("所属产品不存在"));
     Ok(p.name)
 }
 
@@ -128,7 +123,7 @@ impl IRequestHandler<ListProductSpecsRequest, Vec<SpecModel>> for ListProductSpe
 impl IRequestHandler<GetSpecRequest, SpecModel> for GetSpecHandler {
     async fn handle(&mut self, req: GetSpecRequest) -> ActionResult<SpecModel> {
         let id = parse_id(&req.id)?;
-        let s = crate::ef_require_by_id!(self.ctx, Spec, id, Error::NotFound("规格不存在".into()));
+        let s = crate::ef_require_by_id!(self.ctx, Spec, id, Error::not_found("规格不存在"));
         let name = product_name(&mut self.ctx, &s.product_id).await?;
         spec_model(&mut self.ctx, &s, &name).await
     }
@@ -182,8 +177,7 @@ impl IRequestHandler<CreateSpecRequest, SpecModel> for CreateSpecHandler {
 impl IRequestHandler<UpdateSpecRequest, SpecModel> for UpdateSpecHandler {
     async fn handle(&mut self, req: UpdateSpecRequest) -> ActionResult<SpecModel> {
         let id = parse_id(&req.id)?;
-        let mut s =
-            crate::ef_require_by_id!(self.ctx, Spec, id, Error::NotFound("规格不存在".into()));
+        let mut s = crate::ef_require_by_id!(self.ctx, Spec, id, Error::not_found("规格不存在"));
 
         if let Some(product_id) = req.product_id {
             let product_id = parse_id(&product_id)?;
@@ -232,8 +226,7 @@ impl IRequestHandler<UpdateSpecRequest, SpecModel> for UpdateSpecHandler {
 impl IRequestHandler<DeleteSpecRequest, String> for DeleteSpecHandler {
     async fn handle(&mut self, req: DeleteSpecRequest) -> ActionResult<String> {
         let id = parse_id(&req.id)?;
-        let mut s =
-            crate::ef_require_by_id!(self.ctx, Spec, id, Error::NotFound("规格不存在".into()));
+        let mut s = crate::ef_require_by_id!(self.ctx, Spec, id, Error::not_found("规格不存在"));
 
         let now = now_secs();
         let op = operator_id();

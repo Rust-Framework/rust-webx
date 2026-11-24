@@ -145,7 +145,7 @@ struct FailingStart;
 #[async_trait::async_trait]
 impl IHostedService for FailingStart {
     async fn start(&self) -> Result<()> {
-        Err(Error::Internal("seed failed".to_string()))
+        Err(Error::internal("seed failed".to_string()))
     }
 }
 

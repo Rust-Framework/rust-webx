@@ -85,7 +85,7 @@ pub const ALPN_PROTOCOLS: [&[u8]; 2] = [b"h2", b"http/1.1"];
 /// * The key may be PKCS#8 (`PRIVATE KEY`), PKCS#1 (`RSA PRIVATE KEY`) or SEC1
 ///   (`EC PRIVATE KEY`).
 /// * A file that cannot be opened, parsed, or paired (`with_single_cert`
-///   mismatch) is reported as [`Error::Http`] with the offending path — the key
+///   mismatch) is reported as [`Error::bad_request`] with the offending path — the key
 ///   material itself is never included in the message or logged.
 pub fn build_server_config(cert_path: &str, key_path: &str) -> Result<Arc<ServerConfig>> {
     build_server_config_with_client_auth(cert_path, key_path, "", TlsClientAuth::Off)
@@ -103,17 +103,17 @@ pub fn build_server_config_with_client_auth(
     client_auth: TlsClientAuth,
 ) -> Result<Arc<ServerConfig>> {
     if cert_path.trim().is_empty() || key_path.trim().is_empty() {
-        return Err(Error::Http(
+        return Err(Error::bad_request(
             "TLS certificate or key path not configured".to_string(),
         ));
     }
     if client_auth != TlsClientAuth::Off && client_ca_path.trim().is_empty() {
-        return Err(Error::Http(
+        return Err(Error::bad_request(
             "Tls.ClientAuth requires Tls.ClientCaPath".to_string(),
         ));
     }
     if client_auth == TlsClientAuth::Off && !client_ca_path.trim().is_empty() {
-        return Err(Error::Http(
+        return Err(Error::bad_request(
             "Tls.ClientCaPath is set but Tls.ClientAuth is Off".to_string(),
         ));
     }
@@ -121,12 +121,12 @@ pub fn build_server_config_with_client_auth(
     // Report a missing file as the file the operator must fix, before parsing
     // the other one. Order matters for diagnostics only.
     if !std::path::Path::new(cert_path).is_file() {
-        return Err(Error::Http(format!(
+        return Err(Error::bad_request(format!(
             "cannot open TLS certificate '{cert_path}': file does not exist"
         )));
     }
     if !std::path::Path::new(key_path).is_file() {
-        return Err(Error::Http(format!(
+        return Err(Error::bad_request(format!(
             "cannot open TLS private key '{key_path}': file does not exist"
         )));
     }
@@ -147,14 +147,14 @@ pub fn build_server_config_with_client_auth(
                 verifier
             };
             let verifier = verifier.build().map_err(|err| {
-                Error::Http(format!("TLS client CA configuration is invalid: {err}"))
+                Error::bad_request(format!("TLS client CA configuration is invalid: {err}"))
             })?;
             builder.with_client_cert_verifier(verifier)
         }
     };
 
     let mut config = builder.with_single_cert(certs, key).map_err(|err| {
-        Error::Http(format!(
+        Error::bad_request(format!(
             "TLS configuration rejected the certificate/key pair ({cert_path}, {key_path}): {err}"
         ))
     })?;
@@ -171,7 +171,7 @@ fn load_client_ca(path: &str) -> Result<RootCertStore> {
     let mut roots = RootCertStore::empty();
     for cert in certs {
         roots.add(cert).map_err(|err| {
-            Error::Http(format!(
+            Error::bad_request(format!(
                 "cannot add client CA certificate from '{path}': {err}"
             ))
         })?;
@@ -180,19 +180,21 @@ fn load_client_ca(path: &str) -> Result<RootCertStore> {
 }
 
 fn load_certs(path: &str) -> Result<Vec<CertificateDer<'static>>> {
-    let file = File::open(path)
-        .map_err(|err| Error::Http(format!("cannot open TLS certificate '{path}': {err}")))?;
+    let file = File::open(path).map_err(|err| {
+        Error::bad_request(format!("cannot open TLS certificate '{path}': {err}"))
+    })?;
     let mut reader = BufReader::new(file);
 
     let mut certs = Vec::new();
     for item in CertificateDer::pem_reader_iter(&mut reader) {
-        let cert = item
-            .map_err(|err| Error::Http(format!("cannot parse TLS certificate '{path}': {err}")))?;
+        let cert = item.map_err(|err| {
+            Error::bad_request(format!("cannot parse TLS certificate '{path}': {err}"))
+        })?;
         certs.push(cert);
     }
 
     if certs.is_empty() {
-        return Err(Error::Http(format!(
+        return Err(Error::bad_request(format!(
             "no PEM CERTIFICATE block found in '{path}'"
         )));
     }
@@ -200,17 +202,18 @@ fn load_certs(path: &str) -> Result<Vec<CertificateDer<'static>>> {
 }
 
 fn load_key(path: &str) -> Result<PrivateKeyDer<'static>> {
-    let file = File::open(path)
-        .map_err(|err| Error::Http(format!("cannot open TLS private key '{path}': {err}")))?;
+    let file = File::open(path).map_err(|err| {
+        Error::bad_request(format!("cannot open TLS private key '{path}': {err}"))
+    })?;
     let mut reader = BufReader::new(file);
 
     // `PrivateKeyDer::from_pem_reader` accepts PKCS#8, PKCS#1 and SEC1 PEM blocks.
     match PrivateKeyDer::from_pem_reader(&mut reader) {
         Ok(key) => Ok(key),
-        Err(rustls_pki_types::pem::Error::NoItemsFound) => Err(Error::Http(format!(
+        Err(rustls_pki_types::pem::Error::NoItemsFound) => Err(Error::bad_request(format!(
             "no PKCS#8, PKCS#1 or SEC1 private key found in '{path}'"
         ))),
-        Err(err) => Err(Error::Http(format!(
+        Err(err) => Err(Error::bad_request(format!(
             "cannot parse TLS private key '{path}': {err}"
         ))),
     }

@@ -165,12 +165,12 @@ mod tests {
         async fn try_acquire(&self, key: &str, ttl: Duration) -> Result<Option<AdvisoryLease>> {
             self.attempts.fetch_add(1, Ordering::SeqCst);
             if ttl.is_zero() {
-                return Err(Error::Validation(
+                return Err(Error::validation(
                     "advisory lock ttl must be positive".to_string(),
                 ));
             }
             if let Some(status) = self.backend_status {
-                return Err(Error::Status(status, "lock backend down".to_string()));
+                return Err(Error::status(status, "lock backend down".to_string()));
             }
             let mut held = self.held();
             if held.is_some() {

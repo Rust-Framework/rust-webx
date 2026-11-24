@@ -11,12 +11,6 @@
 
 pub use rust_core::keyset::{Cursor, CursorError, CursorPage, KeysetRequest, MAX_CURSOR_BYTES};
 
-/// A malformed client cursor is a request error (`400`), not a server fault.
-impl From<CursorError> for crate::error::Error {
-    fn from(error: CursorError) -> Self {
-        Self::Validation(error.to_string())
-    }
-}
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -102,7 +102,7 @@ pub trait IAuthenticationHandler: Send + Sync {
 /// The host tries schemes in registration order: the first scheme whose
 /// [`matches`](Self::matches) returns `true` handles the request. A scheme that
 /// matches but produces no claims leaves the request anonymous (JWT semantics);
-/// a scheme can also return [`Error::Unauthorized`] to reject malformed
+/// a scheme can also return [`Error::unauthorized`] to reject malformed
 /// credentials outright (API key semantics).
 ///
 /// `IAuthenticationHandler` remains the lower-level "verify a credential"
@@ -130,7 +130,7 @@ pub trait IAuthenticationScheme: Send + Sync {
     /// Verify the credential and return claims.
     ///
     /// Return `Ok(None)` to continue anonymously; return
-    /// `Err(Error::Unauthorized(..))` to reject an explicitly presented but
+    /// `Err(Error::unauthorized(..))` to reject an explicitly presented but
     /// invalid credential.
     async fn authenticate(&self, ctx: &mut dyn IHttpContext) -> Result<Option<Box<dyn IClaims>>>;
 }
@@ -391,7 +391,7 @@ impl IdentityUser {
         }
     }
 
-    /// The tenant identifier, or `Error::Forbidden` when the principal carries
+    /// The tenant identifier, or `Error::forbidden` when the principal carries
     /// no tenant claim.
     ///
     /// A missing tenant is **not** an authentication failure — the principal
@@ -400,7 +400,7 @@ impl IdentityUser {
     /// retrying with the same valid credentials.
     pub fn require_tenant(&self) -> Result<&str> {
         self.tenant().ok_or_else(|| {
-            Error::Forbidden("the authenticated principal has no tenant claim".to_string())
+            Error::forbidden("the authenticated principal has no tenant claim".to_string())
         })
     }
 
@@ -500,7 +500,7 @@ pub trait RequestUser {
     /// The identity, or `401 Unauthorized` when the request is anonymous.
     fn require_user(&self) -> Result<&IdentityUser> {
         self.current_user()
-            .ok_or_else(|| Error::Unauthorized("authentication required".to_string()))
+            .ok_or_else(|| Error::unauthorized("authentication required".to_string()))
     }
 
     /// Require `role`, separating "not signed in" from "not allowed".
@@ -515,7 +515,7 @@ pub trait RequestUser {
         if user.is_in_role(role) {
             Ok(())
         } else {
-            Err(Error::Forbidden(format!("{role} role required")))
+            Err(Error::forbidden(format!("{role} role required")))
         }
     }
 
@@ -543,7 +543,7 @@ pub trait RequestUser {
         if user.id == owner_id {
             Ok(())
         } else {
-            Err(Error::Forbidden("resource owner required".to_string()))
+            Err(Error::forbidden("resource owner required".to_string()))
         }
     }
 
@@ -562,7 +562,7 @@ pub trait RequestUser {
         if scope == tenant_id {
             Ok(())
         } else {
-            Err(Error::Forbidden(
+            Err(Error::forbidden(
                 "cross-tenant access is not allowed".to_string(),
             ))
         }
@@ -653,7 +653,10 @@ mod tests {
         let user = single_tenant_user();
         let err = user.require_tenant().unwrap_err();
         assert!(
-            matches!(&err, Error::Forbidden(detail) if detail.contains("no tenant claim")),
+            err.code() == "forbidden"
+                && err
+                    .public_detail()
+                    .is_some_and(|detail| detail.contains("no tenant claim")),
             "expected Forbidden(no tenant claim), got {err:?}"
         );
         assert_eq!(err.status_code(), 403, "missing tenant scope is not 401");
@@ -672,7 +675,8 @@ mod tests {
 
         let role_err = anonymous.require_role("admin").unwrap_err();
         assert!(
-            matches!(&role_err, Error::Unauthorized(detail) if detail == "authentication required"),
+            role_err.code() == "unauthorized"
+                && role_err.public_detail() == Some("authentication required"),
             "anonymous must be 401, got {role_err:?}"
         );
         assert_eq!(role_err.status_code(), 401);
@@ -702,7 +706,7 @@ mod tests {
 
         let err = request.require_role("auditor").unwrap_err();
         assert!(
-            matches!(&err, Error::Forbidden(detail) if detail == "auditor role required"),
+            err.code() == "forbidden" && err.public_detail() == Some("auditor role required"),
             "expected Forbidden(auditor role required), got {err:?}"
         );
         assert_eq!(err.status_code(), 403);
@@ -716,7 +720,7 @@ mod tests {
         // Still signed in: this is a scope problem, not a credentials problem.
         assert!(request.current_user().is_some());
         let err = request.require_tenant().unwrap_err();
-        assert!(matches!(&err, Error::Forbidden(_)), "got {err:?}");
+        assert!(err.code() == "forbidden", "got {err:?}");
         assert_eq!(err.status_code(), 403);
     }
 
@@ -845,7 +849,7 @@ mod tests {
         let err = request.require_owner("user-2").unwrap_err();
         assert_eq!(err.status_code(), 403);
         assert!(
-            matches!(&err, Error::Forbidden(detail) if detail == "resource owner required"),
+            err.code() == "forbidden" && err.public_detail() == Some("resource owner required"),
             "{err:?}"
         );
 
@@ -853,7 +857,10 @@ mod tests {
         let err = request.require_same_tenant("other").unwrap_err();
         assert_eq!(err.status_code(), 403);
         assert!(
-            matches!(&err, Error::Forbidden(detail) if detail.contains("cross-tenant")),
+            err.code() == "forbidden"
+                && err
+                    .public_detail()
+                    .is_some_and(|detail| detail.contains("cross-tenant")),
             "{err:?}"
         );
 

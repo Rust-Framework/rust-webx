@@ -51,12 +51,12 @@ fn dispatch_authorized(_ctx: &mut dyn IHttpContext) -> DispatchFuture<'_> {
 
 /// Mirrors the binding code `#[derive(WebxRequestMeta)]` emits for a required
 /// `#[fromclaim] user: IdentityUser` field: missing claims is an
-/// `Error::Unauthorized` (401), not a 400 binding failure.
+/// `Error::unauthorized` (401), not a 400 binding failure.
 fn dispatch_binding(ctx: &mut dyn IHttpContext) -> DispatchFuture<'_> {
     let authenticated = ctx.claims().is_some();
     Box::pin(async move {
         if !authenticated {
-            return Err(Error::Unauthorized(
+            return Err(Error::unauthorized(
                 "authentication required for this endpoint".to_string(),
             ));
         }
@@ -67,7 +67,7 @@ fn dispatch_binding(ctx: &mut dyn IHttpContext) -> DispatchFuture<'_> {
 /// Fails with an internal message that must never be echoed to the client.
 fn dispatch_failing(_ctx: &mut dyn IHttpContext) -> DispatchFuture<'_> {
     Box::pin(async {
-        let failed: Result<Response> = Err(Error::Internal(
+        let failed: Result<Response> = Err(Error::internal(
             "db connect failed for /var/lib/app/secret.db".to_string(),
         ));
         failed

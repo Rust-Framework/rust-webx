@@ -36,7 +36,7 @@ impl IEventPublisher for NatsEventPublisher {
         client
             .publish(self.subject.clone(), frame.into())
             .await
-            .map_err(|error| Error::Status(503, format!("NATS publish failed: {error}")))
+            .map_err(|error| Error::status(503, format!("NATS publish failed: {error}")))
     }
 }
 
@@ -73,7 +73,7 @@ impl NatsEventConsumer {
             }
             _ => client.subscribe(subject).await,
         }
-        .map_err(|error| Error::Status(503, format!("NATS subscribe failed: {error}")))?;
+        .map_err(|error| Error::status(503, format!("NATS subscribe failed: {error}")))?;
 
         loop {
             tokio::select! {

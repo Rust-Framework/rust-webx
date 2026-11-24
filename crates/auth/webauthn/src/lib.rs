@@ -43,12 +43,12 @@ impl WebAuthnConfig {
             || rp_id.contains('/')
             || rp_id.contains(':')
         {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "WebAuthn rp_id must be a bare domain (no scheme/port/path)".to_string(),
             ));
         }
         if !origin.starts_with("https://") {
-            return Err(Error::Di("WebAuthn origin must be https://".to_string()));
+            return Err(Error::di("WebAuthn origin must be https://".to_string()));
         }
         Ok(Self {
             rp_id,

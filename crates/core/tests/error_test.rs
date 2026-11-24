@@ -2,86 +2,86 @@ use webx_core::error::{Error, Result};
 
 #[test]
 fn error_status_code_http_maps_to_400() {
-    let err = Error::Http("bad request".into());
+    let err = Error::bad_request("bad request");
     assert_eq!(err.status_code(), 400);
 }
 
 #[test]
 fn error_status_code_di_maps_to_500() {
-    let err = Error::Di("di failure".into());
+    let err = Error::di("di failure");
     assert_eq!(err.status_code(), 500);
 }
 
 #[test]
 fn error_status_code_routing_maps_to_404() {
-    let err = Error::Routing("route not found".into());
+    let err = Error::route_not_found("route not found");
     assert_eq!(err.status_code(), 404);
 }
 
 #[test]
 fn error_status_code_serialization_maps_to_400() {
     let err =
-        Error::Serialization(serde_json::from_str::<serde_json::Value>("invalid").unwrap_err());
+        Error::invalid_json(serde_json::from_str::<serde_json::Value>("invalid").unwrap_err());
     assert_eq!(err.status_code(), 400);
 }
 
 #[test]
 fn error_status_code_internal_maps_to_500() {
-    let err = Error::Internal("internal error".into());
+    let err = Error::internal("internal error");
     assert_eq!(err.status_code(), 500);
 }
 
 #[test]
 fn error_status_code_message_maps_to_500() {
-    let err = Error::Message("something went wrong".into());
+    let err = Error::internal("something went wrong");
     assert_eq!(err.status_code(), 500);
 }
 
 #[test]
 fn error_status_code_validation_maps_to_400() {
-    let err = Error::Validation("invalid input".into());
+    let err = Error::validation("invalid input");
     assert_eq!(err.status_code(), 400);
 }
 
 #[test]
 fn error_status_code_not_found_maps_to_404() {
-    let err = Error::NotFound("resource missing".into());
+    let err = Error::not_found("resource missing");
     assert_eq!(err.status_code(), 404);
 }
 
 #[test]
 fn error_display_http() {
-    let err = Error::Http("bad request".into());
-    assert_eq!(err.to_string(), "HTTP error: bad request");
+    let err = Error::bad_request("bad request");
+    assert_eq!(err.to_string(), "bad request");
 }
 
 #[test]
 fn error_display_di() {
-    let err = Error::Di("service not found".into());
-    assert_eq!(err.to_string(), "DI error: service not found");
+    let err = Error::di("service not found");
+    assert_eq!(err.to_string(), "service not found");
 }
 
 #[test]
 fn error_display_not_found() {
-    let err = Error::NotFound("user 42".into());
+    let err = Error::not_found("user 42");
     assert_eq!(err.to_string(), "user 42");
 }
 
 #[test]
 fn error_display_validation() {
-    let err = Error::Validation("email required".into());
+    let err = Error::validation("email required");
     assert_eq!(err.to_string(), "email required");
 }
 
 #[test]
 fn error_display_serialization() {
-    let err = Error::Serialization(serde_json::from_str::<i32>("\"not_a_number\"").unwrap_err());
-    assert!(err.to_string().contains("Serialization error"));
+    let err = Error::invalid_json(serde_json::from_str::<i32>("\"not_a_number\"").unwrap_err());
+    assert!(err.to_string().contains("expected"));
 }
 
 #[test]
 fn error_debug_format() {
-    let err = Error::NotFound("test".into());
+    let err = Error::not_found("test");
     let debug_str = format!("{:?}", err);
     assert!(debug_str.contains("NotFound"));
     assert!(debug_str.contains("test"));
@@ -95,7 +95,7 @@ fn result_type_alias_works() {
     assert_eq!(returns_result().unwrap(), "success");
 
     fn returns_error() -> Result<String> {
-        Err(Error::NotFound("gone".into()))
+        Err(Error::not_found("gone"))
     }
     assert!(returns_error().is_err());
 }

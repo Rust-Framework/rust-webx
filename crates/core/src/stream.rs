@@ -167,7 +167,7 @@ impl SseEvent {
 
 fn validate_field(name: &str, value: &str) -> Result<()> {
     if value.bytes().any(|byte| matches!(byte, b'\r' | b'\n' | 0)) {
-        return Err(Error::Validation(format!(
+        return Err(Error::validation(format!(
             "SSE {name} field must not contain CR, LF or NUL"
         )));
     }
@@ -509,7 +509,7 @@ mod tests {
         let error = SseEvent::event("bad\nname", "x")
             .encode(&mut out)
             .expect_err("a newline in the event name must be rejected");
-        assert!(matches!(error, Error::Validation(_)));
+        assert!(matches!(error, error if error.code() == "validation_failed"));
         assert!(out.is_empty(), "nothing is written before validation fails");
     }
 

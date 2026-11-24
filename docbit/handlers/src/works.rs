@@ -51,7 +51,7 @@ impl Staging {
     fn create(name: &str) -> Result<Self> {
         let path = uploads_root().join(".tmp").join(name);
         fs::create_dir_all(&path)
-            .map_err(|e| Error::Internal(format!("Cannot create staging dir: {}", e)))?;
+            .map_err(|e| Error::internal(format!("Cannot create staging dir: {}", e)))?;
         Ok(Self { path, keep: false })
     }
 
@@ -86,13 +86,13 @@ pub struct ExtractReport {
 /// rather than being sanitised into something unexpected.
 fn sanitize_slug(raw: &str) -> Result<String> {
     if raw.is_empty() || raw.len() > 64 {
-        return Err(Error::Validation("slug must be 1-64 characters".into()));
+        return Err(Error::validation("slug must be 1-64 characters"));
     }
     let ok = raw
         .chars()
         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
     if !ok || raw.starts_with('-') || raw.ends_with('-') {
-        return Err(Error::Validation(format!(
+        return Err(Error::validation(format!(
             "invalid slug '{raw}': use lowercase letters, digits and inner hyphens"
         )));
     }
@@ -107,12 +107,12 @@ fn sanitize_slug(raw: &str) -> Result<String> {
 /// zip bomb cannot fill the disk.
 pub fn extract_zip(archive: &Path, dest: &Path) -> Result<ExtractReport> {
     let file = fs::File::open(archive)
-        .map_err(|e| Error::Validation(format!("Cannot read uploaded archive: {}", e)))?;
+        .map_err(|e| Error::validation(format!("Cannot read uploaded archive: {}", e)))?;
     let mut zip = zip::ZipArchive::new(file)
-        .map_err(|e| Error::Validation(format!("Not a valid zip archive: {}", e)))?;
+        .map_err(|e| Error::validation(format!("Not a valid zip archive: {}", e)))?;
 
     if zip.len() > MAX_ENTRIES {
-        return Err(Error::Validation(format!(
+        return Err(Error::validation(format!(
             "archive has {} entries; the limit is {MAX_ENTRIES}",
             zip.len()
         )));
@@ -124,14 +124,14 @@ pub fn extract_zip(archive: &Path, dest: &Path) -> Result<ExtractReport> {
     for index in 0..zip.len() {
         let mut entry = zip
             .by_index(index)
-            .map_err(|e| Error::Validation(format!("Corrupt archive entry {index}: {e}")))?;
+            .map_err(|e| Error::validation(format!("Corrupt archive entry {index}: {e}")))?;
 
         let raw_name = entry
             .name()
-            .map_err(|e| Error::Validation(format!("Corrupt archive entry {index}: {e}")))?
+            .map_err(|e| Error::validation(format!("Corrupt archive entry {index}: {e}")))?
             .to_string();
         if raw_name.contains('\\') || raw_name.contains(':') {
-            return Err(Error::Validation(format!(
+            return Err(Error::validation(format!(
                 "archive entry '{raw_name}' is not a plain relative path"
             )));
         }
@@ -139,7 +139,7 @@ pub fn extract_zip(archive: &Path, dest: &Path) -> Result<ExtractReport> {
         // Symlinks would let the archive point outside the install directory.
         if let Some(mode) = entry.unix_mode() {
             if mode & 0o170_000 == 0o120_000 {
-                return Err(Error::Validation(format!(
+                return Err(Error::validation(format!(
                     "archive entry '{raw_name}' is a symlink"
                 )));
             }
@@ -147,7 +147,7 @@ pub fn extract_zip(archive: &Path, dest: &Path) -> Result<ExtractReport> {
 
         // `enclosed_name` returns None for absolute paths and `..` escapes.
         let Some(relative) = entry.enclosed_name() else {
-            return Err(Error::Validation(format!(
+            return Err(Error::validation(format!(
                 "archive entry '{raw_name}' escapes the archive root"
             )));
         };
@@ -158,20 +158,20 @@ pub fn extract_zip(archive: &Path, dest: &Path) -> Result<ExtractReport> {
         let target = dest.join(&relative);
         if entry.is_dir() {
             fs::create_dir_all(&target).map_err(|e| {
-                Error::Internal(format!("Cannot create '{}': {}", target.display(), e))
+                Error::internal(format!("Cannot create '{}': {}", target.display(), e))
             })?;
             continue;
         }
 
         if entry.size() > MAX_FILE_BYTES {
-            return Err(Error::Validation(format!(
+            return Err(Error::validation(format!(
                 "'{raw_name}' is {} MiB; the per-file limit is {} MiB",
                 entry.size() / (1024 * 1024),
                 MAX_FILE_BYTES / (1024 * 1024)
             )));
         }
         if bytes + entry.size() > MAX_TOTAL_BYTES {
-            return Err(Error::Validation(format!(
+            return Err(Error::validation(format!(
                 "archive expands beyond the {} MiB limit",
                 MAX_TOTAL_BYTES / (1024 * 1024)
             )));
@@ -179,18 +179,18 @@ pub fn extract_zip(archive: &Path, dest: &Path) -> Result<ExtractReport> {
 
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent).map_err(|e| {
-                Error::Internal(format!("Cannot create '{}': {}", parent.display(), e))
+                Error::internal(format!("Cannot create '{}': {}", parent.display(), e))
             })?;
         }
 
         let mut out = fs::File::create(&target)
-            .map_err(|e| Error::Internal(format!("Cannot write '{}': {}", target.display(), e)))?;
+            .map_err(|e| Error::internal(format!("Cannot write '{}': {}", target.display(), e)))?;
 
         // `take` enforces the per-file cap even if the header lies.
         let written = std::io::copy(&mut entry.by_ref().take(MAX_FILE_BYTES + 1), &mut out)
-            .map_err(|e| Error::Internal(format!("Cannot write '{}': {}", target.display(), e)))?;
+            .map_err(|e| Error::internal(format!("Cannot write '{}': {}", target.display(), e)))?;
         if written > MAX_FILE_BYTES {
-            return Err(Error::Validation(format!(
+            return Err(Error::validation(format!(
                 "'{raw_name}' exceeds the {} MiB per-file limit",
                 MAX_FILE_BYTES / (1024 * 1024)
             )));
@@ -218,7 +218,7 @@ impl IRequestHandler<UploadWorkDocsRequest, UploadWorkDocsResponse> for UploadWo
         let slug = sanitize_slug(&req.slug)?;
 
         if req.archive.is_empty() {
-            return Err(Error::Validation("the archive is empty".into()));
+            return Err(Error::validation("the archive is empty"));
         }
 
         let staging = Staging::create(&format!("docs-{}-{}", slug, new_id()))?;
@@ -228,22 +228,20 @@ impl IRequestHandler<UploadWorkDocsRequest, UploadWorkDocsResponse> for UploadWo
         req.archive
             .save_as(&archive_path)
             .await
-            .map_err(|e| Error::Internal(format!("Cannot store uploaded archive: {}", e)))?;
+            .map_err(|e| Error::internal(format!("Cannot store uploaded archive: {}", e)))?;
 
         let report = extract_zip(&archive_path, staging.path())?;
 
         if !staging.path().join("INDEX.json").is_file() {
-            return Err(Error::Validation(
-                "the archive root must contain INDEX.json (zip the work's docs directory, \
-                 not its parent)"
-                    .into(),
+            return Err(Error::validation(
+                "the archive root must contain INDEX.json (zip the work's docs directory, \\\n                 not its parent)",
             ));
         }
 
         let installed = self
             .docs
             .install_work_dir(&slug, staging.path())
-            .map_err(Error::Internal)?;
+            .map_err(Error::internal)?;
         // The staging tree has been renamed into place; nothing left to clean.
         staging.keep();
 

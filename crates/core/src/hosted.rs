@@ -38,7 +38,7 @@
 //!
 //! `execute` returning `Err` is a typed failure, not a panic: the adapter logs
 //! it when it happens and reports it again from `stop()`. A panic inside
-//! `execute` is caught by the task and converted to [`Error::Internal`] in
+//! `execute` is caught by the task and converted to [`Error::internal`] in
 //! `stop()`. A worker that
 //! ignores cancellation is aborted after [`STOP_GRACE`] so it cannot outlive
 //! provider disposal.
@@ -214,7 +214,7 @@ impl<T: PeriodicBackgroundService + ?Sized> BackgroundService for T {
     async fn execute(&self, ct: CancellationToken) -> Result<()> {
         let interval = self.interval();
         if interval.is_zero() {
-            return Err(Error::Internal(
+            return Err(Error::internal(
                 "periodic background service interval must be greater than zero".to_string(),
             ));
         }
@@ -277,12 +277,12 @@ impl BackgroundServiceHost {
             Ok(Ok(result)) => result,
             // The task was aborted or the runtime is shutting down.
             Ok(Err(join_error)) if join_error.is_cancelled() => Ok(()),
-            Ok(Err(join_error)) => Err(Error::Internal(format!(
+            Ok(Err(join_error)) => Err(Error::internal(format!(
                 "background service panicked: {join_error}"
             ))),
             Err(_) => {
                 handle.abort();
-                Err(Error::Internal(format!(
+                Err(Error::internal(format!(
                     "background service did not observe cancellation within {}s and was aborted",
                     grace.as_secs()
                 )))
@@ -296,7 +296,7 @@ impl IHostedService for BackgroundServiceHost {
     async fn start(&self) -> Result<()> {
         let mut slot = self.run.lock().await;
         if slot.is_some() {
-            return Err(Error::State(
+            return Err(Error::state(
                 "background service is already running".to_string(),
             ));
         }
@@ -446,7 +446,7 @@ mod tests {
     #[async_trait::async_trait]
     impl BackgroundService for Failing {
         async fn execute(&self, _ct: CancellationToken) -> Result<()> {
-            Err(Error::Internal("worker exploded".to_string()))
+            Err(Error::internal("worker exploded".to_string()))
         }
     }
 
@@ -616,7 +616,7 @@ mod tests {
 
         async fn tick(&self) -> Result<()> {
             self.ticks.fetch_add(1, Ordering::SeqCst);
-            Err(Error::Internal("tick failed".to_string()))
+            Err(Error::internal("tick failed".to_string()))
         }
 
         fn stop_on_error(&self) -> bool {

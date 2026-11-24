@@ -35,7 +35,7 @@ impl IEventPublisher for RedisEventPublisher {
             .connection
             .manager()
             .await
-            .map_err(|error| Error::Status(503, format!("redis unavailable: {error}")))?;
+            .map_err(|error| Error::status(503, format!("redis unavailable: {error}")))?;
         redis::cmd("XADD")
             .arg(&self.options.stream)
             .arg("MAXLEN")
@@ -96,7 +96,7 @@ impl RedisEventConsumer {
     /// replayed safely.
     pub async fn replay_dead_letter(&self, count: usize) -> Result<usize> {
         let Some(dead_letter) = self.dead_letter_stream() else {
-            return Err(Error::Status(
+            return Err(Error::status(
                 503,
                 "redis dead-letter replay requires a distinct dead_letter_stream".to_string(),
             ));
@@ -105,7 +105,7 @@ impl RedisEventConsumer {
             .connection
             .manager()
             .await
-            .map_err(|error| Error::Status(503, format!("redis unavailable: {error}")))?;
+            .map_err(|error| Error::status(503, format!("redis unavailable: {error}")))?;
         let value: redis::Value = redis::cmd("XRANGE")
             .arg(dead_letter)
             .arg("-")
@@ -158,7 +158,7 @@ impl RedisEventConsumer {
             .connection
             .manager()
             .await
-            .map_err(|error| Error::Status(503, format!("redis unavailable: {error}")))?;
+            .map_err(|error| Error::status(503, format!("redis unavailable: {error}")))?;
         ensure_group(&mut connection, &self.options).await?;
 
         let claim_interval = Duration::from_millis(self.options.claim_idle_ms.max(1_000));

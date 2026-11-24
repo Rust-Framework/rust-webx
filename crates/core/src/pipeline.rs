@@ -67,7 +67,7 @@ where
 ///         next: Next<CreateOrderRequest, OrderView>,
 ///     ) -> ActionResult<OrderView> {
 ///         if req.note.is_empty() {
-///             return Err(Error::Validation("note is required".into()));
+///             return Err(Error::validation("note is required"));
 ///         }
 ///         next.run(req).await
 ///     }

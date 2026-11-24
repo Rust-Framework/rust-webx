@@ -72,7 +72,7 @@ impl IRequestHandler<GetUserRequest, UserModel> for GetUserHandler {
             .first_or_default()
             .await
             .map_ef()?
-            .ok_or_else(|| Error::NotFound("User not found".into()))?;
+            .ok_or_else(|| Error::not_found("User not found"))?;
 
         Ok(UserModel::from(user))
     }
@@ -102,7 +102,7 @@ impl IRequestHandler<CreateUserRequest, UserModel> for CreateUserHandler {
             self.ctx,
             User,
             user_id,
-            Error::NotFound("User not found after create".into());
+            Error::not_found("User not found after create");
             include row.roles
         );
 
@@ -129,7 +129,7 @@ impl IRequestHandler<UpdateUserRequest, UserModel> for UpdateUserHandler {
             .find(id.clone())
             .await
             .map_ef()?
-            .ok_or_else(|| Error::NotFound("User not found".into()))?;
+            .ok_or_else(|| Error::not_found("User not found"))?;
 
         req.apply_to(&mut user, now_secs());
 
@@ -141,7 +141,7 @@ impl IRequestHandler<UpdateUserRequest, UserModel> for UpdateUserHandler {
             self.ctx,
             User,
             id,
-            Error::NotFound("User not found after update".into());
+            Error::not_found("User not found after update");
             include row.roles
         );
 
@@ -162,7 +162,7 @@ impl IRequestHandler<DeleteUserRequest, String> for DeleteUserHandler {
             .find(id.clone())
             .await
             .map_ef()?
-            .ok_or_else(|| Error::NotFound("User not found".into()))?;
+            .ok_or_else(|| Error::not_found("User not found"))?;
 
         user.is_deleted = true;
         user.updated_id = operator_id();

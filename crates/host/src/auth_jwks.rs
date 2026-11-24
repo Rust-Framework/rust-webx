@@ -113,7 +113,7 @@ pub fn parse_jwk_set(set: &JwkSet, max_keys: usize) -> Result<Vec<ResolvedJwk>> 
         });
     }
     if keys.is_empty() {
-        return Err(Error::Status(
+        return Err(Error::status(
             503,
             "JWKS contains no usable signing keys".to_string(),
         ));
@@ -227,7 +227,7 @@ impl HttpJwksFetcher {
     /// Build a fetcher for an absolute `https://` URL.
     pub fn new(url: &str, timeout: Duration, allow_private_networks: bool) -> Result<Self> {
         if !url.starts_with("https://") {
-            return Err(Error::Di(format!(
+            return Err(Error::di(format!(
                 "Jwt.Jwks.Url must be https:// (got '{url}')"
             )));
         }
@@ -238,7 +238,7 @@ impl HttpJwksFetcher {
         options.pool_max_idle_per_host = 1;
         options.allow_private_networks = allow_private_networks;
         let client = HttpClient::new("jwks", options)
-            .map_err(|error| Error::Di(format!("invalid Jwt.Jwks.Url: {error}")))?;
+            .map_err(|error| Error::di(format!("invalid Jwt.Jwks.Url: {error}")))?;
         Ok(Self { client })
     }
 }
@@ -250,9 +250,9 @@ impl IJwksFetcher for HttpJwksFetcher {
             .client
             .execute(OutboundRequest::get(""))
             .await
-            .map_err(|error| Error::Status(503, format!("JWKS fetch failed: {error}")))?;
+            .map_err(|error| Error::status(503, format!("JWKS fetch failed: {error}")))?;
         if !response.is_success() {
-            return Err(Error::Status(
+            return Err(Error::status(
                 503,
                 format!("JWKS endpoint returned HTTP {}", response.status),
             ));
@@ -261,9 +261,9 @@ impl IJwksFetcher for HttpJwksFetcher {
             .body
             .collect(JWKS_MAX_DOCUMENT_BYTES)
             .await
-            .map_err(|error| Error::Status(503, format!("JWKS body failed: {error}")))?;
+            .map_err(|error| Error::status(503, format!("JWKS body failed: {error}")))?;
         serde_json::from_slice(&body)
-            .map_err(|error| Error::Status(503, format!("invalid JWKS document: {error}")))
+            .map_err(|error| Error::status(503, format!("invalid JWKS document: {error}")))
     }
 }
 
@@ -411,7 +411,7 @@ impl IJwtKeyResolver for JwksResolver {
             let now = Instant::now();
             if let Some(previous) = *last {
                 if now.duration_since(previous) < self.min_refresh_interval {
-                    return Err(Error::Unauthorized(format!(
+                    return Err(Error::unauthorized(format!(
                         "unknown JWKS key id '{kid}' for {alg:?}"
                     )));
                 }
@@ -420,7 +420,7 @@ impl IJwtKeyResolver for JwksResolver {
         }
         self.refresh().await?;
         self.lookup(kid, alg)
-            .ok_or_else(|| Error::Unauthorized(format!("unknown JWKS key id '{kid}' for {alg:?}")))
+            .ok_or_else(|| Error::unauthorized(format!("unknown JWKS key id '{kid}' for {alg:?}")))
     }
 }
 
@@ -471,12 +471,12 @@ impl StaticKeyResolver {
         let key = match alg {
             Algorithm::RS256 | Algorithm::RS384 | Algorithm::RS512 => {
                 DecodingKey::from_rsa_pem(pem)
-                    .map_err(|error| Error::Di(format!("invalid RSA public key: {error}")))?
+                    .map_err(|error| Error::di(format!("invalid RSA public key: {error}")))?
             }
             Algorithm::ES256 | Algorithm::ES384 => DecodingKey::from_ec_pem(pem)
-                .map_err(|error| Error::Di(format!("invalid EC public key: {error}")))?,
+                .map_err(|error| Error::di(format!("invalid EC public key: {error}")))?,
             other => {
-                return Err(Error::Di(format!(
+                return Err(Error::di(format!(
                     "{other:?} is not supported by StaticKeyResolver"
                 )))
             }
@@ -497,7 +497,7 @@ impl IJwtKeyResolver for StaticKeyResolver {
             .iter()
             .find(|key| key.kid == kid && key.alg == alg)
             .map(|key| Arc::clone(&key.key))
-            .ok_or_else(|| Error::Unauthorized(format!("unknown key id '{kid}'")))
+            .ok_or_else(|| Error::unauthorized(format!("unknown key id '{kid}'")))
     }
 }
 
@@ -519,6 +519,6 @@ mod tests {
         });
         let set: JwkSet = serde_json::from_value(document).expect("parse JWKS");
         let error = parse_jwk_set(&set, 32).err().expect("no usable keys");
-        assert!(matches!(error, Error::Status(503, _)), "got {error:?}");
+        assert_eq!(error.status_code(), 503, "got {error:?}");
     }
 }

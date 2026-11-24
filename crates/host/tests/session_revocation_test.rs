@@ -11,7 +11,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation};
 use serde_json::json;
-use webx_core::error::Error;
 use webx_core::http::IClaimsExt;
 use webx_core::middleware::IMiddleware;
 use webx_core::security::{
@@ -90,7 +89,7 @@ async fn issuer_rejects_an_empty_subject_with_a_typed_error() {
         .issue(TokenClaims::new("   "))
         .await
         .expect_err("an empty subject is a caller bug, not a token");
-    assert!(matches!(err, Error::Validation(_)), "got {err:?}");
+    assert!(err.code() == "validation_failed", "got {err:?}");
     assert_eq!(err.status_code(), 400);
 }
 
@@ -135,7 +134,7 @@ async fn revoked_token_is_unauthorized_at_the_middleware() {
         Err(err) => err,
     };
 
-    assert!(matches!(err, Error::Unauthorized(_)), "got {err:?}");
+    assert!(err.code() == "unauthorized", "got {err:?}");
     assert_eq!(err.status_code(), 401);
     assert!(
         ctx.claims().is_none(),
@@ -202,7 +201,7 @@ async fn revoke_all_for_subject_is_not_implemented_by_default() {
         .await
         .expect_err("the in-memory store cannot enumerate a subject's tokens");
     assert!(
-        matches!(err, Error::Status(501, _)),
+        err.status_code() == 501,
         "an unsupported optional capability maps to 501, got {err:?}"
     );
     assert_eq!(err.status_code(), 501);

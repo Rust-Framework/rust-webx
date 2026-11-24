@@ -3,17 +3,43 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
-## [3.0.0] — unreleased — 契约类型并入 `rust-core`（3.0 第一批）
+## [3.0.0] — unreleased — 契约类型与统一错误载体（3.0 前两批）
 
 > **English** · **简体中文**
 
 The pagination, cursor and business-envelope contracts now come from the shared
 **`rust-core`** crate instead of `rust-webx-core`. The 2.9.x definitions are deleted; the
 historical `webx_core::pagination` / `::keyset` / `::operation` module paths keep working as
-re-exports. This is the first step of the 3.0 contract convergence (the `Error = AppError` alias and
-the API-convergence batches are separate, still-unreleased steps).
+re-exports. The same 3.0 batch also replaces the error enum with the shared
+`pub type Error = rust_core::AppError` (see below). The API-convergence batches remain separate.
 
 #### English
+
+##### Error = `AppError` (second batch)
+
+`webx_core::Error` is now `pub type Error = rust_core::AppError`; the 2.9 enum is deleted. The
+`ProblemDetails ↔ AppError` bridge preserves the pre-built problem wire shape, and the default
+writer renders every error through it.
+
+- **Constructors are snake_case**: `Validation` → `validation`, `Internal` → `internal`,
+  `Status` → `status`, `Http` → `bad_request`, `Routing` → `route_not_found`,
+  `Serialization` → `invalid_json`, `ResponseSerialization` → `response_serialization`,
+  `TooManyRequests { .. }` → `too_many_requests(secs, detail)`, `ConflictRetryable` →
+  `conflict_retryable`, `Message` → `internal`.
+- **Pattern matches become accessors**: use `err.kind()`, `err.code()`, `err.status_code()`,
+  `err.public_detail()`, `err.operator()`, `err.fields()`, `err.extensions()`. An old
+  `Error::Problem(problem)` construction becomes `problem.into()`.
+- **`Display` changed**: it prints the operator detail, else the client detail, else the code; the
+  old `"HTTP error: "` / `"DI error: "` prefixes are gone. Client output must keep using
+  `public_detail()`/the status title, never `Display`.
+- **`Result` / `ActionResult`** still exist as `rust_core::Result` aliases; `RdiError` and
+  `EFError` convert at their own boundary (`From` impls in rust-dix 1.1 / rust-ef 2.9.1).
+- **`x-webx-*` extensions are reserved**: custom `IErrorResponseWriter` implementations must use
+  `webx_core::problem::extensions_for_wire`; the default writer writes `Retry-After` from
+  `retry_after_of`.
+- **Verification**: `cargo test --workspace` (252 test result blocks) and
+  `cargo clippy --workspace --all-targets -- -D warnings` pass on this branch. `webx_ef` still
+  carries its own mapping and is removed in the next batch.
 
 ##### Added
 
@@ -54,6 +80,28 @@ the API-convergence batches are separate, still-unreleased steps).
 | `#[serde(default)]` requires `Deserialize` | `serde` is a `WebxRequestMeta` helper attribute (2.9.1+) |
 
 #### 简体中文
+
+##### Error = `AppError`（第二批）
+
+`webx_core::Error` 现在是 `pub type Error = rust_core::AppError`，2.9 的 enum 已删除；
+`ProblemDetails ↔ AppError` 桥保证预构造 problem 的 wire 形状不变，默认 writer 统一走该桥。
+
+- **构造器改为 snake_case**：`Validation` → `validation`、`Internal` → `internal`、`Status` →
+  `status`、`Http` → `bad_request`、`Routing` → `route_not_found`、`Serialization` →
+  `invalid_json`、`ResponseSerialization` → `response_serialization`、`TooManyRequests { .. }` →
+  `too_many_requests(secs, detail)`、`ConflictRetryable` → `conflict_retryable`、`Message` →
+  `internal`。
+- **模式匹配改为访问器**：`err.kind()`、`err.code()`、`err.status_code()`、`err.public_detail()`、
+  `err.operator()`、`err.fields()`、`err.extensions()`；旧的 `Error::Problem(problem)` 构造改为
+  `problem.into()`。
+- **`Display` 变化**：依次打印 operator detail、客户端 detail、code；不再有 `"HTTP error: "` /
+  `"DI error: "` 前缀。客户端输出继续用 `public_detail()`/状态 title，绝不能用 `Display`。
+- **`Result` / `ActionResult`** 仍是 `rust_core::Result` 别名；`RdiError`/`EFError` 在各自 crate
+  的边界转换（rust-dix 1.1 / rust-ef 2.9.1 的 `From`）。
+- **`x-webx-*` 是保留扩展键**：自定义 `IErrorResponseWriter` 必须用
+  `webx_core::problem::extensions_for_wire`；默认 writer 用 `retry_after_of` 写 `Retry-After`。
+- **验证**：本分支 `cargo test --workspace`（253 个 test binary）与
+  `cargo clippy --workspace --all-targets -- -D warnings` 全过。`webx_ef` 仍自带映射，下一批删除。
 
 ##### 新增
 

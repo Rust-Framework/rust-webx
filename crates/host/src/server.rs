@@ -469,7 +469,7 @@ impl HostBuilder {
     ///
     /// 1.0 defaults to **strict** scope validation (MEDI `ValidateScopes = true`):
     /// resolving a Scoped service from the root `ServiceProvider` returns
-    /// [`webx::Error::Di`](webx_core::error::Error::Di) instead of silently caching it on the
+    /// [`webx::Error::di`](webx_core::error::Error::di) instead of silently caching it on the
     /// root. Existing code that resolves Scoped services from
     /// `host.provider()` can opt back in here while it migrates to explicit
     /// scopes (`provider.scope()` / `get_owned`) — see the migration notes in
@@ -1467,11 +1467,11 @@ impl HostBuilder {
     /// This is the non-panicking form of [`HostBuilder::build`]. Production
     /// guards (missing/weak JWT secret, wildcard CORS), a failing DI provider
     /// build, invalid localization resources and inconsistent route/handler
-    /// metadata all come back as [`Error::Di`] carrying the same operator-facing
+    /// metadata all come back as [`Error::di`] carrying the same operator-facing
     /// message [`HostBuilder::build`] panics with.
     ///
     /// Configuration violations are collected before the first one is reported:
-    /// one `Error::Di` lists every invalid key, sorted by section and key, so a
+    /// one `Error::di` lists every invalid key, sorted by section and key, so a
     /// broken `appsettings.json` does not require a redeploy per fix. See
     /// [`crate::config_validation`] for the validator and the reusable
     /// [`validate_options`](crate::config_validation::validate_options) entry
@@ -1513,7 +1513,7 @@ impl HostBuilder {
     /// Use this instead of [`HostBuilder::try_build`] when the service
     /// collection contains `async_*` registrations (for example rust-ef's
     /// `add_dbcontext_async`). Async singletons are initialised dependency-first
-    /// by rust-dix before the host is assembled; failures surface as `Error::Di`.
+    /// by rust-dix before the host is assembled; failures surface as `Error::di`.
     ///
     /// ```ignore
     /// let host = Host::builder()
@@ -1571,7 +1571,7 @@ impl HostBuilder {
         // startup error. Silently falling back to defaults used to switch off
         // rate limiting / CORS after a single misspelled key.
         let (appsettings, config_sources) = config::try_load_appsettings(self.mode)
-            .map_err(|error| Error::Di(format!("Invalid configuration: {error}")))?;
+            .map_err(|error| Error::di(format!("Invalid configuration: {error}")))?;
         if config_sources.is_default_only() {
             if self.mode == AppMode::Production {
                 tracing::warn!(
@@ -1583,7 +1583,7 @@ impl HostBuilder {
         }
         let appsettings = appsettings.unwrap_or_else(|| serde_json::json!({}));
         let mut options: AppOptions = config::try_bind_root(&appsettings)
-            .map_err(|error| Error::Di(format!("Invalid configuration: {error}")))?;
+            .map_err(|error| Error::di(format!("Invalid configuration: {error}")))?;
         for modifier in std::mem::take(&mut self.options_modifiers) {
             modifier(&mut options);
         }
@@ -1592,14 +1592,14 @@ impl HostBuilder {
         crate::auth_jwt::apply_jwt_secret_file(&mut options)?;
 
         // Fail closed, but report everything at once: collect all startup
-        // configuration violations and return one `Error::Di` listing them in a
+        // configuration violations and return one `Error::di` listing them in a
         // deterministic order instead of stopping at the first `?`. The rules
         // are the existing startup guards (TLS client auth, bounded engine
         // server, Production secret/CORS/legacy-RateLimit guards, JWT and TURN
         // sections); only the reporting changed.
         let violations = self.config_violations(&options);
         if !violations.is_empty() {
-            return Err(Error::Di(crate::config_validation::format_violations(
+            return Err(Error::di(crate::config_validation::format_violations(
                 &violations,
             )));
         }
@@ -1611,12 +1611,12 @@ impl HostBuilder {
             Some(config) => {
                 config
                     .validate()
-                    .map_err(|error| Error::Di(format!("Invalid Turn configuration: {error}")))?;
+                    .map_err(|error| Error::di(format!("Invalid Turn configuration: {error}")))?;
                 Some(config)
             }
             None if options.turn.is_configured() => Some(
                 webx_core::realtime::TurnRestConfig::from_section(&options.turn)
-                    .map_err(|error| Error::Di(format!("Invalid Turn configuration: {error}")))?,
+                    .map_err(|error| Error::di(format!("Invalid Turn configuration: {error}")))?,
             ),
             None => None,
         };
@@ -1632,7 +1632,7 @@ impl HostBuilder {
             .unwrap_or_else(LocalizationOptions::none);
         let localizer: Arc<dyn IStringLocalizer> = Arc::new(
             StringLocalizer::new(default_culture, &localization)
-                .map_err(|error| Error::Di(format!("Invalid localization resources: {error}")))?,
+                .map_err(|error| Error::di(format!("Invalid localization resources: {error}")))?,
         );
         let endpoints: Arc<dyn IEndpointCatalog> = Arc::new(EndpointCatalog::from_inventory());
 
@@ -1997,13 +1997,13 @@ impl HostBuilder {
         if let Some(violation) =
             crate::config_validation::production_cors_violation(self.mode, &cors.origins)
         {
-            return Err(Error::Di(violation.message));
+            return Err(Error::di(violation.message));
         }
         if let Some(violation) = crate::config_validation::cors_credentials_wildcard_violation(
             &cors.origins,
             cors.allow_credentials,
         ) {
-            return Err(Error::Di(violation.message));
+            return Err(Error::di(violation.message));
         }
         // The WebSocket origin policy falls back to these origins, so keep them
         // before the CORS middleware takes ownership.
@@ -2025,7 +2025,7 @@ impl HostBuilder {
                 // Fail closed: silently ignoring the keys would limit every
                 // client by the reverse-proxy address (one global bucket an
                 // attacker can drain). Force the one-line migration instead.
-                return Err(Error::Di(violation.message));
+                return Err(Error::di(violation.message));
             }
             tracing::warn!(
                 "RateLimit.TrustProxy / RateLimit.TrustedProxies are ignored (legacy since 2.8.0); \
@@ -2057,7 +2057,7 @@ impl HostBuilder {
             .iter()
             .any(|scheme| scheme.name() == SESSION_COOKIE_SCHEME_NAME);
         if has_cookie_scheme && self.csrf.is_none() {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "SessionCookieScheme is registered without CSRF protection. \
                  Call HostBuilder::use_csrf(CsrfConfig::double_submit())."
                     .to_string(),
@@ -2072,7 +2072,7 @@ impl HostBuilder {
                     continue;
                 };
                 if name != csrf.session_cookie_name {
-                    return Err(Error::Di(format!(
+                    return Err(Error::di(format!(
                         "CsrfConfig::session_cookie_name ('{}') does not match the session cookie \
                          name of the registered {} scheme ('{}'). CSRF checks would never run; set \
                          `CsrfConfig::session_cookie_name` to the cookie name the scheme reads.",
@@ -2349,7 +2349,7 @@ impl HostBuilder {
             uses_hs256,
             is_weak_jwt_secret(&options.jwt.secret),
         ) {
-            return Err(Error::Di(violation.message));
+            return Err(Error::di(violation.message));
         }
 
         let mut engine_router = webx_engine::Router::new();
@@ -2383,7 +2383,7 @@ impl HostBuilder {
         let has_dynamic_routes =
             inventory::iter::<RouteEntry>().any(|entry| entry.authorization_dynamic);
         if has_dynamic_routes && authorizers.is_none() {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "A route declares `#[authorize(dynamic)]` but no IDynamicAuthorizer is \
                  registered. Register one with `instance::<dyn IDynamicAuthorizer>(...)` \
                  or remove the dynamic declaration."
@@ -2410,7 +2410,7 @@ impl HostBuilder {
             for dispatch in inventory::iter::<webx_core::route::scan::HandlerDispatch> {
                 let key = (dispatch.req_type_id, dispatch.rsp_type_id);
                 if direct_by_pair.insert(key, dispatch.dispatch).is_some() {
-                    return Err(Error::Di(format!(
+                    return Err(Error::di(format!(
                         "duplicate direct handler registration for request type '{}'; \
                          each (request, response) pair may have exactly one #[handler]",
                         dispatch.req_type_name
@@ -2470,7 +2470,7 @@ impl HostBuilder {
             let dispatch_fn = match dispatch_by_id.get(&entry.req_type_id).copied() {
                 Some(dispatch) => Some(dispatch),
                 None if entry.rsp_type_id.is_some() => {
-                    return Err(Error::Di(format!(
+                    return Err(Error::di(format!(
                         "route `{} {}` ({}) has no TypeId dispatch; the route macro metadata is \
                          incomplete (mixed macro versions?)",
                         entry.method.as_str(),
@@ -2730,16 +2730,16 @@ impl HostBuilder {
     pub fn build(self) -> Host {
         match self.try_build() {
             Ok(host) => host,
-            // `Error::Di` carries the operator-facing text without a variant
+            // `Error::di` carries the operator-facing text without a variant
             // prefix, keeping the panic message identical to pre-0.10 builds.
             Err(error) => panic!("{}", build_failure_message(&error)),
         }
     }
 }
 
-/// Map a rust-dix provider build failure to the host `Error::Di` form.
+/// Map a rust-dix provider build failure to the host `Error::di` form.
 fn build_provider_error(error: rust_dix::RdiError) -> Error {
-    Error::Di(format!(
+    Error::di(format!(
         "Failed to build ServiceProvider: {}. Check your DI registrations.",
         error
     ))
@@ -2759,19 +2759,19 @@ pub(crate) fn validate_tls_client_auth(options: &AppOptions) -> Result<()> {
     let enabled = tls.client_auth != webx_core::config::TlsClientAuth::Off;
     if !enabled {
         if !tls.client_ca_path.trim().is_empty() {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "Tls.ClientCaPath is set but Tls.ClientAuth is Off".to_string(),
             ));
         }
         return Ok(());
     }
     if tls.client_ca_path.trim().is_empty() {
-        return Err(Error::Di(
+        return Err(Error::di(
             "Tls.ClientAuth requires Tls.ClientCaPath".to_string(),
         ));
     }
     if !std::path::Path::new(&tls.client_ca_path).is_file() {
-        return Err(Error::Di(format!(
+        return Err(Error::di(format!(
             "Tls.ClientCaPath '{}' does not exist",
             tls.client_ca_path
         )));
@@ -2782,7 +2782,7 @@ pub(crate) fn validate_tls_client_auth(options: &AppOptions) -> Result<()> {
         .iter()
         .any(|url| url.starts_with("https://"))
     {
-        return Err(Error::Di(
+        return Err(Error::di(
             "Tls.ClientAuth requires at least one https:// App.Urls listener".to_string(),
         ));
     }
@@ -2792,10 +2792,11 @@ pub(crate) fn validate_tls_client_auth(options: &AppOptions) -> Result<()> {
 /// Operator-facing text of a `try_build` failure, without the `Error` variant
 /// prefix (the `build()` panic message must not change in 0.10).
 fn build_failure_message(error: &Error) -> String {
-    match error {
-        Error::Di(message) => message.clone(),
-        other => other.to_string(),
-    }
+    error
+        .public_detail()
+        .or_else(|| error.operator())
+        .map(str::to_string)
+        .unwrap_or_else(|| error.to_string())
 }
 
 /// Handle for a running server, allowing programmatic graceful shutdown.
@@ -2991,18 +2992,19 @@ impl Host {
     /// listener sharing the host's DI, router, pipeline and shutdown signal.
     async fn run_on(&self, urls: Vec<(String, String)>) -> Result<()> {
         if urls.is_empty() {
-            return Err(Error::Http("no URLs configured".to_string()));
+            return Err(Error::bad_request("no URLs configured".to_string()));
         }
 
         let mut listeners = Vec::with_capacity(urls.len());
         for (scheme, addr) in urls {
             if scheme != "http" && scheme != "https" {
-                return Err(Error::Http(format!(
+                return Err(Error::bad_request(format!(
                     "Unsupported URL scheme '{scheme}'; use http:// or https://"
                 )));
             }
-            let listener = std::net::TcpListener::bind(&addr)
-                .map_err(|err| Error::Http(format!("failed to bind HTTP on {addr}: {err}")))?;
+            let listener = std::net::TcpListener::bind(&addr).map_err(|err| {
+                Error::bad_request(format!("failed to bind HTTP on {addr}: {err}"))
+            })?;
             listeners.push((scheme, addr, listener));
         }
 
@@ -3010,7 +3012,7 @@ impl Host {
         if self.options.tls.client_auth != webx_core::config::TlsClientAuth::Off
             && !listeners.iter().any(|(scheme, _, _)| scheme == "https")
         {
-            return Err(Error::Http(
+            return Err(Error::bad_request(
                 "Tls.ClientAuth requires at least one https:// listener".to_string(),
             ));
         }
@@ -3018,7 +3020,7 @@ impl Host {
             if scheme == "https" {
                 let tls = &self.options.tls;
                 if tls.cert_path.is_empty() || tls.key_path.is_empty() {
-                    return Err(Error::Http(
+                    return Err(Error::bad_request(
                         "HTTPS URLs require Tls.CertPath and Tls.KeyPath".to_string(),
                     ));
                 }
@@ -3046,7 +3048,7 @@ impl Host {
             )
             .is_err()
         {
-            return Err(Error::State(
+            return Err(Error::state(
                 "Host is single-use; build a new Host to run again".to_string(),
             ));
         }
@@ -3350,7 +3352,7 @@ async fn start_hosted_services(services: &[Arc<dyn IHostedService>]) -> Result<(
             }
             Err(_) => {
                 timed_out = Some(started);
-                failure = Some(webx_core::error::Error::Internal(format!(
+                failure = Some(webx_core::error::Error::internal(format!(
                     "hosted service start timed out after {HOSTED_START_TIMEOUT_SECS}s"
                 )));
                 break;
@@ -3398,7 +3400,7 @@ fn parse_url(url: &str) -> Result<(&str, String)> {
     } else if let Some(rest) = url.strip_prefix("http://") {
         Ok(("http", rest.to_string()))
     } else {
-        Err(webx_core::error::Error::Http(format!(
+        Err(webx_core::error::Error::bad_request(format!(
             "Invalid URL '{}'. Use http://host:port or https://host:port",
             url
         )))

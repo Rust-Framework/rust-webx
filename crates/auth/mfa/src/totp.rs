@@ -59,17 +59,17 @@ impl TotpConfig {
     /// Validate the parameters (fail before generating/verifying codes).
     pub fn validate(&self) -> Result<()> {
         if !(6..=8).contains(&self.digits) {
-            return Err(Error::Validation(
+            return Err(Error::validation(
                 "TOTP digits must be between 6 and 8".to_string(),
             ));
         }
         if self.step_seconds == 0 || self.step_seconds > 300 {
-            return Err(Error::Validation(
+            return Err(Error::validation(
                 "TOTP step must be between 1 and 300 seconds".to_string(),
             ));
         }
         if self.skew_steps > 2 {
-            return Err(Error::Validation(
+            return Err(Error::validation(
                 "TOTP skew must be at most 2 steps".to_string(),
             ));
         }
@@ -115,15 +115,15 @@ impl TotpSecret {
             .map(|c| c.to_ascii_uppercase())
             .collect();
         if normalized.is_empty() {
-            return Err(Error::Validation(
+            return Err(Error::validation(
                 "TOTP secret must not be empty".to_string(),
             ));
         }
         let bytes = BASE32_NOPAD
             .decode(normalized.as_bytes())
-            .map_err(|_| Error::Validation("TOTP secret is not valid base32".to_string()))?;
+            .map_err(|_| Error::validation("TOTP secret is not valid base32".to_string()))?;
         if bytes.len() < 10 || bytes.len() > 64 {
-            return Err(Error::Validation(
+            return Err(Error::validation(
                 "TOTP secret must be between 80 and 512 bits".to_string(),
             ));
         }
@@ -158,7 +158,7 @@ impl TotpSecret {
     /// Code for `unix_secs`.
     pub fn code_at(&self, unix_secs: u64, config: TotpConfig) -> Result<String> {
         if config.step_seconds == 0 {
-            return Err(Error::Validation("TOTP step must be positive".to_string()));
+            return Err(Error::validation("TOTP step must be positive".to_string()));
         }
         self.code_at_step(unix_secs / config.step_seconds, config)
     }
@@ -177,7 +177,7 @@ impl TotpSecret {
         config.validate()?;
         let code = code.trim();
         if code.len() != config.digits as usize || !code.bytes().all(|byte| byte.is_ascii_digit()) {
-            return Err(Error::Unauthorized("invalid TOTP code".to_string()));
+            return Err(Error::unauthorized("invalid TOTP code".to_string()));
         }
 
         let current = unix_secs / config.step_seconds;
@@ -194,10 +194,10 @@ impl TotpSecret {
         }
 
         let (matched_step, delta_steps) =
-            matched.ok_or_else(|| Error::Unauthorized("invalid TOTP code".to_string()))?;
+            matched.ok_or_else(|| Error::unauthorized("invalid TOTP code".to_string()))?;
         if let Some(last) = last_accepted_step {
             if matched_step <= last {
-                return Err(Error::Unauthorized(
+                return Err(Error::unauthorized(
                     "TOTP code has already been used".to_string(),
                 ));
             }
@@ -240,13 +240,13 @@ fn hmac_digest(secret: &[u8], message: &[u8], algorithm: TotpAlgorithm) -> Resul
     match algorithm {
         TotpAlgorithm::Sha1 => Hmac::<Sha1>::new_from_slice(secret)
             .map(|mac| finish(mac, message))
-            .map_err(|_| Error::Internal("invalid TOTP key".to_string())),
+            .map_err(|_| Error::internal("invalid TOTP key".to_string())),
         TotpAlgorithm::Sha256 => Hmac::<Sha256>::new_from_slice(secret)
             .map(|mac| finish(mac, message))
-            .map_err(|_| Error::Internal("invalid TOTP key".to_string())),
+            .map_err(|_| Error::internal("invalid TOTP key".to_string())),
         TotpAlgorithm::Sha512 => Hmac::<Sha512>::new_from_slice(secret)
             .map(|mac| finish(mac, message))
-            .map_err(|_| Error::Internal("invalid TOTP key".to_string())),
+            .map_err(|_| Error::internal("invalid TOTP key".to_string())),
     }
 }
 

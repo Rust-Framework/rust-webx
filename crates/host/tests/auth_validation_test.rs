@@ -1,4 +1,4 @@
-﻿//! 2.5 M1 —JWT validation hardening.
+//! 2.5 M1 —JWT validation hardening.
 //!
 //! Covers the fail-closed configuration surface (issuer/audience/leeway/size/
 //! algorithm/behavior), empty `sub`, future `iat`, and the two invalid-token
@@ -108,7 +108,7 @@ fn asymmetric_algorithm_requires_jwks() {
         .algorithms([JwtAlgorithm::Rs256])
         .build()
         .expect_err("RS256 is enabled by JWKS in M2, not M1");
-    assert!(matches!(error, Error::Di(_)), "got {error:?}");
+    assert!(error.code() == "dependency_injection", "got {error:?}");
     assert!(
         error.to_string().contains("Jwks"),
         "the error must name the M2 capability: {error}"
@@ -121,7 +121,7 @@ fn empty_algorithm_list_is_rejected() {
         .algorithms([])
         .build()
         .expect_err("an empty algorithm list must never verify anything");
-    assert!(matches!(error, Error::Di(_)), "got {error:?}");
+    assert!(error.code() == "dependency_injection", "got {error:?}");
 }
 
 #[test]
@@ -130,7 +130,7 @@ fn empty_issuer_is_rejected() {
         .require_issuer("   ")
         .build()
         .expect_err("an empty issuer would disable the check silently");
-    assert!(matches!(error, Error::Di(_)), "got {error:?}");
+    assert!(error.code() == "dependency_injection", "got {error:?}");
 }
 
 #[test]
@@ -139,20 +139,20 @@ fn oversized_clock_skew_is_rejected() {
         .leeway(std::time::Duration::from_secs(301))
         .build()
         .expect_err("a 5-minute grace period must not silently become 10 minutes");
-    assert!(matches!(error, Error::Di(_)), "got {error:?}");
+    assert!(error.code() == "dependency_injection", "got {error:?}");
 }
 
 #[test]
 fn zero_or_oversized_token_budget_is_rejected() {
     assert!(matches!(
         JwtValidation::builder().max_token_bytes(0).build(),
-        Err(Error::Di(_))
+        Err(error) if error.code() == "dependency_injection"
     ));
     assert!(matches!(
         JwtValidation::builder()
             .max_token_bytes(1024 * 1024 + 1)
             .build(),
-        Err(Error::Di(_))
+        Err(error) if error.code() == "dependency_injection"
     ));
 }
 
@@ -182,7 +182,7 @@ async fn empty_sub_is_never_an_identity() {
     let error = authenticate(&auth(&reject_validation()), &token)
         .await
         .expect_err("reject mode must answer 401");
-    assert!(matches!(error, Error::Unauthorized(_)), "got {error:?}");
+    assert!(error.code() == "unauthorized", "got {error:?}");
 }
 
 #[tokio::test]
@@ -317,7 +317,7 @@ async fn oversized_token_is_rejected_before_verification() {
     let error = authenticate(&auth(&reject), &token)
         .await
         .expect_err("reject mode must answer 401");
-    assert!(matches!(error, Error::Unauthorized(_)), "got {error:?}");
+    assert!(error.code() == "unauthorized", "got {error:?}");
 }
 
 #[tokio::test]
@@ -372,7 +372,7 @@ fn host_build_rejects_unsupported_jwt_algorithm() {
         .try_build()
         .err()
         .expect("an algorithm the host cannot verify must abort startup");
-    assert!(matches!(error, Error::Di(_)), "got {error:?}");
+    assert!(error.code() == "dependency_injection", "got {error:?}");
     assert!(error.to_string().contains("Jwks"), "got {error}");
 }
 

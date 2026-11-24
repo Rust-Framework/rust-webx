@@ -76,14 +76,14 @@ impl PaymentInboxWorker {
         // work.
         let scope = self.services.create_scope();
         let inbox = scope.get::<dyn IPaymentInbox>().map_err(|error| {
-            Error::Internal(format!(
+            Error::internal(format!(
                 "payment inbox worker needs Arc<dyn IPaymentInbox> registered: {error}"
             ))
         })?;
         let handler = match &self.handler {
             Some(handler) => Arc::clone(handler),
             None => scope.get::<dyn IPaymentEventHandler>().map_err(|error| {
-                Error::Internal(format!(
+                Error::internal(format!(
                     "payment inbox worker needs an IPaymentEventHandler registered in DI: {error}"
                 ))
             })?,

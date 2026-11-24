@@ -106,7 +106,7 @@ struct Issued {
 ///
 /// * [`issue`](Self::issue) replaces the slot and re-arms it; only **one**
 ///   secret is active at a time. Empty values are rejected with
-///   [`Error::Validation`] and leave the current state untouched.
+///   [`Error::validation`] and leave the current state untouched.
 /// * [`consume`](Self::consume) returns `true` exactly once per issued secret,
 ///   only while it is neither expired nor consumed. A wrong candidate consumes
 ///   nothing, so the legitimate holder can still use the secret.
@@ -175,13 +175,13 @@ impl OneTimeSecret {
     /// The caller supplies the value — see the module-level docs for the RNG
     /// and hash-at-rest recipes.
     ///
-    /// An empty secret is rejected with [`Error::Validation`] because it would
+    /// An empty secret is rejected with [`Error::validation`] because it would
     /// make `consume("")` succeed; the previous secret stays in place so a
     /// failed re-issue cannot silently extend or shorten the current one.
     pub fn issue(&self, secret: impl Into<String>) -> Result<()> {
         let secret = secret.into();
         if secret.is_empty() {
-            return Err(Error::Validation(
+            return Err(Error::validation(
                 "a one-time secret must not be empty".to_string(),
             ));
         }
@@ -392,7 +392,7 @@ mod tests {
         store.issue("token-value").unwrap();
 
         let error = store.issue("").expect_err("empty secrets are rejected");
-        assert!(matches!(error, Error::Validation(_)), "got {error:?}");
+        assert!(error.code() == "validation_failed", "got {error:?}");
         assert_eq!(store.state(), OneTimeSecretState::Pending);
         assert!(store.consume("token-value"));
     }

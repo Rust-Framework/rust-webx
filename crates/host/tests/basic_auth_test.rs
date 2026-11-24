@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use base64::Engine as _;
 use webx_core::auth::{IAuthenticationScheme, IClaims};
-use webx_core::error::{Error, Result};
+use webx_core::error::Result;
 use webx_host::auth_basic::{BasicClaims, BasicScheme, IBasicCredentialValidator};
 
 struct StaticValidator {
@@ -58,7 +58,7 @@ async fn wrong_password_is_unauthorized() {
         .await
         .err()
         .expect("must reject");
-    assert!(matches!(error, Error::Unauthorized(_)), "got {error:?}");
+    assert!(error.code() == "unauthorized", "got {error:?}");
 }
 
 #[tokio::test]
@@ -70,7 +70,7 @@ async fn malformed_base64_is_unauthorized() {
         .await
         .err()
         .expect("must reject");
-    assert!(matches!(error, Error::Unauthorized(_)), "got {error:?}");
+    assert!(error.code() == "unauthorized", "got {error:?}");
 }
 
 #[tokio::test]

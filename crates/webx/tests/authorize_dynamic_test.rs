@@ -230,7 +230,7 @@ impl IDynamicAuthorizer for RecordingAuthorizer {
     ) -> Result<()> {
         self.calls.lock().unwrap().push(route_pattern.to_string());
         if route_pattern.ends_with("/dynamic-deny") {
-            Err(Error::Forbidden(
+            Err(Error::forbidden(
                 "dynamic authorizer denied the request".to_string(),
             ))
         } else {
@@ -386,11 +386,11 @@ impl IDynamicAuthorizer for IdentityGateAuthorizer {
     ) -> Result<()> {
         match RequestContext::identity() {
             Some(identity) if identity.id == "user-1" => Ok(()),
-            Some(identity) => Err(Error::Forbidden(format!(
+            Some(identity) => Err(Error::forbidden(format!(
                 "unexpected request-context identity `{}`",
                 identity.id
             ))),
-            None => Err(Error::Forbidden(
+            None => Err(Error::forbidden(
                 "RequestContext::identity() is not installed on the HTTP path".to_string(),
             )),
         }

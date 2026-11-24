@@ -80,7 +80,7 @@ struct EchoMessageHandler {
 impl IRequestHandler<EchoRequest, EchoReply> for EchoMessageHandler {
     async fn handle(&mut self, req: EchoRequest) -> ActionResult<EchoReply> {
         if req.text.is_empty() {
-            return Err(Error::Validation("text is required".into()));
+            return Err(Error::validation("text is required"));
         }
         // The connection stays reachable from the message handler even though
         // its own `#[inject]` dependencies come from the per-message scope.

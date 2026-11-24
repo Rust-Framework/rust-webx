@@ -19,13 +19,13 @@ async fn spec_and_product(ctx: &mut DbContext, spec_id: &str) -> Result<(Spec, S
         .first_or_default()
         .await
         .map_ef()?
-        .ok_or_else(|| Error::NotFound("规格不存在".into()))?;
+        .ok_or_else(|| Error::not_found("规格不存在"))?;
     let pid = s.product_id.clone();
     let p = linq!(ctx.set::<Product>(), |p: Product| p.id == pid)
         .first_or_default()
         .await
         .map_ef()?
-        .ok_or_else(|| Error::NotFound("所属产品不存在".into()))?;
+        .ok_or_else(|| Error::not_found("所属产品不存在"))?;
     Ok((s, p.name))
 }
 
@@ -140,8 +140,7 @@ impl IRequestHandler<ListSpecDevicesRequest, Vec<DeviceModel>> for ListSpecDevic
 impl IRequestHandler<GetDeviceRequest, DeviceModel> for GetDeviceHandler {
     async fn handle(&mut self, req: GetDeviceRequest) -> ActionResult<DeviceModel> {
         let id = parse_id(&req.id)?;
-        let d =
-            crate::ef_require_by_id!(self.ctx, Device, id, Error::NotFound("设备不存在".into()));
+        let d = crate::ef_require_by_id!(self.ctx, Device, id, Error::not_found("设备不存在"));
         let (spec, product_name) = spec_and_product(&mut self.ctx, &d.spec_id).await?;
         Ok(device_to_model(&d, &spec.code, &product_name))
     }
@@ -194,7 +193,7 @@ impl IRequestHandler<GenerateDevicesRequest, GenerateDevicesResult> for Generate
 
         let count = req.count.unwrap_or(_spec.planned_quantity);
         if count <= 0 {
-            return Err(Error::Validation("生成数量必须大于 0".into()));
+            return Err(Error::validation("生成数量必须大于 0"));
         }
 
         let prefix = if req.asset_prefix.is_empty() {
@@ -253,8 +252,7 @@ impl IRequestHandler<GenerateDevicesRequest, GenerateDevicesResult> for Generate
 impl IRequestHandler<UpdateDeviceRequest, DeviceModel> for UpdateDeviceHandler {
     async fn handle(&mut self, req: UpdateDeviceRequest) -> ActionResult<DeviceModel> {
         let id = parse_id(&req.id)?;
-        let mut d =
-            crate::ef_require_by_id!(self.ctx, Device, id, Error::NotFound("设备不存在".into()));
+        let mut d = crate::ef_require_by_id!(self.ctx, Device, id, Error::not_found("设备不存在"));
 
         if let Some(spec_id) = req.spec_id {
             let spec_id = parse_id(&spec_id)?;
@@ -295,8 +293,7 @@ impl IRequestHandler<UpdateDeviceRequest, DeviceModel> for UpdateDeviceHandler {
 impl IRequestHandler<DeleteDeviceRequest, String> for DeleteDeviceHandler {
     async fn handle(&mut self, req: DeleteDeviceRequest) -> ActionResult<String> {
         let id = parse_id(&req.id)?;
-        let mut d =
-            crate::ef_require_by_id!(self.ctx, Device, id, Error::NotFound("设备不存在".into()));
+        let mut d = crate::ef_require_by_id!(self.ctx, Device, id, Error::not_found("设备不存在"));
 
         d.is_deleted = true;
         d.updated_at = now_secs();

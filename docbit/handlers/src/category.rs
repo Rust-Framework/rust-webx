@@ -140,7 +140,7 @@ impl IRequestHandler<UpdateCategoryRequest, CategoryModel> for UpdateCategoryHan
             .find(id.clone())
             .await
             .map_ef()?
-            .ok_or_else(|| Error::NotFound("Category not found".into()))?;
+            .ok_or_else(|| Error::not_found("Category not found"))?;
 
         req.apply_to(&mut cat, now_secs());
 
@@ -165,7 +165,7 @@ impl IRequestHandler<DeleteCategoryRequest, String> for DeleteCategoryHandler {
             .find(id.clone())
             .await
             .map_ef()?
-            .ok_or_else(|| Error::NotFound("Category not found".into()))?;
+            .ok_or_else(|| Error::not_found("Category not found"))?;
 
         cat.is_deleted = true;
         cat.updated_id = operator_id();

@@ -54,7 +54,7 @@ pub fn is_json_content_type(value: &str) -> bool {
 pub fn require_json_content_type(req: &dyn IHttpRequest) -> Result<()> {
     if let Some(content_type) = req.header("content-type") {
         if !is_json_content_type(content_type) {
-            return Err(Error::UnsupportedMediaType(
+            return Err(Error::unsupported_media_type(
                 "this endpoint binds a JSON body; send Content-Type: application/json".to_string(),
             ));
         }
@@ -606,9 +606,7 @@ mod tests {
         binder.missing("a");
         binder.missing("b");
         let error = binder.into_error();
-        let Error::Problem(problem) = error else {
-            panic!("expected Problem, got {error:?}");
-        };
+        let problem = crate::problem::ProblemDetails::from_app_error(&error, "", None);
         assert_eq!(problem.status, 400);
         let errors = problem.extensions.as_ref().unwrap().get("errors").unwrap();
         assert_eq!(

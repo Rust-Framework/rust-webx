@@ -123,20 +123,20 @@ impl IAuthenticationScheme for BasicScheme {
         };
 
         let decoded = decode_base64(encoded)
-            .ok_or_else(|| Error::Unauthorized("invalid basic credentials".to_string()))?;
+            .ok_or_else(|| Error::unauthorized("invalid basic credentials".to_string()))?;
         let decoded = String::from_utf8(decoded)
-            .map_err(|_| Error::Unauthorized("invalid basic credentials".to_string()))?;
+            .map_err(|_| Error::unauthorized("invalid basic credentials".to_string()))?;
         // RFC 7617: the username must not contain ':'; the password may.
         let (username, password) = decoded
             .split_once(':')
-            .ok_or_else(|| Error::Unauthorized("invalid basic credentials".to_string()))?;
+            .ok_or_else(|| Error::unauthorized("invalid basic credentials".to_string()))?;
         if username.is_empty() {
-            return Err(Error::Unauthorized("invalid basic credentials".to_string()));
+            return Err(Error::unauthorized("invalid basic credentials".to_string()));
         }
 
         match self.validator.validate(username, password).await? {
             Some(claims) => Ok(Some(claims)),
-            None => Err(Error::Unauthorized("invalid basic credentials".to_string())),
+            None => Err(Error::unauthorized("invalid basic credentials".to_string())),
         }
     }
 }

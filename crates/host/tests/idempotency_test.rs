@@ -355,7 +355,7 @@ async fn a_handler_error_releases_the_lease_with_its_token() {
 
     let mut ctx = context("POST", "/api/orders", "lease-error");
     let next = NextStage::new(|_ctx| {
-        Box::pin(async move { Err(Error::Internal("handler failed".to_string())) })
+        Box::pin(async move { Err(Error::internal("handler failed".to_string())) })
     });
     middleware
         .invoke_next(&mut ctx, next)

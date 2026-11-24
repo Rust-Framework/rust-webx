@@ -142,17 +142,17 @@ impl fmt::Debug for OAuth2Client {
 impl OAuth2Client {
     pub fn new(provider: OAuth2Provider, config: OAuth2Config) -> Result<Self> {
         if config.client_id.trim().is_empty() {
-            return Err(Error::Di("OAuth2 client_id must not be empty".to_string()));
+            return Err(Error::di("OAuth2 client_id must not be empty".to_string()));
         }
         if config.redirect_uri.trim().is_empty() {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "OAuth2 redirect_uri must not be empty".to_string(),
             ));
         }
         if provider.userinfo_request == crate::provider::UserInfoRequest::JsonPost
             && provider.userinfo_body.is_empty()
         {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "OAuth2 JsonPost userinfo requires a body template".to_string(),
             ));
         }
@@ -166,7 +166,7 @@ impl OAuth2Client {
                     && (endpoint.starts_with("http://127.0.0.1")
                         || endpoint.starts_with("http://localhost")));
             if !secure {
-                return Err(Error::Di(format!(
+                return Err(Error::di(format!(
                     "OAuth2 endpoint must be https:// (got '{endpoint}')"
                 )));
             }
@@ -176,7 +176,7 @@ impl OAuth2Client {
         options.request_timeout = Some(Duration::from_secs(20));
         options.allow_private_networks = config.allow_private_networks;
         let http = HttpClient::new("oauth2", options)
-            .map_err(|error| Error::Di(format!("OAuth2 HTTP client: {error}")))?;
+            .map_err(|error| Error::di(format!("OAuth2 HTTP client: {error}")))?;
         Ok(Self {
             provider,
             config,
@@ -192,13 +192,13 @@ impl OAuth2Client {
     pub fn authorization_url(&self, state: impl Into<String>) -> Result<OAuth2Authorization> {
         let state = state.into();
         if state.trim().is_empty() {
-            return Err(Error::Validation(
+            return Err(Error::validation(
                 "OAuth2 state must not be empty".to_string(),
             ));
         }
         let pkce = (self.provider.pkce && self.config.pkce).then(Pkce::generate);
         let mut url = Url::parse(&self.provider.authorization_endpoint)
-            .map_err(|error| Error::Di(format!("invalid authorization endpoint: {error}")))?;
+            .map_err(|error| Error::di(format!("invalid authorization endpoint: {error}")))?;
         {
             let mut query = url.query_pairs_mut();
             query.append_pair(
@@ -237,12 +237,12 @@ impl OAuth2Client {
         pkce_verifier: Option<&str>,
     ) -> Result<OAuth2Token> {
         if code.trim().is_empty() {
-            return Err(Error::Validation(
+            return Err(Error::validation(
                 "OAuth2 authorization code must not be empty".to_string(),
             ));
         }
         if self.provider.pkce && self.config.pkce && pkce_verifier.is_none() {
-            return Err(Error::Validation(
+            return Err(Error::validation(
                 "OAuth2 PKCE code_verifier is required".to_string(),
             ));
         }
@@ -266,7 +266,7 @@ impl OAuth2Client {
         let mut headers = vec![("accept".to_string(), "application/json".to_string())];
         if self.provider.client_auth == ClientAuth::Basic {
             let Some(secret) = &self.config.client_secret else {
-                return Err(Error::Di(
+                return Err(Error::di(
                     "OAuth2 provider requires a client_secret for Basic auth".to_string(),
                 ));
             };
@@ -300,7 +300,7 @@ impl OAuth2Client {
                     .map(|(key, value)| (key.clone(), Value::String(value.clone())))
                     .collect();
                 let body = serde_json::to_vec(&Value::Object(map))
-                    .map_err(|error| Error::Internal(format!("OAuth2 JSON: {error}")))?;
+                    .map_err(|error| Error::internal(format!("OAuth2 JSON: {error}")))?;
                 let mut request = OutboundRequest::post(&self.provider.token_endpoint)
                     .header("content-type", "application/json")
                     .header("accept", "application/json")
@@ -312,7 +312,7 @@ impl OAuth2Client {
             }
             TokenRequest::QueryGet => {
                 let mut url = Url::parse(&self.provider.token_endpoint)
-                    .map_err(|error| Error::Di(format!("invalid token endpoint: {error}")))?;
+                    .map_err(|error| Error::di(format!("invalid token endpoint: {error}")))?;
                 url.query_pairs_mut().extend_pairs(&params);
                 let mut request =
                     OutboundRequest::get(url.as_str()).header("accept", "application/json");
@@ -324,22 +324,20 @@ impl OAuth2Client {
         };
         if !(200..300).contains(&status) {
             return Err(if status >= 500 {
-                Error::Status(503, format!("OAuth2 token endpoint HTTP {status}"))
+                Error::status(503, format!("OAuth2 token endpoint HTTP {status}"))
             } else {
-                Error::Unauthorized("OAuth2 token endpoint rejected the code".to_string())
+                Error::unauthorized("OAuth2 token endpoint rejected the code".to_string())
             });
         }
         let value = match self.provider.token_format {
             TokenFormat::Json => serde_json::from_slice(&body).map_err(|error| {
-                Error::Status(502, format!("invalid OAuth2 token JSON: {error}"))
+                Error::status(502, format!("invalid OAuth2 token JSON: {error}"))
             })?,
             TokenFormat::Form => form_to_json(&body),
         };
         let access_token = pointer(&value, &fields.access_token)
             .and_then(scalar_to_string)
-            .ok_or_else(|| {
-                Error::Status(502, "OAuth2 token response has no access_token".into())
-            })?;
+            .ok_or_else(|| Error::status(502, "OAuth2 token response has no access_token"))?;
         let mut token = OAuth2Token {
             access_token,
             token_type: fields
@@ -375,7 +373,7 @@ impl OAuth2Client {
 
     async fn fetch_subject(&self, endpoint: &str, access_token: &str) -> Result<Option<String>> {
         let mut url = Url::parse(endpoint)
-            .map_err(|error| Error::Di(format!("invalid subject endpoint: {error}")))?;
+            .map_err(|error| Error::di(format!("invalid subject endpoint: {error}")))?;
         {
             let mut query = url.query_pairs_mut();
             query.append_pair("access_token", access_token);
@@ -410,7 +408,7 @@ impl OAuth2Client {
             },
         };
         let mut url = Url::parse(&self.provider.userinfo_endpoint)
-            .map_err(|error| Error::Di(format!("invalid userinfo endpoint: {error}")))?;
+            .map_err(|error| Error::di(format!("invalid userinfo endpoint: {error}")))?;
         match self.provider.userinfo_auth {
             UserInfoAuth::Bearer => {
                 if !self.provider.userinfo_query.is_empty() {
@@ -460,7 +458,7 @@ impl OAuth2Client {
                     })
                     .collect();
                 let body = serde_json::to_vec(&Value::Object(body))
-                    .map_err(|error| Error::Internal(format!("OAuth2 userinfo JSON: {error}")))?;
+                    .map_err(|error| Error::internal(format!("OAuth2 userinfo JSON: {error}")))?;
                 OutboundRequest::post(url.as_str())
                     .header("accept", "application/json")
                     .header("content-type", "application/json")
@@ -472,18 +470,18 @@ impl OAuth2Client {
         }
         let (status, body) = self.send(request).await?;
         if !(200..300).contains(&status) {
-            return Err(Error::Status(
+            return Err(Error::status(
                 503,
                 format!("OAuth2 userinfo endpoint HTTP {status}"),
             ));
         }
         let value: Value = serde_json::from_slice(&body).map_err(|error| {
-            Error::Status(502, format!("invalid OAuth2 userinfo JSON: {error}"))
+            Error::status(502, format!("invalid OAuth2 userinfo JSON: {error}"))
         })?;
         let subject = self
             .subject(&value)
             .or(subject_hint)
-            .ok_or_else(|| Error::Unauthorized("OAuth2 userinfo has no subject".to_string()))?;
+            .ok_or_else(|| Error::unauthorized("OAuth2 userinfo has no subject".to_string()))?;
         let email = self
             .string_at(&value, self.provider.email_pointer.as_deref())
             .filter(|email| !email.is_empty());
@@ -544,13 +542,13 @@ impl OAuth2Client {
             .http
             .execute(request)
             .await
-            .map_err(|error| Error::Status(503, format!("OAuth2 transport failed: {error}")))?;
+            .map_err(|error| Error::status(503, format!("OAuth2 transport failed: {error}")))?;
         let status = response.status;
         let body = response
             .body
             .collect(MAX_BODY_BYTES)
             .await
-            .map_err(|error| Error::Status(503, format!("OAuth2 body failed: {error}")))?;
+            .map_err(|error| Error::status(503, format!("OAuth2 body failed: {error}")))?;
         Ok((status, body.to_vec()))
     }
 }

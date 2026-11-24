@@ -504,10 +504,10 @@ struct FailHandler;
 impl IRequestHandler<FailRequest, FailResponse> for FailHandler {
     async fn handle(&mut self, req: FailRequest) -> ActionResult<FailResponse> {
         match req.code.as_str() {
-            "401" => Err(Error::Unauthorized("custom unauthorized".into())),
-            "403" => Err(Error::Forbidden("custom forbidden".into())),
-            "422" => Err(Error::Status(422, "validation failed".into())),
-            "500" => Err(Error::Internal("internal error".into())),
+            "401" => Err(Error::unauthorized("custom unauthorized")),
+            "403" => Err(Error::forbidden("custom forbidden")),
+            "422" => Err(Error::status(422, "validation failed")),
+            "500" => Err(Error::internal("internal error")),
             _ => Ok(FailResponse {
                 message: "ok".into(),
             }),

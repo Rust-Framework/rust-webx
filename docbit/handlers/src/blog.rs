@@ -119,7 +119,7 @@ impl IRequestHandler<ListBlogCategoriesRequest, Vec<BlogCategoryCount>>
 #[async_trait]
 impl IRequestHandler<ListMyBlogPostsRequest, Vec<BlogPostSummary>> for ListMyBlogPostsHandler {
     async fn handle(&mut self, _req: ListMyBlogPostsRequest) -> ActionResult<Vec<BlogPostSummary>> {
-        let uid = operator_id().ok_or_else(|| Error::Http("Not authenticated".into()))?;
+        let uid = operator_id().ok_or_else(|| Error::bad_request("Not authenticated"))?;
         let q = uid.clone();
 
         let blogs = linq!(self.ctx.set::<Blog>(), |b: Blog| b.author_id == q; include b.category; include b.author; order_by b.published_at desc)
@@ -142,7 +142,7 @@ impl IRequestHandler<GetBlogPostRequest, BlogPostModel> for GetBlogPostHandler {
             .first_or_default()
             .await
             .map_ef()?
-            .ok_or_else(|| Error::NotFound(format!("Blog post not found: {}", slug)))?;
+            .ok_or_else(|| Error::not_found(format!("Blog post not found: {}", slug)))?;
 
         Ok(blog.to_model())
     }
@@ -152,7 +152,7 @@ impl IRequestHandler<GetBlogPostRequest, BlogPostModel> for GetBlogPostHandler {
 #[async_trait]
 impl IRequestHandler<CreateBlogPostRequest, BlogPostModel> for CreateBlogPostHandler {
     async fn handle(&mut self, req: CreateBlogPostRequest) -> ActionResult<BlogPostModel> {
-        let uid = operator_id().ok_or_else(|| Error::Http("Not authenticated".into()))?;
+        let uid = operator_id().ok_or_else(|| Error::bad_request("Not authenticated"))?;
 
         let slug = req.slug.clone();
         let q = slug.clone();
@@ -162,7 +162,7 @@ impl IRequestHandler<CreateBlogPostRequest, BlogPostModel> for CreateBlogPostHan
             .map_ef()?;
 
         if exists.is_some() {
-            return Err(Error::Http(format!("Slug already exists: {}", slug)));
+            return Err(Error::bad_request(format!("Slug already exists: {}", slug)));
         }
 
         let now = now_secs();
@@ -177,7 +177,7 @@ impl IRequestHandler<CreateBlogPostRequest, BlogPostModel> for CreateBlogPostHan
             self.ctx,
             Blog,
             id,
-            Error::NotFound("Blog not found after save".into());
+            Error::not_found("Blog not found after save");
             include row.category;
             include row.author
         );
@@ -202,10 +202,10 @@ impl IRequestHandler<UpdateBlogPostRequest, BlogPostModel> for UpdateBlogPostHan
             .first_or_default()
             .await
             .map_ef()?
-            .ok_or_else(|| Error::NotFound(format!("Blog post not found: {}", slug)))?;
+            .ok_or_else(|| Error::not_found(format!("Blog post not found: {}", slug)))?;
 
         if !is_admin(&roles) && blog.author_id != uid {
-            return Err(Error::Forbidden("not the author".into()));
+            return Err(Error::forbidden("not the author"));
         }
 
         let blog_id = blog.id.clone();
@@ -219,7 +219,7 @@ impl IRequestHandler<UpdateBlogPostRequest, BlogPostModel> for UpdateBlogPostHan
             self.ctx,
             Blog,
             blog_id,
-            Error::NotFound("Blog not found after update".into());
+            Error::not_found("Blog not found after update");
             include row.category;
             include row.author
         );
@@ -243,10 +243,10 @@ impl IRequestHandler<DeleteBlogPostRequest, String> for DeleteBlogPostHandler {
             .first_or_default()
             .await
             .map_ef()?
-            .ok_or_else(|| Error::NotFound(format!("Blog post not found: {}", slug)))?;
+            .ok_or_else(|| Error::not_found(format!("Blog post not found: {}", slug)))?;
 
         if !is_admin(&roles) && blog.author_id != uid {
-            return Err(Error::Forbidden("not the author".into()));
+            return Err(Error::forbidden("not the author"));
         }
 
         blog.is_deleted = true;

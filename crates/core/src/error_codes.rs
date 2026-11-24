@@ -38,7 +38,7 @@ pub struct ErrorCodeSpec {
     ///
     /// [`FALLBACK_STATUS`] for the generic `error` fallback, whose actual status
     /// is carried by the error itself
-    /// ([`Error::Status`](crate::error::Error::Status) or the
+    /// ([`Error::status`](crate::error::Error::status) or the
     /// [`ProblemDetails`](crate::problem::ProblemDetails) status).
     pub status: u16,
     /// Whether retrying the same request may succeed.

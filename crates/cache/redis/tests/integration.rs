@@ -107,7 +107,7 @@ struct AlwaysFailingHandler;
 #[async_trait::async_trait]
 impl IEventHandler<FailingEvent> for AlwaysFailingHandler {
     async fn handle(&self, _event: FailingEvent) -> webx_core::error::Result<()> {
-        Err(Error::Internal("always fails".into()))
+        Err(Error::internal("always fails"))
     }
 }
 

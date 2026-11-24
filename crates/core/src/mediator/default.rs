@@ -61,7 +61,7 @@ impl IMediator for Mediator {
     async fn send_boxed(&self, req: Box<dyn Any + Send>) -> Result<Box<dyn Any + Send>> {
         let type_id = (*req).type_id();
         let dispatch_fn = self.handler_cache.boxed_dispatch(type_id).ok_or_else(|| {
-            crate::Error::Di(format!(
+            crate::Error::di(format!(
                 "No #[handler] with a boxed dispatch bridge is registered for request type {:?}",
                 type_id
             ))
@@ -81,7 +81,7 @@ impl IMediator for Mediator {
             Ok(publisher) => publisher,
             Err(_) => {
                 self.event_metrics.record_publish_failed();
-                return Err(Error::Di(
+                return Err(Error::di(
                     "No IEventPublisher is registered. Use `add_mediator()` (default \
                      in-memory queue) or `HostBuilder::use_event_publisher(...)`."
                         .to_string(),

@@ -137,7 +137,7 @@ impl IAuthorizationPolicy for ResourceAuthorization {
         }
 
         // No matching policies found —deny by default
-        Err(webx_core::error::Error::Forbidden(format!(
+        Err(webx_core::error::Error::forbidden(format!(
             "no policy grants access to '{} {}'",
             _method, resource_key
         )))
@@ -167,7 +167,7 @@ impl IMiddleware for ResourceAuthMiddleware {
                 // the only place that writes `route_pattern`. It therefore
                 // cannot authorize anything; returning Continue would ship a
                 // security no-op. Fail closed and point at the replacement.
-                return Err(webx_core::error::Error::Forbidden(
+                return Err(webx_core::error::Error::forbidden(
                     "resource_auth_middleware cannot see the matched route before routing; \
                      use #[authorize] / IDynamicAuthorizer instead"
                         .to_string(),
@@ -185,7 +185,7 @@ impl IMiddleware for ResourceAuthMiddleware {
                 .authorize(claims, &route_pattern, &method)
                 .await
                 .map(|_| ControlFlow::Continue(())),
-            None => Err(webx_core::error::Error::Unauthorized(
+            None => Err(webx_core::error::Error::unauthorized(
                 "authentication required".to_string(),
             )),
         }

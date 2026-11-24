@@ -457,7 +457,7 @@ pub trait IHttpContext: IClaimsExt + Send {
     /// Endpoint adapters use this to build the `Mediator` over the host's
     /// service provider and handler registry. Contexts created by tests or
     /// alternative hosts return `None`; dispatching an endpoint through such a
-    /// context is a programming error and is reported as `Error::Internal`.
+    /// context is a programming error and is reported as `Error::internal`.
     fn dispatch_runtime(
         &self,
     ) -> Option<&std::sync::Arc<crate::dispatch_runtime::DispatchRuntime>> {
@@ -665,7 +665,7 @@ pub trait IHttpRequest: Send {
     async fn body_text(&mut self) -> Result<String> {
         let bytes = self.body_bytes().await?;
         String::from_utf8(bytes)
-            .map_err(|_| crate::error::Error::Validation("request body is not valid UTF-8".into()))
+            .map_err(|_| crate::error::Error::validation("request body is not valid UTF-8"))
     }
 
     /// The request's media type, without parameters (e.g. `"multipart/form-data"`).
@@ -692,7 +692,7 @@ pub trait IHttpRequest: Send {
     /// The default implementation reports the request as unsupported; the
     /// rust-webx HTTP host provides the real parser.
     async fn multipart(&mut self) -> Result<Arc<crate::form::MultipartForm>> {
-        Err(crate::error::Error::UnsupportedMediaType(
+        Err(crate::error::Error::unsupported_media_type(
             "multipart/form-data is not supported by this request implementation".to_string(),
         ))
     }
@@ -771,7 +771,7 @@ pub trait IHttpResponse: Send {
     async fn write_body(&mut self, body: ResponseBody) -> Result<()> {
         match body {
             ResponseBody::Bytes(bytes) => self.write_bytes(bytes).await,
-            ResponseBody::File(_) => Err(crate::error::Error::Internal(
+            ResponseBody::File(_) => Err(crate::error::Error::internal(
                 "file responses require the rust-webx HTTP host".to_string(),
             )),
         }
@@ -849,15 +849,15 @@ fn percent_encode_ext_value(value: &str) -> String {
 /// Helper: build a JSON response by serializing a value and writing it.
 ///
 /// A serialization failure is a server-side defect in the response DTO, so it
-/// surfaces as [`Error::ResponseSerialization`](crate::error::Error::ResponseSerialization)
+/// surfaces as [`Error::response_serialization`](crate::error::Error::response_serialization)
 /// (500), not the request-parse
-/// [`Error::Serialization`](crate::error::Error::Serialization) (400).
+/// [`Error::invalid_json`](crate::error::Error::invalid_json) (400).
 pub async fn write_json_response<T: serde::Serialize + Send>(
     resp: &mut dyn IHttpResponse,
     value: &T,
 ) -> Result<()> {
     let json =
-        crate::json::encode_json(value).map_err(crate::error::Error::ResponseSerialization)?;
+        crate::json::encode_json(value).map_err(crate::error::Error::response_serialization)?;
     resp.set_header("content-type", "application/json");
     resp.write_bytes(json).await
 }
@@ -867,5 +867,5 @@ pub async fn read_json_body<T: serde::de::DeserializeOwned>(
     req: &mut dyn IHttpRequest,
 ) -> Result<T> {
     let bytes = req.body_bytes().await?;
-    serde_json::from_slice(&bytes).map_err(crate::error::Error::Serialization)
+    serde_json::from_slice(&bytes).map_err(crate::error::Error::invalid_json)
 }

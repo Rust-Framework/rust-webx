@@ -29,7 +29,7 @@ struct FailingHandler;
 #[async_trait::async_trait]
 impl IRequestHandler<FailingRequest, FailingView> for FailingHandler {
     async fn handle(&mut self, _req: FailingRequest) -> ActionResult<FailingView> {
-        Err(Error::Internal("intentional".to_string()))
+        Err(Error::internal("intentional".to_string()))
     }
 }
 

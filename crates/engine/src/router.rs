@@ -228,7 +228,7 @@ impl Router {
         self.routes[method_index(method)]
             .insert(path, value)
             .map_err(|error| {
-                webx_core::error::Error::Http(format!(
+                webx_core::error::Error::bad_request(format!(
                     "failed to register route {} {}: {error}",
                     method.as_str(),
                     path
@@ -626,7 +626,7 @@ mod tests {
     }
 
     fn ignore_encoder(_value: &dyn std::any::Any) -> Result<EndpointResult> {
-        Err(webx_core::error::Error::Internal(
+        Err(webx_core::error::Error::internal(
             "test encoder must not be called".to_string(),
         ))
     }

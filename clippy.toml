@@ -1,0 +1,5 @@
+# The single application error carrier (`rust_core::AppError`) intentionally
+# carries kind, code, detail, operator detail, fields and extensions. Boxing it
+# at every fallible signature would obscure the contract, so keep
+# `clippy::result_large_err` quiet for the shared carrier (default is 128).
+large-error-threshold = 512

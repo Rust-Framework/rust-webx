@@ -14,11 +14,11 @@ use crate::store::{ImStore, StoredMessage};
 /// Map domain-string errors to HTTP-shaped framework errors.
 fn store_error(message: String) -> Error {
     if message.contains("not found") {
-        Error::NotFound(message)
+        Error::not_found(message)
     } else if message.contains("not a member") {
-        Error::Forbidden(message)
+        Error::forbidden(message)
     } else {
-        Error::Validation(message)
+        Error::validation(message)
     }
 }
 
@@ -51,20 +51,18 @@ impl IRequestHandler<LoginRequest, LoginResponse> for LoginHandler {
     async fn handle(&mut self, req: LoginRequest) -> ActionResult<LoginResponse> {
         let username = req.username.trim().to_string();
         if username.is_empty() {
-            return Err(Error::Validation("username is required".into()));
+            return Err(Error::validation("username is required"));
         }
         if username.len() > 64 {
-            return Err(Error::Validation("username is too long".into()));
+            return Err(Error::validation("username is too long"));
         }
         if req.password.len() < 4 {
-            return Err(Error::Validation(
-                "password must be at least 4 characters".into(),
-            ));
+            return Err(Error::validation("password must be at least 4 characters"));
         }
         let (user_id, known) = match self.store.credentials(&username) {
             Some((user_id, hash)) => {
                 if !self.hasher.verify(&req.password, &hash).await? {
-                    return Err(Error::Unauthorized("invalid credentials".into()));
+                    return Err(Error::unauthorized("invalid credentials"));
                 }
                 (user_id, true)
             }
@@ -125,7 +123,7 @@ impl IRequestHandler<JoinRoomRequest, RoomView> for JoinRoomHandler {
         let room = self
             .store
             .room(&req.room_id)
-            .ok_or_else(|| Error::NotFound(format!("room '{}' not found", req.room_id)))?;
+            .ok_or_else(|| Error::not_found(format!("room '{}' not found", req.room_id)))?;
         Ok(room_view(&self.store, room))
     }
 }
@@ -214,7 +212,7 @@ pub struct ImMessageHandler {
 impl IRequestHandler<ImRequest, ImReply> for ImMessageHandler {
     async fn handle(&mut self, req: ImRequest) -> ActionResult<ImReply> {
         let user = RequestContext::identity()
-            .ok_or_else(|| Error::Unauthorized("websocket login required".into()))?;
+            .ok_or_else(|| Error::unauthorized("websocket login required"))?;
         match req {
             ImRequest::Join { room_id } => {
                 let members = self
@@ -296,9 +294,9 @@ impl IRequestHandler<ImRequest, ImReply> for ImMessageHandler {
                 let room = self
                     .store
                     .room(&room_id)
-                    .ok_or_else(|| Error::NotFound(format!("room '{room_id}' not found")))?;
+                    .ok_or_else(|| Error::not_found(format!("room '{room_id}' not found")))?;
                 if !room.members.contains(&user.id) {
-                    return Err(Error::Forbidden(format!(
+                    return Err(Error::forbidden(format!(
                         "user is not a member of room '{room_id}'"
                     )));
                 }
@@ -323,10 +321,10 @@ impl IRequestHandler<ImRequest, ImReply> for ImMessageHandler {
                     Some(target_username) => {
                         let target_id =
                             self.store.user_id_of(&target_username).ok_or_else(|| {
-                                Error::NotFound(format!("user '{target_username}' not found"))
+                                Error::not_found(format!("user '{target_username}' not found"))
                             })?;
                         if !room.members.contains(&target_id) {
-                            return Err(Error::Forbidden(format!(
+                            return Err(Error::forbidden(format!(
                                 "user '{target_username}' is not a member of room '{room_id}'"
                             )));
                         }
@@ -341,7 +339,7 @@ impl IRequestHandler<ImRequest, ImReply> for ImMessageHandler {
                     message,
                 };
                 let payload_json = serde_json::to_string(&event)
-                    .map_err(|error| Error::Internal(format!("signal encode failed: {error}")))?;
+                    .map_err(|error| Error::internal(format!("signal encode failed: {error}")))?;
                 let mut delivered = 0usize;
                 match target_id {
                     Some(target_id) => {
@@ -387,7 +385,7 @@ impl ImMessageHandler {
             at_unix: message.at_unix,
         };
         let payload = serde_json::to_string(&event)
-            .map_err(|error| Error::Internal(format!("event encode failed: {error}")))?;
+            .map_err(|error| Error::internal(format!("event encode failed: {error}")))?;
         for peer in registry.room_connections(room_id) {
             // Backpressure drops are counted by the connection; fan-out must not
             // fail the sender because one receiver is slow.

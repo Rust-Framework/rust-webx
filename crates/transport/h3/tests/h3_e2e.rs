@@ -142,7 +142,7 @@ impl IRequestHandler<H3CertRequest, String> for H3CertHandler {
 struct H3WebTransportEcho;
 
 fn wt_error(error: impl std::fmt::Display) -> webx::Error {
-    webx::Error::Http(format!("webtransport: {error}"))
+    webx::Error::bad_request(format!("webtransport: {error}"))
 }
 
 #[async_trait::async_trait]
@@ -190,7 +190,7 @@ impl IWebTransportHandler for H3WebTransportDeny {
         &self,
         _info: &webx_h3::webtransport::WebTransportRequestInfo,
     ) -> Result<()> {
-        Err(webx::Error::Http("denied by policy".into()))
+        Err(webx::Error::bad_request("denied by policy"))
     }
 
     async fn on_session(

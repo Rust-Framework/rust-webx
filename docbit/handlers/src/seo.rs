@@ -453,7 +453,7 @@ fn owned_db(services: &Arc<dyn ScopeFactory>) -> (webx::rust_dix::Scope, DbConte
     let scope = services.create_scope();
     let mut ctx: DbContext = scope
         .get_owned()
-        .map_err(|e| Error::Internal(format!("DbContext resolution failed: {e}")))
+        .map_err(|e| Error::internal(format!("DbContext resolution failed: {e}")))
         .expect("DbContext must be registered for SEO middleware");
     prepare_context(&mut ctx);
     (scope, ctx)

@@ -121,7 +121,7 @@ where
                 return Ok(false);
             }
             Err(error) => {
-                return Err(Error::Internal(format!(
+                return Err(Error::internal(format!(
                     "cannot read options file {}: {error}",
                     self.path.display()
                 )));
@@ -140,7 +140,7 @@ where
         }
 
         let json: serde_json::Value = serde_json::from_slice(&bytes).map_err(|error| {
-            Error::Validation(format!(
+            Error::validation(format!(
                 "invalid JSON in options file {}: {error}",
                 self.path.display()
             ))
@@ -149,7 +149,7 @@ where
         // stays active. The lossy binder used to install `T::default()` here,
         // which silently reset a section after a typo.
         let bound: T = config::try_bind_config(&json, &self.section).map_err(|error| {
-            Error::Validation(format!(
+            Error::validation(format!(
                 "rejected reload of {}: {error}",
                 self.path.display()
             ))
@@ -272,7 +272,7 @@ mod tests {
         std::fs::write(&path, "{ not json").expect("write");
         assert!(matches!(
             watcher.reload_now(),
-            Err(Error::Validation(message)) if message.contains("invalid JSON")
+            Err(error) if error.code() == "validation_failed" && error.public_detail().is_some_and(|message| message.contains("invalid JSON"))
         ));
         assert_eq!(
             monitor.current().rpm,

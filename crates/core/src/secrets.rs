@@ -82,11 +82,11 @@ impl From<SecretError> for crate::error::Error {
         match error {
             SecretError::NotFound(name) => {
                 tracing::error!(secret = %name, "secret lookup failed: not found");
-                crate::error::Error::Internal("secret is not available".to_string())
+                crate::error::Error::internal("secret is not available".to_string())
             }
             SecretError::Unavailable { name, detail } => {
                 tracing::error!(secret = %name, reason = %detail, "secret store is unavailable");
-                crate::error::Error::Status(503, SECRET_UNAVAILABLE_DETAIL.to_string())
+                crate::error::Error::status(503, SECRET_UNAVAILABLE_DETAIL.to_string())
             }
         }
     }

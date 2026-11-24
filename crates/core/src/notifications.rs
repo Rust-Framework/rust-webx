@@ -115,7 +115,7 @@ impl EmailMessage {
     /// characters — together this rejects CRLF/header injection.
     pub fn validate(&self) -> Result<()> {
         if self.to.is_empty() {
-            return Err(crate::error::Error::Validation(
+            return Err(crate::error::Error::validation(
                 "email message needs at least one recipient".to_string(),
             ));
         }
@@ -134,12 +134,12 @@ impl EmailMessage {
                 || name.contains(':')
                 || name.chars().any(char::is_control)
             {
-                return Err(crate::error::Error::Validation(
+                return Err(crate::error::Error::validation(
                     "invalid email header name".to_string(),
                 ));
             }
             if value.chars().any(char::is_control) {
-                return Err(crate::error::Error::Validation(format!(
+                return Err(crate::error::Error::validation(format!(
                     "email header `{name}` value must not contain control characters"
                 )));
             }
@@ -156,7 +156,7 @@ impl EmailMessage {
 fn validate_address(value: &str, role: &str) -> Result<()> {
     let value = value.trim();
     if value.is_empty() || !value.contains('@') || value.contains(char::is_whitespace) {
-        return Err(crate::error::Error::Validation(format!(
+        return Err(crate::error::Error::validation(format!(
             "invalid email {role} `{value}`"
         )));
     }
@@ -189,12 +189,12 @@ impl SmsMessage {
                 .bytes()
                 .all(|byte| byte.is_ascii_digit() || matches!(byte, b'+' | b'-' | b' '))
         {
-            return Err(crate::error::Error::Validation(format!(
+            return Err(crate::error::Error::validation(format!(
                 "invalid SMS destination `{to}`"
             )));
         }
         if self.text.trim().is_empty() {
-            return Err(crate::error::Error::Validation(
+            return Err(crate::error::Error::validation(
                 "SMS body must not be empty".to_string(),
             ));
         }
@@ -207,7 +207,7 @@ impl SmsMessage {
 pub trait IEmailSender: Send + Sync {
     /// Deliver one email.
     ///
-    /// Transport failures should come back as `Error::Status(503, …)` (retryable)
+    /// Transport failures should come back as `Error::status(503, …)` (retryable)
     /// with fixed client text; provider payloads stay in the operator log.
     async fn send(&self, message: &EmailMessage) -> Result<()>;
 }

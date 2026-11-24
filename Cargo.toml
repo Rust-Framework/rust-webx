@@ -108,6 +108,11 @@ repository = "https://github.com/Rust-Framework/rust-webx"
 documentation = "https://docs.rs/rust-webx"
 description = "rust-webx - A Rust WebApi framework inspired by ASP.NET Core, built on DI + Mediator pattern"
 
+[patch.crates-io]
+# 3.0 workspace: unify the registry 1.0 dependency pulled by the ef starters
+# with the local rust-dix 1.1 (From<RdiError>); remove once 1.1 is published.
+rust-dix = { path = "../rust-dix/crates/dix" }
+
 [workspace.dependencies]
 # Internal crates
 rust-webx-core = { version = "=3.0.0", path = "crates/core" }
@@ -159,7 +164,9 @@ dmbit-domain = { version = "0.1.0", path = "dmbit/domain" }
 dmbit-handlers = { version = "0.1.0", path = "dmbit/handlers" }
 
 # DI framework (crates.io — no local path required)
-rust-dix = "1.0"
+# Local sibling checkout for the 3.0 workspace (rust-dix 1.1 adds
+# From<RdiError> for AppError); published builds use the 1.0..2.0 range.
+rust-dix = { version = "1.0", path = "../rust-dix/crates/dix" }
 # Shared contract layer (error carrier, pagination/cursor/OperationResult).
 # 3.0 re-exports these types; 2.9.x keeps its own historical definitions.
 # Publish rust-core first; the path serves the sibling RF checkout.

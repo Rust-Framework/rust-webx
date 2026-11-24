@@ -55,7 +55,7 @@ struct FailingHandler {
 impl IEventHandler<OrderPlaced> for FailingHandler {
     async fn handle(&self, _event: OrderPlaced) -> Result<()> {
         self.state.failed.store(true, Ordering::SeqCst);
-        Err(Error::Internal("subscriber failed".into()))
+        Err(Error::internal("subscriber failed"))
     }
 }
 
@@ -153,10 +153,12 @@ async fn publish_without_local_registration_fails_closed() {
         .publish(UnhandledEvent { value: 1 })
         .await
         .expect_err("an event with no local handler must not be dropped silently");
-    match error {
-        Error::Di(message) => assert!(message.contains("event registration"), "{message}"),
-        other => panic!("expected a DI error, got {other:?}"),
-    }
+    assert!(
+        error
+            .operator()
+            .is_some_and(|message| message.contains("event registration")),
+        "expected a DI error, got {error:?}"
+    );
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]

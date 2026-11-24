@@ -57,5 +57,5 @@ pub trait IOutbox: Send + Sync {
 ///
 /// The text is operator-facing (logs) only: 5xx `Public_detail()` stays `None`.
 pub(crate) fn store_error(error: rust_ef::error::EFError) -> Error {
-    Error::Internal(format!("outbox storage error: {error}"))
+    Error::internal(format!("outbox storage error: {error}"))
 }

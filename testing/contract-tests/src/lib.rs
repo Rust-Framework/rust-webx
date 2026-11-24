@@ -23,7 +23,6 @@
 
 pub mod event_transport;
 
-use webx_core::error::Error;
 use webx_core::media::{IMediaPlaneAdapter, MediaStats, MediaTrackInfo, MediaTrackKind};
 use webx_core::storage::{IObjectStore, PartEtag};
 
@@ -107,7 +106,7 @@ pub async fn object_store_contract(store: &dyn IObjectStore) {
         .await
         .expect("part 2");
     assert!(
-        matches!(store.complete_upload(gap).await, Err(Error::Validation(_))),
+        matches!(store.complete_upload(gap).await, Err(error) if error.code() == "validation_failed"),
         "non-consecutive parts must be rejected"
     );
 
@@ -118,7 +117,7 @@ pub async fn object_store_contract(store: &dyn IObjectStore) {
         .expect("begin aborted upload");
     store.abort_upload(aborted.clone()).await.expect("abort");
     assert!(
-        matches!(store.list_parts(&aborted).await, Err(Error::NotFound(_))),
+        matches!(store.list_parts(&aborted).await, Err(error) if error.code() == "not_found"),
         "aborted upload is gone"
     );
 
@@ -126,7 +125,7 @@ pub async fn object_store_contract(store: &dyn IObjectStore) {
     assert!(
         matches!(
             store.put("../escape", Vec::new(), "text/plain").await,
-            Err(Error::Validation(_))
+            Err(error) if error.code() == "validation_failed"
         ),
         "path traversal keys must be rejected"
     );
@@ -158,7 +157,7 @@ pub async fn media_plane_contract(adapter: &dyn IMediaPlaneAdapter) {
     assert_eq!(first.room_id, "room/contract");
     assert_eq!(first.user_id, "alice");
     assert!(
-        matches!(adapter.join("", "eve").await, Err(Error::Validation(_))),
+        matches!(adapter.join("", "eve").await, Err(error) if error.code() == "validation_failed"),
         "empty room/user must be rejected"
     );
 
@@ -184,7 +183,7 @@ pub async fn media_plane_contract(adapter: &dyn IMediaPlaneAdapter) {
                     vec![MediaTrackInfo::new("x", MediaTrackKind::Audio)]
                 )
                 .await,
-            Err(Error::NotFound(_))
+            Err(error) if error.code() == "not_found"
         ),
         "unknown session is a not-found"
     );
@@ -193,7 +192,7 @@ pub async fn media_plane_contract(adapter: &dyn IMediaPlaneAdapter) {
     assert!(stats.rtt_ms >= 0.0);
     assert!((0.0..=1.0).contains(&stats.packet_loss_ratio));
     assert!(
-        matches!(adapter.stats("missing").await, Err(Error::NotFound(_))),
+        matches!(adapter.stats("missing").await, Err(error) if error.code() == "not_found"),
         "unknown session has no stats"
     );
 
@@ -205,7 +204,7 @@ pub async fn media_plane_contract(adapter: &dyn IMediaPlaneAdapter) {
     assert!(
         matches!(
             adapter.stats(&first.session_id).await,
-            Err(Error::NotFound(_))
+            Err(error) if error.code() == "not_found"
         ),
         "left session is gone"
     );
@@ -217,7 +216,7 @@ pub async fn media_plane_contract(adapter: &dyn IMediaPlaneAdapter) {
     assert!(
         matches!(
             adapter.stats(&second.session_id).await,
-            Err(Error::NotFound(_))
+            Err(error) if error.code() == "not_found"
         ),
         "close_room tears down every session"
     );

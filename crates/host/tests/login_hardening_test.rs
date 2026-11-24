@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use webx_core::error::{Error, Result};
+use webx_core::error::Result;
 use webx_core::security::IPasswordHasher;
 use webx_host::login::{
     default_password_concurrency, verify_password_or_dummy, BoundedPasswordHasher, ILoginThrottle,
@@ -247,7 +247,7 @@ async fn bounded_hasher_fails_fast_when_saturated() {
     // The first call holds the only permit; the second must time out with 503.
     let second = bounded.hash("b").await;
     assert!(
-        matches!(second, Err(Error::Status(503, _))),
+        matches!(&second, Err(error) if error.status_code() == 503),
         "saturated hashing must fail fast, got {second:?}"
     );
 

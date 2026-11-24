@@ -57,7 +57,7 @@ impl KafkaEventPublisher {
             )
             .await
             .map_err(|error| {
-                Error::Status(
+                Error::status(
                     503,
                     format!(
                         "Kafka partition {}/{} is unavailable: {error}",
@@ -92,7 +92,7 @@ impl IEventPublisher for KafkaEventPublisher {
             .produce(vec![record], Compression::NoCompression)
             .await
             .map(|_| ())
-            .map_err(|error| Error::Status(503, format!("Kafka produce failed: {error}")))
+            .map_err(|error| Error::status(503, format!("Kafka produce failed: {error}")))
     }
 }
 
@@ -133,7 +133,7 @@ impl KafkaEventConsumer {
                 )
                 .await
                 .map_err(|error| {
-                    Error::Status(
+                    Error::status(
                         503,
                         format!(
                             "Kafka partition {}/{} is unavailable: {error}",
@@ -182,7 +182,7 @@ impl KafkaEventConsumer {
                             }
                         }
                         Some(Err(error)) => {
-                            return Err(Error::Status(
+                            return Err(Error::status(
                                 503,
                                 format!("Kafka fetch failed: {error}"),
                             ));
@@ -236,12 +236,12 @@ async fn ensure_topic(client: &Client, options: &KafkaOptions) -> Result<()> {
     let topics = client
         .list_topics()
         .await
-        .map_err(|error| Error::Status(503, format!("Kafka metadata request failed: {error}")))?;
+        .map_err(|error| Error::status(503, format!("Kafka metadata request failed: {error}")))?;
     if topics.iter().any(|topic| topic.name == options.topic) {
         return Ok(());
     }
     if !options.create_topic {
-        return Err(Error::Status(
+        return Err(Error::status(
             503,
             format!("Kafka topic '{}' does not exist", options.topic),
         ));
@@ -249,7 +249,7 @@ async fn ensure_topic(client: &Client, options: &KafkaOptions) -> Result<()> {
 
     let controller = client
         .controller_client()
-        .map_err(|error| Error::Status(503, format!("Kafka controller lookup failed: {error}")))?;
+        .map_err(|error| Error::status(503, format!("Kafka controller lookup failed: {error}")))?;
     match controller
         .create_topic(
             options.topic.clone(),
@@ -265,7 +265,7 @@ async fn ensure_topic(client: &Client, options: &KafkaOptions) -> Result<()> {
             protocol_error: rskafka::client::error::ProtocolError::TopicAlreadyExists,
             ..
         }) => Ok(()),
-        Err(error) => Err(Error::Status(
+        Err(error) => Err(Error::status(
             503,
             format!("Kafka topic creation failed: {error}"),
         )),

@@ -54,7 +54,7 @@ impl IRequestHandler<EchoRequest, String> for EchoHandler {
 }
 
 fn tls_error(message: impl std::fmt::Display) -> Error {
-    Error::Http(message.to_string())
+    Error::bad_request(message.to_string())
 }
 
 /// PEM certificate/key pair used by the QUIC listener.

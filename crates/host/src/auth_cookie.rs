@@ -100,7 +100,7 @@ impl CookieOptions {
     /// `HttpOnly`/`Secure`.
     pub fn validate(&self) -> Result<()> {
         if self.name.trim().is_empty() {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "session cookie name must not be empty".to_string(),
             ));
         }
@@ -109,34 +109,34 @@ impl CookieOptions {
             .chars()
             .any(|c| c.is_control() || matches!(c, ' ' | ';' | '=' | ','))
         {
-            return Err(Error::Di(format!(
+            return Err(Error::di(format!(
                 "session cookie name '{}' contains an invalid character",
                 self.name
             )));
         }
         if !self.http_only {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "session cookies must be HttpOnly; refusing to expose the session id to JavaScript"
                     .to_string(),
             ));
         }
         if !self.path.starts_with('/') {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "session cookie path must start with '/'".to_string(),
             ));
         }
         if self.absolute_timeout.is_zero() {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "session absolute_timeout must be greater than zero".to_string(),
             ));
         }
         if self.same_site == SameSite::None && !self.secure {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "SameSite=None requires Secure; refusing to build an insecure cookie".to_string(),
             ));
         }
         if self.name.starts_with("__Host-") && (!self.secure || self.path != "/") {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "__Host- cookies require Secure and Path=/".to_string(),
             ));
         }
@@ -219,7 +219,7 @@ impl SessionCookieScheme {
     pub async fn issue_for(&self, subject: impl Into<String>) -> Result<IssuedSession> {
         let subject = subject.into();
         if subject.trim().is_empty() {
-            return Err(Error::Validation(
+            return Err(Error::validation(
                 "a session subject must not be empty".to_string(),
             ));
         }
@@ -232,7 +232,7 @@ impl SessionCookieScheme {
     /// permissions). The scheme assigns the id and the absolute expiry.
     pub async fn issue_session(&self, mut record: SessionRecord) -> Result<IssuedSession> {
         if record.subject.trim().is_empty() {
-            return Err(Error::Validation(
+            return Err(Error::validation(
                 "a session subject must not be empty".to_string(),
             ));
         }
@@ -438,10 +438,8 @@ mod tests {
         let repository = std::sync::Arc::new(webx_core::security::InMemorySessionRepository::new());
         let scheme =
             SessionCookieScheme::new(repository, CookieOptions::default()).expect("scheme");
-        assert!(matches!(
-            scheme.issue_for("  ").await,
-            Err(Error::Validation(_))
-        ));
+        let error = scheme.issue_for("  ").await.expect_err("empty subject");
+        assert_eq!(error.code(), "validation_failed");
     }
 
     #[test]
@@ -461,7 +459,7 @@ mod tests {
             ..CookieOptions::default()
         };
         let error = options.validate().unwrap_err();
-        assert!(matches!(error, Error::Di(_)), "got {error:?}");
+        assert!(error.code() == "dependency_injection", "got {error:?}");
     }
 
     #[test]

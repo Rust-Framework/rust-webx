@@ -158,7 +158,7 @@ impl IOidcHttp for FakeHttp {
         } else if url.ends_with("/jwks") {
             Ok(self.jwks.clone())
         } else {
-            Err(Error::Status(503, format!("unexpected GET {url}")))
+            Err(Error::status(503, format!("unexpected GET {url}")))
         }
     }
 
@@ -334,7 +334,7 @@ async fn nonce_issuer_audience_and_expiry_are_enforced() {
             .err()
             .unwrap_or_else(|| panic!("{label} must be rejected"));
         assert!(
-            matches!(error, Error::Unauthorized(_)),
+            error.code() == "unauthorized",
             "{label}: expected 401, got {error:?}"
         );
     }
@@ -358,7 +358,7 @@ async fn at_hash_mismatch_is_rejected() {
         .exchange_code("code-1", REDIRECT, Some("verifier"), Some("nonce-1"))
         .await
         .expect_err("at_hash mismatch");
-    assert!(matches!(error, Error::Unauthorized(_)), "{error:?}");
+    assert!(error.code() == "unauthorized", "{error:?}");
 }
 
 #[tokio::test]
@@ -380,7 +380,7 @@ async fn at_hash_without_access_token_is_rejected() {
         .exchange_code("code-1", REDIRECT, Some("verifier"), Some("nonce-1"))
         .await
         .expect_err("at_hash without access token");
-    assert!(matches!(error, Error::Unauthorized(_)), "{error:?}");
+    assert!(error.code() == "unauthorized", "{error:?}");
 }
 
 #[test]
@@ -427,7 +427,7 @@ async fn public_client_authorization_url_requires_pkce() {
     let error = client
         .authorization_url(AuthorizationRequest::new(REDIRECT))
         .expect_err("public client without PKCE");
-    assert!(matches!(error, Error::Validation(_)), "{error:?}");
+    assert!(error.code() == "validation_failed", "{error:?}");
 }
 
 #[tokio::test]
@@ -439,7 +439,7 @@ async fn public_client_requires_pkce_verifier() {
         .exchange_code("code-1", REDIRECT, None, Some("nonce-1"))
         .await
         .expect_err("public client without PKCE");
-    assert!(matches!(error, Error::Validation(_)), "{error:?}");
+    assert!(error.code() == "validation_failed", "{error:?}");
 }
 
 #[tokio::test]

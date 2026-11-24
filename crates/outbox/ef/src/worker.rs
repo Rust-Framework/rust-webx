@@ -63,7 +63,7 @@ impl OutboxDispatcher {
     async fn drain(&self) -> Result<()> {
         let scope = self.services.create_scope();
         let outbox = scope.get::<dyn IOutbox>().map_err(|error| {
-            Error::Internal(format!(
+            Error::internal(format!(
                 "outbox dispatcher needs Arc<dyn IOutbox> registered (call add_outbox): {error}"
             ))
         })?;
@@ -126,7 +126,7 @@ impl OutboxDispatcher {
 
         let scope = self.services.create_scope();
         let outbox = scope.get::<dyn IOutbox>().map_err(|error| {
-            Error::Internal(format!("outbox dispatcher needs Arc<dyn IOutbox>: {error}"))
+            Error::internal(format!("outbox dispatcher needs Arc<dyn IOutbox>: {error}"))
         })?;
         outbox.purge(now.saturating_sub(retention)).await?;
         Ok(())

@@ -133,7 +133,7 @@ impl EventTransportContract {
         let expected = RealtimeFanoutEvent::to_room(ROOM, PAYLOAD);
         let message = EventMessage::from_event(&expected)?;
         if !self.dispatcher.has_event(&message.event_name) {
-            return Err(Error::Di(format!(
+            return Err(Error::di(format!(
                 "event transport contract: no local registration for `{}` \
                  (is rust-webx-core linked into this test binary?)",
                 message.event_name
@@ -165,19 +165,19 @@ impl EventTransportContract {
         match tokio::time::timeout(Duration::from_secs(5), &mut task).await {
             Ok(Ok(Ok(()))) => {}
             Ok(Ok(Err(error))) => {
-                return Err(Error::Internal(format!(
+                return Err(Error::internal(format!(
                     "event transport contract: consumer failed: {error}"
                 )))
             }
             Ok(Err(error)) => {
-                return Err(Error::Internal(format!(
+                return Err(Error::internal(format!(
                     "event transport contract: consumer task panicked: {error}"
                 )))
             }
             Err(_) => {
                 task.abort();
                 let _ = task.await;
-                return Err(Error::Internal(
+                return Err(Error::internal(
                     "event transport contract: consumer did not stop within 5s".to_string(),
                 ));
             }
@@ -192,7 +192,7 @@ impl EventTransportContract {
             let detail = publish_error
                 .map(|error| format!(" (last publish error: {error})"))
                 .unwrap_or_default();
-            return Err(Error::Internal(format!(
+            return Err(Error::internal(format!(
                 "event transport contract: no delivery within {timeout:?}{detail}"
             )));
         }

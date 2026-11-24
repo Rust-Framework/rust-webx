@@ -94,7 +94,7 @@ struct BoomHandler;
 #[async_trait::async_trait]
 impl IRequestHandler<BoomRequest, Response> for BoomHandler {
     async fn handle(&mut self, _req: BoomRequest) -> ActionResult<Response> {
-        Err(Error::Forbidden("parity forbidden".to_string()))
+        Err(Error::forbidden("parity forbidden".to_string()))
     }
 }
 

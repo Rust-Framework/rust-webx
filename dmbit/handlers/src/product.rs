@@ -119,8 +119,7 @@ impl IRequestHandler<ListProductsRequest, Vec<ProductModel>> for ListProductsHan
 impl IRequestHandler<GetProductRequest, ProductModel> for GetProductHandler {
     async fn handle(&mut self, req: GetProductRequest) -> ActionResult<ProductModel> {
         let id = parse_id(&req.id)?;
-        let p =
-            crate::ef_require_by_id!(self.ctx, Product, id, Error::NotFound("产品不存在".into()));
+        let p = crate::ef_require_by_id!(self.ctx, Product, id, Error::not_found("产品不存在"));
 
         let pid = p.id.clone();
         let specs = linq!(self.ctx.set::<Spec>(), |s: Spec| s.product_id == pid)
@@ -184,8 +183,7 @@ impl IRequestHandler<CreateProductRequest, ProductModel> for CreateProductHandle
 impl IRequestHandler<UpdateProductRequest, ProductModel> for UpdateProductHandler {
     async fn handle(&mut self, req: UpdateProductRequest) -> ActionResult<ProductModel> {
         let id = parse_id(&req.id)?;
-        let mut p =
-            crate::ef_require_by_id!(self.ctx, Product, id, Error::NotFound("产品不存在".into()));
+        let mut p = crate::ef_require_by_id!(self.ctx, Product, id, Error::not_found("产品不存在"));
 
         if let Some(name) = req.name {
             p.name = require_text("产品名称", &name, MAX_PRODUCT_NAME)?;
@@ -238,8 +236,7 @@ impl IRequestHandler<UpdateProductRequest, ProductModel> for UpdateProductHandle
 impl IRequestHandler<DeleteProductRequest, String> for DeleteProductHandler {
     async fn handle(&mut self, req: DeleteProductRequest) -> ActionResult<String> {
         let id = parse_id(&req.id)?;
-        let mut p =
-            crate::ef_require_by_id!(self.ctx, Product, id, Error::NotFound("产品不存在".into()));
+        let mut p = crate::ef_require_by_id!(self.ctx, Product, id, Error::not_found("产品不存在"));
 
         let now = now_secs();
         let op = operator_id();

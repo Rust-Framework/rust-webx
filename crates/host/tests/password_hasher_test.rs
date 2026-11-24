@@ -6,7 +6,6 @@
 //! contract: malformed stored hashes are typed errors, never panics, and an old
 //! (weaker-parameter) hash still verifies while flagging `needs_rehash`.
 
-use webx_core::error::Error;
 use webx_core::security::IPasswordHasher;
 use webx_host::password_argon2::{Argon2Params, Argon2PasswordHasher};
 
@@ -131,7 +130,7 @@ async fn unknown_algorithm_is_a_typed_error() {
             .await
             .expect_err("an unsupported algorithm must be an Err");
         assert!(
-            matches!(err, Error::Internal(_)),
+            err.code() == "internal_error",
             "expected a typed Internal (500) error for {stored}, got {err:?}"
         );
         assert_eq!(
@@ -159,7 +158,7 @@ async fn malformed_phc_is_a_typed_error_not_a_panic() {
             .await
             .expect_err("a malformed stored hash must be an Err");
         assert!(
-            matches!(err, Error::Internal(_)),
+            err.code() == "internal_error",
             "expected a typed Internal (500) error for {stored:?}, got {err:?}"
         );
     }
@@ -188,5 +187,5 @@ async fn invalid_parameters_are_a_typed_error() {
         .hash("pw")
         .await
         .expect_err("invalid Argon2 parameters must be an Err");
-    assert!(matches!(err, Error::Internal(_)), "got {err:?}");
+    assert!(err.code() == "internal_error", "got {err:?}");
 }

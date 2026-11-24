@@ -127,10 +127,10 @@ impl fmt::Debug for AlipayClient {
 impl AlipayClient {
     pub fn new(config: AlipayConfig) -> Result<Self> {
         if config.app_id.trim().is_empty() {
-            return Err(Error::Di("Alipay app_id must not be empty".to_string()));
+            return Err(Error::di("Alipay app_id must not be empty".to_string()));
         }
         if config.redirect_uri.trim().is_empty() {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "Alipay redirect_uri must not be empty".to_string(),
             ));
         }
@@ -140,7 +140,7 @@ impl AlipayClient {
                     && (endpoint.starts_with("http://127.0.0.1")
                         || endpoint.starts_with("http://localhost")));
             if !secure {
-                return Err(Error::Di(format!(
+                return Err(Error::di(format!(
                     "Alipay endpoint must be https:// (got '{endpoint}')"
                 )));
             }
@@ -152,7 +152,7 @@ impl AlipayClient {
         options.request_timeout = Some(Duration::from_secs(20));
         options.allow_private_networks = config.allow_private_networks;
         let http = HttpClient::new("alipay", options)
-            .map_err(|error| Error::Di(format!("Alipay HTTP client: {error}")))?;
+            .map_err(|error| Error::di(format!("Alipay HTTP client: {error}")))?;
         Ok(Self {
             config,
             http,
@@ -165,12 +165,12 @@ impl AlipayClient {
     pub fn authorization_url(&self, state: impl Into<String>) -> Result<String> {
         let state = state.into();
         if state.trim().is_empty() {
-            return Err(Error::Validation(
+            return Err(Error::validation(
                 "Alipay state must not be empty".to_string(),
             ));
         }
         let mut url = Url::parse(&self.config.authorize_endpoint)
-            .map_err(|error| Error::Di(format!("invalid Alipay authorize URL: {error}")))?;
+            .map_err(|error| Error::di(format!("invalid Alipay authorize URL: {error}")))?;
         {
             let mut query = url.query_pairs_mut();
             query.append_pair("app_id", &self.config.app_id);
@@ -184,7 +184,7 @@ impl AlipayClient {
     /// Exchange an authorization code with `alipay.system.oauth.token`.
     pub async fn exchange_code(&self, code: &str) -> Result<AlipayToken> {
         if code.trim().is_empty() {
-            return Err(Error::Validation(
+            return Err(Error::validation(
                 "Alipay authorization code must not be empty".to_string(),
             ));
         }
@@ -199,9 +199,9 @@ impl AlipayClient {
             .await?;
         let response = response_object(&value, "alipay_system_oauth_token_response")?;
         let access_token = string_field(response, "access_token")
-            .ok_or_else(|| Error::Status(502, "Alipay token has no access_token".to_string()))?;
+            .ok_or_else(|| Error::status(502, "Alipay token has no access_token".to_string()))?;
         let user_id = string_field(response, "user_id")
-            .ok_or_else(|| Error::Status(502, "Alipay token has no user_id".to_string()))?;
+            .ok_or_else(|| Error::status(502, "Alipay token has no user_id".to_string()))?;
         Ok(AlipayToken {
             access_token,
             user_id,
@@ -222,7 +222,7 @@ impl AlipayClient {
         let response = response_object(&value, "alipay_user_info_share_response")?;
         let user_id = string_field(response, "user_id").unwrap_or_else(|| token.user_id.clone());
         if user_id.trim().is_empty() {
-            return Err(Error::Unauthorized(
+            return Err(Error::unauthorized(
                 "Alipay userinfo has no user_id".to_string(),
             ));
         }
@@ -273,20 +273,20 @@ impl AlipayClient {
                     .body(form),
             )
             .await
-            .map_err(|error| Error::Status(503, format!("Alipay transport: {error}")))?;
+            .map_err(|error| Error::status(503, format!("Alipay transport: {error}")))?;
         let status = response.status;
         let body = response
             .body
             .collect(MAX_BODY_BYTES)
             .await
-            .map_err(|error| Error::Status(503, format!("Alipay body: {error}")))?;
+            .map_err(|error| Error::status(503, format!("Alipay body: {error}")))?;
         if !(200..300).contains(&status) {
-            return Err(Error::Status(503, format!("Alipay gateway HTTP {status}")));
+            return Err(Error::status(503, format!("Alipay gateway HTTP {status}")));
         }
         let text = String::from_utf8(body.to_vec())
-            .map_err(|error| Error::Status(502, format!("Alipay response not UTF-8: {error}")))?;
+            .map_err(|error| Error::status(502, format!("Alipay response not UTF-8: {error}")))?;
         let value: Value = serde_json::from_str(&text)
-            .map_err(|error| Error::Status(502, format!("Alipay response JSON: {error}")))?;
+            .map_err(|error| Error::status(502, format!("Alipay response JSON: {error}")))?;
         self.verify_response(&text, &value)?;
         Ok(value)
     }
@@ -308,13 +308,13 @@ impl AlipayClient {
 
     fn verify_response(&self, body: &str, value: &Value) -> Result<()> {
         let Some(signature) = value.get("sign").and_then(Value::as_str) else {
-            return Err(Error::Status(
+            return Err(Error::status(
                 502,
                 "Alipay response is missing a signature".to_string(),
             ));
         };
         let Some(index) = body.rfind(",\"sign\"") else {
-            return Err(Error::Status(
+            return Err(Error::status(
                 502,
                 "Alipay response sign is not the last field".to_string(),
             ));
@@ -322,12 +322,12 @@ impl AlipayClient {
         let content = &body[..index];
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(signature)
-            .map_err(|_| Error::Status(502, "Alipay response sign is not base64".to_string()))?;
+            .map_err(|_| Error::status(502, "Alipay response sign is not base64".to_string()))?;
         let signature = rsa::pkcs1v15::Signature::try_from(bytes.as_slice())
-            .map_err(|_| Error::Status(502, "Alipay response sign is malformed".to_string()))?;
+            .map_err(|_| Error::status(502, "Alipay response sign is malformed".to_string()))?;
         self.verifying
             .verify(content.as_bytes(), &signature)
-            .map_err(|_| Error::Status(502, "Alipay response signature mismatch".to_string()))
+            .map_err(|_| Error::status(502, "Alipay response signature mismatch".to_string()))
     }
 }
 
@@ -337,14 +337,14 @@ fn response_object<'a>(value: &'a Value, key: &str) -> Result<&'a Map<String, Va
         let message = string_field(error, "sub_msg")
             .or_else(|| string_field(error, "msg"))
             .unwrap_or_default();
-        return Err(Error::Unauthorized(format!(
+        return Err(Error::unauthorized(format!(
             "Alipay error {code}: {message}"
         )));
     }
     value
         .get(key)
         .and_then(Value::as_object)
-        .ok_or_else(|| Error::Status(502, format!("Alipay response has no {key}")))
+        .ok_or_else(|| Error::status(502, format!("Alipay response has no {key}")))
 }
 
 fn string_field(object: &Map<String, Value>, key: &str) -> Option<String> {
@@ -359,14 +359,14 @@ fn parse_private_key(pem: &str) -> Result<PrivateKey> {
     let pem = normalize_pem(pem, "PRIVATE KEY");
     PrivateKey::from_pkcs8_pem(&pem)
         .or_else(|_| PrivateKey::from_pkcs1_pem(&pem))
-        .map_err(|error| Error::Di(format!("Alipay private key: {error}")))
+        .map_err(|error| Error::di(format!("Alipay private key: {error}")))
 }
 
 fn parse_public_key(pem: &str) -> Result<PublicKey> {
     let pem = normalize_pem(pem, "PUBLIC KEY");
     PublicKey::from_public_key_pem(&pem)
         .or_else(|_| PublicKey::from_pkcs1_pem(&pem))
-        .map_err(|error| Error::Di(format!("Alipay public key: {error}")))
+        .map_err(|error| Error::di(format!("Alipay public key: {error}")))
 }
 
 /// Alipay consoles often show a raw base64 key without PEM armor.

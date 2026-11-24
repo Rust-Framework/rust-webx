@@ -55,14 +55,14 @@ impl OidcDiscovery {
     ) -> Result<Self> {
         let issuer = issuer.trim_end_matches('/');
         if !issuer.starts_with("https://") {
-            return Err(Error::Di(format!(
+            return Err(Error::di(format!(
                 "OIDC issuer must be https:// (got '{issuer}')"
             )));
         }
         let url = format!("{issuer}/.well-known/openid-configuration");
         let value = http.get_json(&url).await?;
         let document: Self = serde_json::from_value(value).map_err(|error| {
-            Error::Status(503, format!("invalid OIDC discovery document: {error}"))
+            Error::status(503, format!("invalid OIDC discovery document: {error}"))
         })?;
         document.validate_with(issuer, require_pkce_advertised)?;
         Ok(document)
@@ -81,7 +81,7 @@ impl OidcDiscovery {
     ) -> Result<()> {
         let requested = requested_issuer.trim_end_matches('/');
         if self.issuer.trim_end_matches('/') != requested {
-            return Err(Error::Di(format!(
+            return Err(Error::di(format!(
                 "OIDC discovery issuer mismatch: requested '{requested}', document '{}'",
                 self.issuer
             )));
@@ -92,7 +92,7 @@ impl OidcDiscovery {
             ("jwks_uri", &self.jwks_uri),
         ] {
             if !endpoint.starts_with("https://") {
-                return Err(Error::Di(format!(
+                return Err(Error::di(format!(
                     "OIDC {label} must be https:// (got '{endpoint}')"
                 )));
             }
@@ -104,7 +104,7 @@ impl OidcDiscovery {
         if !advertises_s256
             && (require_pkce_advertised || !self.code_challenge_methods_supported.is_empty())
         {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "OIDC provider does not advertise PKCE S256".to_string(),
             ));
         }
@@ -113,12 +113,12 @@ impl OidcDiscovery {
             .iter()
             .any(|response_type| response_type == "code")
         {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "OIDC provider does not advertise the authorization-code flow".to_string(),
             ));
         }
         if self.id_token_signing_alg_values_supported.is_empty() {
-            return Err(Error::Di(
+            return Err(Error::di(
                 "OIDC provider does not advertise id_token signing algorithms".to_string(),
             ));
         }

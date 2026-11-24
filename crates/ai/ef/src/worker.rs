@@ -59,7 +59,7 @@ impl PeriodicBackgroundService for UsageOutboxWorker {
             .outbox
             .pending(self.limit)
             .await
-            .map_err(|error| Error::Internal(format!("usage outbox read failed: {error}")))?;
+            .map_err(|error| Error::internal(format!("usage outbox read failed: {error}")))?;
 
         for row in rows {
             let request_id = row.request_id.clone();
@@ -70,7 +70,7 @@ impl PeriodicBackgroundService for UsageOutboxWorker {
                             .mark_delivered(&request_id)
                             .await
                             .map_err(|error| {
-                                Error::Internal(format!("usage outbox ack failed: {error}"))
+                                Error::internal(format!("usage outbox ack failed: {error}"))
                             })?;
                     }
                     Err(error) => {
@@ -78,7 +78,7 @@ impl PeriodicBackgroundService for UsageOutboxWorker {
                             .mark_failed(&request_id, &error)
                             .await
                             .map_err(|error| {
-                                Error::Internal(format!(
+                                Error::internal(format!(
                                     "usage outbox failure write failed: {error}"
                                 ))
                             })?;
@@ -89,7 +89,7 @@ impl PeriodicBackgroundService for UsageOutboxWorker {
                         .mark_failed(&request_id, &format!("invalid usage payload: {error}"))
                         .await
                         .map_err(|error| {
-                            Error::Internal(format!("usage outbox failure write failed: {error}"))
+                            Error::internal(format!("usage outbox failure write failed: {error}"))
                         })?;
                 }
             }
@@ -135,7 +135,7 @@ impl PeriodicBackgroundService for UsageRollupWorker {
             .rollup_window(window_start, self.window_secs)
             .await
             .map(|_| ())
-            .map_err(|error| Error::Internal(format!("usage rollup failed: {error}")))
+            .map_err(|error| Error::internal(format!("usage rollup failed: {error}")))
     }
 }
 

@@ -26,7 +26,9 @@ use rust_dix::IServiceResolver;
 use webx_core::app::IHost;
 use webx_core::error::{Error, Result};
 use webx_core::handler::IHostedService;
-use webx_core::hosted::{delay, BackgroundService, BackgroundServiceSpec, CancellationToken};
+use webx_core::hosted::{
+    delay, BackgroundService, BackgroundServiceSpec, CancellationToken, HostedServiceSpec,
+};
 use webx_core::http::IHttpContext;
 use webx_core::middleware::IMiddleware;
 use webx_core::route::ext::IServiceCollectionExt;
@@ -119,13 +121,13 @@ async fn factory_registration_injects_configuration_without_default() {
             svc.instance(Arc::new(TestConfig {
                 greeting: "hi".to_string(),
             }))
-            .add_hosted_service_with(move |resolver| {
+            .add_hosted_service(HostedServiceSpec::with_factory(move |resolver| {
                 let config = resolve::<TestConfig>(resolver);
                 Arc::new(ConfigAwareService {
                     config,
                     started: Arc::clone(&started_for_factory),
                 })
-            })
+            }))
         })
     })
     .await;
@@ -156,7 +158,9 @@ async fn failing_start_returns_a_typed_error_instead_of_panicking() {
     let host = Host::builder()
         .mode(webx_core::mode::AppMode::Development)
         .no_spa()
-        .register(|svc| svc.add_hosted_service_with(|_| Arc::new(FailingStart)))
+        .register(|svc| {
+            svc.add_hosted_service(HostedServiceSpec::with_factory(|_| Arc::new(FailingStart)))
+        })
         .build();
 
     let error = host
@@ -206,25 +210,31 @@ async fn ordered_registration_controls_start_and_stop_order() {
         let events = Arc::clone(&events);
         move |builder| {
             builder.register(move |svc| {
-                svc.add_hosted_service_with_ordered(100, {
-                    let events = Arc::clone(&events);
-                    move |_| {
-                        Arc::new(Recorder {
-                            name: "late",
-                            events: Arc::clone(&events),
-                        })
-                    }
-                })
-                .add_hosted_service_with_ordered(-100, {
-                    let events = Arc::clone(&events);
-                    move |_| {
-                        Arc::new(Recorder {
-                            name: "early",
-                            events: Arc::clone(&events),
-                        })
-                    }
-                })
-                .add_hosted_service_with({
+                svc.add_hosted_service(
+                    HostedServiceSpec::with_factory({
+                        let events = Arc::clone(&events);
+                        move |_| {
+                            Arc::new(Recorder {
+                                name: "late",
+                                events: Arc::clone(&events),
+                            })
+                        }
+                    })
+                    .ordered(100),
+                )
+                .add_hosted_service(
+                    HostedServiceSpec::with_factory({
+                        let events = Arc::clone(&events);
+                        move |_| {
+                            Arc::new(Recorder {
+                                name: "early",
+                                events: Arc::clone(&events),
+                            })
+                        }
+                    })
+                    .ordered(-100),
+                )
+                .add_hosted_service(HostedServiceSpec::with_factory({
                     let events = Arc::clone(&events);
                     move |_| {
                         Arc::new(Recorder {
@@ -232,7 +242,7 @@ async fn ordered_registration_controls_start_and_stop_order() {
                             events: Arc::clone(&events),
                         })
                     }
-                })
+                }))
             })
         }
     })
@@ -287,11 +297,14 @@ async fn disabled_conditional_registration_never_starts() {
         .mode(webx_core::mode::AppMode::Development)
         .no_spa()
         .register(move |svc| {
-            svc.add_hosted_service_with_if(false, move |_| {
-                Arc::new(Conditional {
-                    started: Arc::clone(&started_for_factory),
+            svc.add_hosted_service(
+                HostedServiceSpec::with_factory(move |_| {
+                    Arc::new(Conditional {
+                        started: Arc::clone(&started_for_factory),
+                    })
                 })
-            })
+                .enabled(false),
+            )
         })
         .build();
 
@@ -312,11 +325,14 @@ async fn enabled_conditional_registration_starts() {
 
     let (handle, _runner) = spawn(port, move |builder| {
         builder.register(move |svc| {
-            svc.add_hosted_service_with_if(true, move |_| {
-                Arc::new(Conditional {
-                    started: Arc::clone(&started_for_factory),
+            svc.add_hosted_service(
+                HostedServiceSpec::with_factory(move |_| {
+                    Arc::new(Conditional {
+                        started: Arc::clone(&started_for_factory),
+                    })
                 })
-            })
+                .enabled(true),
+            )
         })
     })
     .await;
@@ -441,11 +457,11 @@ async fn hosted_services_stop_before_in_flight_requests_finish() {
         builder
             .use_middleware(MiddlewareSpec::factory(|| Arc::new(SlowOnDemand)))
             .register(move |svc| {
-                svc.add_hosted_service_with(move |_| {
+                svc.add_hosted_service(HostedServiceSpec::with_factory(move |_| {
                     Arc::new(StopTimeRecorder {
                         stopped_at: Arc::clone(&stopped_for_factory),
                     })
-                })
+                }))
             })
     })
     .await;
@@ -563,7 +579,9 @@ impl IHostedService for LegacyDefaultService {
 async fn add_hosted_service_with_default_still_works() {
     let port = find_free_port();
     let (handle, _runner) = spawn(port, |builder| {
-        builder.register(|svc| svc.add_hosted_service::<LegacyDefaultService>())
+        builder.register(|svc| {
+            svc.add_hosted_service(HostedServiceSpec::new::<LegacyDefaultService>())
+        })
     })
     .await;
 

@@ -97,6 +97,11 @@ writer renders every error through it.
   `BackgroundServiceSpec::with_factory(|resolver| Arc::new(B::new(..))).enabled(flag)` for
   constructor/DI and conditional registration. `add_background_service_with` and
   `_with_if` are removed; adapters/starters migrated.
+- **`HostedServiceSpec` is the single hosted-service registration value**:
+  `add_hosted_service(HostedServiceSpec::new::<T>())`, or
+  `HostedServiceSpec::with_factory(..).ordered(n).enabled(flag)` for factory construction,
+  start/stop order and conditional registration. `add_hosted_service_with`,
+  `_ordered`, `_with_ordered`, `_if` and `_with_if` are removed; tests migrated.
 
 ##### Nested request models (E2)
 
@@ -223,6 +228,11 @@ writer renders every error through it.
   `add_background_service(BackgroundServiceSpec::new::<B>())` 用于 `Default` worker；
   `BackgroundServiceSpec::with_factory(|resolver| Arc::new(B::new(..))).enabled(flag)` 覆盖构造参数、
   DI 与条件注册。删除 `add_background_service_with` 与 `_with_if`；adapter/starter 已迁移。
+- **`HostedServiceSpec` 成为 hosted service 的唯一注册值**：
+  `add_hosted_service(HostedServiceSpec::new::<T>())`，或
+  `HostedServiceSpec::with_factory(..).ordered(n).enabled(flag)` 覆盖工厂构造、启动/停止顺序与
+  条件注册。删除 `add_hosted_service_with`、`_ordered`、`_with_ordered`、`_if`、`_with_if`；
+  测试已迁移。
 
 ##### 嵌套请求模型（E2）
 

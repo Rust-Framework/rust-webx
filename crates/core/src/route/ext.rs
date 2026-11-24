@@ -101,64 +101,20 @@ pub trait IServiceCollectionExt: Sized {
     ///     .run()
     ///     .await
     /// ```
-    fn add_hosted_service<T>(self) -> Self
-    where
-        T: IHostedService + Default + Send + Sync + 'static;
-
-    /// Register a hosted service built by `factory` (singleton).
-    ///
-    /// Unlike [`add_hosted_service`](IServiceCollectionExt::add_hosted_service)
-    /// this does **not** require `Default`: the factory receives the DI resolver
-    /// when the service is constructed, so configuration and constructor
-    /// dependencies are injected normally.
-    ///
-    /// Analogous to ASP.NET Core's
-    /// `AddHostedService(sp => new T(sp.GetRequiredService<...>()))`.
+    /// Register a startup/shutdown service through [`HostedServiceSpec`].
     ///
     /// ```ignore
     /// svc
-    ///     .add_options::<OutboxOptions>("Outbox")
-    ///     .add_hosted_service_with(|resolver| {
-    ///         let options = resolve::<OutboxOptions>(resolver);
-    ///         Arc::new(OutboxConsumer::new(options))
-    ///     })
+    ///     .add_hosted_service(HostedServiceSpec::new::<DbInitService>())
+    ///     .add_hosted_service(
+    ///         HostedServiceSpec::with_factory(|resolver| {
+    ///             Arc::new(OutboxConsumer::new(resolve(resolver)))
+    ///         })
+    ///         .ordered(-100)
+    ///         .enabled(options.outbox.enabled),
+    ///     );
     /// ```
-    fn add_hosted_service_with<T, F>(self, factory: F) -> Self
-    where
-        T: IHostedService + 'static,
-        F: Fn(&dyn IServiceResolver) -> Arc<T> + Send + Sync + 'static;
-
-    /// Register a hosted service with an explicit start/stop order.
-    ///
-    /// Lower `order` starts first and stops last; equal orders keep the
-    /// registration order. See [`IHostedService::order`].
-    fn add_hosted_service_ordered<T>(self, order: i32) -> Self
-    where
-        T: IHostedService + Default + Send + Sync + 'static;
-
-    /// Register a factory-built hosted service with an explicit start/stop order.
-    fn add_hosted_service_with_ordered<T, F>(self, order: i32, factory: F) -> Self
-    where
-        T: IHostedService + 'static,
-        F: Fn(&dyn IServiceResolver) -> Arc<T> + Send + Sync + 'static;
-
-    /// Register a hosted service only when `enabled` is true.
-    ///
-    /// Conditions belong to configuration (`if options.Outbox.Enabled`), so a
-    /// deployment can switch a migration/consumer off without a code change:
-    ///
-    /// ```ignore
-    /// svc.add_hosted_service_if::<SeedService>(options.seed.enabled)
-    /// ```
-    fn add_hosted_service_if<T>(self, enabled: bool) -> Self
-    where
-        T: IHostedService + Default + Send + Sync + 'static;
-
-    /// Register a factory-built hosted service only when `enabled` is true.
-    fn add_hosted_service_with_if<T, F>(self, enabled: bool, factory: F) -> Self
-    where
-        T: IHostedService + 'static,
-        F: Fn(&dyn IServiceResolver) -> Arc<T> + Send + Sync + 'static;
+    fn add_hosted_service(self, spec: crate::hosted::HostedServiceSpec) -> Self;
 
     /// Register a [`BackgroundService`](crate::hosted::BackgroundService)
     /// worker (singleton, `Default` constructor).
@@ -311,68 +267,11 @@ impl IServiceCollectionExt for ServiceCollection {
             .add(ServiceLifetime::Singleton, factory)
     }
 
-    fn add_hosted_service<T>(self) -> Self
-    where
-        T: IHostedService + Default + Send + Sync + 'static,
-    {
-        self.singleton::<dyn IHostedService>(|_| Arc::new(T::default()))
-    }
-
-    fn add_hosted_service_with<T, F>(self, factory: F) -> Self
-    where
-        T: IHostedService + 'static,
-        F: Fn(&dyn IServiceResolver) -> Arc<T> + Send + Sync + 'static,
-    {
-        self.add(
-            ServiceLifetime::Singleton,
-            move |resolver: &dyn IServiceResolver| -> Arc<dyn IHostedService> { factory(resolver) },
-        )
-    }
-
-    fn add_hosted_service_ordered<T>(self, order: i32) -> Self
-    where
-        T: IHostedService + Default + Send + Sync + 'static,
-    {
-        self.add_hosted_service_with_ordered(order, |_| Arc::new(T::default()))
-    }
-
-    fn add_hosted_service_with_ordered<T, F>(self, order: i32, factory: F) -> Self
-    where
-        T: IHostedService + 'static,
-        F: Fn(&dyn IServiceResolver) -> Arc<T> + Send + Sync + 'static,
-    {
-        self.add(
-            ServiceLifetime::Singleton,
-            move |resolver: &dyn IServiceResolver| -> Arc<dyn IHostedService> {
-                Arc::new(crate::hosted::OrderedHostedService::new(
-                    order,
-                    factory(resolver),
-                ))
-            },
-        )
-    }
-
-    fn add_hosted_service_if<T>(self, enabled: bool) -> Self
-    where
-        T: IHostedService + Default + Send + Sync + 'static,
-    {
-        if enabled {
-            self.add_hosted_service::<T>()
-        } else {
-            self
-        }
-    }
-
-    fn add_hosted_service_with_if<T, F>(self, enabled: bool, factory: F) -> Self
-    where
-        T: IHostedService + 'static,
-        F: Fn(&dyn IServiceResolver) -> Arc<T> + Send + Sync + 'static,
-    {
-        if enabled {
-            self.add_hosted_service_with(factory)
-        } else {
-            self
-        }
+    fn add_hosted_service(self, spec: crate::hosted::HostedServiceSpec) -> Self {
+        let Some(factory) = spec.into_factory() else {
+            return self;
+        };
+        self.singleton::<dyn IHostedService>(move |resolver| factory(resolver))
     }
 
     fn add_background_service(self, spec: BackgroundServiceSpec) -> Self {

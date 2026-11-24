@@ -370,6 +370,67 @@ impl BackgroundServiceSpec {
     }
 }
 
+pub(crate) type HostedServiceFactory =
+    Arc<dyn Fn(&dyn rust_dix::IServiceResolver) -> Arc<dyn IHostedService> + Send + Sync>;
+
+/// A startup/shutdown service waiting to be registered.
+///
+/// Build one with [`new`](HostedServiceSpec::new) or
+/// [`with_factory`](HostedServiceSpec::with_factory), then refine it with
+/// [`ordered`](HostedServiceSpec::ordered) / [`enabled`](HostedServiceSpec::enabled).
+pub struct HostedServiceSpec {
+    factory: HostedServiceFactory,
+    order: Option<i32>,
+    enabled: bool,
+}
+
+impl HostedServiceSpec {
+    /// A service created with `T::default()`.
+    pub fn new<T: IHostedService + Default + Send + Sync + 'static>() -> Self {
+        Self::with_factory(|_| Arc::new(T::default()))
+    }
+
+    /// A service created by a factory that receives the DI resolver.
+    pub fn with_factory<T, F>(factory: F) -> Self
+    where
+        T: IHostedService + 'static,
+        F: Fn(&dyn rust_dix::IServiceResolver) -> Arc<T> + Send + Sync + 'static,
+    {
+        let factory = Arc::new(factory);
+        Self {
+            factory: Arc::new(move |resolver| factory(resolver) as Arc<dyn IHostedService>),
+            order: None,
+            enabled: true,
+        }
+    }
+
+    /// Start/stop order (lower starts first, stops last).
+    pub fn ordered(mut self, order: i32) -> Self {
+        self.order = Some(order);
+        self
+    }
+
+    /// Skip registration when `enabled` is false.
+    pub fn enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+
+    pub(crate) fn into_factory(self) -> Option<HostedServiceFactory> {
+        if !self.enabled {
+            return None;
+        }
+        let factory = self.factory;
+        Some(match self.order {
+            Some(order) => Arc::new(move |resolver| {
+                Arc::new(OrderedHostedService::new(order, factory(resolver)))
+                    as Arc<dyn IHostedService>
+            }),
+            None => factory,
+        })
+    }
+}
+
 pub(crate) struct OrderedHostedService<T: ?Sized> {
     order: i32,
     inner: Arc<T>,

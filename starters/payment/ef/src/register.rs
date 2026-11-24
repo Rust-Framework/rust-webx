@@ -9,6 +9,7 @@
 use std::sync::Arc;
 
 use rust_dix::{IServiceResolverExt, ScopeFactory, ServiceCollection};
+use webx_core::hosted::BackgroundServiceSpec;
 use webx_core::route::ext::IServiceCollectionExt;
 use webx_host::server::HostBuilder;
 
@@ -70,12 +71,12 @@ fn add_payment_inbox(
     }
 
     let worker_options = options.clone();
-    services.add_background_service_with_if::<PaymentInboxWorker, _>(
-        options.enabled,
-        move |resolver| {
+    services.add_background_service(
+        BackgroundServiceSpec::with_factory(move |resolver| {
             let services = resolve_scope_factory(resolver);
             Arc::new(PaymentInboxWorker::new(services, worker_options.clone()))
-        },
+        })
+        .enabled(options.enabled),
     )
 }
 

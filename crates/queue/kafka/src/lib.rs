@@ -36,6 +36,7 @@ pub use options::{KafkaOptions, KafkaStartOffset};
 use std::sync::Arc;
 
 use rust_dix::ServiceCollection;
+use webx_core::hosted::BackgroundServiceSpec;
 use webx_core::mediator::{EventDispatcher, IEventPublisher};
 use webx_core::route::ext::IServiceCollectionExt;
 use webx_host::health::HealthCheckSpec;
@@ -68,17 +69,19 @@ impl KafkaServiceCollectionExt for ServiceCollection {
         let mut services = self.instance::<dyn IEventPublisher>(publisher);
 
         if options.consumer_enabled {
-            services = services.add_background_service_with(move |resolver| {
-                let provider = resolver
-                    .provider_arc()
-                    .expect("ServiceProvider not available from DI resolver");
-                let dispatcher = Arc::new(EventDispatcher::new(provider));
-                Arc::new(KafkaEventConsumer::new(
-                    Arc::clone(&connection),
-                    options.clone(),
-                    dispatcher,
-                ))
-            });
+            services = services.add_background_service(BackgroundServiceSpec::with_factory(
+                move |resolver| {
+                    let provider = resolver
+                        .provider_arc()
+                        .expect("ServiceProvider not available from DI resolver");
+                    let dispatcher = Arc::new(EventDispatcher::new(provider));
+                    Arc::new(KafkaEventConsumer::new(
+                        Arc::clone(&connection),
+                        options.clone(),
+                        dispatcher,
+                    ))
+                },
+            ))
         }
 
         services

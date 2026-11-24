@@ -26,7 +26,7 @@ use rust_dix::IServiceResolver;
 use webx_core::app::IHost;
 use webx_core::error::{Error, Result};
 use webx_core::handler::IHostedService;
-use webx_core::hosted::{delay, BackgroundService, CancellationToken};
+use webx_core::hosted::{delay, BackgroundService, BackgroundServiceSpec, CancellationToken};
 use webx_core::http::IHttpContext;
 use webx_core::middleware::IMiddleware;
 use webx_core::route::ext::IServiceCollectionExt;
@@ -356,12 +356,12 @@ async fn background_worker_is_cancelled_promptly_on_shutdown() {
 
     let (handle, _runner) = spawn(port, move |builder| {
         builder.register(move |svc| {
-            svc.add_background_service_with(move |_| {
+            svc.add_background_service(BackgroundServiceSpec::with_factory(move |_| {
                 Arc::new(LoopWorker {
                     ticked: Arc::clone(&ticked_for_factory),
                     exited: Arc::clone(&exited_for_factory),
                 })
-            })
+            }))
         })
     })
     .await;
@@ -505,11 +505,11 @@ async fn periodic_worker_runs_from_a_factory_registration() {
 
     let (handle, _runner) = spawn(port, move |builder| {
         builder.register(move |svc| {
-            svc.add_background_service_with(move |_| {
+            svc.add_background_service(BackgroundServiceSpec::with_factory(move |_| {
                 Arc::new(TickWorker {
                     ticks: Arc::clone(&ticks_for_factory),
                 })
-            })
+            }))
         })
     })
     .await;
@@ -587,12 +587,12 @@ async fn ihost_stop_cancels_background_workers() {
             .mode(webx_core::mode::AppMode::Development)
             .no_spa()
             .register(move |svc| {
-                svc.add_background_service_with(move |_| {
+                svc.add_background_service(BackgroundServiceSpec::with_factory(move |_| {
                     Arc::new(LoopWorker {
                         ticked: Arc::new(AtomicU32::new(0)),
                         exited: Arc::clone(&exited_for_factory),
                     })
-                })
+                }))
             })
             .build(),
     );

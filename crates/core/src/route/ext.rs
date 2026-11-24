@@ -1,6 +1,7 @@
 //! IServiceCollectionExt — Extension trait for rust_dix ServiceCollection.
 
 use crate::handler::IHostedService;
+use crate::hosted::BackgroundServiceSpec;
 use crate::mediator::Mediator;
 use crate::middleware::IMiddleware;
 use crate::pipeline::IPipelineBehavior;
@@ -165,27 +166,19 @@ pub trait IServiceCollectionExt: Sized {
     /// The host starts the worker without blocking startup and cancels its
     /// [`CancellationToken`](crate::hosted::CancellationToken) on shutdown;
     /// business code only implements `execute`.
-    fn add_background_service<B>(self) -> Self
-    where
-        B: crate::hosted::BackgroundService + Default;
-
-    /// Register a factory-built [`BackgroundService`](crate::hosted::BackgroundService)
-    /// worker (singleton).
+    /// [`CancellationToken`](crate::hosted::CancellationToken) on shutdown;
+    /// business code only implements `execute`.
     ///
-    /// The factory receives the DI resolver at construction time, so the worker
-    /// can take configuration and `Arc<dyn ScopeFactory>` for its per-tick
-    /// scopes — the pattern that used to require a hand-rolled
-    /// `start`/`stop`/`JoinHandle` hosted service.
-    fn add_background_service_with<B, F>(self, factory: F) -> Self
-    where
-        B: crate::hosted::BackgroundService,
-        F: Fn(&dyn IServiceResolver) -> Arc<B> + Send + Sync + 'static;
-
-    /// Register a factory-built background worker only when `enabled` is true.
-    fn add_background_service_with_if<B, F>(self, enabled: bool, factory: F) -> Self
-    where
-        B: crate::hosted::BackgroundService,
-        F: Fn(&dyn IServiceResolver) -> Arc<B> + Send + Sync + 'static;
+    /// ```ignore
+    /// svc.add_background_service(BackgroundServiceSpec::new::<OutboxWorker>());
+    /// svc.add_background_service(
+    ///     BackgroundServiceSpec::with_factory(|resolver| {
+    ///         Arc::new(OutboxWorker::new(resolver))
+    ///     })
+    ///     .enabled(options.outbox.enabled),
+    /// );
+    /// ```
+    fn add_background_service(self, spec: BackgroundServiceSpec) -> Self;
 }
 
 impl IServiceCollectionExt for ServiceCollection {
@@ -230,19 +223,21 @@ impl IServiceCollectionExt for ServiceCollection {
 
         let mediator_registration = if has_local_events {
             let receiver_slot = Arc::new(std::sync::Mutex::new(Some(receiver)));
-            mediator_registration.add_background_service_with(move |resolver| {
-                let provider = resolver
-                    .provider_arc()
-                    .expect("ServiceProvider not available from DI resolver");
-                let receiver = receiver_slot
-                    .lock()
-                    .expect("event worker receiver lock poisoned")
-                    .take()
-                    .expect("the in-memory event worker is registered twice");
-                Arc::new(crate::mediator::InMemoryEventWorker::new(
-                    receiver, provider,
-                ))
-            })
+            mediator_registration.add_background_service(BackgroundServiceSpec::with_factory(
+                move |resolver| {
+                    let provider = resolver
+                        .provider_arc()
+                        .expect("ServiceProvider not available from DI resolver");
+                    let receiver = receiver_slot
+                        .lock()
+                        .expect("event worker receiver lock poisoned")
+                        .take()
+                        .expect("the in-memory event worker is registered twice");
+                    Arc::new(crate::mediator::InMemoryEventWorker::new(
+                        receiver, provider,
+                    ))
+                },
+            ))
         } else {
             // The queue has no producer: the publisher rejects every event
             // before touching it, so there is nothing to drain.
@@ -380,36 +375,15 @@ impl IServiceCollectionExt for ServiceCollection {
         }
     }
 
-    fn add_background_service<B>(self) -> Self
-    where
-        B: crate::hosted::BackgroundService + Default,
-    {
-        self.add_background_service_with(|_| Arc::new(B::default()))
-    }
-
-    fn add_background_service_with<B, F>(self, factory: F) -> Self
-    where
-        B: crate::hosted::BackgroundService,
-        F: Fn(&dyn IServiceResolver) -> Arc<B> + Send + Sync + 'static,
-    {
+    fn add_background_service(self, spec: BackgroundServiceSpec) -> Self {
+        if !spec.enabled {
+            return self;
+        }
+        let factory = spec.factory;
         self.add(
             ServiceLifetime::Singleton,
-            move |resolver: &dyn IServiceResolver| -> Arc<dyn IHostedService> {
-                Arc::new(crate::hosted::BackgroundServiceHost::new(factory(resolver)))
-            },
+            move |resolver: &dyn IServiceResolver| -> Arc<dyn IHostedService> { factory(resolver) },
         )
-    }
-
-    fn add_background_service_with_if<B, F>(self, enabled: bool, factory: F) -> Self
-    where
-        B: crate::hosted::BackgroundService,
-        F: Fn(&dyn IServiceResolver) -> Arc<B> + Send + Sync + 'static,
-    {
-        if enabled {
-            self.add_background_service_with(factory)
-        } else {
-            self
-        }
     }
 }
 

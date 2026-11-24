@@ -92,6 +92,11 @@ writer renders every error through it.
   constructor parameters and explicit slots. `use_middleware::<M>()`, `use_middleware_at`,
   `use_middleware_with` and `use_middleware_with_at` are removed; the workspace call sites are
   migrated.
+- **`BackgroundServiceSpec` is the single background-worker registration value**:
+  `add_background_service(BackgroundServiceSpec::new::<B>())` for a `Default` worker, or
+  `BackgroundServiceSpec::with_factory(|resolver| Arc::new(B::new(..))).enabled(flag)` for
+  constructor/DI and conditional registration. `add_background_service_with` and
+  `_with_if` are removed; adapters/starters migrated.
 
 ##### Nested request models (E2)
 
@@ -214,6 +219,10 @@ writer renders every error through it.
   `MiddlewareSpec::factory(|| Arc::new(M::new(..)) as Arc<dyn IMiddleware>).at(slot)` 覆盖构造参数
   与显式槽位。删除 `use_middleware::<M>()`、`use_middleware_at`、`use_middleware_with`、
   `use_middleware_with_at`；workspace 调用点已迁移。
+- **`BackgroundServiceSpec` 成为后台 worker 的唯一注册值**：
+  `add_background_service(BackgroundServiceSpec::new::<B>())` 用于 `Default` worker；
+  `BackgroundServiceSpec::with_factory(|resolver| Arc::new(B::new(..))).enabled(flag)` 覆盖构造参数、
+  DI 与条件注册。删除 `add_background_service_with` 与 `_with_if`；adapter/starter 已迁移。
 
 ##### 嵌套请求模型（E2）
 

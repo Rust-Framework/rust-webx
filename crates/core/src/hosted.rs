@@ -328,6 +328,48 @@ impl IHostedService for BackgroundServiceHost {
 /// Implementation detail of `add_hosted_service_ordered` /
 /// `add_hosted_service_with_ordered`: the host discovers hosted services through
 /// DI, so the order has to travel with the instance.
+/// A background worker waiting to be registered as a hosted service.
+///
+/// Build one with [`new`](BackgroundServiceSpec::new) (a `Default` worker) or
+/// [`with_factory`](BackgroundServiceSpec::with_factory) (constructor
+/// parameters / DI), optionally `.enabled(bool)`, then register it with
+/// `IServiceCollectionExt::add_background_service`.
+pub(crate) type BackgroundServiceFactory =
+    Arc<dyn Fn(&dyn rust_dix::IServiceResolver) -> Arc<dyn IHostedService> + Send + Sync>;
+
+pub struct BackgroundServiceSpec {
+    pub(crate) factory: BackgroundServiceFactory,
+    pub(crate) enabled: bool,
+}
+
+impl BackgroundServiceSpec {
+    /// A worker created with `B::default()`.
+    pub fn new<B: BackgroundService + Default + 'static>() -> Self {
+        Self::with_factory(|_| Arc::new(B::default()))
+    }
+
+    /// A worker created by a factory that receives the DI resolver.
+    pub fn with_factory<B, F>(factory: F) -> Self
+    where
+        B: BackgroundService + 'static,
+        F: Fn(&dyn rust_dix::IServiceResolver) -> Arc<B> + Send + Sync + 'static,
+    {
+        let factory = Arc::new(factory);
+        Self {
+            factory: Arc::new(move |resolver| {
+                Arc::new(BackgroundServiceHost::new(factory(resolver))) as Arc<dyn IHostedService>
+            }),
+            enabled: true,
+        }
+    }
+
+    /// Skip registration when `enabled` is false (configuration-driven workers).
+    pub fn enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+}
+
 pub(crate) struct OrderedHostedService<T: ?Sized> {
     order: i32,
     inner: Arc<T>,

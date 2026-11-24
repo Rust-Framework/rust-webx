@@ -10,6 +10,7 @@
 use std::sync::Arc;
 
 use rust_dix::{IServiceResolver, ScopeFactory, ServiceCollection};
+use webx_core::hosted::BackgroundServiceSpec;
 use webx_core::route::ext::IServiceCollectionExt;
 use webx_host::server::HostBuilder;
 
@@ -37,9 +38,8 @@ impl OutboxServiceCollectionExt for ServiceCollection {
         });
 
         let worker_options = options.clone();
-        services = services.add_background_service_with_if::<OutboxDispatcher, _>(
-            options.enabled,
-            move |resolver| {
+        services = services.add_background_service(
+            BackgroundServiceSpec::with_factory(move |resolver| {
                 let services = resolve_scope_factory(resolver);
                 let provider = resolver.provider_arc().expect(
                     "rust-dix built-in ScopeFactory implies a built provider; outbox registration \
@@ -50,7 +50,8 @@ impl OutboxServiceCollectionExt for ServiceCollection {
                     provider,
                     worker_options.clone(),
                 ))
-            },
+            })
+            .enabled(options.enabled),
         );
         services
     }

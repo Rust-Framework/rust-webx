@@ -10,6 +10,7 @@ use webx_core::auth::IAuthenticationScheme;
 use webx_core::config::{self, AppOptions};
 use webx_core::error::{Error, IErrorResponseWriter, Result};
 use webx_core::handler::IHostedService;
+use webx_core::hosted::BackgroundServiceSpec;
 use webx_core::hosted::{CancellationToken, ShutdownToken};
 use webx_core::localization::{IStringLocalizer, LocalizationOptions, StringLocalizer};
 use webx_core::mediator::IEventPublisher;
@@ -621,9 +622,9 @@ impl HostBuilder {
                 path,
                 interval,
             );
-            svc.instance(monitor)
-                .instance(port)
-                .add_background_service_with(move |_| Arc::new(watcher.clone()))
+            svc.instance(monitor).instance(port).add_background_service(
+                BackgroundServiceSpec::with_factory(move |_| Arc::new(watcher.clone())),
+            )
         })
     }
 

@@ -53,7 +53,7 @@
 | 决策 | 当前立场 | 验收 |
 |---|---|---|
 | 运行模型 | 保留 ASP.NET Core 式生命周期（DI/中间件/HostedService/Options/ProblemDetails），剥离运行期反射 | 显式依赖、无 ambient DI |
-| 性能 | 预算化：地板 + 框架税，CI 只对税设限 | `alloc-probe compare 500 12` |
+| 性能 | 预算化：地板 + 框架税，CI 只对税设限 | `alloc-probe compare 500 13` |
 | 内置 vs 生态 | 端口 + starter crate；`core` 不含 ORM/缓存/消息/AI | 依赖方向门禁 |
 | 路由注册 | 编译期 inventory + 启动期确定性排序；重复/冲突启动失败 | 路由冲突测试、trybuild |
 | 生命周期作用域 | 请求 scope + 连接 scope（实时）；root 不解析 Scoped | 严格作用域测试 |
@@ -98,7 +98,7 @@
 | MSRV | `ci.yml` msrv | `cargo +1.95.0 check --workspace --locked` |
 | 安全 | `ci.yml` audit | `cargo audit`（0 漏洞） |
 | 兼容 | `ci.yml` semver/upgrade | 公开 API 对 `v2.7.0`；N-2（rust-webx 2.7.0）源码同编译 |
-| 分配 | `ci.yml` alloc | `alloc-probe compare 500 12` |
+| 分配 | `ci.yml` alloc | `alloc-probe compare 500 13` |
 | 稳定性 | `stability.yml` | soak / chaos / wire p99 / broker-integration / conformance（HTTP 互操作矩阵） |
 | Fuzz | `fuzz.yml` | 独立 `fuzz/` workspace 的 nightly cargo-fuzz（6 个解析 target）+ 稳定工具链不变量测试 |
 

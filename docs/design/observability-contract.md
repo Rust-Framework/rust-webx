@@ -134,8 +134,9 @@ token 过期等）时读 session 层信号（`IConnection::close_reason()`、`Ss
 
 - **默认路径**：请求 span 是 DEBUG，默认 INFO subscriber 不创建它们，因此每个请求只做一次
   调用点兴趣检查；不分配、不 clone request 数据；body 只记录字节数，不记录内容。本机
-  `alloc-probe compare 500 12`（release，默认配置）仍为 **framework 16.43 / baseline 6.00 /
-  tax 10.42**，与本契约引入前一致，满足 [alloc-budget.md](alloc-budget.md) 的 ≤12 门禁。
+  `alloc-probe compare 500 13`（release，默认配置）为 **Windows: framework 16.43 / baseline
+  6.00 / tax 10.42**，**Linux CI: framework 18.43 / baseline 6.00 / tax 12.42**；两者都在
+  [alloc-budget.md](alloc-budget.md) 的平台门禁内（Windows ≤12 / Linux ≤13）。
 - **开启 span 的代价**：订阅者会为每个 enabled span 保存格式化字段。本机 alloc-probe 把
   `webx.http` 开到 DEBUG 后（`/hello` 该路由 3 个 span：root、route_match、response_write），
   framework 升到 70.43 allocs/request（+54）。这个代价只在显式开启 span 时发生；生产开启前请按

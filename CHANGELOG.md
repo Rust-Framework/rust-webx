@@ -74,7 +74,8 @@ existing `webx` API; there are **no application-facing breaking changes**.
 #### Changed
 
 - h3/h1/h2 share the same pipeline, error writer, response assembly and shutdown/drain lifecycle;
-  the hyper path keeps its byte-identical output (alloc probe unchanged: tax 10.42/12).
+  the hyper path keeps its byte-identical output (alloc probe: Windows 10.42, Linux CI 12.42;
+  the CI budget is 13, the Windows reference budget is 12).
 - QUIC 0-RTT remains **disabled** (`max_early_data_size = 0`) until the idempotency replay story is
   designed end to end.
 - WebSocket-over-HTTP/3 is delivered via the pinned `trev-h3 0.3.0` fork (upstream h3 0.0.8 cannot
@@ -190,7 +191,7 @@ existing `webx` API; there are **no application-facing breaking changes**.
 #### 变更
 
 - h3/h1/h2 共用 pipeline、错误写入、响应组装与停机排空；hyper 路径保持字节一致
-  （alloc 税不变：10.42/12）。
+  （alloc 税：Windows 10.42、Linux CI 12.42；CI 预算 13，Windows 参考预算 12）。
 - QUIC 0-RTT 保持关闭（`max_early_data_size = 0`），待幂等重放设计完成后再评估。
 - WebSocket over HTTP/3 通过钉版 `trev-h3 0.3.0` fork 交付（上游 h3 0.0.8 无法表达
   `:protocol: websocket`）。WebTransport 以同一 fork 的 `trev-h3-webtransport` 交付

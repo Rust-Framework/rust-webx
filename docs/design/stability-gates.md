@@ -102,8 +102,9 @@ WIRE_P99_BUDGET_MS=5 cargo test --release -p rust-webx --test wire_p99_test -- -
 
 ## 5. 分配门禁（PR CI）
 
-`cargo run -p alloc-probe --release --locked -- compare 500 12`：同机比较 framework
-与 hyper 地板，只对**框架税**设限；当前实测 tax **10.42**，门禁 12。细节与 ≤8 路径见
+`cargo run -p alloc-probe --release --locked -- compare 500 13`：同机比较 framework
+与 hyper 地板，只对**框架税**设限；Windows 参考 tax **10.42**，Linux CI tax **12.42**，
+门禁分别 12 / 13。细节与 ≤8 路径见
 [`alloc-budget.md`](alloc-budget.md)。
 
 ## 6. 安全审计

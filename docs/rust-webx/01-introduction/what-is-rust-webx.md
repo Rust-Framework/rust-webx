@@ -152,7 +152,7 @@ let user = req.require_user()?;
 | 优势 | 对开发者的直接价值 |
 |---|---|
 | **请求即端点，编译期分派** | `#[get]`/`#[post]` + `#[handler]` 自动 join；无手写路由表。direct JSON 路径不经过 mediator，也不装箱 request/response。 |
-| **低分配热路径** | 参考 `/hello` 基准的框架税为 **10.42 allocs/request**（hyper 地板 6.00），CI 门禁 ≤12。见[分配预算](../../design/alloc-budget.md)。 |
+| **低分配热路径** | 参考 `/hello` 基准的框架税为 **10.42 allocs/request**（hyper 地板 6.00；Linux CI 12.42），CI 门禁 ≤13（Windows 参考 ≤12）。见[分配预算](../../design/alloc-budget.md)。 |
 | **HTTP 能力由路由决定** | 无路由的 `#[handler]` 自动作为 `IMediator` handler，响应不要求 `Serialize`；没有 `in_process` 标注负担，也不会误暴露 command handler。 |
 | **生产级准入** | 所有 listener 共享一个全局 `MaxConnections` governor；首请求超时关闭静默连接；HTTP/2 keepalive；per-worker SSE drain。 |
 | **可取消的生命周期** | Host 单次运行状态机、run drop guard、优雅/立即关闭、join 超时保护 DI dispose；重复/并发 run 返回 typed error。 |

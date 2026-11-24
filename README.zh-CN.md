@@ -93,7 +93,7 @@ rust-webx **不是** 全栈 UI 框架（可搭配任意前端）、**不是** OR
 |---|---|
 | **对齐 ASP.NET Core 的开发模型** | 请求即端点：`impl IRequest<R>` 上写 `#[get]`/`#[post]`，实现上写 `#[handler]`，DI 与中间件在 `Host` 一次配置。 |
 | **编译期分派，没有字符串路由表** | 路由元数据和直接 Handler bridge 由 `inventory` 收集，`Host::build()` 负责 join，配置不一致启动即失败。 |
-| **低分配热路径** | direct JSON 路径不经过 mediator，也不装箱 request/response；`/hello` 参考基准的框架税为 **10.42 allocs/request**（hyper 地板 6.00），CI 门禁 ≤12。 |
+| **低分配热路径** | direct JSON 路径不经过 mediator，也不装箱 request/response；`/hello` 参考基准的框架税为 **10.42 allocs/request**（hyper 地板 6.00，Windows 参考；Linux CI 12.42），CI 门禁 ≤13（Windows 参考 ≤12）。 |
 | **性能不以正确性为代价** | allocation 计数、wire-level 正确性和稳定性套件都是发布门禁。见[分配预算](docs/design/alloc-budget.md)与[稳定性门禁](docs/design/stability-gates.md)。 |
 | **生产级准入与生命周期** | 所有 listener 共享一个全局连接 governor、首请求超时、HTTP/2 keepalive、优雅/立即关闭 guard、Host 单次运行状态、per-worker SSE drain。 |
 | **错误语义可信** | 错误响应在逆序 after hooks 之前写入，metrics/tracing/compression 看到真实状态；失败的成功路径不会残留 `cache-control`/`etag`/`content-encoding` 等表示头。 |

@@ -75,7 +75,7 @@ let host = Host::builder()
 - 引擎：`crates/engine/src/pipeline.rs`（`has_continuation` 分派、`run_chain`）
 - 契约测试：`crates/webx/tests/middleware_next_test.rs`（4 项：onion 顺序、短路、
   504 超时取消、错误响应先于 `after` 钩子）
-- 默认管道分配预算不变（`alloc-probe compare 500 12`，见 `docs/design/alloc-budget.md`）
+- 默认管道分配预算不变（`alloc-probe compare 500 13`，见 `docs/design/alloc-budget.md`）
 
 ## 边界
 

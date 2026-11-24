@@ -1,9 +1,9 @@
-﻿<#
+<#
 .SYNOPSIS
     Copy ecosystem documentation trees into a target docs/ directory.
 
 .DESCRIPTION
-    Shared copy logic used by docbit/publish.ps1 (bundle) and scripts/sync-docs.ps1
+    Shared copy logic used by starters/starters/docbit/publish.ps1 (bundle) and scripts/sync-docs.ps1
     (optional local staging). Sources are sibling repos under the Rust-Framework
     monorepo root; rust-webx handbook always comes from the workspace.
 

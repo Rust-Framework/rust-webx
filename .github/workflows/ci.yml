@@ -43,7 +43,9 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Run tests
-        run: cargo test --workspace --no-fail-fast
+        run: |
+            cargo test --workspace --no-fail-fast
+            cargo test --workspace --manifest-path starters/Cargo.toml --no-fail-fast
 
   lint:
     name: Lint
@@ -96,7 +98,9 @@ jobs:
         run: docker compose -f docker-compose.brokers.yml config > /dev/null
 
       - name: Run Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: |
+            cargo clippy --workspace --all-targets -- -D warnings
+            cargo clippy --workspace --manifest-path starters/Cargo.toml --all-targets -- -D warnings
 
       # Internal crates are released in lockstep; exact pins keep a consumer
       # from resolving a mixed set (e.g. umbrella 2.0 + host 2.1).
@@ -328,7 +332,7 @@ jobs:
           test -f docs/rust-webx/INDEX.json || (echo "Missing docs/rust-webx/INDEX.json" && exit 1)
 
       - name: Build docbit-host
-        run: cargo build -p docbit-host
+        run: cargo build --manifest-path starters/Cargo.toml -p docbit-host
 
       # 2.2-7: reference apps must use the framework security ports, not
       # hand-rolled JWT/bcrypt (the EF `map_ef` adapter is allowed: rust-ef
@@ -337,7 +341,7 @@ jobs:
       - name: Reference apps use native auth ports
         run: |
           if grep -rnE '^\s*(use (jsonwebtoken|bcrypt)|jsonwebtoken\s*=|bcrypt\s*=)' \
-              docbit dmbit --include='*.rs' --include='Cargo.toml'; then
+              starters/docbit starters/dmbit --include='*.rs' --include='Cargo.toml'; then
             echo "reference apps must use ITokenIssuer/IPasswordHasher, not hand-written JWT/bcrypt"
             exit 1
           fi

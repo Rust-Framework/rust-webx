@@ -78,6 +78,11 @@ def main() -> int:
         if not isinstance(spec, dict) or "path" not in spec:
             continue
         path = Path(spec["path"]).as_posix()
+        # Sibling RF workspaces (rust-dix/rust-ef) are deliberately outside this
+        # repository; the runtime crates must not depend on them, but the shared
+        # contract paths are pinned by the workspace itself.
+        if path.startswith("../"):
+            continue
         if path not in member_set:
             errors.append(
                 f"workspace.dependencies.{name} points at '{path}', "

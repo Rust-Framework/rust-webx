@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Stage ecosystem docs under rust-webx/docs/ for local preview (optional).
 
@@ -7,7 +7,7 @@
     mirror under rust-webx/docs/ (e.g. testing standalone layout). Daily monorepo
     development does NOT need this — DocService reads sibling repos live.
 
-    For production bundles, use docbit/publish.ps1 which copies directly from
+    For production bundles, use starters/starters/docbit/publish.ps1 which copies directly from
     source repos at publish time.
 
 .EXAMPLE

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Optional: stage ecosystem docs under rust-webx/docs/ for local preview.
-# Production publish copies directly from source repos — see docbit/publish.sh.
+# Production publish copies directly from source repos — see starters/docbit/publish.sh.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

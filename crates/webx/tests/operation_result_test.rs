@@ -56,10 +56,12 @@ struct CreateOrderHandler;
 #[async_trait::async_trait]
 impl IRequestHandler<CreateOrderRequest, OperationResult<OrderDto>> for CreateOrderHandler {
     async fn handle(&mut self, req: CreateOrderRequest) -> ActionResult<OperationResult<OrderDto>> {
-        Ok(OperationResult::success("order created").with_result(OrderDto {
-            id: "o-1".into(),
-            sku: req.sku,
-        }))
+        Ok(
+            OperationResult::success("order created").with_result(OrderDto {
+                id: "o-1".into(),
+                sku: req.sku,
+            }),
+        )
     }
 }
 

@@ -5,6 +5,8 @@
 use std::net::TcpListener;
 use std::sync::Arc;
 
+use webx_host::cors::CorsConfig;
+
 async fn spawn_test_host(port: u16) {
     spawn_test_host_with(port, |b| b).await;
 }
@@ -273,7 +275,13 @@ async fn integration_health_probe_evaluated_at_request_time() {
 #[tokio::test]
 async fn integration_cors_preflight_returns_204() {
     let port = find_free_port();
-    spawn_test_host(port).await;
+    spawn_test_host_with(port, |builder| {
+        builder.use_cors(CorsConfig {
+            origins: vec!["https://example.com".to_string()],
+            ..CorsConfig::default()
+        })
+    })
+    .await;
 
     let client = reqwest::Client::new();
     let resp = client
@@ -306,7 +314,13 @@ async fn integration_cors_preflight_returns_204() {
 #[tokio::test]
 async fn integration_cors_actual_request_has_headers() {
     let port = find_free_port();
-    spawn_test_host(port).await;
+    spawn_test_host_with(port, |builder| {
+        builder.use_cors(CorsConfig {
+            origins: vec!["https://example.com".to_string()],
+            ..CorsConfig::default()
+        })
+    })
+    .await;
 
     let resp = reqwest::Client::new()
         .get(format!("http://127.0.0.1:{}/health", port))

@@ -7,7 +7,6 @@ members = [
     "crates/engine",
     "crates/macros",
     "crates/webx",
-    "crates/idempotency/ef",
     "crates/spa",
     "crates/build",
     "crates/openapi",
@@ -15,9 +14,7 @@ members = [
     # of adding another top-level `crates/<vendor>` entry. Enforced by
     # scripts/check-crate-layout.sh.
     "crates/ai/core",
-    "crates/ai/ef",
     "crates/ai/gateway",
-    "crates/auth/ef",
     "crates/auth/oidc",
     "crates/auth/oauth2",
     "crates/auth/mfa",
@@ -34,11 +31,8 @@ members = [
     "crates/payment/paypal",
     "crates/payment/adyen",
     "crates/payment/square",
-    "crates/payment/ef",
     # ORM boundary group: Web/ORM adapters live here, never in core/umbrella.
-    "crates/ef/webx",
     # Outbox group: transactional-outbox starter over rust-ef.
-    "crates/outbox/ef",
     # Transport group: optional non-hyper listener backends (2.9 transport port).
     "crates/transport/h3",
     "crates/client",
@@ -48,14 +42,6 @@ members = [
     "testing/alloc-probe",
     "testing/contract-tests",
     "testing/load-probe",
-    "docbit/contracts",
-    "docbit/domain",
-    "docbit/handlers",
-    "docbit/host",
-    "dmbit/contracts",
-    "dmbit/domain",
-    "dmbit/handlers",
-    "dmbit/host",
     "imbit",
 ]
 
@@ -113,10 +99,6 @@ description = "rust-webx - A Rust WebApi framework inspired by ASP.NET Core, bui
 # 3.0 workspace: unify the registry 1.0 dependency pulled by the ef starters
 # with the local rust-dix 1.1 (From<RdiError>); remove once 1.1 is published.
 rust-dix = { path = "../rust-dix/crates/dix" }
-# 3.0: local rust-ef 2.9.1 provides `From<EFError> for AppError`; the registry
-# 2.9.0 does not. Remove after 2.9.1 is published.
-rust-ef = { path = "../rust-ef/crates/core" }
-rust-ef-sqlite = { path = "../rust-ef/crates/sqlite" }
 
 [workspace.dependencies]
 # Internal crates
@@ -129,8 +111,6 @@ rust-webx-spa = { version = "=3.0.0", path = "crates/spa" }
 rust-webx-build = { version = "=3.0.0", path = "crates/build" }
 rust-webx-openapi = { version = "=3.0.0", path = "crates/openapi" }
 rust-webx-ai = { version = "=3.0.0", path = "crates/ai/core" }
-rust-webx-ai-ef = { version = "=3.0.0", path = "crates/ai/ef" }
-rust-webx-auth-ef = { version = "=3.0.0", path = "crates/auth/ef" }
 rust-webx-oidc = { version = "=3.0.0", path = "crates/auth/oidc" }
 rust-webx-oauth2 = { version = "=3.0.0", path = "crates/auth/oauth2" }
 rust-webx-mfa = { version = "=3.0.0", path = "crates/auth/mfa" }
@@ -149,25 +129,13 @@ rust-webx-pay-wechatpay = { version = "=3.0.0", path = "crates/payment/wechatpay
 rust-webx-pay-paypal = { version = "=3.0.0", path = "crates/payment/paypal" }
 rust-webx-pay-adyen = { version = "=3.0.0", path = "crates/payment/adyen" }
 rust-webx-pay-square = { version = "=3.0.0", path = "crates/payment/square" }
-rust-webx-pay-ef = { version = "=3.0.0", path = "crates/payment/ef" }
 
 # ORM boundary (opt-in; core/umbrella never link rust-ef).
-rust-webx-ef = { version = "=3.0.0", path = "crates/ef/webx" }
-rust-webx-idempotency-ef = { version = "=3.0.0", path = "crates/idempotency/ef" }
 # Transactional outbox starter (opt-in; own crate group).
-rust-webx-outbox-ef = { version = "=3.0.0", path = "crates/outbox/ef" }
 # Optional non-hyper listener backends (opt-in; core/umbrella never link quinn/h3).
 rust-webx-h3 = { version = "=3.0.0", path = "crates/transport/h3" }
 
-# Docbit sub-crates
-docbit-contracts = { version = "0.1.0", path = "docbit/contracts" }
-docbit-domain = { version = "0.1.0", path = "docbit/domain" }
-docbit-handlers = { version = "0.1.0", path = "docbit/handlers" }
 
-# Dmbit sub-crates
-dmbit-contracts = { version = "0.1.0", path = "dmbit/contracts" }
-dmbit-domain = { version = "0.1.0", path = "dmbit/domain" }
-dmbit-handlers = { version = "0.1.0", path = "dmbit/handlers" }
 
 # DI framework (crates.io — no local path required)
 # Local sibling checkout for the 3.0 workspace (rust-dix 1.1 adds

@@ -52,10 +52,14 @@ fn documented_constructors_still_exist() {
         .with_detail("detail")
         .with_instance("/x");
 
-    // Pagination (2.0 contract).
-    let paging = PagedRequest::from_parts(Some(2), Some(50));
+    // Pagination contract (3.0: plain fields; binding owns defaults/validation).
+    let paging = PagedRequest {
+        page: 2,
+        page_size: 50,
+    };
     assert_eq!(paging.page, 2);
     assert_eq!(paging.page_size, 50);
+    assert_eq!(paging.offset(), 50);
 
     // Rate limiting compatibility wrapper (kept by 2.2).
     let limiter = RateLimiter::new(10.0, 20, 1_000);

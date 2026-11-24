@@ -76,19 +76,18 @@ proptest! {
         prop_assert_eq!(&hit.params[0].1, &id);
     }
 
-    /// Pagination clamps and never overflows, even for extreme inputs.
+    /// Pagination offset never overflows, even for extreme inputs.
     #[test]
-    fn pagination_is_always_bounded(
-        page in proptest::option::of(any::<u32>()),
-        page_size in proptest::option::of(any::<u32>()),
+    fn pagination_offset_is_u64_and_bounded(
+        page in any::<u32>(),
+        page_size in any::<u32>(),
     ) {
-        let paging = PagedRequest::from_parts(page, page_size);
-        prop_assert!(paging.page >= 1);
-        prop_assert!((1..=100).contains(&paging.page_size));
+        let paging = PagedRequest { page, page_size };
         prop_assert_eq!(
             paging.offset(),
-            paging.page.saturating_sub(1).saturating_mul(paging.page_size)
+            u64::from(page.saturating_sub(1)) * u64::from(page_size)
         );
+        prop_assert_eq!(paging.limit(), page_size);
     }
 
     /// RFC 9457 members survive a serialize/parse round trip, including

@@ -3,6 +3,71 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [3.0.0] — unreleased — 契约类型并入 `rust-core`（3.0 第一批）
+
+> **English** · **简体中文**
+
+The pagination, cursor and business-envelope contracts now come from the shared
+**`rust-core`** crate instead of `rust-webx-core`. The 2.9.x definitions are deleted; the
+historical `webx_core::pagination` / `::keyset` / `::operation` module paths keep working as
+re-exports. This is the first step of the 3.0 contract convergence (the `Error = AppError` alias and
+the API-convergence batches are separate, still-unreleased steps).
+
+#### English
+
+##### Breaking
+
+- **`PagedRequest` is the plain request contract**: fields `page` / `page_size` only; `new`,
+  `from_parts`, `clamped`, `Default` and serde field defaults are gone. Defaults and range
+  validation move to the binding layer (migration: use `#[serde(default = "..")]` +
+  `#[validate(range(..))]`; out-of-range is `400`, not a silent clamp). `offset()` now returns
+  `u64`; `limit()` returns `page_size`.
+- **`PagedResult<T>` is the flat operation envelope**
+  `{success,status,message,items,total}` (composed from `OperationResult<()>`; Rust has no
+  inheritance). `PagedResult::new(items, total)` takes two arguments; `from_request` and the
+  `page`/`page_size`/`total_pages` echo are removed. The page part still has no request echo;
+  clients compute `total_pages = ceil(total / page_size)`.
+- **`KeysetRequest` / `Cursor` / `CursorPage` / `CursorError` and `OperationResult<T>`** are
+  re-exports from `rust-core`; their shapes are unchanged in this release (the keyset constructors
+  and the `OperationResult` method convergence are later steps).
+- **New dependency**: `rust-core` (0.1) must be published before `rust-webx` 3.0. `rust-webx`
+  runtime crates still do not depend on `rust-ef`.
+
+##### Migration
+
+| 2.9.x | 3.0 |
+|---|---|
+| `PagedRequest::from_parts(page, size)` | `PagedRequest { page, page_size }` with binding defaults/validation |
+| `PagedResult::from_request(items, total, &req)` | `PagedResult::new(items, total)` (or `to_page` in rust-ef) |
+| `result.page` / `result.page_size` / `result.total_pages` | request fields / `ceil(total / page_size)` on the client |
+| `#[serde(default)]` requires `Deserialize` | `serde` is a `WebxRequestMeta` helper attribute (2.9.1+) |
+
+#### 简体中文
+
+##### 破坏性变更
+
+- **`PagedRequest` 变成纯请求契约**：只剩 `page` / `page_size` 字段，删除 `new`、`from_parts`、
+  `clamped`、`Default` 与 serde 字段默认值；默认值与范围校验移到 binding 层（迁移：用
+  `#[serde(default = "..")]` + `#[validate(range(..))]`；越界是 400，不再静默夹紧）。`offset()`
+  改返回 `u64`；`limit()` 返回 `page_size`。
+- **`PagedResult<T>` 变成扁平业务信封** `{success,status,message,items,total}`（组合
+  `OperationResult<()>`，Rust 无继承）。`PagedResult::new(items, total)` 两个参数；删除
+  `from_request` 与 `page`/`page_size`/`total_pages` 回声。页面部分仍无请求回声；客户端按
+  `ceil(total / page_size)` 计算总页数。
+- **`KeysetRequest` / `Cursor` / `CursorPage` / `CursorError` 与 `OperationResult<T>`** 改为从
+  `rust-core` 重导出；本版形状不变（keyset 构造器与 `OperationResult` 方法收敛是后续步骤）。
+- **新依赖**：`rust-webx` 3.0 依赖 `rust-core` 0.1，必须先发布 core；runtime crates 仍不依赖
+  `rust-ef`。
+
+##### 迁移
+
+| 2.9.x | 3.0 |
+|---|---|
+| `PagedRequest::from_parts(page, size)` | `PagedRequest { page, page_size }` + binding 默认/校验 |
+| `PagedResult::from_request(items, total, &req)` | `PagedResult::new(items, total)`（或 rust-ef `to_page`） |
+| `result.page` / `result.page_size` / `result.total_pages` | 请求字段 / 客户端 `ceil(total / page_size)` |
+| `#[serde(default)]` 需 `Deserialize` | 2.9.1 起 `serde` 是 `WebxRequestMeta` helper attribute |
+
 ## [2.9.1] — 2026-11-24
 
 > **English** · **简体中文**

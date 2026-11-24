@@ -9,6 +9,7 @@
 | 小节 | 内容 |
 |------|------|
 | [升级到 2.5（2.x 加性演进）](upgrade-to-2.5.md) | 2.1 → 2.5 升级步骤、可选能力清单、稳定面与弃用承诺 |
+| [升级到 3.0（破坏性）](upgrade-to-3.0.md) | Error 载体、分页、嵌套绑定、排序、HostBuilder 入口与 workspace 拆分 |
 | [从 ASP.NET Core 迁移](from-aspnet-core.md) | .NET 开发者迁移路径 |
 | [从 Axum / Actix 迁移](from-axum-actix.md) | Rust 原生框架迁移 |
 | [概念对照表](concept-mapping.md) | 完整概念映射 |

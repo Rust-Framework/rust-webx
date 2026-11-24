@@ -152,6 +152,7 @@
 
 - [第十六章 迁移指南](./16-migration/INDEX.md)
   - [升级到 2.5（2.x 加性演进）](./16-migration/upgrade-to-2.5.md)
+- [升级到 3.0（破坏性）](./16-migration/upgrade-to-3.0.md)
   - [从 ASP.NET Core 迁移](./16-migration/from-aspnet-core.md)
   - [从 Axum / Actix 迁移](./16-migration/from-axum-actix.md)
   - [概念对照表](./16-migration/concept-mapping.md)

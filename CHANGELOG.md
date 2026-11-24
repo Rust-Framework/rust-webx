@@ -5,7 +5,7 @@ All notable changes to **rust-webx** are documented in this file.
 
 ## [3.0.0] — unreleased — 契约类型与统一错误载体（3.0 前两批）
 
-> **English** · **简体中文**
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
 
 The pagination, cursor and business-envelope contracts now come from the shared
 **`rust-core`** crate instead of `rust-webx-core`. The 2.9.x definitions are deleted; the
@@ -235,7 +235,7 @@ writer renders every error through it.
 
 ## [2.9.1] — 2026-11-24
 
-> **English** · **简体中文**
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
 
 ### English
 
@@ -475,7 +475,7 @@ deprecated, by maintainer decision (see Breaking).
 
 ## [2.9.0] — 2026-11-24
 
-> **English** · **简体中文**
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
 
 ### English
 
@@ -718,7 +718,7 @@ existing `webx` API; there are **no application-facing breaking changes**.
 > This iteration was never tagged or published to crates.io; its changes ship in **2.9.0**.
 > Kept here as the provenance of the 2.8 iteration.
 
-> **English** · **简体中文**
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
 
 ### English
 
@@ -1328,7 +1328,7 @@ allowlist and `docs/design/compatibility.md`); all items are mechanical to migra
 
 ## [2.7.0] — 2026-11-22
 
-> **English** · **简体中文**
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
 
 ### English
 
@@ -1569,7 +1569,7 @@ umbrella 均不链接支付适配器；不引入服务商 SDK，也不引入第�
 
 ## [2.6.0] — 2026-11-21
 
-> **English** · **简体中文**
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
 
 ### English
 
@@ -1767,7 +1767,7 @@ implement the full sanitized contract.
 Production-stability pass over the 2.0 engine. No feature expansion; the focus
 is admission, lifecycle, error semantics and wire-level verification.
 
-> **English** · **简体中文**
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
 
 ### English
 
@@ -1842,7 +1842,7 @@ The execution engine is rewritten from first principles on the new
 `IRequest`/`IRequestHandler`, `IMiddleware`, results, auth/config/DI) is kept;
 the old single-runtime hyper loop is gone.
 
-> **English** · **简体中文**
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
 
 ### English
 
@@ -1941,7 +1941,7 @@ Security/correctness hardening plus the 1.5 capability line (SSE, outbound clien
 API-key auth, secrets, metrics, options hot reload, request-body streaming,
 error writers, HTTP/2, AI gateway crates).
 
-> **English** · **简体中文**
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
 
 ### English
 
@@ -2052,7 +2052,7 @@ Additive release on the 1.3 line: every existing API keeps working (`register`, 
 the synchronous health registry view, the default `ITokenIssuer`). It fixes the two upstream defects
 found by the Travel production verification.
 
-> **English** · **简体中文**
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
 
 ### English
 
@@ -2988,7 +2988,7 @@ for the step-by-step migration.
 
 ## [0.4.0] — 2026-09-16 — 文件上传与下载基础设施
 
-> **English** · **简体中文**
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
 
 ### English
 
@@ -3190,7 +3190,7 @@ for the step-by-step migration.
 
 ## [0.3.7] — 2026-09-01 — rust-ef 1.8.3 + docbit DbContext
 
-> **English** · **简体中文**
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
 
 ### English
 
@@ -3208,7 +3208,7 @@ for the step-by-step migration.
 
 ## [0.3.6] — 2026-09-01 — rust-dix 0.7 / rust-ef 1.8.2
 
-> **English** · **简体中文**
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
 
 ### English
 
@@ -3224,7 +3224,7 @@ for the step-by-step migration.
 
 ## [0.3.5] — 2026-08-31 — Cors appsettings bind + docbit Production
 
-> **English** · **简体中文**
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
 
 ### English
 
@@ -3244,7 +3244,7 @@ for the step-by-step migration.
 
 ## [0.3.4] — 2026-08-31 — Docbit SQLite-only and rustls
 
-> **English** · **简体中文**
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
 
 ### English
 
@@ -3267,7 +3267,7 @@ Maintenance release focused on simpler docbit production packaging and OpenSSL-f
 - **Docbit 发布**：`publish.ps1 -Linux` 支持交叉编译。
 ## [0.3.3] — 2026-08-31 — Docbit cross-compile and docs
 
-> **English** · **简体中文**
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
 
 ### English
 
@@ -3289,7 +3289,7 @@ Maintenance release: docbit-host cross-compile tooling, ecosystem docs publishin
 - **Docbit 发布脚本**与**文档 INDEX/展览**更新。
 ## [0.3.2] — 2026-08-31 — Architecture remediation Phases 1–4
 
-> **English** · **简体中文**
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
 
 ### English
 
@@ -3341,7 +3341,7 @@ Breaking and behavioral changes from the architecture remediation (Phases 1–4)
 
 ## [0.3.1] — 2026-08-16 — crates.io 再发布对齐 · Re-release alignment
 
-> **English** · **简体中文**
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
 
 ### English
 

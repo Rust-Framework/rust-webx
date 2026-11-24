@@ -125,6 +125,11 @@ existing `webx` API; there are **no application-facing breaking changes**.
 - MSRV stays **1.95**; `rust-webx-h3` pins `quinn = 0.11.12`, `trev-h3 = 0.3.0`,
   `trev-h3-quinn = 0.3.0` and `trev-h3-webtransport = 0.3.0` (the MIT h3 fork is isolated
   behind `H3Config`/`H3Transport`/`IWebTransportHandler`; exact pins keep fork changes contained).
+- **`rust-webx-h3` is an opt-in preview transport in 2.9.** Default builds do not link it;
+  the HTTP/1.1+2 engine is the stable path. Interop baseline: h3spec v0.1.15, 86 cases /
+  64 pass / 21 failures in the pinned upstream `trev-h3 0.3.0` fork (H3/QPACK error handling
+  and one quinn/rustls TLS case) / 1 pending. Those failures are tracked upstream and do not
+  affect the default pipeline.
 - Cross-repo pairing: rust-ef 2.9.0 first, then rust-webx 2.9.0 (unchanged ORM boundary).
 - **Repository layout:** `crates/` is now the published surface only. The non-published
   harnesses moved to `testing/` (`alloc-probe`, `contract-tests`, `upgrade-smoke`), and the
@@ -224,6 +229,10 @@ existing `webx` API; there are **no application-facing breaking changes**.
 - MSRV 保持 **1.95**；`rust-webx-h3` 精确钉 `quinn = 0.11.12`、`trev-h3 = 0.3.0`、
   `trev-h3-quinn = 0.3.0`、`trev-h3-webtransport = 0.3.0`（MIT h3 fork 隔离在
   `H3Config`/`H3Transport`/`IWebTransportHandler` 后面，精确钉版限制 fork 变更的影响面）。
+- **`rust-webx-h3` 在 2.9 是可选 preview 传输。** 默认构建不链接；HTTP/1.1+2 engine 仍是稳定
+  路径。互操作基线：h3spec v0.1.15，86 cases / 64 pass / 21 个 pinned upstream
+  `trev-h3 0.3.0` fork 失败（H3/QPACK 错误处理 + 1 个 quinn/rustls TLS case）/ 1 pending。
+  失败按上游跟踪，不影响默认 pipeline。
 - 跨仓配对：先 rust-ef 2.9.0，后 rust-webx 2.9.0（ORM 边界不变）。
 - **仓库布局：** `crates/` 现在只放可发布 crate。非发布测试工具迁移到 `testing/`
   （`alloc-probe`、`contract-tests`、`upgrade-smoke`），布局门禁会拒绝 `crates/` 下的

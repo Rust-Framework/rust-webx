@@ -175,7 +175,7 @@ core/伞 crate 不链接它：
 
 | crate | 导入名 | 职责 |
 |---|---|---|
-| `rust-webx-h3` | `webx_h3` | HTTP/3（QUIC + TLS 1.3 + h3）：`H3Transport` 实现 `IHttpTransport`，提供 `H3Config`、RFC 9220 WebSocket over h3 与 adapter-level WebTransport |
+| `rust-webx-h3` | `webx_h3` | HTTP/3（preview）：QUIC + TLS 1.3 + h3，`H3Transport` 实现 `IHttpTransport`，提供 `H3Config`、RFC 9220 WebSocket over h3 与 adapter-level WebTransport |
 
 - **应用按需依赖**：`rust-webx-h3 = "2.9"`；core/伞不链接 QUIC/h3，默认构建不受影响。
 - **复用同一条 pipeline**：路由、中间件、绑定、错误写入、鉴权、DI 与指标都走 engine 生产路径；

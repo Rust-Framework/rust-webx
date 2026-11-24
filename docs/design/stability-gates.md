@@ -109,9 +109,9 @@ WIRE_P99_BUDGET_MS=5 cargo test --release -p rust-webx --test wire_p99_test -- -
 ## 6. 安全审计
 
 - PR CI `audit` job：`cargo install cargo-audit --locked && cargo audit`（RustSec 漏洞库），
-  当前 **0 vulnerabilities** + 2 条 `unmaintained` 警告（`chrono` 经 `rskafka`/`rust-ef`
-  传递，`rustls-pemfile` 为 `rust-webx-client` 直接依赖；均为允许级警告，跟踪上游迁移，
-  不阻塞发布）；
+  当前 **0 vulnerabilities** + 1 条 `unmaintained` 警告（`chrono` 经 `rskafka`/`rust-ef`
+  传递；TLS PEM 解析已迁到维护中的 `rustls-pki-types`，`rustls-pemfile` 不再在依赖图中）；
+  该警告为允许级，跟踪上游迁移，不阻塞发布；
 - 依赖来源：仅 crates.io + 锁定 `Cargo.lock`；`unsafe_code = "forbid"` 覆盖全部框架 crate
   （`alloc-probe` 为独立开发工具，显式说明其 `GlobalAlloc` 用途）；
 - 安全相关回归门禁：`session_revocation_test`、`csrf`/`cookie` 测试、`constant_time_eq`

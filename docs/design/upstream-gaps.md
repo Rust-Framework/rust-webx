@@ -87,7 +87,7 @@
   （`/health` + `/echo`）；quiche-client smoke 与 h3i 0.7.0 replay 均 200、exit 0；
   h3spec v0.1.15 为 **86 examples / 21 failures / 1 pending** 的**上游 `trev-h3 0.3.0`
   基线**（失败在 H3/QPACK 错误处理与 1 个 quinn/rustls TLS 层，不在 adapter/pipeline），
-  用作回归基线而非 2.9 交付缺陷。建议进 CI 非阻塞/夜间 job 并固定版本/digest。
+  用作**可选 preview 传输**的回归基线而非 2.9 稳定面缺陷。建议进 CI 非阻塞/夜间 job 并固定版本/digest。
 - **新增风险**：`rust-webx-h3` 依赖 h3 fork，需要跟踪 fork 维护、精确钉版并在 CI
   做回归；RustSec advisory 按 crate 名匹配，fork 包名 `trev-*` 不会命中上游
   `h3`/`h3-quinn` 的既有 advisory，需人工跟踪上游修复。后续若上游 h3 支持 RFC 9220/

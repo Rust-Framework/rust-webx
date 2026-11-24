@@ -30,7 +30,7 @@ rustls.workspace = true
 tokio = { workspace = true, features = ["net", "rt", "rt-multi-thread", "macros", "fs", "signal", "sync", "time", "io-util"] }
 tokio-util.workspace = true
 tokio-rustls.workspace = true
-rustls-pemfile.workspace = true
+rustls-pki-types.workspace = true
 sha2.workspace = true
 tracing.workspace = true
 multer.workspace = true

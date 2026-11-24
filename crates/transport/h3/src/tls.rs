@@ -4,7 +4,7 @@
 //! the shared HTTP/1.1+2 rustls configuration would negotiate the wrong ALPN or
 //! fail during the handshake. This module therefore builds an **independent**
 //! TLS server configuration with exactly one protocol (`h3`) and exactly one
-//! version (TLS 1.3). PEM decoding stays with `rustls-pemfile`, the provider and
+//! version (TLS 1.3). PEM decoding stays with `rustls-pki-types`, the provider and
 //! cipher suites stay with rustls — no key material handling is re-implemented
 //! here.
 
@@ -16,6 +16,7 @@ use std::sync::Arc;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::server::WebPkiClientVerifier;
 use rustls::{RootCertStore, ServerConfig};
+use rustls_pki_types::pem::PemObject;
 use webx_core::config::TlsClientAuth;
 use webx_core::error::{Error, Result};
 
@@ -113,7 +114,7 @@ fn load_certificates(path: &Path) -> Result<Vec<CertificateDer<'static>>> {
     let mut reader = BufReader::new(file);
 
     let mut certificates = Vec::new();
-    for item in rustls_pemfile::certs(&mut reader) {
+    for item in CertificateDer::pem_reader_iter(&mut reader) {
         certificates.push(item.map_err(|err| {
             Error::Http(format!(
                 "cannot parse HTTP/3 TLS certificate '{}': {err}",
@@ -140,20 +141,18 @@ fn load_private_key(path: &Path) -> Result<PrivateKeyDer<'static>> {
     })?;
     let mut reader = BufReader::new(file);
 
-    // `rustls_pemfile::private_key` accepts PKCS#8, PKCS#1 and SEC1 blocks.
-    rustls_pemfile::private_key(&mut reader)
-        .map_err(|err| {
-            Error::Http(format!(
-                "cannot parse HTTP/3 TLS private key '{}': {err}",
-                path.display()
-            ))
-        })?
-        .ok_or_else(|| {
-            Error::Http(format!(
-                "no PKCS#8, PKCS#1 or SEC1 private key found in HTTP/3 TLS private key '{}'",
-                path.display()
-            ))
-        })
+    // `PrivateKeyDer::from_pem_reader` accepts PKCS#8, PKCS#1 and SEC1 blocks.
+    match PrivateKeyDer::from_pem_reader(&mut reader) {
+        Ok(key) => Ok(key),
+        Err(rustls_pki_types::pem::Error::NoItemsFound) => Err(Error::Http(format!(
+            "no PKCS#8, PKCS#1 or SEC1 private key found in HTTP/3 TLS private key '{}'",
+            path.display()
+        ))),
+        Err(err) => Err(Error::Http(format!(
+            "cannot parse HTTP/3 TLS private key '{}': {err}",
+            path.display()
+        ))),
+    }
 }
 
 #[cfg(test)]

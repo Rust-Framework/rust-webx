@@ -14,6 +14,8 @@ use std::time::Duration;
 use bytes::{Buf as _, BufMut as _, Bytes, BytesMut};
 use futures_util::io::AsyncReadExt as _;
 use futures_util::{SinkExt, StreamExt};
+use rustls_pki_types::pem::PemObject;
+use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use serde::Serialize;
 use sha2::{Digest as _, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -406,15 +408,14 @@ impl H3Client {
                 let mut cert_reader = std::io::BufReader::new(
                     std::fs::File::open(cert_path).expect("open the client certificate"),
                 );
-                let certificates = rustls_pemfile::certs(&mut cert_reader)
+                let certificates = CertificateDer::pem_reader_iter(&mut cert_reader)
                     .collect::<std::result::Result<Vec<_>, _>>()
                     .expect("parse the client certificate");
                 let mut key_reader = std::io::BufReader::new(
                     std::fs::File::open(key_path).expect("open the client key"),
                 );
-                let key = rustls_pemfile::private_key(&mut key_reader)
-                    .expect("parse the client key")
-                    .expect("client key block");
+                let key =
+                    PrivateKeyDer::from_pem_reader(&mut key_reader).expect("parse the client key");
                 builder
                     .with_client_auth_cert(certificates, key)
                     .expect("client-auth TLS config")

@@ -16,6 +16,7 @@ use hyper_util::client::legacy::connect::proxy::Tunnel;
 use hyper_util::client::legacy::connect::{Connect, HttpConnector};
 use hyper_util::client::legacy::Client as HyperClient;
 use hyper_util::rt::TokioExecutor;
+use rustls::pki_types::{pem::PemObject, CertificateDer};
 use rustls::RootCertStore;
 use std::fmt;
 use std::future::Future;
@@ -871,7 +872,7 @@ fn build_tls_config(options: &HttpClientOptions) -> Result<rustls::ClientConfig,
             })?;
             let mut reader = std::io::BufReader::new(file);
             let mut added = 0usize;
-            for certificate in rustls_pemfile::certs(&mut reader) {
+            for certificate in CertificateDer::pem_reader_iter(&mut reader) {
                 let certificate = certificate.map_err(|error| {
                     HttpClientError::InvalidRequest(format!(
                         "invalid PEM certificate in {}: {error}",

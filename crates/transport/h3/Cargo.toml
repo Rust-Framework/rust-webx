@@ -9,7 +9,7 @@ homepage.workspace = true
 repository.workspace = true
 documentation.workspace = true
 readme = "../../../README.md"
-description = "Optional HTTP/3 listener transport for rust-webx: QUIC + rustls + h3 serving the engine's neutral request port, with WebSocket and WebTransport support"
+description = "Optional (preview) HTTP/3 listener transport for rust-webx: QUIC + rustls + h3 serving the engine's neutral request port, with WebSocket and WebTransport support"
 keywords = ["web", "http3", "quic", "h3", "rustls"]
 categories = ["web-programming", "network-programming", "asynchronous"]
 
@@ -28,7 +28,7 @@ h3-webtransport = { package = "trev-h3-webtransport", version = "=0.3.0" }
 http.workspace = true
 quinn = { version = "=0.11.12", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
 rustls.workspace = true
-rustls-pemfile.workspace = true
+rustls-pki-types.workspace = true
 sha2.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "net", "time", "sync", "macros"] }
 tracing.workspace = true

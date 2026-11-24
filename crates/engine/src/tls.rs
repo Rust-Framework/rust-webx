@@ -1,7 +1,7 @@
 //! TLS termination material for the engine.
 //!
 //! Certificate and key parsing is not re-invented here: `rustls` owns the
-//! protocol and `rustls-pemfile` owns PEM decoding. This module only turns the
+//! protocol and `rustls-pki-types` owns PEM decoding. This module only turns the
 //! operator's two file paths into an `Arc<ServerConfig>` with the ALPN list the
 //! engine's hyper `auto` builder expects, and reports every failure as a typed
 //! [`Error`] instead of panicking during startup.
@@ -13,6 +13,7 @@ use std::sync::Arc;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::server::WebPkiClientVerifier;
 use rustls::{RootCertStore, ServerConfig};
+use rustls_pki_types::pem::PemObject;
 use webx_core::config::TlsClientAuth;
 use webx_core::error::{Error, Result};
 use webx_core::mode::AppMode;
@@ -184,24 +185,13 @@ fn load_certs(path: &str) -> Result<Vec<CertificateDer<'static>>> {
     let mut reader = BufReader::new(file);
 
     let mut certs = Vec::new();
-    for item in rustls_pemfile::certs(&mut reader) {
+    for item in CertificateDer::pem_reader_iter(&mut reader) {
         let cert = item
             .map_err(|err| Error::Http(format!("cannot parse TLS certificate '{path}': {err}")))?;
         certs.push(cert);
     }
 
     if certs.is_empty() {
-        // `rustls_pemfile` silently skips a block whose base64 payload is
-        // malformed, so distinguish "wrong file type" from "invalid payload"
-        // for the operator.
-        let has_certificate_block = std::fs::read_to_string(path)
-            .map(|text| text.contains("-----BEGIN CERTIFICATE-----"))
-            .unwrap_or(false);
-        if has_certificate_block {
-            return Err(Error::Http(format!(
-                "cannot parse TLS certificate '{path}': invalid PEM payload"
-            )));
-        }
         return Err(Error::Http(format!(
             "no PEM CERTIFICATE block found in '{path}'"
         )));
@@ -214,14 +204,16 @@ fn load_key(path: &str) -> Result<PrivateKeyDer<'static>> {
         .map_err(|err| Error::Http(format!("cannot open TLS private key '{path}': {err}")))?;
     let mut reader = BufReader::new(file);
 
-    // `private_key` accepts PKCS#8, PKCS#1 and SEC1 PEM blocks.
-    rustls_pemfile::private_key(&mut reader)
-        .map_err(|err| Error::Http(format!("cannot parse TLS private key '{path}': {err}")))?
-        .ok_or_else(|| {
-            Error::Http(format!(
-                "no PKCS#8, PKCS#1 or SEC1 private key found in '{path}'"
-            ))
-        })
+    // `PrivateKeyDer::from_pem_reader` accepts PKCS#8, PKCS#1 and SEC1 PEM blocks.
+    match PrivateKeyDer::from_pem_reader(&mut reader) {
+        Ok(key) => Ok(key),
+        Err(rustls_pki_types::pem::Error::NoItemsFound) => Err(Error::Http(format!(
+            "no PKCS#8, PKCS#1 or SEC1 private key found in '{path}'"
+        ))),
+        Err(err) => Err(Error::Http(format!(
+            "cannot parse TLS private key '{path}': {err}"
+        ))),
+    }
 }
 
 #[cfg(test)]

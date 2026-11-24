@@ -223,7 +223,7 @@ percent-encoding = "2"
 url = "2"
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12", "ring"] }
-rustls-pemfile = "2"
+rustls-pki-types = { version = "1", features = ["std"] }
 webpki-roots = "1"
 zeroize = { version = "1", features = ["alloc"] }
 criterion = "0.5"

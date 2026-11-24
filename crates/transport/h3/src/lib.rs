@@ -25,6 +25,16 @@
 //!     .await?;
 //! ```
 //!
+//! # Preview status
+//!
+//! HTTP/3 is an **opt-in preview** in 2.9. Default builds do not link this
+//! crate; the HTTP/1.1+2 engine remains the stable transport. The interop
+//! baseline is h3spec v0.1.15: 86 cases, 64 pass, 21 failures in the pinned
+//! upstream `trev-h3 0.3.0` fork (H3/QPACK error handling and one
+//! quinn/rustls TLS case) and 1 pending case. Those failures are tracked as
+//! upstream, not adapter/pipeline defects; do not treat this transport as
+//! production-equivalent until that baseline is green.
+//!
 //! # What the adapter does
 //!
 //! * binds one [`quinn::Endpoint`] to the configured UDP address (port `0` asks

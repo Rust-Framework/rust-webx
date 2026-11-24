@@ -227,7 +227,7 @@ fork 维护。下游缺口判定与互操作基线（quiche-client / h3i / h3spe
   但无单独 e2e。
 - **0-RTT 保持关闭**（`max_early_data_size = 0`）：需先完成幂等重放设计。
 - **h3spec 的失败项属于 pinned fork 基线**：网络互操作以 h3spec/h3i/quiche-client 为回归
-  基线，不宣称与 h1/h2 完全对等。
+  基线；`rust-webx-h3` 是**可选 preview 传输**，不宣称与 h1/h2 完全对等。
 - **连接风暴/soak 的 h3 变体未建立**：QUIC 无法在握手前写 503，准入拒绝以关闭连接表达。
 
 ---

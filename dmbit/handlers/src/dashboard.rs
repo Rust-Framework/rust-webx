@@ -15,7 +15,6 @@ use dmbit_contracts::goods::ComponentModel;
 use dmbit_contracts::site::SiteConfig;
 use dmbit_domain::entities::{Device, Product, Spec, SpecComponent};
 
-use crate::db::EfResultExt;
 use crate::mapping::{component_to_model, format_capacity_label, parts_summary, spec_to_model};
 
 #[derive(Inject)]
@@ -60,13 +59,10 @@ fn push_part_total(
 #[async_trait]
 impl IRequestHandler<GetDashboardRequest, DashboardModel> for GetDashboardHandler {
     async fn handle(&mut self, _: GetDashboardRequest) -> ActionResult<DashboardModel> {
-        let products = linq!(self.ctx.set::<Product>();).to_list().await.map_ef()?;
-        let specs = linq!(self.ctx.set::<Spec>();).to_list().await.map_ef()?;
-        let devices = linq!(self.ctx.set::<Device>();).to_list().await.map_ef()?;
-        let comps = linq!(self.ctx.set::<SpecComponent>();)
-            .to_list()
-            .await
-            .map_ef()?;
+        let products = linq!(self.ctx.set::<Product>();).to_list().await?;
+        let specs = linq!(self.ctx.set::<Spec>();).to_list().await?;
+        let devices = linq!(self.ctx.set::<Device>();).to_list().await?;
+        let comps = linq!(self.ctx.set::<SpecComponent>();).to_list().await?;
 
         // Index: spec_id → (spec, product)
         let spec_product: HashMap<String, (&Spec, &Product)> = specs

@@ -18,8 +18,6 @@ use docbit_contracts::site::SiteConfig;
 use docbit_domain::entities::Blog;
 use docbit_domain::prepare_context;
 
-use crate::db::EfResultExt;
-
 #[derive(Inject)]
 pub struct SeoHtmlMiddleware {
     #[inject]
@@ -389,7 +387,6 @@ impl SeoHtmlMiddleware {
         let Ok(blogs) = linq!(ctx.set::<Blog>(); order_by b.published_at desc)
             .to_list()
             .await
-            .map_ef()
         else {
             return Vec::new();
         };

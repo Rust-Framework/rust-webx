@@ -157,8 +157,6 @@ use webx_core::idempotency::{
     REPLAYABLE_RESPONSE_HEADERS,
 };
 
-use crate::map_ef_error;
-
 /// Row state: a request owns the key and is still running.
 pub const STATE_IN_PROGRESS: &str = "in_progress";
 
@@ -351,8 +349,7 @@ async fn delete_expired_batch(ctx: &mut DbContext, cutoff: i64) -> Result<u64> {
         select (record.key_hash)
     )
     .to_list_typed_1::<String>()
-    .await
-    .map_err(map_ef_error)?;
+    .await?;
 
     if hashes.is_empty() {
         return Ok(0);
@@ -364,7 +361,7 @@ async fn delete_expired_batch(ctx: &mut DbContext, cutoff: i64) -> Result<u64> {
     )
     .execute_delete()
     .await
-    .map_err(map_ef_error)
+    .map_err(Error::from)
 }
 
 /// Find the row for a protocol key (looked up by its digest), if any.
@@ -416,8 +413,7 @@ async fn resolve_existing(
         .set_column(IdempotencyRecord::COLUMN_CREATED_AT, now)
         .set_column(IdempotencyRecord::COLUMN_EXPIRES_AT, expires_at)
         .execute()
-        .await
-        .map_err(map_ef_error)?;
+        .await?;
         // The CAS re-checks the expiry: a concurrent owner that completed the
         // key between our SELECT and UPDATE wins and we report InProgress.
         return Ok(if affected == 1 {
@@ -473,7 +469,7 @@ impl IIdempotencyStore for EfIdempotencyStore {
         let attempt = new_attempt_token();
         let mut ctx = self.context()?;
 
-        if let Some(record) = find_record(&mut ctx, key).await.map_err(map_ef_error)? {
+        if let Some(record) = find_record(&mut ctx, key).await? {
             return resolve_existing(&mut ctx, record, now, expires_at, attempt).await;
         }
 
@@ -500,7 +496,7 @@ impl IIdempotencyStore for EfIdempotencyStore {
                 // INSERT. The failed INSERT is rolled back; drop its tracking
                 // entry and resolve the row the other node created.
                 ctx.clear_tracking();
-                let Some(record) = find_record(&mut ctx, key).await.map_err(map_ef_error)? else {
+                let Some(record) = find_record(&mut ctx, key).await? else {
                     // The winning row was purged before we could read it. Do not
                     // claim the key twice: report InProgress and let the client's
                     // next retry take the normal path.
@@ -508,7 +504,7 @@ impl IIdempotencyStore for EfIdempotencyStore {
                 };
                 resolve_existing(&mut ctx, record, now, expires_at, attempt).await
             }
-            Err(error) => Err(map_ef_error(error)),
+            Err(error) => Err(error.into()),
         }
     }
 
@@ -614,8 +610,7 @@ impl EfIdempotencyStore {
             .set_column(IdempotencyRecord::COLUMN_ATTEMPT, DbValue::Null)
             .set_column(IdempotencyRecord::COLUMN_EXPIRES_AT, expires_at)
             .execute()
-            .await
-            .map_err(map_ef_error)?;
+            .await?;
         if affected == 0 {
             // The reservation expired (outlived its lease), was released or was
             // reclaimed by another attempt while the handler ran; a retry may
@@ -659,7 +654,7 @@ impl EfIdempotencyStore {
                 |record: IdempotencyRecord| record.attempt == Some(attempt.to_string())
             ));
         }
-        let affected = query.execute_delete().await.map_err(map_ef_error)?;
+        let affected = query.execute_delete().await?;
         if affected > 0 {
             tracing::debug!("idempotency: released an in-progress reservation");
         }

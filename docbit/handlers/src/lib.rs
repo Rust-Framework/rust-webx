@@ -30,7 +30,7 @@
 //!
 //! - 软删除由 `docbit_domain::prepare_context` 全局过滤器处理，handler 禁止重复 `!is_deleted`
 //! - 审计字段（`created_id`/`updated_id`）由 `docbit_domain` mapper 从 `RequestContext` 读取，handler 无需传 `op`
-//! - 使用 `crate::db::{save_changes, EfResultExt}` 统一 ORM 错误映射
+//! - `rust-ef` 的 `From<EFError>` 统一持久层错误映射；handler 只用 `?`
 
 pub mod auth;
 pub mod authorizer;

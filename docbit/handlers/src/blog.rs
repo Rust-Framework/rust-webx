@@ -14,7 +14,7 @@ use docbit_contracts::blog::*;
 use docbit_domain::entities::{Blog, Category};
 use docbit_domain::{new_id, ApplyTo, ToEntity, ToModel};
 
-use crate::db::{save_changes, EfResultExt};
+use crate::db::save_changes;
 use crate::util::{now_secs, operator_id};
 
 fn is_admin(roles: &[String]) -> bool {
@@ -70,7 +70,7 @@ impl IRequestHandler<ListBlogPostsRequest, Vec<BlogPostSummary>> for ListBlogPos
         let blogs = linq!(self.ctx.set::<Blog>(); include b.category; include b.author; order_by b.published_at desc)
             .to_list()
             .await
-            .map_ef()?;
+            ?;
 
         Ok(blogs.into_iter().map(BlogPostSummary::from).collect())
     }
@@ -85,17 +85,14 @@ impl IRequestHandler<ListBlogCategoriesRequest, Vec<BlogCategoryCount>>
         &mut self,
         _: ListBlogCategoriesRequest,
     ) -> ActionResult<Vec<BlogCategoryCount>> {
-        let blogs = linq!(self.ctx.set::<Blog>();).to_list().await.map_ef()?;
+        let blogs = linq!(self.ctx.set::<Blog>();).to_list().await?;
 
         let mut counts: HashMap<String, usize> = HashMap::new();
         for b in &blogs {
             *counts.entry(b.category_id.clone()).or_insert(0) += 1;
         }
 
-        let cats = linq!(self.ctx.set::<Category>();)
-            .to_list()
-            .await
-            .map_ef()?;
+        let cats = linq!(self.ctx.set::<Category>();).to_list().await?;
 
         let mut result: Vec<BlogCategoryCount> = cats
             .into_iter()
@@ -125,7 +122,7 @@ impl IRequestHandler<ListMyBlogPostsRequest, Vec<BlogPostSummary>> for ListMyBlo
         let blogs = linq!(self.ctx.set::<Blog>(), |b: Blog| b.author_id == q; include b.category; include b.author; order_by b.published_at desc)
             .to_list()
             .await
-            .map_ef()?;
+            ?;
 
         Ok(blogs.into_iter().map(BlogPostSummary::from).collect())
     }
@@ -141,7 +138,7 @@ impl IRequestHandler<GetBlogPostRequest, BlogPostModel> for GetBlogPostHandler {
         let blog = linq!(self.ctx.set::<Blog>(), |b: Blog| b.slug == q; include b.category; include b.author)
             .first_or_default()
             .await
-            .map_ef()?
+            ?
             .ok_or_else(|| Error::not_found(format!("Blog post not found: {}", slug)))?;
 
         Ok(blog.to_model())
@@ -158,8 +155,7 @@ impl IRequestHandler<CreateBlogPostRequest, BlogPostModel> for CreateBlogPostHan
         let q = slug.clone();
         let exists = linq!(self.ctx.set::<Blog>(), |b: Blog| b.slug == q)
             .first_or_default()
-            .await
-            .map_ef()?;
+            .await?;
 
         if exists.is_some() {
             return Err(Error::bad_request(format!("Slug already exists: {}", slug)));
@@ -201,7 +197,7 @@ impl IRequestHandler<UpdateBlogPostRequest, BlogPostModel> for UpdateBlogPostHan
         let mut blog = linq!(self.ctx.set::<Blog>(), |b: Blog| b.slug == q; include b.category; include b.author)
             .first_or_default()
             .await
-            .map_ef()?
+            ?
             .ok_or_else(|| Error::not_found(format!("Blog post not found: {}", slug)))?;
 
         if !is_admin(&roles) && blog.author_id != uid {
@@ -241,8 +237,7 @@ impl IRequestHandler<DeleteBlogPostRequest, String> for DeleteBlogPostHandler {
         let q = slug.clone();
         let mut blog = linq!(self.ctx.set::<Blog>(), |b: Blog| b.slug == q)
             .first_or_default()
-            .await
-            .map_ef()?
+            .await?
             .ok_or_else(|| Error::not_found(format!("Blog post not found: {}", slug)))?;
 
         if !is_admin(&roles) && blog.author_id != uid {

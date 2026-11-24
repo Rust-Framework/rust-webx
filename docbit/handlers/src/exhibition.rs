@@ -15,7 +15,7 @@ use docbit_contracts::exhibition::{
 use docbit_domain::entities::Exhibition;
 use docbit_domain::{new_id, ApplyTo, ToEntity, ToModel};
 
-use crate::db::{save_changes, EfResultExt};
+use crate::db::save_changes;
 use crate::util::{now_secs, operator_id};
 
 #[derive(Inject)]
@@ -49,8 +49,7 @@ impl IRequestHandler<ListExhibitionsRequest, Vec<ExhibitionModel>> for ListExhib
         let items =
             linq!(self.ctx.set::<Exhibition>(); include e.category; order_by e.sort_order asc)
                 .to_list()
-                .await
-                .map_ef()?;
+                .await?;
 
         Ok(items.into_iter().map(ExhibitionModel::from).collect())
     }
@@ -66,8 +65,7 @@ impl IRequestHandler<GetExhibitionRequest, ExhibitionModel> for GetExhibitionHan
         let item =
             linq!(self.ctx.set::<Exhibition>(), |e: Exhibition| e.slug == q; include e.category)
                 .first_or_default()
-                .await
-                .map_ef()?
+                .await?
                 .ok_or_else(|| Error::not_found(format!("Exhibition not found: {}", slug)))?;
 
         Ok(ExhibitionModel::from(item))
@@ -84,8 +82,7 @@ impl IRequestHandler<UpsertExhibitionRequest, ExhibitionModel> for UpsertExhibit
 
         let existing = linq!(self.ctx.set::<Exhibition>(), |e: Exhibition| e.slug == q)
             .first_or_default()
-            .await
-            .map_ef()?;
+            .await?;
 
         let saved_id = if let Some(mut ex) = existing {
             let id = ex.id.clone();
@@ -130,8 +127,7 @@ impl IRequestHandler<DeleteExhibitionRequest, String> for DeleteExhibitionHandle
 
         let items = linq!(self.ctx.set::<Exhibition>(), |e: Exhibition| e.slug == q)
             .to_list()
-            .await
-            .map_ef()?;
+            .await?;
 
         if items.is_empty() {
             return Err(Error::not_found(format!("Exhibition not found: {}", slug)));

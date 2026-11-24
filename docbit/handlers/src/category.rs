@@ -14,7 +14,7 @@ use docbit_contracts::category::{
 use docbit_domain::entities::Category;
 use docbit_domain::{new_id, ApplyTo, ToEntity, ToModel};
 
-use crate::db::{save_changes, EfResultExt};
+use crate::db::save_changes;
 use crate::util::{now_secs, operator_id, parse_id};
 
 #[derive(Inject)]
@@ -99,10 +99,7 @@ fn attach_children(
 #[async_trait]
 impl IRequestHandler<ListCategoriesRequest, Vec<CategoryTreeNode>> for ListCategoriesHandler {
     async fn handle(&mut self, _: ListCategoriesRequest) -> ActionResult<Vec<CategoryTreeNode>> {
-        let cats = linq!(self.ctx.set::<Category>();)
-            .to_list()
-            .await
-            .map_ef()?;
+        let cats = linq!(self.ctx.set::<Category>();).to_list().await?;
 
         let models: Vec<CategoryModel> = cats.into_iter().map(CategoryModel::from).collect();
         Ok(build_tree(models))
@@ -138,8 +135,7 @@ impl IRequestHandler<UpdateCategoryRequest, CategoryModel> for UpdateCategoryHan
             .set::<Category>()
             .query()
             .find(id.clone())
-            .await
-            .map_ef()?
+            .await?
             .ok_or_else(|| Error::not_found("Category not found"))?;
 
         req.apply_to(&mut cat, now_secs());
@@ -163,8 +159,7 @@ impl IRequestHandler<DeleteCategoryRequest, String> for DeleteCategoryHandler {
             .set::<Category>()
             .query()
             .find(id.clone())
-            .await
-            .map_ef()?
+            .await?
             .ok_or_else(|| Error::not_found("Category not found"))?;
 
         cat.is_deleted = true;

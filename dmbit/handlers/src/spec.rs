@@ -7,7 +7,7 @@ use dmbit_contracts::spec::*;
 use dmbit_domain::entities::{Device, Product, Spec, SpecComponent};
 use dmbit_domain::new_id;
 
-use crate::db::{save_changes, EfResultExt};
+use crate::db::save_changes;
 use crate::mapping::{
     assert_spec_code_available, load_components_for_specs, load_device_counts,
     replace_spec_components, require_non_negative, require_text, spec_to_model, MAX_BRAND,
@@ -68,8 +68,8 @@ pub struct DeleteSpecHandler {
 #[async_trait]
 impl IRequestHandler<ListSpecsRequest, Vec<SpecModel>> for ListSpecsHandler {
     async fn handle(&mut self, _: ListSpecsRequest) -> ActionResult<Vec<SpecModel>> {
-        let products = linq!(self.ctx.set::<Product>();).to_list().await.map_ef()?;
-        let mut specs = linq!(self.ctx.set::<Spec>();).to_list().await.map_ef()?;
+        let products = linq!(self.ctx.set::<Product>();).to_list().await?;
+        let mut specs = linq!(self.ctx.set::<Spec>();).to_list().await?;
         specs.sort_by_key(|a| (a.sort_order, a.id.clone()));
         let ids: Vec<String> = specs.iter().map(|s| s.id.clone()).collect();
         let cmap = load_components_for_specs(&mut self.ctx, &ids).await?;
@@ -100,8 +100,7 @@ impl IRequestHandler<ListProductSpecsRequest, Vec<SpecModel>> for ListProductSpe
 
         let mut specs = linq!(self.ctx.set::<Spec>(), |s: Spec| s.product_id == product_id)
             .to_list()
-            .await
-            .map_ef()?;
+            .await?;
         specs.sort_by_key(|a| a.sort_order);
         let ids: Vec<String> = specs.iter().map(|s| s.id.clone()).collect();
         let cmap = load_components_for_specs(&mut self.ctx, &ids).await?;
@@ -241,8 +240,7 @@ impl IRequestHandler<DeleteSpecRequest, String> for DeleteSpecHandler {
             .spec_id
             == sid2)
         .to_list()
-        .await
-        .map_ef()?;
+        .await?;
         for mut c in comps {
             c.is_deleted = true;
             c.updated_at = now;
@@ -253,8 +251,7 @@ impl IRequestHandler<DeleteSpecRequest, String> for DeleteSpecHandler {
         // Mark devices as "已淘汰" instead of cascade delete
         let devices = linq!(self.ctx.set::<Device>(), |d: Device| d.spec_id == sid)
             .to_list()
-            .await
-            .map_ef()?;
+            .await?;
         for mut d in devices {
             d.status = "已淘汰".into();
             d.updated_at = now;

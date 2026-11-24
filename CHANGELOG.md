@@ -37,9 +37,23 @@ writer renders every error through it.
 - **`x-webx-*` extensions are reserved**: custom `IErrorResponseWriter` implementations must use
   `webx_core::problem::extensions_for_wire`; the default writer writes `Retry-After` from
   `retry_after_of`.
-- **Verification**: `cargo test --workspace` (252 test result blocks) and
-  `cargo clippy --workspace --all-targets -- -D warnings` pass on this branch. `webx_ef` still
-  carries its own mapping and is removed in the next batch.
+- **Verification**: `cargo test --workspace` (257 test result blocks) and
+  `cargo clippy --workspace --all-targets -- -D warnings` pass on this branch.
+
+##### Structure
+
+- **`webx_ef` no longer maps errors.** `map_ef_error`, `EfResultExt` and the `DETAIL_*`
+  sanitization constants are removed; `rust-ef` 2.9.1 implements `From<EFError> for AppError`, so
+  handlers use `?` (the workspace `.map_ef()?` call sites were removed). `webx_ef` remains a
+  compatibility re-export for this release.
+- **`EfIdempotencyStore` moved to `rust-webx-idempotency-ef`** (new workspace member
+  `crates/idempotency/ef`). It owns the durable key store, fencing-token rows and
+  `IdempotencyHousekeeping`; its test suite moved with it (25 tests). `webx_ef` re-exports the
+  same items (including the historical `webx_ef::idempotency::*` path) for one release and is
+  scheduled for removal in 3.0.
+- **Root workspace is not yet ef-free**: the `*-ef` starters and the docbit/dmbit demos are still
+  members; moving them to a separate starter workspace is the next step (acceptance:
+  `cargo tree --workspace | rg rust-ef` is empty).
 
 ##### Added
 
@@ -101,7 +115,19 @@ writer renders every error through it.
 - **`x-webx-*` 是保留扩展键**：自定义 `IErrorResponseWriter` 必须用
   `webx_core::problem::extensions_for_wire`；默认 writer 用 `retry_after_of` 写 `Retry-After`。
 - **验证**：本分支 `cargo test --workspace`（253 个 test binary）与
-  `cargo clippy --workspace --all-targets -- -D warnings` 全过。`webx_ef` 仍自带映射，下一批删除。
+  `cargo clippy --workspace --all-targets -- -D warnings` 全过。
+
+##### 结构
+
+- **`webx_ef` 不再做错误映射**：删除 `map_ef_error`、`EfResultExt` 与 `DETAIL_*` 脱敏常量；
+  rust-ef 2.9.1 已实现 `From<EFError> for AppError`，handler 只用 `?`（workspace 内
+  `.map_ef()?` 已移除）。`webx_ef` 本版仅保留兼容重导出。
+- **`EfIdempotencyStore` 迁到 `rust-webx-idempotency-ef`**（新 workspace member
+  `crates/idempotency/ef`），负责 durable key 表、fencing token 与 `IdempotencyHousekeeping`；
+  测试随迁（25 条）。`webx_ef` 重导出同名项（含历史 `webx_ef::idempotency::*` 路径）一个版本，
+  3.0 删除。
+- **根 workspace 尚未去 ef**：`*-ef` starters 与 docbit/dmbit demo 仍是成员；把它们移到独立
+  starter workspace 是下一步（验收：`cargo tree --workspace | rg rust-ef` 为空）。
 
 ##### 新增
 

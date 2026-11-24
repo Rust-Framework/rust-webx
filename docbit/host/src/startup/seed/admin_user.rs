@@ -11,7 +11,7 @@
 //! default: shipping `admin123` to a public host hands over the admin panel.
 //! Operator-supplied passwords are never written to the log.
 
-use docbit_handlers::db::{save_changes, EfResultExt};
+use docbit_handlers::db::save_changes;
 use rust_ef::{db_context::DbContext, prelude::*};
 use webx::*;
 
@@ -46,8 +46,7 @@ pub async fn ensure_admin_user(ctx: &mut DbContext, hasher: &dyn IPasswordHasher
     let q = ADMIN_EMAIL.to_string();
     let existing = linq!(ctx.set::<User>(), |u: User| u.email == q)
         .first_or_default()
-        .await
-        .map_ef()?;
+        .await?;
 
     let mode = AppMode::from_env();
     let password = resolve_password(mode, configured_password());

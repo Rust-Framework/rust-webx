@@ -3743,13 +3743,12 @@ dependencies = [
 
 [[package]]
 name = "rust-ef"
-version = "2.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d5a02060c89412c1289f08a675e4b05b57742b4d8a614deb21173b2b6f86e3c4"
+version = "2.9.1"
 dependencies = [
  "async-trait",
  "chrono",
  "inventory",
+ "rust-core",
  "rust-dix",
  "rust-ef-macros",
  "rust_decimal",
@@ -3761,9 +3760,7 @@ dependencies = [
 
 [[package]]
 name = "rust-ef-macros"
-version = "2.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52cd235ba9f66a30acf8eace79a2785d13b22f22ffbb6d2c70f3022606368145"
+version = "2.9.1"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -3808,9 +3805,7 @@ dependencies = [
 
 [[package]]
 name = "rust-ef-sqlite"
-version = "2.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ff12d6e986f707281634b4c08c4f0348c6125682ebeeb19a71600f5757d0888"
+version = "2.9.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3993,17 +3988,7 @@ dependencies = [
 name = "rust-webx-ef"
 version = "3.0.0"
 dependencies = [
- "async-trait",
- "rust-ef",
- "rust-ef-mysql",
- "rust-ef-postgres",
- "rust-ef-sqlite",
- "rust-webx-core",
- "serde_json",
- "sha2 0.10.9",
- "tokio",
- "tracing",
- "uuid",
+ "rust-webx-idempotency-ef",
 ]
 
 [[package]]
@@ -4111,6 +4096,23 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "rust-webx-idempotency-ef"
+version = "3.0.0"
+dependencies = [
+ "async-trait",
+ "rust-ef",
+ "rust-ef-mysql",
+ "rust-ef-postgres",
+ "rust-ef-sqlite",
+ "rust-webx-core",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "tracing",
  "uuid",
 ]
 

@@ -8,7 +8,6 @@ use dmbit_domain::new_id;
 use rust_ef::{db_context::DbContext, prelude::*};
 use webx::*;
 
-use crate::db::EfResultExt;
 use crate::util::{now_secs, operator_id};
 
 // ── Constants ──────────────────────────────────────────────────────
@@ -279,8 +278,7 @@ pub async fn assert_product_code_available(
     let q = code.to_string();
     let rows = linq!(ctx.set::<Product>(), |p: Product| p.code == q)
         .to_list()
-        .await
-        .map_ef()?;
+        .await?;
     if let Some(p) = rows.into_iter().next() {
         if exclude_id.map(|id| id != p.id.as_str()).unwrap_or(true) {
             return Err(Error::conflict(format!("产品编码「{code}」已存在")));
@@ -297,8 +295,7 @@ pub async fn assert_spec_code_available(
     let q = code.to_string();
     let rows = linq!(ctx.set::<Spec>(), |s: Spec| s.code == q)
         .to_list()
-        .await
-        .map_ef()?;
+        .await?;
     if let Some(s) = rows.into_iter().next() {
         if exclude_id.map(|id| id != s.id.as_str()).unwrap_or(true) {
             return Err(Error::conflict(format!("规格编码「{code}」已存在")));
@@ -315,8 +312,7 @@ pub async fn assert_device_asset_code_available(
     let q = asset_code.to_string();
     let rows = linq!(ctx.set::<Device>(), |d: Device| d.asset_code == q)
         .to_list()
-        .await
-        .map_ef()?;
+        .await?;
     if let Some(d) = rows.into_iter().next() {
         if exclude_id.map(|id| id != d.id.as_str()).unwrap_or(true) {
             return Err(Error::conflict(format!("资产编码「{asset_code}」已存在")));
@@ -338,10 +334,7 @@ pub async fn load_components_for_specs(
         return Ok(map);
     }
     let id_set: HashSet<&str> = spec_ids.iter().map(|s| s.as_str()).collect();
-    let all = linq!(ctx.set::<SpecComponent>();)
-        .to_list()
-        .await
-        .map_ef()?;
+    let all = linq!(ctx.set::<SpecComponent>();).to_list().await?;
     for c in all {
         if !id_set.contains(c.spec_id.as_str()) {
             continue;
@@ -366,7 +359,7 @@ pub async fn load_device_counts(
         return Ok(map);
     }
     let id_set: HashSet<&str> = spec_ids.iter().map(|s| s.as_str()).collect();
-    let all = linq!(ctx.set::<Device>();).to_list().await.map_ef()?;
+    let all = linq!(ctx.set::<Device>();).to_list().await?;
     for d in all {
         if !id_set.contains(d.spec_id.as_str()) {
             continue;
@@ -388,8 +381,7 @@ pub async fn replace_spec_components(
     let existing = linq!(ctx.set::<SpecComponent>(), |c: SpecComponent| c.spec_id
         == sid)
     .to_list()
-    .await
-    .map_ef()?;
+    .await?;
     // Soft-delete old records (ORM does not support physical remove on DbSet)
     for mut old in existing {
         old.is_deleted = true;

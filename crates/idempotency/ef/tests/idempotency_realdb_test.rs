@@ -1,5 +1,5 @@
 //! Real-database (PostgreSQL / MySQL) tests for
-//! [`EfIdempotencyStore`](webx_ef::idempotency::EfIdempotencyStore).
+//! [`EfIdempotencyStore`](rust_webx_idempotency_ef::EfIdempotencyStore).
 //!
 //! Ignored by default: they need a live server and a dedicated empty database,
 //! and are opt-in per provider through an environment variable:
@@ -27,11 +27,11 @@ use std::time::Duration;
 
 use rust_ef::db_context::{DbContext, DbContextOptions, DbContextOptionsBuilder};
 use rust_ef::prelude::*;
-use webx_core::idempotency::{IIdempotencyStore, IdempotencyBegin, IdempotentResponse};
-use webx_ef::idempotency::{
+use rust_webx_idempotency_ef::{
     key_hash, register_idempotency_model, EfIdempotencyStore, IdempotencyRecord, STATE_COMPLETED,
     STATE_IN_PROGRESS,
 };
+use webx_core::idempotency::{IIdempotencyStore, IdempotencyBegin, IdempotentResponse};
 
 /// Replay retention used by the tests (`Idempotency.TtlSeconds`).
 const TTL: Duration = Duration::from_secs(60);

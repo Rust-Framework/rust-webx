@@ -19,7 +19,7 @@ use dmbit_contracts::inventory::*;
 use dmbit_domain::entities::{Product, Spec};
 use dmbit_domain::new_id;
 
-use crate::db::{save_changes, EfResultExt};
+use crate::db::save_changes;
 use crate::mapping::{
     category_label, format_capacity_label, kind_label, load_components_for_specs,
     normalize_category, normalize_comp_kind, optional_text, parse_capacity_label_to_gb,
@@ -399,9 +399,9 @@ pub struct ImportInventoryHandler {
 #[async_trait]
 impl IRequestHandler<ExportInventoryRequest, Response> for ExportInventoryHandler {
     async fn handle(&mut self, _: ExportInventoryRequest) -> ActionResult<Response> {
-        let mut products = linq!(self.ctx.set::<Product>();).to_list().await.map_ef()?;
+        let mut products = linq!(self.ctx.set::<Product>();).to_list().await?;
         products.sort_by_key(|a| a.sort_order);
-        let specs = linq!(self.ctx.set::<Spec>();).to_list().await.map_ef()?;
+        let specs = linq!(self.ctx.set::<Spec>();).to_list().await?;
         let ids: Vec<String> = specs.iter().map(|s| s.id.clone()).collect();
         let cmap = load_components_for_specs(&mut self.ctx, &ids).await?;
 
@@ -725,7 +725,7 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
         }
 
         // ── Conflict detection ──
-        let existing_products = linq!(self.ctx.set::<Product>();).to_list().await.map_ef()?;
+        let existing_products = linq!(self.ctx.set::<Product>();).to_list().await?;
         let mut product_by_code: HashMap<String, String> = existing_products
             .iter()
             .map(|p| (p.code.clone(), p.id.clone()))
@@ -734,7 +734,7 @@ impl IRequestHandler<ImportInventoryRequest, ImportInventoryResult> for ImportIn
             .into_iter()
             .map(|p| (p.id.clone(), p))
             .collect();
-        let existing_specs = linq!(self.ctx.set::<Spec>();).to_list().await.map_ef()?;
+        let existing_specs = linq!(self.ctx.set::<Spec>();).to_list().await?;
         let mut spec_by_code: HashMap<String, String> = existing_specs
             .iter()
             .map(|s| (s.code.clone(), s.id.clone()))

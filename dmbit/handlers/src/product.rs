@@ -9,7 +9,7 @@ use dmbit_contracts::spec::SpecModel;
 use dmbit_domain::entities::{Device, Product, Spec, SpecComponent};
 use dmbit_domain::new_id;
 
-use crate::db::{save_changes, EfResultExt};
+use crate::db::save_changes;
 use crate::mapping::{
     assert_product_code_available, load_components_for_specs, load_device_counts,
     normalize_category, optional_text, require_text, spec_to_model, MAX_PRODUCT_CODE,
@@ -88,10 +88,10 @@ pub struct DeleteProductHandler {
 #[async_trait]
 impl IRequestHandler<ListProductsRequest, Vec<ProductModel>> for ListProductsHandler {
     async fn handle(&mut self, _: ListProductsRequest) -> ActionResult<Vec<ProductModel>> {
-        let mut products = linq!(self.ctx.set::<Product>();).to_list().await.map_ef()?;
+        let mut products = linq!(self.ctx.set::<Product>();).to_list().await?;
         products.sort_by(|a, b| a.sort_order.cmp(&b.sort_order).then(a.name.cmp(&b.name)));
 
-        let all_specs = linq!(self.ctx.set::<Spec>();).to_list().await.map_ef()?;
+        let all_specs = linq!(self.ctx.set::<Spec>();).to_list().await?;
         let ids: Vec<String> = all_specs.iter().map(|s| s.id.clone()).collect();
         let cmap = load_components_for_specs(&mut self.ctx, &ids).await?;
         let dmap = load_device_counts(&mut self.ctx, &ids).await?;
@@ -124,8 +124,7 @@ impl IRequestHandler<GetProductRequest, ProductModel> for GetProductHandler {
         let pid = p.id.clone();
         let specs = linq!(self.ctx.set::<Spec>(), |s: Spec| s.product_id == pid)
             .to_list()
-            .await
-            .map_ef()?;
+            .await?;
         let ids: Vec<String> = specs.iter().map(|s| s.id.clone()).collect();
         let cmap = load_components_for_specs(&mut self.ctx, &ids).await?;
         let dmap = load_device_counts(&mut self.ctx, &ids).await?;
@@ -212,8 +211,7 @@ impl IRequestHandler<UpdateProductRequest, ProductModel> for UpdateProductHandle
         let pid = p.id.clone();
         let specs = linq!(self.ctx.set::<Spec>(), |s: Spec| s.product_id == pid)
             .to_list()
-            .await
-            .map_ef()?;
+            .await?;
         let ids: Vec<String> = specs.iter().map(|s| s.id.clone()).collect();
         let cmap = load_components_for_specs(&mut self.ctx, &ids).await?;
         let dmap = load_device_counts(&mut self.ctx, &ids).await?;
@@ -248,8 +246,7 @@ impl IRequestHandler<DeleteProductRequest, String> for DeleteProductHandler {
         // Cascade: delete specs → components + mark devices as 已淘汰
         let child_specs = linq!(self.ctx.set::<Spec>(), |s: Spec| s.product_id == pid)
             .to_list()
-            .await
-            .map_ef()?;
+            .await?;
         for mut s in child_specs {
             let sid = s.id.clone();
             // Physical delete components
@@ -258,8 +255,7 @@ impl IRequestHandler<DeleteProductRequest, String> for DeleteProductHandler {
                 .spec_id
                 == sid2)
             .to_list()
-            .await
-            .map_ef()?;
+            .await?;
             for mut c in comps {
                 c.is_deleted = true;
                 c.updated_at = now;
@@ -269,8 +265,7 @@ impl IRequestHandler<DeleteProductRequest, String> for DeleteProductHandler {
             // Mark devices as 已淘汰
             let devs = linq!(self.ctx.set::<Device>(), |d: Device| d.spec_id == sid)
                 .to_list()
-                .await
-                .map_ef()?;
+                .await?;
             for mut d in devs {
                 d.status = "已淘汰".into();
                 d.updated_at = now;

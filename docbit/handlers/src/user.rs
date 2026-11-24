@@ -9,7 +9,7 @@ use docbit_contracts::user::*;
 use docbit_domain::entities::{RoleUser, User};
 use docbit_domain::{new_id, seed_ids, ApplyTo, ToEntity, ToModel};
 
-use crate::db::{save_changes, EfResultExt};
+use crate::db::save_changes;
 use crate::util::{now_secs, operator_id, parse_id};
 
 #[derive(Inject)]
@@ -54,8 +54,7 @@ impl IRequestHandler<ListUsersRequest, Vec<UserModel>> for ListUsersHandler {
     async fn handle(&mut self, _: ListUsersRequest) -> ActionResult<Vec<UserModel>> {
         let users = linq!(self.ctx.set::<User>(); include u.roles; order_by u.created_at desc)
             .to_list()
-            .await
-            .map_ef()?;
+            .await?;
 
         Ok(users.into_iter().map(UserModel::from).collect())
     }
@@ -70,8 +69,7 @@ impl IRequestHandler<GetUserRequest, UserModel> for GetUserHandler {
 
         let user = linq!(self.ctx.set::<User>(), |u: User| u.id == q; include u.roles)
             .first_or_default()
-            .await
-            .map_ef()?
+            .await?
             .ok_or_else(|| Error::not_found("User not found"))?;
 
         Ok(UserModel::from(user))
@@ -127,8 +125,7 @@ impl IRequestHandler<UpdateUserRequest, UserModel> for UpdateUserHandler {
             .set::<User>()
             .query()
             .find(id.clone())
-            .await
-            .map_ef()?
+            .await?
             .ok_or_else(|| Error::not_found("User not found"))?;
 
         req.apply_to(&mut user, now_secs());
@@ -160,8 +157,7 @@ impl IRequestHandler<DeleteUserRequest, String> for DeleteUserHandler {
             .set::<User>()
             .query()
             .find(id.clone())
-            .await
-            .map_ef()?
+            .await?
             .ok_or_else(|| Error::not_found("User not found"))?;
 
         user.is_deleted = true;
@@ -181,7 +177,7 @@ impl IRequestHandler<DeleteUserRequest, String> for DeleteUserHandler {
 #[async_trait]
 impl IRequestHandler<InfoRequest, String> for InfoHandler {
     async fn handle(&mut self, _: InfoRequest) -> ActionResult<String> {
-        let count = linq!(self.ctx.set::<User>(); count).await.map_ef()?;
+        let count = linq!(self.ctx.set::<User>(); count).await?;
 
         Ok(format!("Total users: {}", count))
     }

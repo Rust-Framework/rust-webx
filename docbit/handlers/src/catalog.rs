@@ -19,7 +19,7 @@ use docbit_domain::entities::Exhibition;
 use docbit_domain::new_id;
 use docbit_domain::seed::{canonical_exhibition_repo_urls, category_id_for, exhibition_seed_rows};
 
-use crate::db::{save_changes, EfResultExt};
+use crate::db::save_changes;
 
 fn fallback_repo(slug: &str) -> Option<&'static str> {
     canonical_exhibition_repo_urls()
@@ -154,8 +154,7 @@ pub async fn sync_exhibitions(
         let q = item.slug.clone();
         let existing = linq!(ctx.set::<Exhibition>(), |e: Exhibition| e.slug == q)
             .first_or_default()
-            .await
-            .map_ef()?;
+            .await?;
 
         if let Some(mut ex) = existing {
             if apply_index_fields(&mut ex, item, repo) {
@@ -188,8 +187,7 @@ pub async fn sync_exhibitions(
         let q = (*slug).to_string();
         let existing = linq!(ctx.set::<Exhibition>(), |e: Exhibition| e.slug == q)
             .first_or_default()
-            .await
-            .map_ef()?;
+            .await?;
 
         if let Some(mut ex) = existing {
             let next = Some((*repo_url).to_string());

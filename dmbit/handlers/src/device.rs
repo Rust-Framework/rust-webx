@@ -7,7 +7,7 @@ use dmbit_contracts::device::*;
 use dmbit_domain::entities::{Device, Product, Spec};
 use dmbit_domain::new_id;
 
-use crate::db::{save_changes, EfResultExt};
+use crate::db::save_changes;
 use crate::mapping::{
     assert_device_asset_code_available, device_to_model, normalize_status, optional_text,
     require_text, MAX_ASSET_CODE, MAX_LOCATION, MAX_SERIAL_NO,
@@ -17,14 +17,12 @@ use crate::util::{now_secs, operator_id, parse_id};
 async fn spec_and_product(ctx: &mut DbContext, spec_id: &str) -> Result<(Spec, String)> {
     let s = linq!(ctx.set::<Spec>(), |s: Spec| s.id == spec_id)
         .first_or_default()
-        .await
-        .map_ef()?
+        .await?
         .ok_or_else(|| Error::not_found("规格不存在"))?;
     let pid = s.product_id.clone();
     let p = linq!(ctx.set::<Product>(), |p: Product| p.id == pid)
         .first_or_default()
-        .await
-        .map_ef()?
+        .await?
         .ok_or_else(|| Error::not_found("所属产品不存在"))?;
     Ok((s, p.name))
 }
@@ -75,8 +73,8 @@ pub struct DeleteDeviceHandler {
 async fn spec_name_map(
     ctx: &mut DbContext,
 ) -> Result<std::collections::HashMap<String, (String, String)>> {
-    let specs = linq!(ctx.set::<Spec>();).to_list().await.map_ef()?;
-    let products = linq!(ctx.set::<Product>();).to_list().await.map_ef()?;
+    let specs = linq!(ctx.set::<Spec>();).to_list().await?;
+    let products = linq!(ctx.set::<Product>();).to_list().await?;
     let mut map = std::collections::HashMap::new();
     for s in specs {
         let pname = products
@@ -94,7 +92,7 @@ async fn spec_name_map(
 impl IRequestHandler<ListDevicesRequest, Vec<DeviceModel>> for ListDevicesHandler {
     async fn handle(&mut self, _: ListDevicesRequest) -> ActionResult<Vec<DeviceModel>> {
         let names = spec_name_map(&mut self.ctx).await?;
-        let mut devices = linq!(self.ctx.set::<Device>();).to_list().await.map_ef()?;
+        let mut devices = linq!(self.ctx.set::<Device>();).to_list().await?;
         devices.sort_by(|a, b| {
             a.sort_order
                 .cmp(&b.sort_order)
@@ -120,8 +118,7 @@ impl IRequestHandler<ListSpecDevicesRequest, Vec<DeviceModel>> for ListSpecDevic
 
         let mut devices = linq!(self.ctx.set::<Device>(), |d: Device| d.spec_id == spec_id)
             .to_list()
-            .await
-            .map_ef()?;
+            .await?;
         devices.sort_by(|a, b| {
             a.sort_order
                 .cmp(&b.sort_order)
@@ -213,8 +210,7 @@ impl IRequestHandler<GenerateDevicesRequest, GenerateDevicesResult> for Generate
             let q = asset_code.clone();
             let existing = linq!(self.ctx.set::<Device>(), |d: Device| d.asset_code == q)
                 .first_or_default()
-                .await
-                .map_ef()?;
+                .await?;
             if existing.is_some() {
                 continue;
             }

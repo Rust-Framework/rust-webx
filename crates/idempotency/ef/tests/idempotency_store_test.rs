@@ -8,12 +8,12 @@ use std::time::Duration;
 use rust_ef::db_context::{DbContext, DbContextOptions, DbContextOptionsBuilder};
 use rust_ef::prelude::*;
 use rust_ef_sqlite::DbContextOptionsBuilderExt as _;
-use webx_core::hosted::PeriodicBackgroundService;
-use webx_core::idempotency::{IIdempotencyStore, IdempotencyBegin, IdempotentResponse};
-use webx_ef::idempotency::{
+use rust_webx_idempotency_ef::{
     key_hash, register_idempotency_model, EfIdempotencyStore, IdempotencyHousekeeping,
     IdempotencyRecord, PURGE_BATCH_SIZE, STATE_COMPLETED, STATE_IN_PROGRESS,
 };
+use webx_core::hosted::PeriodicBackgroundService;
+use webx_core::idempotency::{IIdempotencyStore, IdempotencyBegin, IdempotentResponse};
 
 const TTL: Duration = Duration::from_secs(60);
 

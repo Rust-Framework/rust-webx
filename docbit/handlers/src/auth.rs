@@ -16,7 +16,7 @@ use docbit_contracts::auth::*;
 use docbit_domain::entities::{PasswordResetToken, RoleUser, User};
 use docbit_domain::{new_id, seed_ids};
 
-use crate::db::{save_changes, EfResultExt};
+use crate::db::save_changes;
 use crate::util::{now_secs, operator_id};
 
 /// Mint a token through the framework port; the host stamps `iss`/`aud`
@@ -49,8 +49,7 @@ async fn load_user_by_email(ctx: &mut DbContext, email: &str) -> Result<Option<U
     let q = email.to_string();
     let users = linq!(ctx.set::<User>(), |u: User| u.email == q; include u.roles)
         .to_list()
-        .await
-        .map_ef()?;
+        .await?;
 
     Ok(users.into_iter().next())
 }
@@ -60,8 +59,7 @@ async fn load_user_by_id(ctx: &mut DbContext, id: &str) -> Result<Option<User>> 
     let q = id.to_string();
     let users = linq!(ctx.set::<User>(), |u: User| u.id == q; include u.roles)
         .to_list()
-        .await
-        .map_ef()?;
+        .await?;
 
     Ok(users.into_iter().next())
 }
@@ -258,8 +256,7 @@ impl IRequestHandler<ResetPasswordRequest, ResetPasswordResponse> for ResetPassw
             |t: PasswordResetToken| t.token == q
         )
         .first_or_default()
-        .await
-        .map_ef()?
+        .await?
         .ok_or_else(|| Error::bad_request("Invalid or expired reset token"))?;
 
         if record.used != 0 {

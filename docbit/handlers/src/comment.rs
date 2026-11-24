@@ -14,7 +14,7 @@ use docbit_contracts::comment::{
 use docbit_domain::entities::Comment;
 use docbit_domain::{new_id, ToEntity, ToModel};
 
-use crate::db::{save_changes, EfResultExt};
+use crate::db::save_changes;
 use crate::util::{now_secs, operator_id, parse_id};
 
 #[derive(Inject)]
@@ -44,8 +44,7 @@ impl IRequestHandler<ListCommentsRequest, Vec<CommentModel>> for ListCommentsHan
 
         let mut rows = linq!(self.ctx.set::<Comment>(), |c: Comment| c.blog_id == q)
             .to_list()
-            .await
-            .map_ef()?;
+            .await?;
 
         rows.sort_by_key(|a| a.created_at);
         Ok(rows.into_iter().map(CommentModel::from).collect())
@@ -104,8 +103,7 @@ impl IRequestHandler<DeleteCommentRequest, String> for DeleteCommentHandler {
             .set::<Comment>()
             .query()
             .find(id.clone())
-            .await
-            .map_ef()?
+            .await?
             .ok_or_else(|| Error::not_found("Comment not found"))?;
 
         let user = req.require_user()?;

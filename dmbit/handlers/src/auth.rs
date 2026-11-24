@@ -5,7 +5,6 @@ use std::sync::Arc;
 use rust_ef::{db_context::DbContext, prelude::*};
 use webx::*;
 
-use crate::db::EfResultExt;
 use crate::util::{now_secs, operator_id};
 use dmbit_contracts::auth::*;
 use dmbit_domain::entities::User;
@@ -32,8 +31,7 @@ async fn load_user_by_email(ctx: &mut DbContext, email: &str) -> Result<Option<U
     let q = email.to_string();
     let users = linq!(ctx.set::<User>(), |u: User| u.email == q; include u.roles)
         .to_list()
-        .await
-        .map_ef()?;
+        .await?;
     Ok(users.into_iter().next())
 }
 
@@ -41,8 +39,7 @@ async fn load_user_by_id(ctx: &mut DbContext, id: &str) -> Result<Option<User>> 
     let q = id.to_string();
     let users = linq!(ctx.set::<User>(), |u: User| u.id == q; include u.roles)
         .to_list()
-        .await
-        .map_ef()?;
+        .await?;
     Ok(users.into_iter().next())
 }
 

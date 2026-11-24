@@ -12,7 +12,7 @@ use docbit_contracts::rbac::*;
 use docbit_domain::entities::{Authorize, Resource, Role, RoleUser};
 use docbit_domain::{new_id, ApplyTo, ToEntity, ToModel};
 
-use crate::db::{save_changes, EfResultExt};
+use crate::db::save_changes;
 use crate::util::{now_secs, operator_id, parse_id};
 
 // ── Role CRUD ──
@@ -45,7 +45,7 @@ pub struct DeleteRoleHandler {
 #[async_trait]
 impl IRequestHandler<ListRolesRequest, Vec<RoleModel>> for ListRolesHandler {
     async fn handle(&mut self, _: ListRolesRequest) -> ActionResult<Vec<RoleModel>> {
-        let roles = linq!(self.ctx.set::<Role>();).to_list().await.map_ef()?;
+        let roles = linq!(self.ctx.set::<Role>();).to_list().await?;
 
         Ok(roles.into_iter().map(RoleModel::from).collect())
     }
@@ -79,8 +79,7 @@ impl IRequestHandler<UpdateRoleRequest, RoleModel> for UpdateRoleHandler {
             .set::<Role>()
             .query()
             .find(id.clone())
-            .await
-            .map_ef()?
+            .await?
             .ok_or_else(|| Error::not_found("Role not found"))?;
 
         req.apply_to(&mut role, now_secs());
@@ -104,8 +103,7 @@ impl IRequestHandler<DeleteRoleRequest, String> for DeleteRoleHandler {
             .set::<Role>()
             .query()
             .find(id.clone())
-            .await
-            .map_ef()?
+            .await?
             .ok_or_else(|| Error::not_found("Role not found"))?;
 
         role.is_deleted = true;
@@ -147,8 +145,7 @@ impl IRequestHandler<AssignRoleRequest, String> for AssignRoleHandler {
             == exists_uid
             && r.role_id == exists_rid)
         .first_or_default()
-        .await
-        .map_ef()?;
+        .await?;
 
         if exists.is_some() {
             return Ok(format!(
@@ -185,8 +182,7 @@ impl IRequestHandler<RevokeRoleRequest, String> for RevokeRoleHandler {
         let affected = linq!(self.ctx.set::<RoleUser>(), |r: RoleUser| r.user_id == uid_q
             && r.role_id == rid_q)
         .execute_delete()
-        .await
-        .map_ef()?;
+        .await?;
 
         if affected > 0 {
             Ok(format!("Revoked role {} from user {}", rid, uid))
@@ -226,10 +222,7 @@ pub struct DeleteResourceHandler {
 #[async_trait]
 impl IRequestHandler<ListResourcesRequest, Vec<ResourceModel>> for ListResourcesHandler {
     async fn handle(&mut self, _: ListResourcesRequest) -> ActionResult<Vec<ResourceModel>> {
-        let items = linq!(self.ctx.set::<Resource>();)
-            .to_list()
-            .await
-            .map_ef()?;
+        let items = linq!(self.ctx.set::<Resource>();).to_list().await?;
 
         Ok(items.into_iter().map(ResourceModel::from).collect())
     }
@@ -263,8 +256,7 @@ impl IRequestHandler<UpdateResourceRequest, ResourceModel> for UpdateResourceHan
             .set::<Resource>()
             .query()
             .find(id.clone())
-            .await
-            .map_ef()?
+            .await?
             .ok_or_else(|| Error::not_found("Resource not found"))?;
 
         req.apply_to(&mut res, now_secs());
@@ -288,8 +280,7 @@ impl IRequestHandler<DeleteResourceRequest, String> for DeleteResourceHandler {
             .set::<Resource>()
             .query()
             .find(id.clone())
-            .await
-            .map_ef()?
+            .await?
             .ok_or_else(|| Error::not_found("Resource not found"))?;
 
         res.is_deleted = true;
@@ -328,13 +319,7 @@ pub struct DeleteAuthorizeHandler {
 #[async_trait]
 impl IRequestHandler<ListAuthorizesRequest, Vec<AuthorizeModel>> for ListAuthorizesHandler {
     async fn handle(&mut self, _: ListAuthorizesRequest) -> ActionResult<Vec<AuthorizeModel>> {
-        let items = self
-            .ctx
-            .set::<Authorize>()
-            .query()
-            .to_list()
-            .await
-            .map_ef()?;
+        let items = self.ctx.set::<Authorize>().query().to_list().await?;
 
         Ok(items.into_iter().map(AuthorizeModel::from).collect())
     }
@@ -353,8 +338,7 @@ impl IRequestHandler<CreateAuthorizeRequest, AuthorizeModel> for CreateAuthorize
             == exists_role
             && a.resource_id == exists_resource)
         .first_or_default()
-        .await
-        .map_ef()?;
+        .await?;
 
         if let Some(existing) = exists {
             return Ok(existing.to_model());
@@ -382,8 +366,7 @@ impl IRequestHandler<DeleteAuthorizeRequest, String> for DeleteAuthorizeHandler 
 
         let affected = linq!(self.ctx.set::<Authorize>(), |a: Authorize| a.id == q)
             .execute_delete()
-            .await
-            .map_ef()?;
+            .await?;
 
         if affected > 0 {
             Ok(format!("Deleted authorize {}", id))

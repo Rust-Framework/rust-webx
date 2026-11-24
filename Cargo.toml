@@ -7,6 +7,7 @@ members = [
     "crates/engine",
     "crates/macros",
     "crates/webx",
+    "crates/idempotency/ef",
     "crates/spa",
     "crates/build",
     "crates/openapi",
@@ -112,6 +113,10 @@ description = "rust-webx - A Rust WebApi framework inspired by ASP.NET Core, bui
 # 3.0 workspace: unify the registry 1.0 dependency pulled by the ef starters
 # with the local rust-dix 1.1 (From<RdiError>); remove once 1.1 is published.
 rust-dix = { path = "../rust-dix/crates/dix" }
+# 3.0: local rust-ef 2.9.1 provides `From<EFError> for AppError`; the registry
+# 2.9.0 does not. Remove after 2.9.1 is published.
+rust-ef = { path = "../rust-ef/crates/core" }
+rust-ef-sqlite = { path = "../rust-ef/crates/sqlite" }
 
 [workspace.dependencies]
 # Internal crates
@@ -148,6 +153,7 @@ rust-webx-pay-ef = { version = "=3.0.0", path = "crates/payment/ef" }
 
 # ORM boundary (opt-in; core/umbrella never link rust-ef).
 rust-webx-ef = { version = "=3.0.0", path = "crates/ef/webx" }
+rust-webx-idempotency-ef = { version = "=3.0.0", path = "crates/idempotency/ef" }
 # Transactional outbox starter (opt-in; own crate group).
 rust-webx-outbox-ef = { version = "=3.0.0", path = "crates/outbox/ef" }
 # Optional non-hyper listener backends (opt-in; core/umbrella never link quinn/h3).

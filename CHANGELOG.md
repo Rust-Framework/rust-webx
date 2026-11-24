@@ -15,6 +15,17 @@ the API-convergence batches are separate, still-unreleased steps).
 
 #### English
 
+##### Added
+
+- **`ProblemDetails ↔ AppError` bridge** — `impl From<ProblemDetails> for rust_core::AppError` turns a
+  pre-built problem into the shared carrier while storing `title`/`type`/`instance` in the reserved
+  `x-webx-title` / `x-webx-type` / `x-webx-instance` extensions (verbatim mode);
+  `ProblemDetails::from_app_error(&AppError, path, trace_id)` renders it back byte-for-byte
+  (including an absent `type` and an unsanitized pre-built 5xx detail), or derives the title/type
+  and sanitizes 5xx in the normal mode. `extensions_for_wire` filters the reserved keys and
+  `retry_after_of` reads a typed 429 value; five wire-equivalence tests cover validation, 418, 500,
+  derived 500 and 429. This is the prerequisite for the `Error = AppError` alias (next step).
+
 ##### Breaking
 
 - **`PagedRequest` is the plain request contract**: fields `page` / `page_size` only; `new`,
@@ -43,6 +54,16 @@ the API-convergence batches are separate, still-unreleased steps).
 | `#[serde(default)]` requires `Deserialize` | `serde` is a `WebxRequestMeta` helper attribute (2.9.1+) |
 
 #### 简体中文
+
+##### 新增
+
+- **`ProblemDetails ↔ AppError` 桥**：`impl From<ProblemDetails> for rust_core::AppError` 把预构造
+  problem 转成共享载体，`title`/`type`/`instance` 存入保留扩展键 `x-webx-title` /
+  `x-webx-type` / `x-webx-instance`（verbatim 模式）；
+  `ProblemDetails::from_app_error(&AppError, path, trace_id)` 原样还原（包括"没有 type"与预构造
+  5xx 的 detail 不脱敏），普通模式派生 title/type 并对 5xx 脱敏。`extensions_for_wire` 过滤保留键，
+  `retry_after_of` 读取 typed 429 值；5 条 wire 等价测试覆盖 validation/418/500/派生 500/429。
+  这是 `Error = AppError` 别名化的前置。
 
 ##### 破坏性变更
 

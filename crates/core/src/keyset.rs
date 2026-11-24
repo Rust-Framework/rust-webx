@@ -9,9 +9,7 @@
 //! component (parse timestamps/ids, reject unknown sort directions, scope the
 //! key to the caller's tenant) before using it in a query.
 
-pub use rust_core::keyset::{
-    Cursor, CursorError, CursorPage, KeysetRequest, MAX_CURSOR_BYTES,
-};
+pub use rust_core::keyset::{Cursor, CursorError, CursorPage, KeysetRequest, MAX_CURSOR_BYTES};
 
 /// A malformed client cursor is a request error (`400`), not a server fault.
 impl From<CursorError> for crate::error::Error {

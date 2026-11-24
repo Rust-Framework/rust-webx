@@ -3710,9 +3710,9 @@ dependencies = [
 
 [[package]]
 name = "rust-ef"
-version = "2.6.0"
+version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a16f6daeb4cc89c1d293fdc76af85b26d91adf86faca064e896ea65e0232ab1e"
+checksum = "d5a02060c89412c1289f08a675e4b05b57742b4d8a614deb21173b2b6f86e3c4"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3728,9 +3728,9 @@ dependencies = [
 
 [[package]]
 name = "rust-ef-macros"
-version = "2.6.0"
+version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2481654632a4b9ea17fc794521e282101291ce4cae86c54e4a23bfa9ca418893"
+checksum = "52cd235ba9f66a30acf8eace79a2785d13b22f22ffbb6d2c70f3022606368145"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -3740,9 +3740,9 @@ dependencies = [
 
 [[package]]
 name = "rust-ef-mysql"
-version = "2.6.0"
+version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85c453f9c77c2f7b8245060451f950a812753d139405375b2537f5d144c42970"
+checksum = "d8ccde5ec2d61ccf214b46dd1015c6fa80a57a847769cf96aebaf1e8ef797a88"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3756,9 +3756,9 @@ dependencies = [
 
 [[package]]
 name = "rust-ef-postgres"
-version = "2.6.0"
+version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd0cbffbf06b74cfc598e0222f269a9d05fd3deac8a7bb7307733834332e8e50"
+checksum = "0238875adf2081c773d655f4ce7de7a8db1642d7babfeecd1a3de9dfbfba0b90"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3775,9 +3775,9 @@ dependencies = [
 
 [[package]]
 name = "rust-ef-sqlite"
-version = "2.6.0"
+version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d1e7f215c7aa9c611f7bc2cbf45ce6168081f7d8e850ff1293a1715fafce15e"
+checksum = "5ff12d6e986f707281634b4c08c4f0348c6125682ebeeb19a71600f5757d0888"
 dependencies = [
  "async-trait",
  "chrono",
@@ -5046,6 +5046,7 @@ dependencies = [
  "memchr",
  "native-tls",
  "percent-encoding",
+ "rust_decimal",
  "smallvec",
  "thiserror 2.0.21",
  "tokio",
@@ -5075,6 +5076,7 @@ dependencies = [
  "percent-encoding",
  "rand 0.10.4",
  "rsa",
+ "rust_decimal",
  "sha1 0.11.0",
  "sha2 0.11.1",
  "sqlx-core",

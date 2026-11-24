@@ -20,7 +20,7 @@
 //! );
 //! Host::builder()
 //!     .register(move |svc| svc.instance(Arc::clone(&health)))
-//!     .add_health_check("gateway-upstreams", health.check())
+//!     .add_health_check(HealthCheckSpec::sync("gateway-upstreams", health.check()))
 //!     .build();
 //! ```
 //!

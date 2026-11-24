@@ -6,6 +6,7 @@ use std::net::TcpListener;
 use std::sync::Arc;
 
 use webx_host::cors::CorsConfig;
+use webx_host::health::HealthCheckSpec;
 
 async fn spawn_test_host(port: u16) {
     spawn_test_host_with(port, |b| b).await;
@@ -219,9 +220,9 @@ async fn integration_health_ready_matches_health() {
 async fn integration_health_with_failing_probe_returns_fail() {
     let port = find_free_port();
     spawn_test_host_with(port, |b| {
-        b.add_health_check("db", || {
+        b.add_health_check(HealthCheckSpec::sync("db", || {
             webx_host::health::HealthStatus::fail("db unreachable")
-        })
+        }))
     })
     .await;
 
@@ -247,13 +248,13 @@ async fn integration_health_probe_evaluated_at_request_time() {
     let flag = Arc::clone(&healthy);
     let port = find_free_port();
     spawn_test_host_with(port, move |b| {
-        b.add_health_check("db", move || {
+        b.add_health_check(HealthCheckSpec::sync("db", move || {
             if flag.load(Ordering::Relaxed) {
                 webx_host::health::HealthStatus::pass()
             } else {
                 webx_host::health::HealthStatus::fail("db down")
             }
-        })
+        }))
     })
     .await;
 

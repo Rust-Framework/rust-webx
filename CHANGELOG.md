@@ -77,6 +77,16 @@ writer renders every error through it.
   replaced by `add_memory_cache(CacheOptions)` (`CacheOptions::default()` or
   `CacheOptions::default().max_entries(n)`). `max_entries(0)` is rejected at registration.
 
+##### API convergence (B: health checks)
+
+- **`HealthCheckSpec` is the single health-check registration value**: `add_health_check(spec)` takes
+  `HealthCheckSpec::sync(name, closure)` or `HealthCheckSpec::async_check(probe)` with an optional
+  `.timeout(d)`. `add_health_check(name, closure)`, `add_health_check_async` and
+  `add_health_check_async_with_timeout` are removed; the default async timeout remains
+  `DEFAULT_HEALTH_CHECK_TIMEOUT`. Caches/queues/payment adapters migrated to the spec.
+- The registry keeps `register`/`register_async` as the low-level primitives; host registration goes
+  through the spec.
+
 ##### Nested request models (E2)
 
 - **`#[fromquery(nested)] field: RequestModel`** binds a field through its own
@@ -184,6 +194,15 @@ writer renders every error through it.
   `use_localization(LocalizationOptions)`；`add_memory_cache()` / `_with(max_entries)` 改为
   `add_memory_cache(CacheOptions)`（`CacheOptions::default()` 或
   `CacheOptions::default().max_entries(n)`）；`max_entries(0)` 在注册期拒绝。
+
+##### API 收敛（B：健康检查）
+
+- **`HealthCheckSpec` 成为健康检查的唯一注册值**：`add_health_check(spec)` 接受
+  `HealthCheckSpec::sync(name, closure)` 或 `HealthCheckSpec::async_check(probe)`，可链式
+  `.timeout(d)`。删除 `add_health_check(name, closure)`、`add_health_check_async` 与
+  `add_health_check_async_with_timeout`；异步默认超时仍是 `DEFAULT_HEALTH_CHECK_TIMEOUT`。
+  cache/queue/payment 适配器已迁移。
+- registry 的 `register`/`register_async` 保留为底层原语；宿主注册统一走 spec。
 
 ##### 嵌套请求模型（E2）
 

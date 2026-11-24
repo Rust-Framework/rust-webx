@@ -27,10 +27,7 @@ use crate::auth_jwt::{init_jwt_secret, JwtAuth, JwtSecret, JwtTokenIssuer, JwtVa
 use crate::cors::{CorsConfig, CorsMiddleware};
 use crate::csrf::{CsrfConfig, CsrfMiddleware};
 use crate::endpoint::{StaticHtmlEndpoint, StaticJsonEndpoint, StubEndpoint};
-use crate::health::{
-    HealthCheckEndpoint, HealthCheckRegistry, HealthStatus, IHealthCheck,
-    DEFAULT_HEALTH_CHECK_TIMEOUT,
-};
+use crate::health::{HealthCheckEndpoint, HealthCheckRegistry, HealthCheckSpec};
 use crate::memory_cache::{CacheOptions, MemoryCache};
 use crate::metrics::{HttpMetrics, MetricsEndpoint, MetricsMiddleware};
 use crate::pipeline::MiddlewarePipeline;
@@ -1337,73 +1334,29 @@ impl HostBuilder {
         self
     }
 
-    /// Register a **synchronous** health check probe.
+    /// Register a health check through [`HealthCheckSpec`].
     ///
     /// Health checks are exposed via `/health` and `/health/ready` endpoints
-    /// following RFC 8407 (`application/health+json` content type).
-    ///
-    /// The closure runs on the request task and cannot be timed out: use it only
-    /// for cheap, non-blocking checks. A check that must `.await` I/O (database
-    /// ping, HTTP dependency, queue depth) belongs in
-    /// [`Self::add_health_check_async`]; the sync view then reports it as `warn`
-    /// instead of evaluating it.
+    /// following RFC 8407 (`application/health+json`). The spec carries the
+    /// name, the sync/async probe and its timeout, so there is one registration
+    /// entry:
     ///
     /// ```ignore
     /// Host::builder()
-    ///     .add_health_check("database", || -> HealthStatus {
+    ///     .add_health_check(HealthCheckSpec::sync("database", || {
     ///         if db_ping() { HealthStatus::pass() } else { HealthStatus::fail("db unreachable") }
-    ///     })
+    ///     }))
+    ///     .add_health_check(
+    ///         HealthCheckSpec::async_check(DatabaseProbe { db })
+    ///             .timeout(Duration::from_secs(2)),
+    ///     )
     ///     .build()
     /// ```
-    pub fn add_health_check<F>(self, name: impl Into<String>, check: F) -> Self
-    where
-        F: Fn() -> HealthStatus + Send + Sync + 'static,
-    {
-        self.health_registry.register(name, Arc::new(check));
-        self
-    }
-
-    /// Register an **async** health check with the default timeout
-    /// ([`DEFAULT_HEALTH_CHECK_TIMEOUT`], 3 s).
     ///
-    /// Async checks are evaluated concurrently on every `/health` /
-    /// `/health/ready` request, each under its own timeout. A check that exceeds
-    /// the timeout is reported as `fail` (`timed out after ...`) and readiness
-    /// answers 503; `warn` keeps the endpoint at 200.
-    ///
-    /// ```ignore
-    /// struct DatabaseProbe { db: Arc<Pool> }
-    ///
-    /// #[async_trait::async_trait]
-    /// impl IHealthCheck for DatabaseProbe {
-    ///     fn name(&self) -> &str { "database" }
-    ///     async fn check(&self) -> HealthStatus {
-    ///         match self.db.ping().await {
-    ///             Ok(()) => HealthStatus::pass(),
-    ///             Err(error) => HealthStatus::fail(format!("db unreachable: {error}")),
-    ///         }
-    ///     }
-    /// }
-    ///
-    /// Host::builder()
-    ///     .add_health_check_async(DatabaseProbe { db })
-    ///     .build()
-    /// ```
-    pub fn add_health_check_async<C: IHealthCheck + 'static>(self, check: C) -> Self {
-        self.add_health_check_async_with_timeout(check, DEFAULT_HEALTH_CHECK_TIMEOUT)
-    }
-
-    /// Register an async health check with an explicit per-check timeout.
-    ///
-    /// Timeouts are independent: a slow check fails only itself while the other
-    /// probes still report their real status in the same response.
-    pub fn add_health_check_async_with_timeout<C: IHealthCheck + 'static>(
-        self,
-        check: C,
-        timeout: Duration,
-    ) -> Self {
-        self.health_registry
-            .register_async(Arc::new(check), timeout);
+    /// Async checks are evaluated concurrently, each under its own timeout; a
+    /// timeout is a single `fail` entry while the other probes still report.
+    pub fn add_health_check(self, spec: HealthCheckSpec) -> Self {
+        self.health_registry.register_spec(spec);
         self
     }
 

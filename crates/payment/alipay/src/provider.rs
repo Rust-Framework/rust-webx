@@ -46,6 +46,7 @@ use rsa::{PrivateKey, PublicKey};
 use rust_dix::IServiceResolverExt;
 use serde_json::Value;
 use webx_client::{HttpClient, IHttpClient, OutboundRequest};
+use webx_host::health::HealthCheckSpec;
 use webx_host::health::HealthStatus;
 use webx_host::server::HostBuilder;
 use webx_pay::{
@@ -863,7 +864,9 @@ impl AlipayHostBuilderExt for HostBuilder {
                 .add_payment_provider(provider)
                 .add_payment_provider_builder(Arc::new(AlipayProviderBuilder))
         })
-        .add_health_check("payments.alipay", move || health.health())
+        .add_health_check(HealthCheckSpec::sync("payments.alipay", move || {
+            health.health()
+        }))
     }
 }
 

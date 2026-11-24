@@ -28,6 +28,7 @@ use async_trait::async_trait;
 use rust_dix::IServiceResolverExt;
 use serde_json::Value;
 use webx_client::IHttpClient;
+use webx_host::health::HealthCheckSpec;
 use webx_host::health::HealthStatus;
 use webx_host::server::HostBuilder;
 use webx_pay::{
@@ -610,7 +611,9 @@ impl PayPalHostBuilderExt for HostBuilder {
                 .add_payment_provider(provider)
                 .add_payment_provider_builder(Arc::new(PayPalProviderBuilder))
         })
-        .add_health_check("payments.paypal", move || health.health())
+        .add_health_check(HealthCheckSpec::sync("payments.paypal", move || {
+            health.health()
+        }))
     }
 }
 

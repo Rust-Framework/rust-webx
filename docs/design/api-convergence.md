@@ -27,7 +27,7 @@
 | 7 | `add_localization` + `add_localization_with(Options)` | 复制 | **已完成（3.0）**：`use_localization(LocalizationOptions)` | A |
 | 8 | `add_memory_cache` + `add_memory_cache_with(max_entries)` | 复制 | **已完成（3.0）**：`add_memory_cache(CacheOptions)`（`Default` + `.max_entries(n)`） | A |
 | 9 | `add_options` / `use_options` / `add_options_monitor` | 复制 + 命名混 | `add_options::<T>(section)` 同时注册 `IOptions<T>`/`IOptionsMonitor<T>`；`use_options(value)` 只用于预构造实例 | B |
-| 10 | `add_health_check` / `_async` / `_async_with_timeout`（+ registry `register`/`register_async`） | 复制 + 维度 | `add_health_check(HealthCheckSpec::new(name, check).timeout(d))`；sync 闭包经 `IntoHealthCheck` 适配 | B |
+| 10 | `add_health_check` / `_async` / `_async_with_timeout`（+ registry `register`/`register_async`） | 复制 + 维度 | **已完成（3.0）**：`add_health_check(HealthCheckSpec::sync/async_check(..).timeout(d))`；registry 保留底层原语 | B |
 | 11 | `use_middleware` / `_at` / `_with` / `_with_at` | 维度 | `use_middleware(MiddlewareSpec::<M>::default().at(order).factory(f))` | B |
 | 12 | `add_background_service` / `_with` / `add_hosted_service_with` / `_ordered` / `_if` | 维度 + 命名混 | `add_background_service(spec)`（spec 承载 order/if/构造）；`PeriodicBackgroundService` 仍是 trait 变体，不是注册变体 | B |
 | 13 | `use_alt_svc(value)` / `use_h3_alt_svc(port)` | 同义 | **已完成（3.0）**：只留 `use_alt_svc(impl Into<String>)` | A |

@@ -88,6 +88,61 @@ enum HealthCheck {
     },
 }
 
+enum HealthCheckSpecKind {
+    Sync(HealthCheckFn),
+    Async(Arc<dyn IHealthCheck>),
+}
+
+/// One health check to register, sync or async.
+///
+/// The spec keeps the name, the probe and its timeout in one value so the host
+/// has a single registration entry:
+///
+/// ```ignore
+/// builder.add_health_check(
+///     HealthCheckSpec::async_check(DatabaseProbe { db }).timeout(Duration::from_secs(2)),
+/// );
+/// ```
+pub struct HealthCheckSpec {
+    name: String,
+    kind: HealthCheckSpecKind,
+    timeout: Option<Duration>,
+}
+
+impl HealthCheckSpec {
+    /// A synchronous probe (cheap, non-blocking).
+    pub fn sync<F>(name: impl Into<String>, check: F) -> Self
+    where
+        F: Fn() -> HealthStatus + Send + Sync + 'static,
+    {
+        Self {
+            name: name.into(),
+            kind: HealthCheckSpecKind::Sync(Arc::new(check)),
+            timeout: None,
+        }
+    }
+
+    /// An async probe; the default timeout is [`DEFAULT_HEALTH_CHECK_TIMEOUT`].
+    pub fn async_check<C: IHealthCheck + 'static>(check: C) -> Self {
+        Self::async_arc(Arc::new(check))
+    }
+
+    /// An already-shared async probe.
+    pub fn async_arc(check: Arc<dyn IHealthCheck>) -> Self {
+        Self {
+            name: check.name().to_string(),
+            kind: HealthCheckSpecKind::Async(check),
+            timeout: None,
+        }
+    }
+
+    /// Override the per-check timeout (async probes only).
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+}
+
 pub struct HealthCheckRegistry {
     checks: Mutex<Vec<(String, HealthCheck)>>,
 }
@@ -172,6 +227,21 @@ impl HealthCheckRegistry {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push((name, HealthCheck::Async { check, timeout }));
+    }
+
+    /// Register a [`HealthCheckSpec`] (sync or async, with its timeout).
+    pub fn register_spec(self: &Arc<Self>, spec: HealthCheckSpec) {
+        let check = match spec.kind {
+            HealthCheckSpecKind::Sync(check) => HealthCheck::Sync(check),
+            HealthCheckSpecKind::Async(check) => HealthCheck::Async {
+                check,
+                timeout: spec.timeout.unwrap_or(DEFAULT_HEALTH_CHECK_TIMEOUT),
+            },
+        };
+        self.checks
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((spec.name, check));
     }
 
     /// Snapshot of the registered probes.
@@ -309,5 +379,43 @@ impl IEndpoint for HealthCheckEndpoint {
         ctx.response_mut()
             .set_header("content-type", "application/health+json");
         ctx.response_mut().write_bytes(body).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sync_spec_registers_name_and_status() {
+        let registry = HealthCheckRegistry::new();
+        registry.register_spec(HealthCheckSpec::sync("database", HealthStatus::pass));
+        let snapshot = registry.snapshot();
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].name, "database");
+        assert_eq!(snapshot[0].status, "pass");
+        assert!(registry.all_healthy());
+    }
+
+    #[test]
+    fn async_spec_keeps_its_timeout() {
+        struct Probe;
+        #[async_trait::async_trait]
+        impl IHealthCheck for Probe {
+            fn name(&self) -> &str {
+                "queue"
+            }
+            async fn check(&self) -> HealthStatus {
+                HealthStatus::pass()
+            }
+        }
+
+        let registry = HealthCheckRegistry::new();
+        registry
+            .register_spec(HealthCheckSpec::async_check(Probe).timeout(Duration::from_millis(20)));
+        assert_eq!(registry.snapshot()[0].name, "queue");
+        // The sync view cannot evaluate an async probe, but the probe was
+        // registered under its name and is not a failure.
+        assert_eq!(registry.snapshot()[0].status, "warn");
     }
 }

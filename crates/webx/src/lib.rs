@@ -196,8 +196,8 @@ pub use webx_host::endpoint::{
     ControllerEndpoint, RequestEndpoint, StaticHtmlEndpoint, StaticJsonEndpoint,
 };
 pub use webx_host::health::{
-    HealthCheckEntry, HealthCheckFn, HealthCheckRegistry, HealthStatus, IHealthCheck,
-    DEFAULT_HEALTH_CHECK_TIMEOUT,
+    HealthCheckEntry, HealthCheckFn, HealthCheckRegistry, HealthCheckSpec, HealthStatus,
+    IHealthCheck, DEFAULT_HEALTH_CHECK_TIMEOUT,
 };
 pub use webx_host::idempotency::{IdempotencyMiddleware, InMemoryIdempotencyStore};
 pub use webx_host::introspection::{

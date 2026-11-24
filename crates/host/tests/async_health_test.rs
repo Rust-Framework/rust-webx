@@ -14,8 +14,8 @@ use std::time::Duration;
 use webx_core::mode::AppMode;
 use webx_core::routing::IEndpoint;
 use webx_host::health::{
-    build_health_response_async, HealthCheckEndpoint, HealthCheckRegistry, HealthStatus,
-    IHealthCheck,
+    build_health_response_async, HealthCheckEndpoint, HealthCheckRegistry, HealthCheckSpec,
+    HealthStatus, IHealthCheck,
 };
 use webx_host::server::Host;
 
@@ -225,7 +225,7 @@ fn find_free_port() -> u16 {
         .port()
 }
 
-/// End-to-end: `HostBuilder::add_health_check_async` reaches `/health/ready`
+/// End-to-end: `HostBuilder::add_health_check` with `HealthCheckSpec` reaches `/health/ready`
 /// and flips the status code as the probe changes.
 #[tokio::test]
 async fn host_builder_wires_async_checks_into_the_readiness_endpoint() {
@@ -237,7 +237,7 @@ async fn host_builder_wires_async_checks_into_the_readiness_endpoint() {
     let host = Host::builder()
         .mode(AppMode::Development)
         .no_spa()
-        .add_health_check_async(Toggle(Arc::clone(&healthy)))
+        .add_health_check(HealthCheckSpec::async_check(Toggle(Arc::clone(&healthy))))
         .try_build()
         .expect("host must build");
 

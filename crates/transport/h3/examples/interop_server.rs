@@ -126,7 +126,7 @@ async fn main() -> Result<()> {
     Host::builder()
         .mode(AppMode::Development)
         .no_spa()
-        .add_health_check("h3_transport", HealthStatus::pass)
+        .add_health_check(HealthCheckSpec::sync("h3_transport", HealthStatus::pass))
         .configure(|app| {
             app.use_options(|options| {
                 // This example is only reached over QUIC; an ephemeral loopback

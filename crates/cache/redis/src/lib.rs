@@ -47,6 +47,7 @@ use webx_core::cache::IDistributedCache;
 use webx_core::locking::IAdvisoryLock;
 use webx_core::mediator::{EventDispatcher, IEventPublisher};
 use webx_core::route::ext::IServiceCollectionExt;
+use webx_host::health::HealthCheckSpec;
 use webx_host::server::HostBuilder;
 
 /// `ServiceCollection` registration for [`add_redis`](Self::add_redis).
@@ -146,7 +147,9 @@ impl RedisHostBuilderExt for HostBuilder {
         });
 
         if options.cache_enabled || options.events.is_some() {
-            builder.add_health_check_async(RedisHealthCheck::new(health_connection))
+            builder.add_health_check(HealthCheckSpec::async_check(RedisHealthCheck::new(
+                health_connection,
+            )))
         } else {
             builder
         }

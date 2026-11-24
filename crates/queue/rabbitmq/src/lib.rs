@@ -35,6 +35,7 @@ use std::sync::Arc;
 use rust_dix::ServiceCollection;
 use webx_core::mediator::{EventDispatcher, IEventPublisher};
 use webx_core::route::ext::IServiceCollectionExt;
+use webx_host::health::HealthCheckSpec;
 use webx_host::server::HostBuilder;
 
 /// `ServiceCollection` registration for [`add_rabbitmq`](Self::add_rabbitmq).
@@ -116,7 +117,9 @@ impl RabbitMqHostBuilderExt for HostBuilder {
         self.register(move |services| {
             services.add_rabbitmq_with(Arc::clone(&connection), service_options)
         })
-        .add_health_check_async(RabbitMqHealthCheck::new(health_connection))
+        .add_health_check(HealthCheckSpec::async_check(RabbitMqHealthCheck::new(
+            health_connection,
+        )))
     }
 }
 

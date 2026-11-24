@@ -31,11 +31,11 @@ mod tests {
 
     #[test]
     fn generic_result_carries_the_payload_and_its_business_status() {
-        let value = serde_json::to_value(OperationResult::ok_with_status(
-            7,
-            UserDto { id: 7 },
-            "created",
-        ))
+        let value = serde_json::to_value(
+            OperationResult::success("created")
+                .with_status(7)
+                .with_result(UserDto { id: 7 }),
+        )
         .unwrap();
         assert_eq!(
             value,

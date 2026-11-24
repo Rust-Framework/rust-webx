@@ -55,6 +55,15 @@ writer renders every error through it.
   members; moving them to a separate starter workspace is the next step (acceptance:
   `cargo tree --workspace | rg rust-ef` is empty).
 
+##### API convergence (A)
+
+- **`OperationResult` constructors converged**: `ok`, `ok_with_status` and `success_with_status`
+  are removed. Build a payload result with
+  `OperationResult::success("created").with_status(7).with_result(value)`; the payload-less form is
+  `OperationResult::success("deleted")`, and `failed(status, message)` is unchanged. The redundant
+  constructors were only aliases of the `with_*` builders; `operation_contract` 6 tests and
+  `operation_result_test` 3 tests cover the replacement.
+
 ##### Nested request models (E2)
 
 - **`#[fromquery(nested)] field: RequestModel`** binds a field through its own
@@ -143,6 +152,13 @@ writer renders every error through it.
   3.0 删除。
 - **根 workspace 尚未去 ef**：`*-ef` starters 与 docbit/dmbit demo 仍是成员；把它们移到独立
   starter workspace 是下一步（验收：`cargo tree --workspace | rg rust-ef` 为空）。
+
+##### API 收敛（A）
+
+- **`OperationResult` 构造器收敛**：删除 `ok`、`ok_with_status`、`success_with_status`。带载荷用
+  `OperationResult::success("created").with_status(7).with_result(value)`；无载荷用
+  `OperationResult::success("deleted")`；`failed(status, message)` 不变。被删的只是 `with_*`
+  的别名；`operation_contract` 6 条与 `operation_result_test` 3 条测试覆盖替代写法。
 
 ##### 嵌套请求模型（E2）
 

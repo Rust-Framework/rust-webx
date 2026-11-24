@@ -94,7 +94,7 @@ impl IRequest<OperationResult<UserDto>> for UpdateUserRequest {}
 impl IRequestHandler<UpdateUserRequest, OperationResult<UserDto>> for UpdateUserHandler {
     async fn handle(&mut self, req: UpdateUserRequest) -> ActionResult<OperationResult<UserDto>> {
         let user = self.update(req).await?;
-        Ok(OperationResult::ok(user, "user updated"))
+        Ok(OperationResult::success("user updated").with_result(user))
     }
 }
 ```

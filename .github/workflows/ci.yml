@@ -332,7 +332,7 @@ jobs:
             exit 1
           fi
 
-  # Optional cross-repo pairing gate (release order: rust-ef 2.8.0 first, then
+  # Optional cross-repo pairing gate (release order: rust-ef 2.9.0 first, then
   # rust-webx 2.9.0). Hosted runners cannot see a developer's local checkout, so
   # this job is inert unless explicitly configured:
   #   * repository variable RUST_EF_PATH  — an existing rust-ef checkout on a

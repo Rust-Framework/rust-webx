@@ -42,6 +42,16 @@ use crate::worker::{self, Worker, WorkerFeed};
 /// Pause before retrying a failed `accept` (EMFILE, transient network error).
 const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(50);
 
+/// Decrements `AdmissionStats.waiting` on every exit path, including future
+/// cancellation while the acceptor waits for a slot.
+struct AdmissionWaitGuard<'a>(&'a crate::shared::AdmissionStats);
+
+impl Drop for AdmissionWaitGuard<'_> {
+    fn drop(&mut self) {
+        self.0.end_wait();
+    }
+}
+
 /// One bound listener plus its transport configuration.
 ///
 /// Multiple listeners deliberately share one worker pool and one global
@@ -417,14 +427,16 @@ async fn accept_loop(
         // `503` and is closed: leaving it in the kernel backlog would hide the
         // queue from clients and from `/metrics`.
         shared.admission.begin_wait();
+        // RAII: the acceptor future can be dropped while waiting for a slot
+        // (shutdown, task cancellation); an explicit `end_wait()` on the two
+        // select branches would leak a `waiting` counter in that case.
+        let wait_guard = AdmissionWaitGuard(&shared.admission);
         let permit = tokio::select! {
             biased;
             _ = worker::wait_for_shutdown(&mut shutdown) => {
-                shared.admission.end_wait();
                 break;
             }
             acquired = acquire_admission(&governor, shared.config.admission_timeout) => {
-                shared.admission.end_wait();
                 match acquired {
                     Admission::Permit(raw) => {
                         ConnectionPermit::new(raw, Arc::clone(&shared.admission))
@@ -440,6 +452,7 @@ async fn accept_loop(
                 }
             }
         };
+        drop(wait_guard);
         shared.admission.record_admitted();
 
         if let Err(err) = stream.set_nodelay(true) {

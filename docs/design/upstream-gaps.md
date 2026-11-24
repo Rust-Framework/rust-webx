@@ -1,7 +1,7 @@
 # 下游能力缺口处置结论
 
 > 来源：下游 RXStudio 的 `docs/design/upstream-framework-gaps.md`（基于 rust-webx 2.6.0 /
-> rust-ef 2.6.0 / rust-dix 1.0.0 的落地反馈）。处置基线：rust-webx 2.9.0 / rust-ef 2.8.0 /
+> rust-ef 2.6.0 / rust-dix 1.0.0 的落地反馈）。处置基线：rust-webx 2.9.0 / rust-ef 2.9.0 /
 > rust-dix 1.0.0。
 >
 > 本页是**处置结论**，不是手册：每项只保留判定、落点与边界；实现细节在代码、rustdoc 与
@@ -78,8 +78,8 @@
 - **WebTransport（adapter-level MVP）已交付**：fork 的 `trev-h3-webtransport 0.3.0`
   提供 session/stream/datagram API；`H3Config::with_webtransport_handler` 接受
   `:protocol: webtransport` session 并把具体 `WebTransportServerSession` 交给应用，
-  `IWebTransportHandler::authorize(&info)` 是 pre-accept 钩子（失败 → 403 且不发送 200，
-  e2e 覆盖拒绝路径），`on_session` 返回后最多等 1s `session.closed()`；e2e 覆盖 bidi
+  `IWebTransportHandler::authorize(&info)` 是 pre-accept 钩子（**fail-closed：默认拒绝**；
+  失败 → 403 且不发送 200，e2e 覆盖默认拒绝与显式拒绝路径），`on_session` 返回后最多等 1s `session.closed()`；e2e 覆盖 bidi
   stream echo，datagram API 已暴露但**尚无 e2e**。**transport-neutral** 的 WebTransport
   端口（engine trait + host 路由/DI/生命周期/指标）仍是后续工作（future work）：
   streams/datagrams 不能无损映射到 `IUpgradeSession` 的字节流。

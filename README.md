@@ -96,7 +96,7 @@ rust-webx is **not** a full-stack UI framework (pair it with any frontend), **no
 | **Performance without giving up correctness** | Allocation counts, wire-level correctness and stability suites are release gates. See the [allocation budget](docs/design/alloc-budget.md) and [stability gates](docs/design/stability-gates.md). |
 | **Production admission and lifecycle** | One global connection governor across all listeners, first-request deadline, HTTP/2 keepalive, graceful/immediate shutdown guards, Host single-use state, and per-worker SSE drain. |
 | **Errors that downstream systems can trust** | Error responses are written before reverse `after` hooks, so metrics/tracing/compression see the real status; representation headers from a failed success path are stripped and `problem+json` is consistent. |
-| **Native-first integrations** | `rust-dix` 1.0 DI scopes, `rust-ef` 2.6+ ORM (verified paired with rust-ef 2.8.0), JWT/session/password ports, and `rust-webx-client` are framework capabilities rather than ad-hoc app glue. |
+| **Native-first integrations** | `rust-dix` 1.0 DI scopes, `rust-ef` 2.6+ ORM (verified paired with rust-ef 2.9.0), JWT/session/password ports, and `rust-webx-client` are framework capabilities rather than ad-hoc app glue. |
 | **Explicit HTTP vs in-process capabilities** | `#[handler]` without a route is mediator-only; a route adds the response encoder. No `#[handler(in_process)]`-style mode flag and no hidden HTTP endpoint for a command handler. |
 
 The numbers above are a local same-window comparison, not a capacity guarantee.

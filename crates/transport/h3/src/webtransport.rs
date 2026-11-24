@@ -18,7 +18,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use webx_core::error::Result;
+use webx_core::error::{Error, Result};
 
 /// A WebTransport server session over the pinned h3/quinn backend.
 pub type WebTransportServerSession =
@@ -60,11 +60,16 @@ pub struct WebTransportRequestInfo {
 pub trait IWebTransportHandler: Send + Sync {
     /// Authorize/deny the CONNECT **before** the transport sends `200`.
     ///
-    /// The default accepts every session. Return an error to answer with
+    /// The default **denies** every session (fail-closed): WebTransport CONNECT
+    /// bypasses the engine middleware pipeline, so a handler that forgets to
+    /// override this hook must not receive an unauthenticated tunnel. Return
+    /// `Ok(())` to accept, or an error to answer with
     /// `403 application/problem+json` and tear the CONNECT stream down without
     /// establishing a WebTransport session (no 200 is sent).
     async fn authorize(&self, _info: &WebTransportRequestInfo) -> Result<()> {
-        Ok(())
+        Err(Error::Forbidden(
+            "WebTransport handler did not authorize the session".to_string(),
+        ))
     }
 
     /// Serve one accepted WebTransport session.

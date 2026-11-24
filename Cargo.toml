@@ -157,10 +157,10 @@ dmbit-handlers = { version = "0.1.0", path = "dmbit/handlers" }
 rust-dix = "1.0"
 rust-dix-macros = "1.0"
 
-# rust-ef ORM (rust-ef 2.6+, paired/verified with rust-ef 2.8.0 in this release;
+# rust-ef ORM (rust-ef 2.6+, paired/verified with rust-ef 2.9.0 in this release;
 # rust-dix 1.0 integration via add_dbcontext + owned resolution).
-# Keep the `"2.6"` semver range: it admits 2.8.x, and the release order is
-# rust-ef 2.8.0 first, then rust-webx 2.9.0. Do not tighten it to `=2.8`, which
+# Keep the `"2.6"` semver range: it admits 2.9.x, and the release order is
+# rust-ef 2.9.0 first, then rust-webx 2.9.0. Do not tighten it to `=2.9`, which
 # would make the lockfile unresolvable before the ORM release is on crates.io.
 # rust-ef is Web-agnostic (no `webx` feature and no dependency on rust-webx);
 # applications map EFError at their boundary (reference apps: handlers/src/db.rs).

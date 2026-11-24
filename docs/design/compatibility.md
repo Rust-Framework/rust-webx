@@ -68,8 +68,8 @@ testing/upgrade-smoke/current/Cargo.toml  → rust-webx = { path = "../../../cra
 `rust-webx`。持久层错误到 HTTP 的翻译属于**应用边界**，由单独的适配 crate
 `rust-webx-ef` 承担（应用按需依赖；core 与 umbrella 不链接它）：
 
-配对发布：先 rust-ef 2.8.0、后 rust-webx 2.9.0；workspace 依赖写 `rust-ef = "2.6"`
-（semver 范围，已含 2.8.x，本版按 2.8.0 验证），不收紧为精确 pin——否则在 ORM 发布前
+配对发布：先 rust-ef 2.9.0、后 rust-webx 2.9.0；workspace 依赖写 `rust-ef = "2.6"`
+（semver 范围，已含 2.9.x，本版按 2.9.0 验证），不收紧为精确 pin——否则在 ORM 发布前
 `Cargo.lock` 不可解析。
 
 - 不在 `rust-webx-core` / umbrella 增加 `ef` feature 或可选 `rust-ef` 依赖。即使
@@ -90,7 +90,7 @@ pub use webx_ef::{map_ef_error, EfResultExt};
 let blogs = ctx.set::<Blog>().query().to_list().await.map_ef()?;
 ```
 
-映射契约（与 rust-ef 2.6+ 迁移指南一致；本版按 2.8.0 配对验证）：
+映射契约（与 rust-ef 2.6+ 迁移指南一致；本版按 2.9.0 配对验证）：
 
 | `EFError` | HTTP | `webx::Error` | 客户端可见 detail |
 |---|---|---|---|
@@ -112,7 +112,7 @@ ORM → Web 框架。
 
 ### 配对验证（pairing verified）的证据边界
 
-发布顺序是 **rust-ef 2.8.0 → rust-webx 2.9.0**（见上）。发布前用本地 rust-ef
+发布顺序是 **rust-ef 2.9.0 → rust-webx 2.9.0**（见上）。发布前用本地 rust-ef
 checkout 做编译级配对验证：
 
 ```bash
@@ -133,6 +133,10 @@ EF 适配层编译通过，并让 `rust-webx-ef` 的测试通过。**不证明**
 制品可下载/可解析、该 rust-ef 树自身的 semver 门禁、也不覆盖真 PostgreSQL/MySQL
 （由 CI 真库 job 覆盖）。发布记录里写证据时应同时记录 rust-ef 的 commit/tag 与
 rust-webx 的 commit，例如 "pairing verified: rust-ef@<sha> × rust-webx@<sha>"。
+
+在 rust-ef 2.9.0 上线 crates.io 之前，`Cargo.lock` 允许继续解析到 2.6.0（保持可构建）；
+rust-ef 发布后、给 rust-webx 打 tag 前，执行 `cargo update -p rust-ef --precise 2.9.0`
+（`rust-ef-sqlite` / providers 同步），确认 `cargo tree -i rust-ef` 只有 2.9.0，再提交锁文件。
 
 ## 5. 弃用政策
 
@@ -168,7 +172,7 @@ rust-webx 的 commit，例如 "pairing verified: rust-ef@<sha> × rust-webx@<sha
 ```text
 □ CI 全绿（tests/clippy/fmt/MSRV/audit/docs/coverage/benches/alloc/semver/upgrade）
 □ CHANGELOG 含迁移说明（弃用/行为变更）
-□ 配对 ORM 已先行发布（rust-ef x.y.z → rust-webx x.y.z；`rust-ef = "2.6"` 范围覆盖 2.8.x，不收紧为精确 pin）
+□ 配对 ORM 已先行发布（rust-ef x.y.z → rust-webx x.y.z；`rust-ef = "2.6"` 范围覆盖 2.9.x，不收紧为精确 pin）
 □ 配对验证已跑：`RUST_EF_PATH=… bash scripts/check-pairing-rust-ef.sh`（或 CI `pairing` job）通过，证据边界见 §4
 □ semver-checks 对上一发布通过（例外仅 §3）
 □ N-2 冒烟通过（testing/upgrade-smoke；2.9.0 的 N-2 = rust-webx 2.7.0）

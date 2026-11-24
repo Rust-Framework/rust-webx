@@ -155,7 +155,7 @@ transport-neutral 握手协商，会话实现本身不变。
 - **WebTransport**：bidi/unidi streams + datagrams 无法无损映射成单个 `AsyncRead + AsyncWrite`。
   当前交付 **adapter-level handler 端口**：`H3Config::with_webtransport_handler` 把具体
   `WebTransportServerSession` 交给应用，`IWebTransportHandler::authorize(&info)` 是 pre-accept
-  钩子（失败 → 403，先于任何 `200`）。transport-neutral 的 `IWebTransportSession` 端口
+  钩子（**fail-closed：默认拒绝**；失败 → 403，先于任何 `200`）。transport-neutral 的 `IWebTransportSession` 端口
   （engine trait + host 路由/DI/指标）尚未建立；**不**改造 `IUpgradeSession` 去承载 datagram。
 - **断线重放**：`IRealtimeEventStore` 以 subscription + cursor 为键，与传输无关；
   `truncated` 语义不变（`crates/core/src/realtime/event_store.rs`）。

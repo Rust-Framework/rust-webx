@@ -53,7 +53,8 @@ existing `webx` API; there are **no application-facing breaking changes**.
   `:protocol: webtransport`, adopts RFC 9220 sessions and hands the application a concrete
   `WebTransportServerSession` (bidi/unidi streams + datagrams). The handler gets a pre-accept
   `authorize(&WebTransportRequestInfo)` hook (denial is `403` before any `200`), then
-  `on_session(info, session)`; a real h3 client opens a WebTransport bidirectional stream and
+  `on_session(info, session)`; the hook is **fail-closed** (a handler that does not override it
+  denies every session, because CONNECT bypasses the engine middleware pipeline). A real h3 client opens a WebTransport bidirectional stream and
   receives the echoed payload end to end. WebTransport CONNECT bypasses the engine HTTP
   middleware pipeline, so the handler authorizes the session itself; a transport-neutral
   WebTransport port for `webx`/`webx_core` remains future work.
@@ -95,19 +96,36 @@ existing `webx` API; there are **no application-facing breaking changes**.
   runtime that owned it and lose its `1001` close frame. `AdmissionStats` now counts live upgrade
   sessions and each worker waits (within the drain budget) for that count to reach zero before its
   runtime is dropped. Covered by the repeated `close_semantics_test` run.
+- **Buffered request bodies honor the body limit on streaming reads.**
+  `IHttpRequest::body_stream()` applies the same `413` check as `body_bytes()`, so a whole-body
+  transport (HTTP/3, in-process backends) cannot bypass `App.MaxBodySize` or a route's
+  `#[max_body_size]` by taking the streaming API.
+- **The acceptor `waiting` gauge cannot leak on cancellation.** The TCP acceptor now uses an RAII
+  guard around `AdmissionStats::begin_wait`/`end_wait`, so dropping the accept future
+  (shutdown/task cancellation) no longer leaves the gauge non-zero and trips the shutdown
+  invariant.
 
 #### Breaking
 
-- **None for application code.** `webx`, `webx_core`, `webx_host` and existing engine entry points
+- **None relative to 2.8.0.** `webx`, `webx_core`, `webx_host` and existing engine entry points
   keep their signatures and behavior. New transport APIs are additive; engine additions are
   documented above.
+- **Upgrading from 2.7.0** (the last published release): 2.8.0 was never published separately;
+  its documented Breaking changes ship in 2.9.0. Custom `IIdempotencyStore` implementations must
+  apply the 2.8.0 migration (`IdempotentResponse::new(..)` + `.with_headers(..)`,
+  `IdempotencyLease::new(..)`, wildcard arm for `IdempotencyBegin`) — see the [2.8.0] Breaking
+  section below. All other 2.8.0 additions are source-compatible.
+- **Behavior changes to apply when coming from 2.7.0:** `RateLimit.TrustProxy` /
+  `RateLimit.TrustedProxies` are legacy no-ops (they were replaced by
+  `ClientInfo.TrustForwardedHeaders` / `ClientInfo.TrustedProxies`); move the trust configuration
+  to the `ClientInfo` section.
 
 #### Notes
 
 - MSRV stays **1.95**; `rust-webx-h3` pins `quinn = 0.11.12`, `trev-h3 = 0.3.0`,
   `trev-h3-quinn = 0.3.0` and `trev-h3-webtransport = 0.3.0` (the MIT h3 fork is isolated
   behind `H3Config`/`H3Transport`/`IWebTransportHandler`; exact pins keep fork changes contained).
-- Cross-repo pairing: rust-ef 2.8.0 first, then rust-webx 2.9.0 (unchanged ORM boundary).
+- Cross-repo pairing: rust-ef 2.9.0 first, then rust-webx 2.9.0 (unchanged ORM boundary).
 - **Repository layout:** `crates/` is now the published surface only. The non-published
   harnesses moved to `testing/` (`alloc-probe`, `contract-tests`, `upgrade-smoke`), and the
   crate-layout gate rejects a `publish = false` package under `crates/`. No published API
@@ -149,8 +167,10 @@ existing `webx` API; there are **no application-facing breaking changes**.
   `:protocol: webtransport`，接受 RFC 9220 session 并向应用暴露具体
   `WebTransportServerSession`（bidi/unidi streams + datagrams）；handler 先经过
   `authorize(&WebTransportRequestInfo)` 预授权（拒绝在 200 之前返回 403），再进入
-  `on_session(info, session)`。真实 h3 client 打开 WebTransport bidi stream 并收到回显 payload
-  的 e2e 已覆盖。WebTransport CONNECT 不经过 engine HTTP middleware，handler 需自行认证授权。
+  `on_session(info, session)`。该钩子**默认拒绝（fail-closed）**：WebTransport CONNECT 不经过
+  engine middleware，未覆写 `authorize` 的 handler 不会收到未认证隧道。真实 h3 client 打开
+  WebTransport bidi stream 并收到回显 payload 的 e2e 已覆盖；未覆写授权钩子返回 403 的 e2e
+  也已覆盖。WebTransport CONNECT 不经过 engine HTTP middleware，handler 需自行认证授权。
   transport-neutral 的 WebTransport 端口仍是后续工作。
 - **QUIC keep-alive / idle / stream limits**：`H3Config` 提供
   `with_keep_alive_interval`、`with_max_idle_timeout`、`with_stream_limits`（默认 15s/60s/16+16），
@@ -183,18 +203,28 @@ existing `webx` API; there are **no application-facing breaking changes**.
   会话可能比拥有它的 worker runtime 活得更久，从而丢失 `1001` 关闭帧。`AdmissionStats` 现在统计
   存活的升级会话，worker 在丢弃 runtime 之前、在排空预算内等待该计数归零。由反复运行的
   `close_semantics_test` 覆盖。
+- **Buffered 请求体在流式读取路径同样受上限约束。** `IHttpRequest::body_stream()` 复用
+  `body_bytes()` 的 `413` 检查，整包传输（HTTP/3、进程内后端）无法通过流式 API 绕过
+  `App.MaxBodySize` 或路由 `#[max_body_size]`。
+- **acceptor 的 `waiting` 计数不再在取消时泄漏。** TCP acceptor 用 RAII 守卫包裹
+  `AdmissionStats::begin_wait`/`end_wait`，accept future 被 drop（停机/任务取消）不再留下非零
+  计数并误触发停机不变量。
 
 #### 破坏性变更
 
-- **应用代码无破坏性变更。** `webx`/`webx_core`/`webx_host` 与既有 engine 入口签名/行为不变；
+- **相对 2.8.0 无破坏性变更。** `webx`/`webx_core`/`webx_host` 与既有 engine 入口签名/行为不变；
   新传输 API 均为加性。
+- **从 2.7.0 升级**（最近一个已发布版本）：2.8.0 未单独发布，其已文档化的 Breaking 变更随 2.9.0
+  交付。自定义 `IIdempotencyStore` 实现需按下方 [2.8.0] Breaking 段迁移
+  （`IdempotentResponse::new(..)` + `.with_headers(..)`、`IdempotencyLease::new(..)`、
+  `IdempotencyBegin` 的 match 补通配分支）；2.8.0 的其余新增均源码兼容。
 
 #### 备注
 
 - MSRV 保持 **1.95**；`rust-webx-h3` 精确钉 `quinn = 0.11.12`、`trev-h3 = 0.3.0`、
   `trev-h3-quinn = 0.3.0`、`trev-h3-webtransport = 0.3.0`（MIT h3 fork 隔离在
   `H3Config`/`H3Transport`/`IWebTransportHandler` 后面，精确钉版限制 fork 变更的影响面）。
-- 跨仓配对：先 rust-ef 2.8.0，后 rust-webx 2.9.0（ORM 边界不变）。
+- 跨仓配对：先 rust-ef 2.9.0，后 rust-webx 2.9.0（ORM 边界不变）。
 - **仓库布局：** `crates/` 现在只放可发布 crate。非发布测试工具迁移到 `testing/`
   （`alloc-probe`、`contract-tests`、`upgrade-smoke`），布局门禁会拒绝 `crates/` 下的
   `publish = false` 包。公开 API 无变化，仅仓库内路径（CI 命令、文档与 `contract-tests`
@@ -203,7 +233,10 @@ existing `webx` API; there are **no application-facing breaking changes**.
   2.9 的传输/`Alt-Svc` helper 是同一 builder 状态的糖。
   `crates/host/tests/composition_slots_test.rs` 锁定两槽契约。
 
-## [2.8.0] — 2026-11-23
+## [2.8.0] — unreleased
+
+> This iteration was never tagged or published to crates.io; its changes ship in **2.9.0**.
+> Kept here as the provenance of the 2.8 iteration.
 
 > **English** · **简体中文**
 

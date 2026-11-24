@@ -65,7 +65,10 @@
 //!   advertises WebTransport + datagrams and adopts RFC 9220
 //!   `:protocol: webtransport` sessions, handing a concrete
 //!   [`WebTransportServerSession`]
-//!   to the application handler. Bidirectional stream echo is covered e2e;
+//!   to the application handler. `IWebTransportHandler::authorize` runs before
+//!   the session is accepted and is **fail-closed**: a handler that does not
+//!   override it denies every session (no `200` is sent). Bidirectional stream
+//!   echo is covered e2e;
 //!   the session also exposes unidirectional streams and datagrams through the
 //!   pinned h3 fork. A **transport-neutral** WebTransport port for
 //!   `webx`/`webx_core` remains future work (streams/datagrams cannot be

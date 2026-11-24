@@ -97,7 +97,7 @@ rust-webx **不是** 全栈 UI 框架（可搭配任意前端）、**不是** OR
 | **性能不以正确性为代价** | allocation 计数、wire-level 正确性和稳定性套件都是发布门禁。见[分配预算](docs/design/alloc-budget.md)与[稳定性门禁](docs/design/stability-gates.md)。 |
 | **生产级准入与生命周期** | 所有 listener 共享一个全局连接 governor、首请求超时、HTTP/2 keepalive、优雅/立即关闭 guard、Host 单次运行状态、per-worker SSE drain。 |
 | **错误语义可信** | 错误响应在逆序 after hooks 之前写入，metrics/tracing/compression 看到真实状态；失败的成功路径不会残留 `cache-control`/`etag`/`content-encoding` 等表示头。 |
-| **原生优先的集成** | `rust-dix` 1.0 DI scope、`rust-ef` 2.6+ ORM（已按 2.8.0 配对验证）、JWT/session/password 端口、`rust-webx-client` 都是框架能力，而非应用层临时胶水。 |
+| **原生优先的集成** | `rust-dix` 1.0 DI scope、`rust-ef` 2.6+ ORM（已按 2.9.0 配对验证）、JWT/session/password 端口、`rust-webx-client` 都是框架能力，而非应用层临时胶水。 |
 | **HTTP 与进程内能力边界清晰** | 无路由的 `#[handler]` 自动是 mediator-only；有路由才增加响应 encoder。没有 `#[handler(in_process)]` 模式开关，也不会把 command handler 意外暴露成 HTTP 端点。 |
 
 以上性能数字是同一台主机同窗口的本地对比，不构成绝对容量承诺；allocation 计数和 wire-level 正确性测试才是发布回归信号。方法与预算见[分配预算](docs/design/alloc-budget.md)。

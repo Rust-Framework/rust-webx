@@ -64,7 +64,8 @@ const H3_NO_ERROR: u32 = 0;
 /// Minimal `application/problem+json` body for a request rejected before the
 /// engine sees it. The engine's own problem writer is used for every request
 /// that is dispatched; this one only covers transport-level rejection.
-const PAYLOAD_TOO_LARGE_BODY: &[u8] = br#"{"status":413,"code":"payload_too_large"}"#;
+const PAYLOAD_TOO_LARGE_BODY: &[u8] =
+    br#"{"status":413,"code":"payload_too_large","title":"Payload Too Large"}"#;
 const BAD_REQUEST_BODY: &[u8] = br#"{"status":400,"code":"bad_request","title":"Bad Request"}"#;
 const NOT_FOUND_BODY: &[u8] = br#"{"status":404,"code":"not_found","title":"Not Found"}"#;
 const NOT_IMPLEMENTED_BODY: &[u8] =

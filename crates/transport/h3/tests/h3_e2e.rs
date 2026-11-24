@@ -145,6 +145,14 @@ fn wt_error(error: impl std::fmt::Display) -> webx::Error {
 
 #[async_trait::async_trait]
 impl IWebTransportHandler for H3WebTransportEcho {
+    async fn authorize(
+        &self,
+        _info: &webx_h3::webtransport::WebTransportRequestInfo,
+    ) -> Result<()> {
+        // The port is fail-closed: a handler that wants traffic must opt in.
+        Ok(())
+    }
+
     async fn on_session(
         &self,
         _info: webx_h3::webtransport::WebTransportRequestInfo,
@@ -183,6 +191,20 @@ impl IWebTransportHandler for H3WebTransportDeny {
         Err(webx::Error::Http("denied by policy".into()))
     }
 
+    async fn on_session(
+        &self,
+        _info: webx_h3::webtransport::WebTransportRequestInfo,
+        _session: Arc<WebTransportServerSession>,
+    ) -> Result<()> {
+        Ok(())
+    }
+}
+
+/// Does not override `authorize`; the port's fail-closed default must deny it.
+struct H3WebTransportNoAuthorize;
+
+#[async_trait::async_trait]
+impl IWebTransportHandler for H3WebTransportNoAuthorize {
     async fn on_session(
         &self,
         _info: webx_h3::webtransport::WebTransportRequestInfo,
@@ -1274,6 +1296,46 @@ async fn h3_webtransport_denies_before_accepting() {
     })
     .await
     .expect("HTTP/3 WebTransport denial test finished within the timeout");
+}
+
+#[tokio::test]
+async fn h3_webtransport_default_authorize_is_fail_closed() {
+    // A handler that does not override `authorize` must not receive an
+    // unauthenticated WebTransport tunnel: CONNECT bypasses the HTTP pipeline.
+    let tls = self_signed_tls();
+    let transport = H3Transport::new(
+        H3Config::new("127.0.0.1:0", tls.cert, tls.key)
+            .with_webtransport_handler(Arc::new(H3WebTransportNoAuthorize)),
+    )
+    .expect("build the HTTP/3 transport with a handler that does not authorize");
+    let address = transport.local_addr();
+
+    let host = TestHost::from_builder(Host::builder().mode(AppMode::Development).no_spa());
+    let engine_shutdown = host.engine_handle();
+    let transport: Arc<dyn IHttpTransport> = Arc::new(transport);
+    let server_task = tokio::spawn(async move { host.run_http_transport(transport).await });
+
+    tokio::time::timeout(TEST_TIMEOUT, async move {
+        let mut client = H3Client::connect(address).await;
+        let denied = client
+            .extended_connect(
+                address,
+                "/h3/webtransport",
+                h3::ext::Protocol::WEB_TRANSPORT,
+                false,
+            )
+            .await;
+        assert_eq!(denied.status, 403);
+        assert_eq!(denied.json()["code"], "forbidden");
+
+        engine_shutdown.shutdown();
+        let transport_result = server_task
+            .await
+            .expect("the HTTP/3 transport task did not panic");
+        transport_result.expect("the HTTP/3 transport returned an error");
+    })
+    .await
+    .expect("HTTP/3 default WebTransport authorization test finished within the timeout");
 }
 
 #[tokio::test]

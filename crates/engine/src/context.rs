@@ -791,6 +791,15 @@ impl IHttpRequest for EngineRequest {
                 ))
             }
             BodyState::Buffered(bytes) => {
+                // A buffered body bypasses the streaming `read_body` limit
+                // check (e.g. an already-decoded transport request), so apply
+                // the same route/app cap here as `body_bytes_shared`.
+                if bytes.len() > self.body_limit {
+                    return Err(Error::PayloadTooLarge(format!(
+                        "request body exceeds the {}-byte limit",
+                        self.body_limit
+                    )));
+                }
                 let bytes = bytes.clone();
                 return Ok(Box::pin(futures_util::stream::once(async move {
                     Ok::<Bytes, Error>(bytes)
@@ -860,6 +869,15 @@ impl IHttpRequest for EngineRequest {
                 // still a valid multipart payload, so replay them as one frame
                 // instead of failing the upload with `415`.
                 BodyState::Buffered(bytes) => {
+                    // Whole-body transports (HTTP/3, in-process backends) have
+                    // no Content-Length to check, so enforce the multipart cap
+                    // on the buffered payload itself.
+                    if bytes.len() as u64 > self.limits.multipart_body {
+                        return Err(Error::PayloadTooLarge(format!(
+                            "multipart body exceeds the {}-byte limit",
+                            self.limits.multipart_body
+                        )));
+                    }
                     let frame: std::result::Result<
                         TransportBodyFrame,
                         crate::transport::TransportBodyError,

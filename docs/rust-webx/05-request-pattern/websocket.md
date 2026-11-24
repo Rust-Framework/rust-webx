@@ -422,7 +422,7 @@ WebSocket 会话建立在 `IUpgradeSession` + `UpgradedTransport` 之上，与�
 依赖说明：2.9 的 h3 适配层使用 `trev-h3 0.3.0` fork（上游 `h3 0.0.8` 无法表达
 `:protocol: websocket`），精确钉版并隔离在可选 crate `rust-webx-h3` 内。WebTransport
 以 adapter-level MVP 交付（`H3Config::with_webtransport_handler`；`IWebTransportHandler::authorize`
-pre-accept 失败 → 403；session + bidi stream echo，datagram API 暴露但无 e2e）；面向
+pre-accept 钩子 fail-closed 默认拒绝，失败 → 403；session + bidi stream echo，datagram API 暴露但无 e2e）；面向
 `webx` 的 transport-neutral WebTransport 端口仍是后续工作。
 
 ## 实时观测

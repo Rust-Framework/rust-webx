@@ -105,6 +105,9 @@ writer renders every error through it.
 - **Authentication enablement uses `use_authentication()`** (was `add_authentication()`): enabling
   JWT is a `use_*` action, while `add_authentication_scheme` still stacks an explicit scheme.
   `use_auth_scheme_for` keeps its per-prefix selection role. All workspace/docs call sites renamed.
+- **Binding spelling stays one mechanism**: field-level `#[fromquery]` is the default query binding;
+  `#[request(queryall)]` is only a struct-level switch that makes unmarked fields bind from the query
+  string on write methods. It does not create a second binding model.
 
 ##### Nested request models (E2)
 
@@ -239,6 +242,8 @@ writer renders every error through it.
 - **认证启用改为 `use_authentication()`**（原 `add_authentication()`）：启用 JWT 属 `use_*` 动作；
   `add_authentication_scheme` 仍用于叠加显式 scheme，`use_auth_scheme_for` 保留按前缀选择职责。
   workspace/文档调用点已全部改名。
+- **绑定写法只有一套**：字段级 `#[fromquery]` 是默认查询绑定；`#[request(queryall)]` 只是结构级开关，
+  让写方法上未标记字段从 query 绑定，不构成第二套绑定模型。
 
 ##### 嵌套请求模型（E2）
 

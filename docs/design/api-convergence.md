@@ -36,7 +36,7 @@
 | 16 | `IRequest<Response>` 自控响应 vs `ActionResult<T>` vs `OperationResult<T>` | 保留（语义不同） | 写死三选一：DTO → `ActionResult<T>`；命令型业务信封 → `OperationResult`；文件/非 JSON/自定义状态 → `IRequest<Response>` | 规则 |
 | 17 | `use_rate_limiter` / `use_rate_limit_policy` | 保留（全局桶 vs 策略） | 全局桶用 limiter；按用户/租户/API key 用 policy | 规则 |
 | 18 | `add_authentication` / `add_authentication_scheme` / `use_auth_scheme_for` | 命名混 | 动词规则：`use_*` = 替换端口/启用；`add_*` = 叠加中间件或基础设施；逐个改名对齐 | C |
-| 19 | `#[fromquery]` 与 `#[request(queryall)]` 两种查询绑定 | 同义（两种写法） | 合并为一种：字段级 `#[fromquery]` 为默认；`queryall` 作为结构级开关而不是第二套绑定 | C |
+| 19 | `#[fromquery]` 与 `#[request(queryall)]` 两种查询绑定 | 同义（两种写法） | **已完成（3.0 规则）**：字段级 `#[fromquery]` 默认；`queryall` 是结构级开关，不是第二套绑定 | C |
 | 20 | `#[validate]` 与 `ProblemDetails::validation(...)` | 维度（声明式 vs 手工） | 字段级/格式用 `#[validate]`；跨字段/查库/业务规则用 `ProblemDetails`；不新增第三套 | 规则 |
 
 ## 批次日与验收

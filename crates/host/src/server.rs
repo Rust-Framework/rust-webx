@@ -31,7 +31,7 @@ use crate::health::{
     HealthCheckEndpoint, HealthCheckRegistry, HealthStatus, IHealthCheck,
     DEFAULT_HEALTH_CHECK_TIMEOUT,
 };
-use crate::memory_cache::MemoryCache;
+use crate::memory_cache::{CacheOptions, MemoryCache};
 use crate::metrics::{HttpMetrics, MetricsEndpoint, MetricsMiddleware};
 use crate::pipeline::MiddlewarePipeline;
 use crate::rate_limit::RateLimitMiddleware;
@@ -1187,7 +1187,7 @@ impl HostBuilder {
         self
     }
 
-    /// Enable localization with the conventional resource layout.
+    /// Enable localization.
     ///
     /// Reads `<culture>.json` files from `locales/` under the application base
     /// (for example `locales/zh-CN.json`, `locales/en.json`). The active culture
@@ -1196,61 +1196,37 @@ impl HostBuilder {
     /// catalog.
     ///
     /// ```ignore
-    /// Host::builder().add_localization().build()
+    /// Host::builder().use_localization(LocalizationOptions::new()).build()
     /// ```
     ///
     /// A missing `locales/` directory is not an error; keys then fall back to
-    /// their literal or the key itself. For a single-file deployment, register
-    /// compiled-in resources with [`Self::add_localization_with`].
-    pub fn add_localization(mut self) -> Self {
-        self.localization = Some(LocalizationOptions::new());
-        self
-    }
-
-    /// Enable localization with explicit options.
-    ///
-    /// Use this for compiled-in resources (`include_str!`) or a non-conventional
-    /// resource directory. Explicit resources override files with the same
-    /// culture and key.
-    ///
-    /// ```ignore
-    /// Host::builder()
-    ///     .add_localization_with(
-    ///         LocalizationOptions::none()
-    ///             .resources("zh-CN", include_str!("../locales/zh-CN.json"))
-    ///             .resources("en", include_str!("../locales/en.json")),
-    ///     )
-    ///     .build()
-    /// ```
-    pub fn add_localization_with(mut self, options: LocalizationOptions) -> Self {
+    /// their literal or the key itself. For a single-file deployment, pass
+    /// `LocalizationOptions::none().resources(...)` instead.
+    pub fn use_localization(mut self, options: LocalizationOptions) -> Self {
         self.localization = Some(options);
         self
     }
 
-    /// Register a memory cache instance for use via `IDistributedCache` trait.
+    /// Register an in-process memory cache as a singleton `IDistributedCache`.
     ///
-    /// The cache is registered as a singleton in the DI container.
-    /// Handlers can access it by implementing `From<Arc<MemoryCache>>`.
+    /// The default cap is [`MemoryCache::DEFAULT_MAX_ENTRIES`]; use
+    /// [`CacheOptions::max_entries`] to bound it. Handlers receive the cache by
+    /// injecting `Arc<MemoryCache>` or the `IDistributedCache` port.
     ///
     /// ```ignore
     /// Host::builder()
-    ///     .add_memory_cache()
+    ///     .add_memory_cache(CacheOptions::default())
     ///     .build()
     ///     .run().await;
     /// ```
-    pub fn add_memory_cache(mut self) -> Self {
-        let cache = Arc::new(MemoryCache::new());
+    pub fn add_memory_cache(mut self, options: CacheOptions) -> Self {
+        assert!(
+            options.max_entries > 0,
+            "add_memory_cache: CacheOptions::max_entries must be greater than zero"
+        );
+        let cache = Arc::new(MemoryCache::new().with_max_entries(options.max_entries));
         self.service_configs
             .push(Box::new(move |svc, _options| svc.instance(cache)));
-        self
-    }
-
-    /// Register a memory cache with custom configuration.
-    pub fn add_memory_cache_with(mut self, max_entries: usize) -> Self {
-        let cache = Arc::new(MemoryCache::new().with_max_entries(max_entries));
-        self.service_configs.push(Box::new(move |svc, _options| {
-            svc.instance(Arc::clone(&cache))
-        }));
         self
     }
 

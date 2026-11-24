@@ -72,6 +72,10 @@ writer renders every error through it.
 - **`use_h3_alt_svc` removed**: `use_alt_svc("h3=\":443\"; ma=86400")` is the single entry (the raw
   value also covers non-H3 alt services). `AltSvcMiddleware::h3(port)` remains available when
   assembling the pipeline by hand.
+- **Localization and memory cache have one entry each**: `add_localization()` / `_with(options)` are
+  replaced by `use_localization(LocalizationOptions)`; `add_memory_cache()` / `_with(max_entries)` are
+  replaced by `add_memory_cache(CacheOptions)` (`CacheOptions::default()` or
+  `CacheOptions::default().max_entries(n)`). `max_entries(0)` is rejected at registration.
 
 ##### Nested request models (E2)
 
@@ -176,6 +180,10 @@ writer renders every error through it.
   注册入口只保留一个。
 - **删除 `use_h3_alt_svc`**：唯一入口是 `use_alt_svc("h3=\":443\"; ma=86400")`（原始值也覆盖
   非 H3 的 alt service）；手工组装 pipeline 时仍可用 `AltSvcMiddleware::h3(port)`。
+- **localization 与 memory cache 各一个入口**：`add_localization()` / `_with(options)` 改为
+  `use_localization(LocalizationOptions)`；`add_memory_cache()` / `_with(max_entries)` 改为
+  `add_memory_cache(CacheOptions)`（`CacheOptions::default()` 或
+  `CacheOptions::default().max_entries(n)`）；`max_entries(0)` 在注册期拒绝。
 
 ##### 嵌套请求模型（E2）
 

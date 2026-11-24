@@ -67,6 +67,37 @@ pub struct MemoryCache {
     max_entries: usize,
 }
 
+/// Configuration for [`HostBuilder::add_memory_cache`](crate::HostBuilder::add_memory_cache).
+///
+/// The default cap matches [`MemoryCache::DEFAULT_MAX_ENTRIES`]; `max_entries(0)`
+/// is rejected at registration so a typo cannot make the cache drop every entry.
+#[derive(Debug, Clone)]
+pub struct CacheOptions {
+    /// Maximum number of entries before the oldest insertion is evicted.
+    pub max_entries: usize,
+}
+
+impl Default for CacheOptions {
+    fn default() -> Self {
+        Self {
+            max_entries: MemoryCache::DEFAULT_MAX_ENTRIES,
+        }
+    }
+}
+
+impl CacheOptions {
+    /// The default cap.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the maximum number of entries.
+    pub fn max_entries(mut self, max_entries: usize) -> Self {
+        self.max_entries = max_entries;
+        self
+    }
+}
+
 impl MemoryCache {
     /// Default cap: enough for typical session/tenant caches, bounded so a
     /// user-controlled key space cannot grow RSS without limit.

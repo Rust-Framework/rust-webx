@@ -207,6 +207,7 @@ pub use webx_host::login::{
     default_password_concurrency, verify_password_or_dummy, BoundedPasswordHasher, ILoginThrottle,
     LoginThrottleDecision, MemoryLoginThrottle, PasswordPolicy, ThrottlePolicy, MAX_PASSWORD_BYTES,
 };
+pub use webx_host::memory_cache::CacheOptions;
 pub use webx_host::memory_cache::MemoryCache;
 pub use webx_host::notifications::{InMemoryEmailSender, InMemorySmsSender};
 #[cfg(feature = "password-argon2")]

@@ -268,7 +268,7 @@ fn host_exposes_the_catalog_and_uses_the_global_culture_config() {
                 options.culture.default = "zh-CN".to_string();
             });
         })
-        .add_localization_with(
+        .use_localization(
             LocalizationOptions::none()
                 .resources("zh-CN", RESOURCES_ZH)
                 .resources("en", RESOURCES_EN),

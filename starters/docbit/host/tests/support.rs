@@ -14,7 +14,7 @@ pub fn build_host() -> Host {
         .register(|svc| svc.add_mediator())
         .add_options::<SiteConfig>("Site")
         .add_authentication()
-        .add_memory_cache()
+        .add_memory_cache(CacheOptions::default())
         .use_spa("wwwroot");
 
     if AppMode::from_env() == AppMode::Production {

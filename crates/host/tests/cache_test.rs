@@ -5,7 +5,7 @@ use std::time::Duration;
 use webx_core::cache::{
     DistributedCacheEntryOptions, DistributedCacheExtensions, IDistributedCache,
 };
-use webx_host::memory_cache::MemoryCache;
+use webx_host::memory_cache::{CacheOptions, MemoryCache};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct TestUser {
@@ -152,4 +152,11 @@ async fn count_after_operations() {
     assert_eq!(c.count().await, 2);
     c.remove("a").await.unwrap();
     assert_eq!(c.count().await, 1);
+}
+
+#[test]
+fn cache_options_default_and_builder() {
+    let default = CacheOptions::default();
+    assert_eq!(default.max_entries, MemoryCache::DEFAULT_MAX_ENTRIES);
+    assert_eq!(CacheOptions::new().max_entries(3).max_entries, 3);
 }

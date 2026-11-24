@@ -24,8 +24,8 @@
 | 4 | `Error::Message`（500，裸文本，13 处） | 同义 | 删除，统一 `Error::Internal`（500、`public_detail()=None`）；`State` 仅用于状态机 | A |
 | 5 | `Error::Http(String)`（400） | 同义 | 删除，统一 `Error::Status(400, _)` / `Validation` | A |
 | 6 | `use_session_store` + `use_session_store_cached` | 复制 | **已完成（3.0）**：只留 `use_session_store`；缓存用 `CachedSessionStore::new(store, ttl)` 显式装饰 | A |
-| 7 | `add_localization` + `add_localization_with(Options)` | 复制 | `use_localization(LocalizationOptions)`（`Default` + builder） | A |
-| 8 | `add_memory_cache` + `add_memory_cache_with(max_entries)` | 复制 | `add_memory_cache(CacheOptions)`（`Default` + `.max_entries(n)`） | A |
+| 7 | `add_localization` + `add_localization_with(Options)` | 复制 | **已完成（3.0）**：`use_localization(LocalizationOptions)` | A |
+| 8 | `add_memory_cache` + `add_memory_cache_with(max_entries)` | 复制 | **已完成（3.0）**：`add_memory_cache(CacheOptions)`（`Default` + `.max_entries(n)`） | A |
 | 9 | `add_options` / `use_options` / `add_options_monitor` | 复制 + 命名混 | `add_options::<T>(section)` 同时注册 `IOptions<T>`/`IOptionsMonitor<T>`；`use_options(value)` 只用于预构造实例 | B |
 | 10 | `add_health_check` / `_async` / `_async_with_timeout`（+ registry `register`/`register_async`） | 复制 + 维度 | `add_health_check(HealthCheckSpec::new(name, check).timeout(d))`；sync 闭包经 `IntoHealthCheck` 适配 | B |
 | 11 | `use_middleware` / `_at` / `_with` / `_with_at` | 维度 | `use_middleware(MiddlewareSpec::<M>::default().at(order).factory(f))` | B |

@@ -15,14 +15,14 @@
 //! Resources are registered at startup. The conventional layout needs one call:
 //!
 //! ```ignore
-//! Host::builder().add_localization().build();  // reads locales/<culture>.json
+//! Host::builder().use_localization(LocalizationOptions::new()).build();  // reads locales/<culture>.json
 //! ```
 //!
 //! For a single-file deployment, compile them in:
 //!
 //! ```ignore
 //! Host::builder()
-//!     .add_localization_with(
+//!     .use_localization(
 //!         LocalizationOptions::none()
 //!             .resources("zh-CN", include_str!("../locales/zh-CN.json"))
 //!             .resources("en", include_str!("../locales/en.json")),
@@ -143,7 +143,7 @@ pub trait IStringLocalizer: Send + Sync {
 /// Two sources, merged in this order (later wins):
 ///
 /// 1. a resource directory of `<culture>.json` files, relative to the
-///    application base (`locales/` by default for `add_localization()`), read at
+///    application base (`locales/` by default for `use_localization(LocalizationOptions::new())`), read at
 ///    startup so operators can adjust translations without a rebuild;
 /// 2. explicit `(culture, json)` entries compiled into the binary with
 ///    `include_str!` — the single-executable form.
@@ -165,7 +165,7 @@ impl Default for LocalizationOptions {
 
 impl LocalizationOptions {
     /// The conventional layout (`locales/<culture>.json`) with no compiled-in
-    /// entries. This is what `HostBuilder::add_localization()` uses.
+    /// entries. This is what `HostBuilder::use_localization(LocalizationOptions::new())` uses.
     pub fn new() -> Self {
         Self::default()
     }

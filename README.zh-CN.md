@@ -39,6 +39,8 @@
 
 ## 什么是 rust-webx
 
+> **如果你来自 ASP.NET Core，并希望在 Rust 里保留熟悉的 DI + Mediator 工程模型，那么 rust-webx 就是为你准备的。**
+
 **rust-webx** 是一个受 **ASP.NET Core** 启发的 Rust WebApi 框架，以 **DI（依赖注入）+ Mediator（中介者）** 为双核心。通过 *请求即端点* 模式，开发者可以用类型安全的 Rust 代码定义完整的 HTTP API——无需手写路由表、无需手动注册 Handler、无需分散的错误处理。
 
 与其自己拼装路由库、DI 容器、中间件与错误处理：
@@ -58,6 +60,24 @@ rust-webx 把这些横切关注点内聚到框架层：
 | 认证授权各自为政 | `use_authentication()` + 声明式 `#[authorize]` |
 
 rust-webx **不是** 全栈 UI 框架（可搭配任意前端）、**不是** ORM（自带或使用 [`rust-ef`](https://crates.io/crates/rust-ef)）、**也不是** 微服务治理平台。
+
+### 适合谁
+
+- **从 .NET 迁到 Rust 的团队。** 你熟悉的词汇几乎一一对应：`IRequest<T>` / `IRequestHandler<T, R>` 就是「请求 + 处理器」，`IMediator::send()` 就是 MediatR 风格的派发，`#[fromclaim] user: IdentityUser` 取代 `HttpContext.User`，`problem+json` 取代手写的异常中间件，`HostBuilder` 就是当年的 `Program.cs`。
+- **分层业务服务。** 一个操作 = 一个 Request + 一个 Handler + 一个文件；契约、领域、应用、宿主四层 crate 让依赖方向显式可见，而不是放任一个两千行的 `routes.rs` 长出来。
+- **上线首日就要生产能力的 API 服务。** 认证与会话、字段校验、OpenAPI、健康检查、事务性 outbox、实时推送与指标都是框架端口，而不是需要你自己粘起来的一堆 crate。
+
+### 和谁比
+
+| | 组合式 HTTP 工具包（`axum`、`actix-web`、`poem`、`rocket`） | rust-webx |
+|---|---|---|
+| 代码单元 | 路由处理函数 + 提取器（extractor） | 一个「本身就是端点」的请求类型（`IRequest<R>`）+ 它的 Handler |
+| 仍需自己写 | 路由树、DI/State 方案、错误→响应转换、校验与 OpenAPI 选型 | 一套约定覆盖全部：`#[handler]`、`#[fromclaim]`、`#[validate]`、`#[authorize]`、`map_ef_error` |
+| 注册方式 | 手写路由注册，或自己再加一层宏 | 路由与 Handler 元数据编译期（`inventory`）收集，`Host::build()` 一次装配 |
+| 应用级能力 | 自带（BYO） | 认证/会话/Passkey、限流、幂等、outbox、实时、支付、OpenAPI、健康检查均为端口 |
+| 逃生通道 | — | Handler 就是普通 Rust；中间件与 after 钩子拿到 `&mut dyn IHttpContext`，HTTP 层始终可达 |
+
+rust-webx 是刻意「有主见」的：它不追求做最小的路由库。如果你想要一个极简 HTTP 工具包、并且享受自己挑选每一层，`axum` 这类框架更合适；如果你要把一个分层的 ASP.NET Core 服务迁到 Rust、并想在对岸保留同一套应用模型，这里的映射是直接的。
 
 ## 核心特性
 

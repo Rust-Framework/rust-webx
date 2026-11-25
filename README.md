@@ -41,6 +41,8 @@ A type-safe, convention-over-configuration platform where *requests are endpoint
 
 ## What is rust-webx
 
+> **If you come from ASP.NET Core and want to keep its DI + Mediator engineering model in Rust, rust-webx is built for you.**
+
 **rust-webx** is a Web API framework for Rust inspired by **ASP.NET Core**. It uses **DI (Dependency Injection) + Mediator** as its dual core. Through the *request-as-endpoint* pattern, developers define complete HTTP APIs with type-safe Rust code — no hand-written route tables, no manual handler registration, no scattered error handling.
 
 Instead of assembling routing libraries, DI containers, middleware and error handling yourself:
@@ -60,6 +62,24 @@ rust-webx folds these cross-cutting concerns into the framework layer:
 | Ad-hoc auth/authorization | `use_authentication()` + declarative `#[authorize]` |
 
 rust-webx is **not** a full-stack UI framework (pair it with any frontend), **not** an ORM (bring your own or use [`rust-ef`](https://crates.io/crates/rust-ef)), and **not** a microservice-governance platform. The optional `rust-webx-ai*` crates build an OpenAI-compatible gateway on top of the framework; they are a separate, opt-in product surface, not a dependency of the core Web API story.
+
+### Who it is for
+
+- **.NET teams moving to Rust.** The words you already know carry over: `IRequest<T>` / `IRequestHandler<T, R>` for a request and its handler, `IMediator::send()` for MediatR-style dispatch, `#[fromclaim] user: IdentityUser` where `HttpContext.User` used to be, `problem+json` instead of hand-rolled exception middleware, and `HostBuilder` where `Program.cs` used to be.
+- **Layered business services.** One operation = one request + one handler + one file; contract, domain, application and host crates make the dependency direction explicit instead of growing a 2,000-line `routes.rs`.
+- **API backends that need production plumbing on day one.** Authentication and sessions, validation, OpenAPI, health checks, the transactional outbox, realtime fan-out and metrics are framework ports, not a hand-picked crate stack you have to glue together.
+
+### How it compares
+
+| | Composable HTTP toolkits (`axum`, `actix-web`, `poem`, `rocket`) | rust-webx |
+|---|---|---|
+| Unit of code | A route handler function plus extractors | A request type that *is* the endpoint (`IRequest<R>`) plus its handler |
+| Wiring you still write | Router tree, state/DI choice, error → response conversion, validation and OpenAPI crates | One convention for all of it: `#[handler]`, `#[fromclaim]`, `#[validate]`, `#[authorize]`, `map_ef_error` |
+| Registration | Register routes by hand, or add your own macro layer | Route and handler metadata collected at compile time (`inventory`), joined once in `Host::build()` |
+| Application services | Bring your own | Auth/session/passkeys, rate limiting, idempotency, outbox, realtime, payments, OpenAPI and health checks as ports |
+| Escape hatch | — | Handlers are plain Rust, and middleware/after hooks receive `&mut dyn IHttpContext`, so raw HTTP stays reachable |
+
+rust-webx is opinionated on purpose: it does not try to be the smallest router. If you want a minimal HTTP toolkit and prefer to choose every layer yourself, an `axum`-style framework is a better fit. If you are porting a layered ASP.NET Core service and want the same application model on the other side, the mapping is direct.
 
 ## Key Features
 

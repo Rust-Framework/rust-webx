@@ -6,6 +6,14 @@
 //! confirms; the consumer acknowledges only after the application handlers ran
 //! and requeues failures, so delivery is at-least-once.
 //!
+//! Competing events use the topic exchange + quorum queue. Broadcast events
+//! ([`IEventPublisher::broadcast`]) use a fanout exchange
+//! (`"<exchange>.broadcast"` by default) to which every node binds its own
+//! exclusive auto-delete queue, so each node receives one copy (**at-most-once**
+//! — handler failures are logged, not requeued). Enabling broadcast needs no
+//! extra configuration; set `broadcast_exchange` only to name the exchange
+//! explicitly.
+//!
 //! ```no_run
 //! use webx_core::route::ext::IServiceCollectionExt;
 //! use webx_host::server::Host;
@@ -140,6 +148,11 @@ mod tests {
         assert_eq!(options.prefetch, 32);
         assert_eq!(options.max_deliveries, 5);
         assert!(options.dead_letter_exchange.is_empty());
+        assert!(options.broadcast_exchange.is_empty());
+        assert_eq!(
+            options.effective_broadcast_exchange(),
+            "webx.events.broadcast"
+        );
     }
 
     #[test]
@@ -154,5 +167,37 @@ mod tests {
         assert_eq!(options.queue, "app.users");
         assert!(!options.consumer_enabled);
         assert_eq!(options.max_deliveries, 3);
+        assert_eq!(
+            options.effective_broadcast_exchange(),
+            "app.events.broadcast"
+        );
+    }
+
+    #[test]
+    fn explicit_broadcast_exchange_wins_and_a_blank_one_derives() {
+        let options = RabbitMqOptions::new("amqp://rabbit").with_topology(
+            "app.events",
+            "user.created",
+            "app.users",
+        );
+        let explicit = options.clone().with_broadcast_exchange("app.events.fanout");
+        assert_eq!(explicit.effective_broadcast_exchange(), "app.events.fanout");
+
+        let blank = options.with_broadcast_exchange("  ");
+        assert_eq!(blank.effective_broadcast_exchange(), "app.events.broadcast");
+    }
+
+    #[test]
+    fn options_deserialize_without_the_new_broadcast_field() {
+        // `#[serde(default)]`: configuration written before 2.9.2 keeps working
+        // and the broadcast exchange is derived from `exchange`.
+        let options: RabbitMqOptions =
+            serde_json::from_str(r#"{"url":"amqp://rabbit","exchange":"app.events"}"#)
+                .expect("options deserialize");
+        assert_eq!(
+            options.effective_broadcast_exchange(),
+            "app.events.broadcast"
+        );
+        assert!(options.consumer_enabled, "other defaults still apply");
     }
 }

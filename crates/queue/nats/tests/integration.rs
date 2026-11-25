@@ -75,6 +75,67 @@ fn provider_with_counting_handler(counted: Arc<AtomicU32>) -> Arc<ServiceProvide
         .expect("test service provider must build")
 }
 
+/// Spawn a consumer with its own cancellation token.
+fn spawn_consumer(
+    connection: &Arc<NatsConnection>,
+    options: NatsOptions,
+    dispatcher: Arc<EventDispatcher>,
+) -> (
+    CancellationToken,
+    tokio::task::JoinHandle<webx_core::error::Result<()>>,
+) {
+    let consumer = NatsEventConsumer::new(Arc::clone(connection), options, dispatcher);
+    let ct = CancellationToken::new();
+    let consumer_ct = ct.clone();
+    let task = tokio::spawn(async move { consumer.execute(consumer_ct).await });
+    (ct, task)
+}
+
+/// Cancel a consumer and fail the test if it does not stop within 5s.
+async fn stop_consumer(
+    ct: CancellationToken,
+    mut task: tokio::task::JoinHandle<webx_core::error::Result<()>>,
+) {
+    ct.cancel();
+    match tokio::time::timeout(Duration::from_secs(5), &mut task).await {
+        Ok(Ok(Ok(()))) => {}
+        Ok(Ok(Err(error))) => panic!("nats consumer failed: {error}"),
+        Ok(Err(error)) => panic!("nats consumer task panicked: {error}"),
+        Err(_) => {
+            task.abort();
+            let _ = task.await;
+            panic!("nats consumer did not stop within 5s of cancellation");
+        }
+    }
+}
+
+/// Re-publish until `done` observes the event: core NATS drops messages
+/// published before the subscriber is registered.
+async fn republish_until(
+    publisher: &dyn IEventPublisher,
+    message: &EventMessage,
+    broadcast: bool,
+    done: impl Fn() -> bool,
+) -> Option<webx_core::error::Error> {
+    let mut last_error = None;
+    let _ = tokio::time::timeout(Duration::from_secs(10), async {
+        while !done() {
+            let result = if broadcast {
+                publisher.broadcast(message.clone()).await
+            } else {
+                publisher.publish(message.clone()).await
+            };
+            if let Err(error) = result {
+                last_error = Some(error);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await;
+    last_error
+}
+
 #[tokio::test]
 async fn event_roundtrip() {
     let Ok(url) = std::env::var("WEBX_NATS_URL") else {
@@ -151,4 +212,88 @@ async fn event_transport_satisfies_the_shared_contract() {
         .await
         .expect("nats event transport contract");
     assert!(report.delivered_count() >= 1);
+}
+
+#[tokio::test]
+async fn broadcast_roundtrip() {
+    let Ok(url) = std::env::var("WEBX_NATS_URL") else {
+        return;
+    };
+    let subject = format!("webx.test.broadcast.{}", unique_suffix());
+    let counted = Arc::new(AtomicU32::new(0));
+    let provider = provider_with_counting_handler(Arc::clone(&counted));
+    let dispatcher = Arc::new(EventDispatcher::new(provider));
+
+    let connection = Arc::new(NatsConnection::new(url.clone(), Duration::from_secs(5)));
+    let options = NatsOptions::new(url).with_subject(subject.clone());
+    let publisher = NatsEventPublisher::new(Arc::clone(&connection), subject.clone());
+    let (ct, task) = spawn_consumer(&connection, options, Arc::clone(&dispatcher));
+
+    let message = EventMessage::from_event(&TestEvent { value: 1 }).expect("encode event");
+    let publish_error = republish_until(&publisher, &message, true, || {
+        counted.load(Ordering::SeqCst) > 0
+    })
+    .await;
+
+    stop_consumer(ct, task).await;
+
+    if let Some(error) = publish_error {
+        panic!("broadcasting the test event failed: {error}");
+    }
+    assert!(
+        counted.load(Ordering::SeqCst) > 0,
+        "the handler did not receive the broadcast event"
+    );
+}
+
+#[tokio::test]
+async fn broadcast_reaches_every_subscriber() {
+    let Ok(url) = std::env::var("WEBX_NATS_URL") else {
+        return;
+    };
+    let subject = format!("webx.test.broadcast-fanout.{}", unique_suffix());
+    let first_counted = Arc::new(AtomicU32::new(0));
+    let second_counted = Arc::new(AtomicU32::new(0));
+
+    let connection = Arc::new(NatsConnection::new(url.clone(), Duration::from_secs(5)));
+    let options = NatsOptions::new(url).with_subject(subject.clone());
+    let publisher = NatsEventPublisher::new(Arc::clone(&connection), subject.clone());
+
+    // Two nodes: both subscribe to the broadcast subject without a queue group,
+    // so each must receive its own copy (a queue group would load-balance).
+    let (first_ct, first_task) = spawn_consumer(
+        &connection,
+        options.clone(),
+        Arc::new(EventDispatcher::new(provider_with_counting_handler(
+            Arc::clone(&first_counted),
+        ))),
+    );
+    let (second_ct, second_task) = spawn_consumer(
+        &connection,
+        options,
+        Arc::new(EventDispatcher::new(provider_with_counting_handler(
+            Arc::clone(&second_counted),
+        ))),
+    );
+
+    let message = EventMessage::from_event(&TestEvent { value: 1 }).expect("encode event");
+    let publish_error = republish_until(&publisher, &message, true, || {
+        first_counted.load(Ordering::SeqCst) > 0 && second_counted.load(Ordering::SeqCst) > 0
+    })
+    .await;
+
+    stop_consumer(first_ct, first_task).await;
+    stop_consumer(second_ct, second_task).await;
+
+    if let Some(error) = publish_error {
+        panic!("broadcasting the test event failed: {error}");
+    }
+    assert!(
+        first_counted.load(Ordering::SeqCst) > 0,
+        "the first subscriber did not receive the broadcast event"
+    );
+    assert!(
+        second_counted.load(Ordering::SeqCst) > 0,
+        "the second subscriber did not receive the broadcast event"
+    );
 }

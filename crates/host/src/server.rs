@@ -847,6 +847,25 @@ impl HostBuilder {
                         >,
                     >
             })
+            // User-targeted fan-out covers 1:1 signaling, direct messages and
+            // device control messages, where a room is not the right address.
+            .try_add_singleton::<
+                dyn webx_core::handler::IEventHandler<
+                    webx_core::realtime::RealtimeUserFanoutEvent,
+                >,
+            >(|resolver| {
+                let registry = resolver
+                    .resolve_arc::<dyn webx_core::realtime::IConnectionRegistry>()
+                    .expect(
+                        "the realtime registry is registered before the user fan-out handler",
+                    );
+                Arc::new(crate::realtime_fanout::RealtimeUserFanoutHandler::new(registry))
+                    as Arc<
+                        dyn webx_core::handler::IEventHandler<
+                            webx_core::realtime::RealtimeUserFanoutEvent,
+                        >,
+                    >
+            })
         }));
         self
     }
@@ -898,6 +917,63 @@ impl HostBuilder {
         self
     }
 
+    /// Share online presence across instances through an [`IOnlinePresence`]
+    /// store.
+    ///
+    /// Registers the store, a bridge that maps this node's atomic first/last
+    /// transitions to `user:<id>` / `tenant:<id>` scopes, and a heartbeat
+    /// background service that refreshes the TTL of the members this node owns.
+    /// A crashed node stops refreshing them, so its users disappear from the
+    /// shared store within the TTL instead of staying online forever.
+    ///
+    /// The default member TTL is 60 s; use [`Self::use_online_presence_with`]
+    /// to tune it. The shared
+    /// implementation for multi-instance deployments ships with
+    /// `rust-webx-redis` (`RedisOnlinePresence`).
+    ///
+    /// [`IOnlinePresence`]: webx_core::realtime::IOnlinePresence
+    pub fn use_online_presence(self, store: Arc<dyn webx_core::realtime::IOnlinePresence>) -> Self {
+        self.use_online_presence_with(store, crate::presence::DEFAULT_PRESENCE_TTL)
+    }
+
+    /// [`Self::use_online_presence`] with an explicit member TTL.
+    pub fn use_online_presence_with(
+        mut self,
+        store: Arc<dyn webx_core::realtime::IOnlinePresence>,
+        ttl: std::time::Duration,
+    ) -> Self {
+        let store_for_bridge = Arc::clone(&store);
+        self.service_configs.push(Box::new(move |svc, _options| {
+            use webx_core::route::ext::IServiceCollectionExt as _;
+            let node_id = presence_node_id();
+            svc.instance::<dyn webx_core::realtime::IOnlinePresence>(store)
+                .try_add_singleton::<crate::presence::PresenceBridge>(move |resolver| {
+                    let clock = resolver
+                        .resolve_arc::<dyn webx_core::time::IClock>()
+                        .expect("the host registers a clock before service configs run");
+                    Arc::new(crate::presence::PresenceBridge::new(
+                        Arc::clone(&store_for_bridge),
+                        ttl,
+                        node_id.clone(),
+                        clock,
+                    ))
+                })
+                .try_add_singleton::<dyn webx_core::realtime::IPresenceObserver>(|resolver| {
+                    resolver
+                        .resolve_arc::<crate::presence::PresenceBridge>()
+                        .expect("the presence bridge is registered above")
+                        as Arc<dyn webx_core::realtime::IPresenceObserver>
+                })
+                .add_background_service(BackgroundServiceSpec::with_factory(|resolver| {
+                    let bridge = resolver
+                        .resolve_arc::<crate::presence::PresenceBridge>()
+                        .expect("the presence bridge is registered above");
+                    Arc::new(crate::presence::PresenceHeartbeat::new(bridge))
+                }))
+        }));
+        self
+    }
+
     /// Register the email delivery port.
     ///
     /// No sender is registered by default: a missing adapter fails at DI
@@ -917,6 +993,22 @@ impl HostBuilder {
     pub fn use_sms(mut self, sender: Arc<dyn webx_core::notifications::ISmsSender>) -> Self {
         self.service_configs.push(Box::new(move |svc, _options| {
             svc.instance::<dyn webx_core::notifications::ISmsSender>(sender)
+        }));
+        self
+    }
+
+    /// Register the mobile push delivery port.
+    ///
+    /// No sender is registered by default: a host that tries to push without an
+    /// adapter fails at DI resolution instead of silently dropping offline
+    /// messages. Production passes `rust-webx-apns` /
+    /// `rust-webx-fcm`; tests pass
+    /// [`InMemoryPushSender`](crate::push::InMemoryPushSender).
+    ///
+    /// [`IPushSender`]: webx_core::push::IPushSender
+    pub fn use_push(mut self, sender: Arc<dyn webx_core::push::IPushSender>) -> Self {
+        self.service_configs.push(Box::new(move |svc, _options| {
+            svc.instance::<dyn webx_core::push::IPushSender>(sender)
         }));
         self
     }
@@ -1059,7 +1151,7 @@ impl HostBuilder {
     ///
     /// Tagged-enum request types (the usual shape for message protocols) cannot
     /// express binding sources at all, which is why this is a documented contract
-    /// rather than a compile-time bound (2.10 tracks a derive-emitted marker).
+    /// rather than a compile-time bound (2.9.2 tracks a derive-emitted marker).
     pub fn use_websocket_request<Req, Rsp>(self, path: &'static str) -> Self
     where
         Req: webx_core::mediator::IRequest<Rsp> + serde::de::DeserializeOwned + Send + 'static,
@@ -1108,7 +1200,7 @@ impl HostBuilder {
     /// Register a custom authentication scheme.
     ///
     /// Schemes are tried in registration order, before the JWT scheme enabled
-    /// by [`add_authentication`](Self::add_authentication); the first scheme
+    /// by [`use_authentication`](Self::use_authentication); the first scheme
     /// whose `matches` returns `true` handles the request. This is how a
     /// management-plane JWT and a data-plane `sk-` API key coexist:
     ///
@@ -2033,6 +2125,42 @@ impl HostBuilder {
             pipeline.add_middleware(Arc::new(CsrfMiddleware::new(csrf)?));
         }
 
+        // Long-lived sessions re-check the credential that authorized the
+        // upgrade. The provider is built only when the operator opted in
+        // (`WebSocketLimits::session_revalidation`) and a session store or
+        // cookie repository exists to check against; otherwise this stays
+        // `None` and costs nothing per upgrade.
+        let websocket_credentials = if self.websocket_limits.session_revalidation.is_some() {
+            let session_store = provider.get_all::<dyn ISessionStore>().into_iter().last();
+            let session_repository = self
+                .auth_schemes
+                .iter()
+                .find_map(|scheme| scheme.session_repository());
+            let session_cookie_name = self
+                .auth_schemes
+                .iter()
+                .find_map(|scheme| scheme.session_cookie_name())
+                .map(str::to_string);
+            let clock = provider
+                .get_all::<dyn webx_core::time::IClock>()
+                .into_iter()
+                .last();
+            match clock {
+                Some(clock) => {
+                    let provider = crate::session_credential::SessionCredentialProvider::new(
+                        session_store,
+                        session_repository,
+                        session_cookie_name,
+                        clock,
+                    );
+                    provider.is_useful().then(|| Arc::new(provider))
+                }
+                None => None,
+            }
+        } else {
+            None
+        };
+
         let mut auth_schemes = self.auth_schemes;
         if self.auth_enabled {
             let secret = options.jwt.secret.clone();
@@ -2226,17 +2354,20 @@ impl HostBuilder {
                     .cloned()
                     .collect()
             };
-            pipeline.add_middleware(Arc::new(
-                crate::websocket::WebSocketMiddleware::new(
-                    routes,
-                    Arc::clone(&provider),
-                    self.websocket_limits.clone(),
-                    provider
-                        .get_all::<dyn webx_core::realtime::IPresenceObserver>()
-                        .into(),
-                )
-                .with_origins(websocket_origins),
-            ));
+            let websocket_middleware = crate::websocket::WebSocketMiddleware::new(
+                routes,
+                Arc::clone(&provider),
+                self.websocket_limits.clone(),
+                provider
+                    .get_all::<dyn webx_core::realtime::IPresenceObserver>()
+                    .into(),
+            )
+            .with_origins(websocket_origins);
+            let websocket_middleware = match websocket_credentials {
+                Some(credentials) => websocket_middleware.with_credentials(credentials),
+                None => websocket_middleware,
+            };
+            pipeline.add_middleware(Arc::new(websocket_middleware));
         }
 
         // SPA 自动启用：若应用显式调用 `use_spa`，使用指定的文件源；
@@ -3187,6 +3318,26 @@ impl IHost for Host {
         trigger_shutdown(&self.shutdown, &self.shutdown_token);
         Ok(())
     }
+}
+
+/// Stable-per-process id for this node's shared-presence members.
+///
+/// The host has no configured instance id; process id + startup time is enough
+/// to keep two nodes from overwriting each other's presence members. It is not
+/// a security boundary.
+fn presence_node_id() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(1);
+    let started = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis())
+        .unwrap_or(0);
+    format!(
+        "node-{}-{}-{}",
+        std::process::id(),
+        started,
+        SEQ.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 fn trigger_shutdown(shutdown: &ShutdownSignal, token: &CancellationToken) {

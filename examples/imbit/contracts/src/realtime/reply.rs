@@ -26,8 +26,14 @@ pub enum ImReply {
         room_id: String,
         online: Vec<String>,
     },
-    /// Signaling frame delivered to `delivered` members (0 when the target is
-    /// offline; signaling is best-effort and clients renegotiate on reconnect).
+    /// Signaling frame accepted for `delivered` **local** connections: the
+    /// target user's connections for a 1:1 signal, the local room connections
+    /// other than the sender for a room broadcast. Delivery itself is
+    /// asynchronous (event transport, at-most-once), so a multi-instance
+    /// deployment cannot count other nodes; clients renegotiate on reconnect.
+    ///
+    /// A room broadcast is written to every local room connection, including the
+    /// sender's; signal receivers filter their own frames by `message.from`.
     Signaled {
         room_id: String,
         delivered: usize,

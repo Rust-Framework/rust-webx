@@ -2151,7 +2151,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx"
-version = "2.9.1"
+version = "2.9.2"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2174,7 +2174,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-ai"
-version = "2.9.1"
+version = "2.9.2"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -2192,7 +2192,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-ai-ef"
-version = "2.9.1"
+version = "2.9.2"
 dependencies = [
  "async-trait",
  "rust-ef",
@@ -2207,7 +2207,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-auth-ef"
-version = "2.9.1"
+version = "2.9.2"
 dependencies = [
  "async-trait",
  "rust-ef",
@@ -2220,7 +2220,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-client"
-version = "2.9.1"
+version = "2.9.2"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2243,7 +2243,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-core"
-version = "2.9.1"
+version = "2.9.2"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2268,7 +2268,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-engine"
-version = "2.9.1"
+version = "2.9.2"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2296,7 +2296,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-host"
-version = "2.9.1"
+version = "2.9.2"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -2341,7 +2341,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-idempotency-ef"
-version = "2.9.1"
+version = "2.9.2"
 dependencies = [
  "async-trait",
  "rust-ef",
@@ -2358,7 +2358,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-macros"
-version = "2.9.1"
+version = "2.9.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2367,7 +2367,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-openapi"
-version = "2.9.1"
+version = "2.9.2"
 dependencies = [
  "inventory",
  "rust-webx-core",
@@ -2376,7 +2376,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-outbox"
-version = "2.9.1"
+version = "2.9.2"
 dependencies = [
  "async-trait",
  "rust-dix",
@@ -2388,7 +2388,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-outbox-ef"
-version = "2.9.1"
+version = "2.9.2"
 dependencies = [
  "async-trait",
  "rust-dix",
@@ -2407,7 +2407,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-pay"
-version = "2.9.1"
+version = "2.9.2"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2425,7 +2425,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-pay-ef"
-version = "2.9.1"
+version = "2.9.2"
 dependencies = [
  "async-trait",
  "rust-dix",
@@ -2444,7 +2444,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-spa"
-version = "2.9.1"
+version = "2.9.2"
 dependencies = [
  "async-trait",
  "brotli-decompressor",

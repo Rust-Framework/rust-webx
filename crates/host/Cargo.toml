@@ -84,11 +84,3 @@ harness = false
 [lints]
 workspace = true
 
-# cargo-semver-checks: 2.9.1 removes `HostBuilder::use_email_sender` /
-# `use_sms_sender` in favour of `use_email` / `use_sms` with no compatibility
-# alias (documented exception, `docs/design/compatibility.md` §3). The allow is
-# scoped to this crate so `rust-webx-core` / `rust-webx-engine` / `rust-webx`
-# keep full method-removal detection. Drop it once the `semver` job baseline
-# moves past v2.9.1.
-[package.metadata.cargo-semver-checks.lints]
-inherent_method_missing = "allow"

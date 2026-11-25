@@ -73,6 +73,15 @@ impl Room {
         names
     }
 
+    /// Member user ids in stable (sorted) order.
+    ///
+    /// The id is the address presence and permissions use: a room's online
+    /// members are computed by filtering these ids through the shared online
+    /// presence store, never by matching display names.
+    pub fn member_ids(&self) -> Vec<String> {
+        self.members.keys().cloned().collect()
+    }
+
     /// Allocate the next gapless sequence number of this room's log.
     pub fn allocate_seq(&mut self) -> u64 {
         self.next_seq += 1;

@@ -127,6 +127,11 @@ impl From<String> for RedisOptions {
 /// `publish` writes to a capped stream and the consumer reads through a
 /// consumer group, acknowledges only after [`EventDispatcher`](webx_core::mediator::EventDispatcher)
 /// ran, and reclaims pending entries from crashed consumers.
+///
+/// `broadcast` (broadcast-class events such as `RealtimeFanoutEvent`) is
+/// published to a **Pub/Sub channel** instead: every node's consumer subscribes
+/// to it, so each node receives its own copy. Pub/Sub is at-most-once; a node
+/// that is not subscribed at publish time misses the event.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RedisEventsOptions {
@@ -140,6 +145,11 @@ pub struct RedisEventsOptions {
     /// messages, `0` = replay everything retained). Ignored once the group
     /// exists.
     pub start_id: String,
+    /// Pub/Sub channel broadcast-class events are published to / consumed from.
+    ///
+    /// Empty means "derive `"<stream>:broadcast"`"; `with_broadcast_channel`
+    /// fills it in. Broadcast delivery never goes through the consumer group.
+    pub broadcast_channel: String,
     /// Start the background consumer. A publisher-only service sets this to
     /// `false`.
     pub consumer_enabled: bool,
@@ -170,6 +180,7 @@ impl Default for RedisEventsOptions {
             group: "webx".to_string(),
             consumer: String::new(),
             start_id: "$".to_string(),
+            broadcast_channel: String::new(),
             consumer_enabled: true,
             max_len: 100_000,
             read_count: 64,
@@ -183,6 +194,27 @@ impl Default for RedisEventsOptions {
 }
 
 impl RedisEventsOptions {
+    /// Pub/Sub channel for broadcast delivery (blank = derive
+    /// `"<stream>:broadcast"`).
+    pub fn with_broadcast_channel(mut self, channel: impl Into<String>) -> Self {
+        self.broadcast_channel = channel.into();
+        self
+    }
+
+    /// The Pub/Sub channel broadcast events are published to / consumed from.
+    ///
+    /// Returns the configured channel when it is set (non-blank); otherwise
+    /// derives `"<stream>:broadcast"` so enabling broadcast support never needs
+    /// a second configuration key.
+    pub(crate) fn effective_broadcast_channel(&self) -> String {
+        let configured = self.broadcast_channel.trim();
+        if configured.is_empty() {
+            derived_broadcast_channel(&self.stream)
+        } else {
+            configured.to_string()
+        }
+    }
+
     /// Consumer name used by `XREADGROUP`/`XAUTOCLAIM`.
     pub(crate) fn consumer_name(&self) -> String {
         if !self.consumer.trim().is_empty() {
@@ -195,4 +227,9 @@ impl RedisEventsOptions {
         let token = RandomState::new().build_hasher().finish();
         format!("webx-{}-{token:016x}", std::process::id())
     }
+}
+
+/// Default broadcast channel for `stream` (`"<stream>:broadcast"`).
+pub(crate) fn derived_broadcast_channel(stream: &str) -> String {
+    format!("{stream}:broadcast")
 }

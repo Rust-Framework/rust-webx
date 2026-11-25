@@ -5,6 +5,7 @@
 //! | Module | Role |
 //! |--------|------|
 //! | [`auth`] | password login, token revocation |
+//! | [`session`] | bearer → browser cookie session exchange |
 //! | [`room`] | create / join / list |
 //! | [`message`] | HTTP offline catch-up |
 //! | [`recording`] | control plane, resumable segments, playback |
@@ -24,3 +25,4 @@ pub mod message;
 pub mod realtime;
 pub mod recording;
 pub mod room;
+pub mod session;

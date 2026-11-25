@@ -43,12 +43,3 @@ libc = "0.2"
 [lints]
 workspace = true
 
-# cargo-semver-checks: 2.9.1 adds `RateLimitRoute::Pattern` and
-# `RateLimitSubject::Composite` (upstream feedback §5). A downstream exhaustive
-# `match` on either enum must add a wildcard arm; the migration is recorded in
-# CHANGELOG [2.9.1] -> Breaking and `docs/design/compatibility.md` §3. `Error`
-# is no longer an enum in 2.9.1 (`too_many_requests` / `conflict_retryable` are
-# `AppError` constructors), so it no longer contributes to this exception. Drop
-# this allow once the semver baseline moves past v2.9.1.
-[package.metadata.cargo-semver-checks.lints]
-enum_variant_added = "allow"

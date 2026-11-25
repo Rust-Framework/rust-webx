@@ -231,21 +231,38 @@ impl IRealtimeEventStore for InMemoryRealtimeEventStore {
         let log = state.entry(request.subscription.clone()).or_default();
         Self::prune(log, &self.limits, now);
 
-        let events: Vec<RealtimeEvent> = log
+        // A cursor ahead of everything this store ever assigned means the
+        // client's state came from another store/instance epoch: it can never
+        // receive another event with the current cursor, so report it as a gap
+        // and restart from the latest known id instead of stalling forever.
+        let latest_known = log
             .events
-            .iter()
-            .filter(|event| event.is_after(request.cursor))
-            .cloned()
-            .collect();
-        let next_cursor = events
-            .last()
+            .back()
             .map(|event| event.event_id)
-            .unwrap_or_else(|| cutoff.max(log.evicted_through));
+            .unwrap_or(log.evicted_through);
+        let ahead = cutoff > latest_known;
+        let events: Vec<RealtimeEvent> = if ahead {
+            Vec::new()
+        } else {
+            log.events
+                .iter()
+                .filter(|event| event.is_after(request.cursor))
+                .cloned()
+                .collect()
+        };
+        let next_cursor = if ahead {
+            latest_known
+        } else {
+            events
+                .last()
+                .map(|event| event.event_id)
+                .unwrap_or_else(|| cutoff.max(log.evicted_through))
+        };
         Ok(ResumeFrame {
             subscription: request.subscription,
             events,
             next_cursor,
-            truncated: log.evicted_through > cutoff,
+            truncated: ahead || log.evicted_through > cutoff,
         })
     }
 
@@ -376,6 +393,22 @@ mod tests {
             .expect("resume");
         assert!(!after_two.truncated);
         assert_eq!(after_two.events.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_cursor_ahead_of_the_log_is_reported_as_a_gap() {
+        let store = InMemoryRealtimeEventStore::default();
+        let first = store.append("room-1", "one".into()).await.expect("append");
+        let frame = store
+            .resume(ResumeRequest::new("room-1", Some(first.event_id + 10)))
+            .await
+            .expect("resume");
+        assert!(
+            frame.truncated,
+            "a cursor ahead of the store must force a resync"
+        );
+        assert!(frame.events.is_empty());
+        assert_eq!(frame.next_cursor, first.event_id);
     }
 
     #[tokio::test]

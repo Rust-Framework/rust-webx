@@ -83,7 +83,30 @@ response.append_header("set-cookie", &csrf_config.clear_cookie());
 前端把 CSRF 值写进 `X-CSRF-Token` 头（`CsrfConfig::header_name`，默认
 `x-csrf-token`）；POST/PUT/PATCH/DELETE 缺少或不等即 403。
 
-## 5. 安全属性
+## 5. 会话交换端点（浏览器 → WebSocket）
+
+浏览器用 Cookie 升级 WebSocket，但登录通常仍走 JSON API（Bearer）。推荐加一个**会话交换端点**
+把短期凭据换成 HttpOnly 会话 Cookie，而不是让浏览器自己拼接 Cookie：
+
+```text
+POST /api/session            Authorization: Bearer <access token>
+  → 200 {"user": {...}}
+  → Set-Cookie: __Host-webx_session=...; HttpOnly; Secure; SameSite=Lax
+  → Set-Cookie: <csrf cookie>; ...（双提交，前端读值写入 X-CSRF-Token）
+```
+
+端点实现就是上一节的签发写法：校验 Bearer 身份 → `issue_session` → 用 `ContentResult` 一次写
+JSON 与两个 `Set-Cookie`。之后：
+
+- 浏览器用 Cookie 升级 WebSocket（`wss://` 同源）；升级是 GET，CSRF 不拦握手，跨站风险由
+  `use_websocket_origins` 白名单兜住（见
+  [WebSocket 会话](../05-request-pattern/websocket.md#浏览器接入cookie--csrf--origin)）；
+- 登出删除会话后，开启 `WebSocketLimits::session_revalidation` 的节点会在复查周期内以
+  close `1008`（`SessionRevoked`）关闭该浏览器的长连接；
+- Bearer 客户端继续用 `Authorization`，不参与 Cookie/CSRF 路径（Cookie scheme 遇到
+  `Authorization` 会主动让位）。
+
+## 6. 安全属性
 
 - `HttpOnly` 防 XSS 读取会话；`Secure` 防明文传输；`SameSite=Lax` 防跨站表单。
 - 登录成功轮换 session id（防固定）；权限变更后删除旧会话。
@@ -91,7 +114,7 @@ response.append_header("set-cookie", &csrf_config.clear_cookie());
 - CSRF 双提交 cookie + 请求头，常量时间比较；`Sec-Fetch-Site: cross-site` 直接拒绝。
 - 删除会话即失效，无 JWT 的 `exp` 窗口。
 
-## 6. 错误语义
+## 7. 错误语义
 
 | 情况 | 结果 |
 |---|---|
@@ -102,13 +125,13 @@ response.append_header("set-cookie", &csrf_config.clear_cookie());
 | `Sec-Fetch-Site: cross-site` | 403 |
 | 带 `Authorization` 的请求 | Cookie scheme 不匹配，交给 JWT/API Key |
 
-## 7. 多实例
+## 8. 多实例
 
 `InMemorySessionRepository` 只适合单进程；多实例复制参考适配器 `examples/adapters/auth/ef`
 （`publish = false`，不随框架发布）的 `EfSessionRepository`（`auth_sessions` 表，支持
 `purge_expired`），改成自己的包名后注册。CSRF 双提交不依赖服务端状态，天然多实例可用。
 
-## 8. 验收
+## 9. 验收
 
 `crates/host/tests/cookie_auth_test.rs`（8 例）与
 `crates/host/tests/csrf_test.rs`（9 例）覆盖签发/命中/过期/注销/Bearer 让位、

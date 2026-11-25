@@ -19,6 +19,7 @@ use crate::error::Result;
 pub mod event_store;
 pub mod fanout;
 pub mod metrics;
+pub mod presence;
 pub mod registry;
 pub mod signaling;
 
@@ -26,8 +27,11 @@ pub use event_store::{
     IRealtimeEventStore, InMemoryRealtimeEventStore, RealtimeEvent, RealtimeEventStoreLimits,
     ResumeFrame, ResumeRequest,
 };
-pub use fanout::RealtimeFanoutEvent;
+pub use fanout::{RealtimeFanoutEvent, RealtimeUserFanoutEvent};
 pub use metrics::{RealtimeMetrics, RealtimeMetricsSnapshot};
+pub use presence::{
+    IOnlinePresence, InMemoryOnlinePresence, OnlinePresenceLimits, PresenceMember, PresenceScope,
+};
 pub use registry::{
     IConnectionRegistry, IPresenceObserver, InMemoryConnectionRegistry, Presence,
     PresenceDirection, PresenceStatus, PresenceTransition,
@@ -199,6 +203,17 @@ pub enum CloseReason {
     },
     /// The session ended on an internal framework or handler error.
     Internal,
+    /// The credential that authorized the upgrade was revoked or its server-side
+    /// session was deleted after the handshake (code `1008`, policy violation).
+    ///
+    /// Detected by [`WebSocketLimits::session_revalidation`]: a live connection
+    /// must not outlive a logout / "sign out everywhere" / session deletion.
+    ///
+    /// Appended last on purpose: `CloseReason` is a C-like enum whose earlier
+    /// variants have implicit discriminants, and inserting a variant in the
+    /// middle would renumber them (a semver-breaking change for downstream code
+    /// that saw the old values).
+    SessionRevoked,
 }
 
 impl CloseReason {
@@ -215,6 +230,7 @@ impl CloseReason {
             Self::IdleTimeout => Some(1001),
             Self::LifetimeExceeded => Some(1001),
             Self::TokenExpired => Some(1008),
+            Self::SessionRevoked => Some(1008),
             Self::ProtocolError { code } => Some(*code),
             Self::Internal => Some(1011),
         }
@@ -266,6 +282,19 @@ pub struct WebSocketLimits {
     /// [`CloseReason::TokenExpired`], and the earlier of this and
     /// [`Self::max_connection_lifetime`] wins.
     pub close_at_token_expiry: bool,
+    /// How often the live session re-checks the credential that authorized the
+    /// upgrade (`None` = never, the default and the historical behavior).
+    ///
+    /// The host resolves the authenticating scheme's server-side state — JWT
+    /// `jti` against `ISessionStore`, cookie session id against
+    /// `ISessionRepository` — and re-checks it on this interval. A revoked
+    /// credential ends the session with close code `1008` and
+    /// [`CloseReason::SessionRevoked`]. Enable it in production and pick an
+    /// interval that bounds the stale window (10–30 s is typical).
+    ///
+    /// A transient store error does **not** close the session: it is logged and
+    /// retried on the next tick, so a storage blip cannot kick every user.
+    pub session_revalidation: Option<std::time::Duration>,
 }
 
 impl Default for WebSocketLimits {
@@ -280,6 +309,7 @@ impl Default for WebSocketLimits {
             idle_timeout: None,
             max_connection_lifetime: None,
             close_at_token_expiry: false,
+            session_revalidation: None,
         }
     }
 }
@@ -338,6 +368,41 @@ impl WebSocketLimits {
         self.close_at_token_expiry = true;
         self
     }
+
+    /// Re-check the upgrade credential every `interval`; a revoked credential
+    /// closes the session with `1008`/`SessionRevoked`.
+    ///
+    /// This is opt-in (default off) to keep pre-2.9.2 session behavior; enable it
+    /// in production so logout and "sign out everywhere" reach live sockets.
+    pub fn with_session_revalidation(mut self, interval: std::time::Duration) -> Self {
+        self.session_revalidation = Some(interval.max(std::time::Duration::from_millis(100)));
+        self
+    }
+}
+
+/// Close every local connection of `user_id` and return how many were targeted.
+///
+/// This is the immediate, same-node half of "kick the user": it calls
+/// [`IConnection::close`] on each entry of
+/// `IConnectionRegistry::user_connections`.
+/// Cross-node revocation is covered by shared session stores plus
+/// [`WebSocketLimits::session_revalidation`] (the framework cannot close a socket
+/// it does not own on another node).
+///
+/// Closing is best effort: a connection that already ended is ignored, and the
+/// return value counts the handles that were asked to close.
+pub async fn close_user_connections(
+    registry: &dyn crate::realtime::IConnectionRegistry,
+    user_id: &str,
+    code: u16,
+    reason: &str,
+) -> usize {
+    let connections = registry.user_connections(user_id);
+    let targeted = connections.len();
+    for connection in connections {
+        let _ = connection.close(code, reason).await;
+    }
+    targeted
 }
 
 /// What to do when a connection's outbound queue is full.

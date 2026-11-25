@@ -2,7 +2,7 @@
 
 > 本文是 rust-webx 长连接**终止语义**的权威落点：WebSocket close frame code、SSE
 > `StreamEnd`、HTTP 连接排空三者如何对应，以及应用侧应依据哪个类型分支。
-> 前前基线 2.9.0；HTTP `problem+json` 的稳定错误码见
+> 前前基线 2.9.0，当前基线 2.9.2；HTTP `problem+json` 的稳定错误码见
 > [error-codes.md](error-codes.md)。
 
 ---
@@ -31,6 +31,7 @@
 | `IdleTimeout` | `WebSocketLimits::idle_timeout` 内无入站帧 | `1001` | close frame `1001` | —（SSE 用 `keep_alive`） |
 | `LifetimeExceeded` | `max_connection_lifetime` 到期（流量不延期） | `1001` | close frame `1001` | `Deadline`（`max_lifetime`） |
 | `TokenExpired` | `close_at_token_expiry` 且升级令牌 `exp` 已过 | `1008` | close frame `1008` | —（用 `on_server_shutdown` 收尾） |
+| `SessionRevoked` | 开启 `WebSocketLimits::session_revalidation` 且升级凭据被吊销（JWT `jti` 在 `ISessionStore` 被吊销 / Cookie 会话已从 `ISessionRepository` 删除） | `1008` | close frame `1008`，reason `session revoked` | —（SSE 无连接期复查；会话失效在下一请求以 `401` 体现） |
 | `ProtocolError { code }` | 协议/策略违规关闭，例如入站限流 | `code`（限流为 `1008`） | close frame + 先行的 `{"error":{"code":...}}` 帧 | `Failed` |
 | `Internal` | Handler 返回 `Err` / 内部错误结束会话 | `1011`（记录用；正常路径不会由框架主动写） | 连接结束/错误帧 | `Failed` |
 
@@ -50,6 +51,9 @@
 5. **SSE 没有 wire close code**：chunked body 结束即结束。`SseResult::on_close`
    报告的 `StreamEnd` 是 SSE 侧的权威原因，与 `CloseReason` 的映射见上表；
    框架不会把 SSE 结束映射成 WebSocket close frame。
+6. **过期 vs 吊销**：`TokenExpired` 是时间到点（换票后可继续），`SessionRevoked` 是凭据被显式
+   吊销（登出 / 全端下线 / 会话删除）。两者都用 close `1008`，客户端按 close code + reason 区分：
+   前者重新认证后重连，后者跳登录页。复查的瞬时存储错误不关闭连接，只在下一轮重试。
 
 ## 3. 排空（drain）语义
 
@@ -91,7 +95,7 @@
 ## 5. 稳定性承诺
 
 - wire code 与既有字符串**不再改变**：`1001`（lifetime / idle / shutdown）、
-  `1008`（token expiry / rate limit）、`1000`（正常完成）保持原语义。
+  `1008`（token expiry / rate limit / session revoked）、`1000`（正常完成）保持原语义。
 - 新增原因 = 新增 `CloseReason` 变体（加性）；新增 wire code 必须在本文表格登记。
 - 应用自定义 close code（4000–4999）不属于框架契约，直接走 `IConnection::close`。
 

@@ -113,6 +113,7 @@
   - [OpenAPI 与 SPA 托管](./11-production/openapi-spa.md)
   - [文件服务的生产部署](./11-production/file-serving.md)
   - [优雅关闭与可观测性](./11-production/graceful-shutdown.md)
+  - [多实例实时部署（扇出、在线态与吊销复查）](./11-production/realtime-cluster.md)
 
 ---
 
@@ -129,6 +130,7 @@
   - [自定义 Endpoint](./13-extensibility/custom-endpoints.md)
   - [样式与约定封装](./13-extensibility/style-patterns.md)
   - [第三方库集成](./13-extensibility/third-party-integration.md)
+  - [移动推送（IPushSender）](./13-extensibility/push-notifications.md)
   - [端口与适配器（下游接入）](./13-extensibility/integrations.md)
   - [出站 HTTP（rust-webx-client）](./13-extensibility/outbound-http.md)
   - [错误响应写入器](./13-extensibility/error-writers.md)

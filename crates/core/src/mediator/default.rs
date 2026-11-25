@@ -12,7 +12,7 @@ use std::any::Any;
 use std::sync::Arc;
 
 use super::dispatch;
-use super::event::{EventMessage, EventMetrics, IEventPublisher};
+use super::event::{EventDelivery, EventMessage, EventMetrics, IEventPublisher};
 use super::{IEventRequest, IMediator, IRequest};
 use crate::error::{Error, Result};
 use crate::route::scan::HandlerCache;
@@ -96,7 +96,14 @@ impl IMediator for Mediator {
                 return Err(error);
             }
         };
-        match publisher.publish(message).await {
+        // The event type owns the delivery class: broadcast events go to the
+        // transport's broadcast path, everything else keeps competing delivery.
+        let delivery = T::delivery();
+        let delivered = match delivery {
+            EventDelivery::Competing => publisher.publish(message).await,
+            EventDelivery::Broadcast => publisher.broadcast(message).await,
+        };
+        match delivered {
             Ok(()) => {
                 self.event_metrics.record_published();
                 Ok(())

@@ -1,0 +1,32 @@
+[package]
+name = "rust-webx-apns"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Apple Push Notification service (APNs) adapter for rust-webx push notifications"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme = "../../../README.md"
+keywords = ["apns", "push", "notifications", "webx", "aspnet-core"]
+categories = ["web-programming", "asynchronous"]
+
+[lib]
+name = "webx_apns"
+
+[dependencies]
+rust-webx-core.workspace = true
+rust-webx-client.workspace = true
+async-trait.workspace = true
+tokio = { workspace = true, features = ["sync", "time"] }
+serde.workspace = true
+serde_json.workspace = true
+jsonwebtoken.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true

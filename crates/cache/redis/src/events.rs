@@ -1,6 +1,8 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use futures_util::StreamExt;
+use tokio::sync::OnceCell;
 use webx_core::error::{Error, Result};
 use webx_core::hosted::{delay, BackgroundService, CancellationToken};
 use webx_core::mediator::{EventDispatcher, EventMessage, IEventPublisher};
@@ -8,11 +10,14 @@ use webx_core::mediator::{EventDispatcher, EventMessage, IEventPublisher};
 use crate::connection::{transport_error, RedisConnection};
 use crate::options::RedisEventsOptions;
 
-/// Redis Streams event publisher (`XADD`).
+/// Redis Streams event publisher (`XADD` / PUBLISH).
 ///
-/// The stream is capped with `MAXLEN ~`, so a stalled consumer cannot grow Redis
-/// memory without limit. Publishing is accepted by the server before it
-/// returns; handler execution happens in [`RedisEventConsumer`].
+/// Competing events go to the capped stream, so a stalled consumer cannot grow
+/// Redis memory without limit. Broadcast events go to a **Pub/Sub channel**
+/// (`RedisEventsOptions::broadcast_channel` derives `"<stream>:broadcast"` otherwise) because Pub/Sub has
+/// fan-out semantics: every subscribed node receives its own copy. Publishing is
+/// accepted by the server before it returns; handler execution happens in
+/// [`RedisEventConsumer`].
 pub struct RedisEventPublisher {
     connection: Arc<RedisConnection>,
     options: RedisEventsOptions,
@@ -26,11 +31,14 @@ impl RedisEventPublisher {
             options,
         }
     }
-}
 
-#[async_trait::async_trait]
-impl IEventPublisher for RedisEventPublisher {
-    async fn publish(&self, message: EventMessage) -> Result<()> {
+    /// Channel broadcast events are published to (tests).
+    #[cfg(test)]
+    pub(crate) fn broadcast_channel(&self) -> String {
+        self.options.effective_broadcast_channel()
+    }
+
+    async fn publish_to_stream(&self, message: EventMessage) -> Result<()> {
         let mut connection = self
             .connection
             .manager()
@@ -51,19 +59,77 @@ impl IEventPublisher for RedisEventPublisher {
             .map(|_| ())
             .map_err(|error| transport_error("redis XADD failed", error))
     }
+
+    async fn publish_to_channel(&self, message: EventMessage) -> Result<()> {
+        // Broadcast-class events use the one binary-body wire framing so the
+        // Pub/Sub payload carries both the routing name and the JSON body.
+        let frame = message.to_wire()?;
+        let channel = self.options.effective_broadcast_channel();
+        let mut connection = self
+            .connection
+            .manager()
+            .await
+            .map_err(|error| Error::status(503, format!("redis unavailable: {error}")))?;
+        redis::cmd("PUBLISH")
+            .arg(&channel)
+            .arg(frame)
+            // PUBLISH returns the number of subscribed nodes; zero is not an
+            // error (broadcast is at-most-once).
+            .query_async::<i64>(&mut connection)
+            .await
+            .map(|_| ())
+            .map_err(|error| transport_error("redis PUBLISH failed", error))
+    }
 }
 
-/// Redis Streams consumer group worker.
+#[async_trait::async_trait]
+impl IEventPublisher for RedisEventPublisher {
+    async fn publish(&self, message: EventMessage) -> Result<()> {
+        self.publish_to_stream(message).await
+    }
+
+    /// Publish to the Pub/Sub broadcast channel, which every node's consumer
+    /// subscribes to. Delivery is at-most-once and not ordered across nodes.
+    async fn broadcast(&self, message: EventMessage) -> Result<()> {
+        self.publish_to_channel(message).await
+    }
+}
+
+/// Redis event consumer: Streams consumer group plus Pub/Sub broadcast channel.
 ///
-/// Reads `XREADGROUP` batches, dispatches each event through
-/// [`EventDispatcher`], and `XACK`s only after the handlers returned. Failed
-/// entries stay pending and are reclaimed by `XAUTOCLAIM` after
-/// `claim_idle_ms`; delivery is at-least-once, so handlers must be idempotent.
+/// The worker holds **two independent Redis connections**:
+///
+/// * the multiplexed connection used for `XREADGROUP`/`XAUTOCLAIM`, which reads
+///   competing events, dispatches each through [`EventDispatcher`], and `XACK`s
+///   only after the handlers returned. Failed entries stay pending and are
+///   reclaimed by `XAUTOCLAIM` after `claim_idle_ms`; delivery is
+///   at-least-once, so handlers must be idempotent.
+/// * a dedicated Pub/Sub connection subscribed to
+///   the derived broadcast channel (`"<stream>:broadcast"`), which reads
+///   broadcast-class events and dispatches them through the same
+///   [`EventDispatcher`]. Pub/Sub is at-most-once: undecodable frames and
+///   handler errors are logged and dropped.
+///
+/// The two loops reconnect independently, so a broken Pub/Sub subscription can
+/// never stop competing delivery (and vice versa). Both stop with the
+/// [`CancellationToken`].
+///
+/// Competing reads use a **dedicated blocking connection** owned by this
+/// consumer (no response timeout): blocking `XREADGROUP` on the shared
+/// multiplexed handle would stall cache/publish/health commands and trip their
+/// command timeout. The connection is created on first use and reconnects with
+/// the loop.
+///
+/// `add_redis` registers this worker in DI as a singleton in addition to
+/// starting it, so operations code can resolve `Arc<RedisEventConsumer>` and call
+/// [`replay_dead_letter`](Self::replay_dead_letter).
 pub struct RedisEventConsumer {
     connection: Arc<RedisConnection>,
     options: RedisEventsOptions,
     dispatcher: Arc<EventDispatcher>,
     consumer: String,
+    /// Dedicated no-timeout connection for blocking `XREADGROUP`/`XAUTOCLAIM`.
+    reader: OnceCell<redis::aio::ConnectionManager>,
 }
 
 impl RedisEventConsumer {
@@ -79,7 +145,22 @@ impl RedisEventConsumer {
             options,
             dispatcher,
             consumer,
+            reader: OnceCell::new(),
         }
+    }
+
+    /// Pub/Sub channel broadcast events are consumed from (tests).
+    #[cfg(test)]
+    pub(crate) fn broadcast_channel(&self) -> String {
+        self.options.effective_broadcast_channel()
+    }
+
+    /// The dedicated blocking-read connection (created on first use).
+    async fn reader(&self) -> Result<redis::aio::ConnectionManager> {
+        self.reader
+            .get_or_try_init(|| async { self.connection.blocking_reader().await })
+            .await
+            .cloned()
     }
 
     /// Consumer name used in `XREADGROUP`/`XAUTOCLAIM`.
@@ -154,11 +235,7 @@ impl RedisEventConsumer {
     }
 
     async fn run_once(&self, ct: &CancellationToken) -> Result<()> {
-        let mut connection = self
-            .connection
-            .manager()
-            .await
-            .map_err(|error| Error::status(503, format!("redis unavailable: {error}")))?;
+        let mut connection = self.reader().await?;
         ensure_group(&mut connection, &self.options).await?;
 
         let claim_interval = Duration::from_millis(self.options.claim_idle_ms.max(1_000));
@@ -289,11 +366,91 @@ impl RedisEventConsumer {
         }
         Some(stream)
     }
-}
 
-#[async_trait::async_trait]
-impl BackgroundService for RedisEventConsumer {
-    async fn execute(&self, ct: CancellationToken) -> Result<()> {
+    /// Consume the broadcast Pub/Sub channel until cancellation.
+    ///
+    /// A dedicated connection is required because a subscribed Redis connection
+    /// cannot serve ordinary commands. The connection is re-established with
+    /// backoff whenever it fails or the stream ends; errors only produce a log
+    /// line and a reconnect counter, never abort the consumer.
+    async fn run_broadcast(&self, ct: CancellationToken) -> Result<()> {
+        let mut backoff = Duration::from_secs(1);
+        loop {
+            if ct.is_cancelled() {
+                return Ok(());
+            }
+            // Cancellation must interrupt a slow connect/subscribe, not just the
+            // idle wait between attempts.
+            let result = tokio::select! {
+                _ = ct.cancelled() => return Ok(()),
+                result = self.consume_broadcast(&ct) => result,
+            };
+            match result {
+                Ok(()) if ct.is_cancelled() => return Ok(()),
+                Ok(()) => backoff = Duration::from_secs(1),
+                Err(error) => {
+                    if let Some(metrics) = self.dispatcher.metrics() {
+                        metrics.record_consumer_reconnect();
+                    }
+                    tracing::warn!(
+                        channel = %self.options.effective_broadcast_channel(),
+                        error = %error,
+                        "redis broadcast consumer lost its connection; reconnecting"
+                    );
+                }
+            }
+            if !delay(&ct, backoff).await {
+                return Ok(());
+            }
+            backoff = (backoff * 2).min(Duration::from_secs(30));
+        }
+    }
+
+    /// Subscribe to the broadcast channel and dispatch every frame.
+    async fn consume_broadcast(&self, ct: &CancellationToken) -> Result<()> {
+        let channel = self.options.effective_broadcast_channel();
+        let mut pubsub = self.connection.pubsub().await?;
+        pubsub
+            .subscribe(&channel)
+            .await
+            .map_err(|error| transport_error("redis SUBSCRIBE failed", error))?;
+        let mut messages = pubsub.into_on_message();
+        loop {
+            let message = tokio::select! {
+                _ = ct.cancelled() => return Ok(()),
+                message = messages.next() => message,
+            };
+            let Some(message) = message else {
+                // The Pub/Sub task ended (connection closed); reconnect.
+                return Err(Error::status(
+                    503,
+                    "redis pub/sub stream ended; reconnecting".to_string(),
+                ));
+            };
+            match EventMessage::from_wire(message.get_payload_bytes()) {
+                Ok(event) => {
+                    if let Err(error) = self.dispatcher.dispatch(&event).await {
+                        // Broadcast delivery is at-most-once: log and drop,
+                        // never retry or requeue.
+                        tracing::error!(
+                            event = %event.event_name,
+                            channel = %channel,
+                            error = %error,
+                            "redis broadcast event handler failed"
+                        );
+                    }
+                }
+                Err(error) => tracing::warn!(
+                    channel = %channel,
+                    error = %error,
+                    "dropping malformed redis broadcast frame"
+                ),
+            }
+        }
+    }
+
+    /// Consume the competing stream consumer group until cancellation.
+    async fn run_streams(&self, ct: CancellationToken) -> Result<()> {
         let mut backoff = Duration::from_secs(1);
         loop {
             if ct.is_cancelled() {
@@ -324,6 +481,19 @@ impl BackgroundService for RedisEventConsumer {
             }
             backoff = (backoff * 2).min(Duration::from_secs(30));
         }
+    }
+}
+
+#[async_trait::async_trait]
+impl BackgroundService for RedisEventConsumer {
+    async fn execute(&self, ct: CancellationToken) -> Result<()> {
+        // Always consume both delivery classes; `consumer_enabled` only decides
+        // whether `add_redis` *registers* this worker (publisher-only services
+        // set it to false). A manually started consumer behaves like the NATS /
+        // RabbitMQ / Kafka adapters: both loops run until cancellation.
+        let (streams, broadcast) =
+            tokio::join!(self.run_streams(ct.clone()), self.run_broadcast(ct.clone()),);
+        streams.and(broadcast)
     }
 }
 
@@ -701,5 +871,111 @@ mod tests {
         assert!(deleted.is_empty());
         assert_eq!(cursor, "0-0");
         assert!(parse_entries(&[Value::Int(1)]).messages.is_empty());
+    }
+
+    fn test_connection() -> Arc<RedisConnection> {
+        Arc::new(RedisConnection::new(
+            "redis://127.0.0.1:1",
+            Duration::from_millis(200),
+            Duration::from_millis(200),
+        ))
+    }
+
+    fn test_dispatcher() -> Arc<EventDispatcher> {
+        let provider = rust_dix::ServiceCollection::new()
+            .build()
+            .expect("test provider must build");
+        Arc::new(EventDispatcher::new(provider))
+    }
+
+    #[test]
+    fn broadcast_channel_defaults_to_a_derived_sibling() {
+        let connection = test_connection();
+        let options = RedisEventsOptions {
+            stream: "app:events".to_string(),
+            ..RedisEventsOptions::default()
+        };
+        assert_eq!(
+            options.effective_broadcast_channel(),
+            "app:events:broadcast"
+        );
+
+        let publisher = RedisEventPublisher::new(Arc::clone(&connection), options.clone());
+        assert_eq!(publisher.broadcast_channel(), "app:events:broadcast");
+        let consumer = RedisEventConsumer::new(Arc::clone(&connection), options, test_dispatcher());
+        assert_eq!(consumer.broadcast_channel(), "app:events:broadcast");
+    }
+
+    #[test]
+    fn an_explicit_broadcast_channel_wins_over_a_blank_one() {
+        let options = RedisEventsOptions::default().with_broadcast_channel("webx.realtime");
+        assert_eq!(options.effective_broadcast_channel(), "webx.realtime");
+
+        // A blank override still derives from the stream rather than publishing
+        // to an empty channel name.
+        let options = RedisEventsOptions::default().with_broadcast_channel("   ");
+        assert_eq!(
+            options.effective_broadcast_channel(),
+            "webx:events:broadcast"
+        );
+    }
+
+    #[test]
+    fn broadcast_channel_survives_configuration_round_trips() {
+        // A configuration section that predates the field keeps the derived
+        // default instead of failing to deserialize or using an empty channel.
+        let options: RedisEventsOptions =
+            serde_json::from_str(r#"{"stream":"app:events"}"#).expect("options deserialize");
+        assert!(options.broadcast_channel.is_empty());
+        assert_eq!(
+            options.effective_broadcast_channel(),
+            "app:events:broadcast"
+        );
+
+        let options = RedisEventsOptions {
+            stream: "app:events".to_string(),
+            broadcast_channel: "app.fanout".to_string(),
+            ..RedisEventsOptions::default()
+        };
+        let json = serde_json::to_string(&options).expect("options serialize");
+        let decoded: RedisEventsOptions = serde_json::from_str(&json).expect("options round trip");
+        assert_eq!(decoded.effective_broadcast_channel(), "app.fanout");
+    }
+
+    #[test]
+    fn broadcast_frames_round_trip_through_the_wire_format() {
+        let message = EventMessage::new(
+            "webx.realtime.fanout",
+            br#"{"room":"lobby","payload":"hello"}"#.to_vec(),
+        );
+        let wire = message.to_wire().expect("encode broadcast frame");
+        let decoded = EventMessage::from_wire(&wire).expect("decode broadcast frame");
+        assert_eq!(decoded, message);
+    }
+
+    #[tokio::test]
+    async fn both_consumer_loops_stop_when_the_token_is_cancelled() {
+        // No Redis is listening on port 1, so this exercises the reconnect path
+        // of both loops: failures are logged/retried and cancellation must end
+        // them promptly.
+        let options = RedisEventsOptions {
+            stream: "webx:test:cancel".to_string(),
+            group: "webx-test-cancel".to_string(),
+            block_ms: 100,
+            claim_idle_ms: 1_000,
+            ..RedisEventsOptions::default()
+        };
+        let consumer = RedisEventConsumer::new(test_connection(), options, test_dispatcher());
+        let ct = CancellationToken::new();
+        let worker_ct = ct.clone();
+        let task = tokio::spawn(async move { consumer.execute(worker_ct).await });
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        ct.cancel();
+        let result = tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .expect("the consumer must stop after cancellation")
+            .expect("the consumer task must not panic");
+        assert!(result.is_ok(), "cancellation is a clean stop: {result:?}");
     }
 }

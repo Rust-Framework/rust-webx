@@ -3,6 +3,75 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [2.9.2] — 2026-11-25 — IM 实时硬化（加性补丁）
+
+> 设计权威：[docs/design/im-hardening.md](docs/design/im-hardening.md)
+
+### English
+
+**Additive patch (maintainer decision).** Fills the five production gaps identified by the 2.9.1
+IM/audio-video capability review. No API is removed, no default behavior changes and nothing
+requires migration; `cargo-semver-checks` should report additions only. The 2.9 line ships the
+follow-up hardening as patches, so the release is versioned 2.9.2 even though the changes are
+additive.
+
+#### Added
+
+- **Event delivery classes** — `EventDelivery::{Competing, Broadcast}` on `IEventRequest::delivery()`;
+  `IEventPublisher::broadcast` (default fails closed); `IMediator::publish` routes by delivery class.
+  Framework events `RealtimeFanoutEvent` and the new `RealtimeUserFanoutEvent` are broadcast-class.
+  Redis uses a Pub/Sub channel, NATS a dedicated broadcast subject and RabbitMQ a fanout exchange;
+  Kafka declares broadcast unsupported instead of silently fanning out to one node.
+- **Shared realtime state** — `RedisRealtimeEventStore` (global monotonic cursor over Redis Streams)
+  and the `IOnlinePresence` port with in-memory/Redis implementations plus a host bridge
+  (`HostBuilder::use_online_presence`) that maps presence transitions to online scopes and refreshes
+  member TTLs with a heartbeat.
+- **Mobile push** — `IPushSender` port (`PushMessage`/`PushOutcome`), `HostBuilder::use_push`,
+  `InMemoryPushSender`, and the `rust-webx-apns` / `rust-webx-fcm` adapter crates
+  (provider verdicts map to `Accepted`/`TokenInvalid`/`Retryable`, transport errors stay 5xx).
+- **Session revocation on live connections** — `WebSocketLimits::with_session_revalidation`,
+  `CloseReason::SessionRevoked` (close `1008`) and
+  `close_user_connections`; the host reuses the JWT session store and the cookie session repository.
+- **Browser realtime auth recipe** — imbit demonstrates `SessionCookieScheme` + CSRF + a WebSocket
+  Origin allowlist end to end, including logout-triggered session close; the WebSocket handbook gains
+  the browser/Cookie/Origin/revocation sections.
+- **Redis transport hardening** — the event consumer now uses a dedicated blocking-read connection
+  (a 5s `XREADGROUP BLOCK` no longer stalls cache/publish/health commands or trips the 5s command
+  timeout), the consumer is registered in DI so dead-letter replay has an entry point, and the
+  realtime store resumes/appends through atomic Lua scripts with a self-healing sequence and
+  count-retention only. `RealtimeFanoutEvent` is now broadcast-class: a mixed 2.9.1/2.9.2 rollout
+  loses cross-node room/user fan-out until every message node runs 2.9.2 — upgrade all nodes together
+  or pause fan-out during the rollout.
+
+- **Publish surface** — 30 crates: adds `rust-webx-apns` and `rust-webx-fcm` (the `crates/push` group), both covered by the publish-order and crate-layout gates.
+
+#### 简体中文
+
+**加性补丁（维护者决定）。** 填平 2.9.1 IM/音视频能力评估列出的 5 个生产级缺口；不删除任何 API、
+不改变既有默认行为、不需要迁移，`cargo-semver-checks` 应只报告新增项。2.9 线以补丁交付硬化，
+因此版本号取 2.9.2。
+
+- **事件投递类**：`EventDelivery::{Competing, Broadcast}`、`IEventPublisher::broadcast`（默认
+  fail-closed）、`IMediator::publish` 按投递类分派；`RealtimeFanoutEvent` 与新增
+  `RealtimeUserFanoutEvent` 为广播类；Redis 走 Pub/Sub、NATS 走独立广播 subject、RabbitMQ 走
+  fanout exchange，Kafka 明确登记不支持而不是静默单节点。
+- **共享实时状态**：`RedisRealtimeEventStore`（Redis Streams 上的全局单调游标）与
+  `IOnlinePresence` 端口（内存/Redis 实现）+ 宿主桥接 `HostBuilder::use_online_presence`
+  （presence 转移映射到在线 scope，后台心跳续期 TTL）。
+- **移动推送**：`IPushSender` 端口（`PushMessage`/`PushOutcome`）、`HostBuilder::use_push`、
+  `InMemoryPushSender`，以及 `rust-webx-apns` / `rust-webx-fcm` 适配器 crate。
+- **会话吊销联动长连接**：`WebSocketLimits::with_session_revalidation`、
+  `CloseReason::SessionRevoked`（close `1008`）与 `close_user_connections`；JWT 走
+  `ISessionStore`、Cookie 走 `ISessionRepository`。
+- **浏览器接入配方**：imbit 端到端演示 `SessionCookieScheme` + CSRF + WS Origin 白名单，包含
+  登出即关闭会话；WebSocket 手册新增浏览器/Cookie/Origin/吊销章节。
+- **Redis 传输加固**：事件消费者改用独立阻塞读连接（5s 的 `XREADGROUP BLOCK` 不再阻塞缓存/发布/
+  健康检查命令，也不会撞上 5s 命令超时），消费者注册进 DI 使死信 replay 有入口；共享续传日志的
+  append/resume 改为原子 Lua 脚本，sequence 可自愈，且只支持条数保留。`RealtimeFanoutEvent` 现为
+  广播投递类：2.9.1/2.9.2 混合滚动升级期间跨节点房间/用户扇出会不完整，必须全量升级或暂停扇出。
+
+- **发布面**：30 个 crate，新增 `rust-webx-apns` / `rust-webx-fcm`（`crates/push` 组），已同步 publish-order 与 crate-layout 门禁。
+
 ## [2.9.1] — 2026-11-25 — 破坏性补丁版（semver 例外）：契约迁移 + 下游反馈修复
 
 > **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-2.9.1.md](docs/rust-webx/16-migration/upgrade-to-2.9.1.md)

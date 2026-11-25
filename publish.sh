@@ -99,7 +99,12 @@ check_workspace_version() {
 # Every place that carries the release version has to move together:
 #   1. `[workspace.package] version` of the root workspace (`Cargo.toml`);
 #   2. the internal `rust-webx*` entries of `[workspace.dependencies]`, which
-#      carry a crates.io requirement next to the path (`=X.Y.Z`).
+#      carry a crates.io requirement next to the path (`=X.Y.Z`);
+#   3. `docs/rust-webx/INDEX.json` (`meta.version`);
+#   4. the workspace-version comments in `README.md` / `README.zh-CN.md`;
+#   5. the top `## [x.y.z]` heading of `CHANGELOG.md` (date kept).
+# `scripts/check-docs.sh` enforces 1/3/5 agreement, so a bump that misses one
+# of them would fail the release preflight.
 # The `rust-ef` reference adapters under `examples/adapters/` are unpublished:
 # they pin the same version for the shared build, but they are not release
 # artifacts and are deliberately left out of the bump.
@@ -115,6 +120,10 @@ bump_version() {
             -e "s/^version = \".*\"/version = \"$NEW_VERSION\"/" \
             -e "s/^(rust-webx[a-z0-9-]* = \{ version = )\"=?[^\"]*\"/\1\"=$NEW_VERSION\"/" \
             Cargo.toml
+        sed -i -E "s/(\"version\": \")[^\"]+\"/\1$NEW_VERSION\"/" docs/rust-webx/INDEX.json
+        sed -i -E "s/(# workspace root \()v[0-9]+\.[0-9]+\.[0-9]+\)/\1v$NEW_VERSION)/" README.md
+        sed -i -E "s/(# workspace 根 \()v[0-9]+\.[0-9]+\.[0-9]+\)/\1v$NEW_VERSION)/" README.zh-CN.md
+        sed -i -E "0,/^## \[[^]]+\]/s//## [$NEW_VERSION]/" CHANGELOG.md
     fi
 }
 
@@ -138,6 +147,7 @@ internal_deps() {
         # `rust-webx` is a dev-dependency (the e2e tests drive a real host); it is
         # published before this crate, so the dry run can resolve it.
         rust-webx-h3) echo "rust-webx-core rust-webx-engine rust-webx" ;;
+        rust-webx-apns|rust-webx-fcm) echo "rust-webx-core rust-webx-client" ;;
         rust-webx) echo "rust-webx-core rust-webx-engine rust-webx-host rust-webx-client rust-webx-macros rust-webx-spa rust-webx-openapi rust-webx-outbox" ;;
     esac
 }
@@ -270,6 +280,8 @@ publish_crate "rust-webx-pay-paypal"
 publish_crate "rust-webx-pay-adyen"
 publish_crate "rust-webx-pay-square"
 publish_crate "rust-webx-h3"
+publish_crate "rust-webx-apns"
+publish_crate "rust-webx-fcm"
 
 echo ""
 echo "================================================================================"

@@ -15,7 +15,7 @@
     "demoUrl": "",
     "featured": true,
     "sortOrder": 1,
-    "version": "2.9.1",
+    "version": "2.9.2",
     "language": "zh-CN",
     "author": "Start",
     "logo": "logo.svg",
@@ -253,8 +253,8 @@
             {
               "id": "websocket",
               "title": "WebSocket 会话",
-              "summary": "use_websocket、101 升级、IConnection 消息抽象与连接级生命周期",
-              "readingTime": 16,
+              "summary": "use_websocket、IConnection 消息抽象、广播投递与跨节点扇出、Cookie/CSRF/Origin 接入、吊销与重连",
+              "readingTime": 20,
               "difficulty": "intermediate"
             },
             {
@@ -640,6 +640,13 @@
               "summary": "信号处理、连接排空与追踪",
               "readingTime": 10,
               "difficulty": "intermediate"
+            },
+            {
+              "id": "realtime-cluster",
+              "title": "多实例实时部署（扇出、在线态与吊销复查）",
+              "summary": "共享续传日志/在线态、广播传输选择、会话吊销复查与容量边界",
+              "readingTime": 14,
+              "difficulty": "advanced"
             }
           ]
         }
@@ -716,6 +723,13 @@
               "summary": "ORM、消息队列与外部服务",
               "readingTime": 14,
               "difficulty": "advanced"
+            },
+            {
+              "id": "push-notifications",
+              "title": "移动推送（IPushSender）",
+              "summary": "APNs/FCM 端口、三态结果、令牌失效与安全边界",
+              "readingTime": 12,
+              "difficulty": "intermediate"
             },
             {
               "id": "integrations",

@@ -12,6 +12,7 @@ taxonomy:
     crates/payment/<leaf>   payment domain (core/stripe/alipay/wechatpay/paypal/adyen/square/ef)
     crates/ef/<leaf>        ORM boundary adapters (webx)
     crates/transport/<leaf> optional non-hyper listener backends (h3)
+    crates/push/<leaf>      push provider adapters (apns/fcm)
     examples/<app>/<crate>  non-published reference apps (docbit/dmbit/imbit); each
                             app is its own cargo workspace with its own lockfile
     testing/<leaf>          non-published test/dev harnesses (alloc-probe,
@@ -55,7 +56,7 @@ FRAMEWORK = {
     # reference adapter, outside this workspace).
     "outbox",
 }
-GROUPS = {"ai", "auth", "cache", "queue", "payment", "ef", "transport"}
+GROUPS = {"ai", "auth", "cache", "queue", "payment", "ef", "transport", "push"}
 # Non-published test/dev harnesses: allowed as workspace members, never in
 # `crates/` (the published surface).
 TESTING = {"testing"}

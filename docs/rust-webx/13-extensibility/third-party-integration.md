@@ -181,6 +181,9 @@ self.email
 （见[后台服务](../06-di-lifecycle/hosted-services.md)），请求内只写库。
 `use_sms` 与 `InMemorySmsSender` 同构，用于断言验证码短信。
 
+移动推送（APNs/FCM）是同一模型的第三个通知端口：`IPushSender` + `HostBuilder::use_push`，
+但供应商裁决有三态（受理 / 令牌失效 / 可重试），见[移动推送](push-notifications.md)。
+
 ## 一次性令牌与防枚举（OneTimeSecret）
 
 密码重置/邮箱验证：令牌由应用生成（如 `uuid::Uuid::new_v4()`），存储只放摘要，

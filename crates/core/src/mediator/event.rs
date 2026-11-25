@@ -46,6 +46,30 @@ use crate::mediator::IEventRequest;
 /// publisher.
 pub const DEFAULT_EVENT_QUEUE_CAPACITY: usize = 1024;
 
+/// How the transport delivers one event to its subscribers.
+///
+/// The default transport model is **competing**: one consumer per broker
+/// group/queue receives the event, which is what a domain event or task wants.
+/// **Broadcast** means every node receives its own copy; it is the correct model
+/// for real-time fan-out (a chat room's message reaches every node holding a
+/// member) and for cross-node control messages.
+///
+/// The delivery class is a property of the event type ([`IEventRequest`]
+/// `::delivery`), not of the wire format: an adapter routes a broadcast event
+/// to a broadcast channel (Redis Pub/Sub, a NATS subject without a queue group,
+/// a RabbitMQ fanout exchange) and its consumer dispatches it through the same
+/// [`EventDispatcher`]. One event model, two delivery classes.
+///
+/// [`IEventRequest`]: crate::mediator::IEventRequest
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EventDelivery {
+    /// Exactly one subscriber in the broker group receives the event.
+    #[default]
+    Competing,
+    /// Every node receives its own copy of the event.
+    Broadcast,
+}
+
 /// A fully encoded event handed to an [`IEventPublisher`].
 ///
 /// `event_name` is [`IEventRequest::event_name`] and `payload` is JSON. Both
@@ -430,8 +454,26 @@ impl EventDispatcher {
 /// for you.
 #[async_trait::async_trait]
 pub trait IEventPublisher: Send + Sync {
-    /// Hand `message` to the transport.
+    /// Hand `message` to the transport for **competing** delivery.
     async fn publish(&self, message: EventMessage) -> Result<()>;
+
+    /// Hand `message` to the transport for **broadcast** delivery.
+    ///
+    /// The default implementation is `fail-closed`: a transport that has not
+    /// declared broadcast capability must not silently fall back to competing
+    /// delivery (the event would reach exactly one node while the publisher
+    /// believes every node saw it). Adapters that support broadcast override
+    /// this method; the per-adapter semantics are tracked in
+    /// `docs/design/broker-capability-matrix.md`.
+    async fn broadcast(&self, message: EventMessage) -> Result<()> {
+        let _ = message;
+        Err(Error::di(
+            "this IEventPublisher does not support broadcast delivery; \
+             use a transport that implements IEventPublisher::broadcast \
+             (in-memory, Redis Pub/Sub, NATS broadcast subject, RabbitMQ fanout)"
+                .to_string(),
+        ))
+    }
 }
 
 /// Default in-memory transport: a bounded queue drained by
@@ -507,6 +549,14 @@ impl IEventPublisher for InMemoryEventPublisher {
                 Error::state("event queue is closed".to_string())
             }
         })
+    }
+
+    /// In a single process "every node" is this node, so the broadcast class
+    /// uses the same bounded local queue as competing delivery. The queue still
+    /// rejects events with no local registration instead of dropping them
+    /// silently.
+    async fn broadcast(&self, message: EventMessage) -> Result<()> {
+        self.publish(message).await
     }
 }
 

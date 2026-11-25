@@ -8,6 +8,15 @@
 //! without touching core. This starter connects to plaintext `host:port`
 //! brokers only.
 //!
+//! **Broadcast delivery is not supported.** Kafka has no fan-out-to-every-node
+//! primitive in this adapter's single-partition follower model, and pretending
+//! otherwise would silently degrade `IEventPublisher::broadcast` into
+//! single-node competing delivery. The trait's fail-closed default therefore
+//! stays in effect: publishing a broadcast event returns an explicit error.
+//! A group-aware adapter (or a separate topic-per-node topology with its own
+//! contract) would have to provide broadcast; see
+//! `docs/design/broker-capability-matrix.md`.
+//!
 //! ```no_run
 //! use webx_core::route::ext::IServiceCollectionExt;
 //! use webx_host::server::Host;
@@ -122,6 +131,9 @@ impl KafkaHostBuilderExt for HostBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
+
+    use webx_core::mediator::{EventMessage, IEventPublisher};
 
     #[test]
     fn defaults_are_aspnet_core_style() {
@@ -143,5 +155,29 @@ mod tests {
         assert_eq!(options.partition, 3);
         assert_eq!(options.start_offset, KafkaStartOffset::Earliest);
         assert!(!options.consumer_enabled);
+    }
+
+    #[tokio::test]
+    async fn broadcast_fails_closed_instead_of_degrading_to_competing() {
+        // No broker needed: the default broadcast implementation fails before
+        // touching the connection, which is the point (no silent single-node
+        // delivery).
+        let connection = Arc::new(KafkaConnection::new(
+            vec!["127.0.0.1:1".to_string()],
+            Duration::from_millis(50),
+        ));
+        let publisher =
+            KafkaEventPublisher::new(connection, KafkaOptions::new("127.0.0.1:1", "webx.events"));
+
+        let error = publisher
+            .broadcast(EventMessage::new("webx.realtime.fanout", b"{}".to_vec()))
+            .await
+            .expect_err("Kafka must not pretend to support broadcast delivery");
+        assert!(
+            error
+                .to_string()
+                .contains("does not support broadcast delivery"),
+            "unexpected error: {error}"
+        );
     }
 }

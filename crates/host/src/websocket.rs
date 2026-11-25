@@ -37,6 +37,8 @@ use webx_core::realtime::{
 };
 use webx_core::request_context::RequestContext;
 
+use crate::session_credential::{ConnectionCredential, SessionCredentialProvider};
+
 type SessionSocket = WebSocketStream<UpgradedTransport>;
 type SessionSink = SplitSink<SessionSocket, Message>;
 type SessionStream = SplitStream<SessionSocket>;
@@ -68,6 +70,11 @@ pub struct WebSocketMiddleware {
     /// A browser attaches cookies to a cross-site WebSocket handshake, so
     /// without an allow-list any site can hijack a `SameSite=None` session.
     origins: Arc<[String]>,
+    /// Builds the credential re-checker for `session_revalidation` hosts.
+    ///
+    /// `None` (no store/repository registered or revalidation disabled) keeps
+    /// the pre-2.9.2 behavior: the upgrade credential is not re-checked.
+    credential_provider: Option<Arc<SessionCredentialProvider>>,
 }
 
 impl WebSocketMiddleware {
@@ -84,7 +91,18 @@ impl WebSocketMiddleware {
             limits,
             observers,
             origins: Arc::from(Vec::<String>::new()),
+            credential_provider: None,
         }
+    }
+
+    /// Re-check the upgrade credential on the configured interval.
+    ///
+    /// The host builds the provider only when
+    /// `WebSocketLimits::session_revalidation` is set and a session store or
+    /// cookie repository is registered, so this is a no-op for other hosts.
+    pub(crate) fn with_credentials(mut self, provider: Arc<SessionCredentialProvider>) -> Self {
+        self.credential_provider = Some(provider);
+        self
     }
 
     /// Restrict which browser origins may open a session.
@@ -190,6 +208,14 @@ impl IMiddleware for WebSocketMiddleware {
         };
         let accept = derive_accept_key(key.as_bytes());
 
+        // Capture the credential re-checker before the request context is gone.
+        // It is `None` unless the host enabled session revalidation and an
+        // applicable session store/repository is registered.
+        let credential = self
+            .credential_provider
+            .as_ref()
+            .and_then(|provider| provider.credential_for(ctx));
+
         ctx.response_mut().set_status(101);
         ctx.response_mut().set_header("connection", "Upgrade");
         ctx.response_mut().set_header("upgrade", "websocket");
@@ -206,6 +232,7 @@ impl IMiddleware for WebSocketMiddleware {
                 identity,
                 limits: self.limits.clone(),
                 token_expires_at_unix_secs,
+                credential,
                 observers: Arc::clone(&self.observers),
             }),
             meta,
@@ -222,6 +249,8 @@ struct WebSocketSession {
     limits: WebSocketLimits,
     /// `exp` (Unix seconds) of the token that authorized the upgrade.
     token_expires_at_unix_secs: Option<u64>,
+    /// Credential re-checker for `session_revalidation` sessions.
+    credential: Option<Arc<dyn ConnectionCredential>>,
     /// Presence observers resolved once when the middleware was assembled.
     observers: Arc<[Arc<dyn webx_core::realtime::IPresenceObserver>]>,
 }
@@ -288,6 +317,8 @@ impl IUpgradeSession for WebSocketSession {
             &connection,
             session_deadline(&limits, self.token_expires_at_unix_secs),
             shutdown,
+            self.credential.clone(),
+            limits.session_revalidation,
         )
         .await;
         if let Some(registry) = &registry {
@@ -342,21 +373,26 @@ enum SessionEnd {
     },
     /// The host started graceful shutdown.
     ServerShutdown,
+    /// The upgrade credential was revoked or its session was deleted.
+    CredentialRevoked,
 }
 
 /// Run the application handler until it returns or the framework ends the
 /// session.
 ///
 /// The framework owns three ways a session can end: the handler returns, an
-/// absolute deadline elapses, or the host starts draining. A framework-initiated
-/// end records the [`CloseReason`] on the connection and writes the matching
-/// close frame before returning, so the peer and observers see *why* the
-/// session ended; the handler future is dropped at that point.
+/// absolute deadline elapses, the host starts draining, or the credential
+/// re-check reports a revocation. A framework-initiated end records the
+/// [`CloseReason`] on the connection and writes the matching close frame before
+/// returning, so the peer and observers see *why* the session ended; the handler
+/// future is dropped at that point.
 async fn drive_session(
     handler: &dyn IWebSocketHandler,
     connection: &Arc<WebSocketConnection>,
     deadline: Option<(tokio::time::Instant, CloseReason, u16, &'static str)>,
     shutdown: Option<CancellationToken>,
+    credential: Option<Arc<dyn ConnectionCredential>>,
+    revalidation: Option<Duration>,
 ) -> Result<()> {
     let mut on_connect = handler.on_connect(Arc::clone(connection) as Arc<dyn IConnection>);
     // Both optional ends become always-pending futures when disabled, so the
@@ -380,11 +416,33 @@ async fn drive_session(
             None => std::future::pending().await,
         }
     };
+    // The credential re-check is opt-in: without a credential or an interval the
+    // future never completes and costs one branch in the select.
+    let credential_watch = async move {
+        match (credential, revalidation) {
+            (Some(credential), Some(interval)) if !interval.is_zero() => loop {
+                tokio::time::sleep(interval).await;
+                match credential.is_valid().await {
+                    Ok(true) => {}
+                    Ok(false) => break SessionEnd::CredentialRevoked,
+                    // A transient store error must not drop a healthy session;
+                    // the next tick retries until the store answers.
+                    Err(error) => tracing::warn!(
+                        %error,
+                        "websocket session credential revalidation failed; retrying \
+                         on the next interval"
+                    ),
+                }
+            },
+            _ => std::future::pending().await,
+        }
+    };
     tokio::select! {
         biased;
         result = &mut on_connect => result,
         end = deadline_wait => end_session(connection, end).await,
         _ = shutdown_wait => end_session(connection, SessionEnd::ServerShutdown).await,
+        end = credential_watch => end_session(connection, end).await,
     }
 }
 
@@ -397,6 +455,7 @@ async fn end_session(connection: &WebSocketConnection, end: SessionEnd) -> Resul
             message,
         } => (reason, code, message),
         SessionEnd::ServerShutdown => (CloseReason::ServerShutdown, 1001, "server shutting down"),
+        SessionEnd::CredentialRevoked => (CloseReason::SessionRevoked, 1008, "session revoked"),
     };
     connection.record_close_reason(reason);
     let _ = connection.close(code, message).await;

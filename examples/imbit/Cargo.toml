@@ -24,8 +24,8 @@ documentation = "https://docs.rs/rust-webx"
 
 [workspace.dependencies]
 # Framework crates (this repository).
-rust-webx-core = { version = "=2.9.1", path = "../../crates/core" }
-rust-webx = { version = "=2.9.1", path = "../../crates/webx" }
+rust-webx-core = { version = "=2.9.2", path = "../../crates/core" }
+rust-webx = { version = "=2.9.2", path = "../../crates/webx" }
 
 # imbit sub-crates (innermost first).
 imbit-contracts = { version = "0.1.0", path = "contracts" }

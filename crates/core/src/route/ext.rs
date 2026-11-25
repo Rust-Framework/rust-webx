@@ -101,7 +101,7 @@ pub trait IServiceCollectionExt: Sized {
     ///     .run()
     ///     .await
     /// ```
-    /// Register a startup/shutdown service through [`HostedServiceSpec`].
+    /// Register a startup/shutdown service through [`HostedServiceSpec`](crate::hosted::HostedServiceSpec).
     ///
     /// ```ignore
     /// svc

@@ -90,6 +90,8 @@ rust-webx 是刻意「有主见」的：它不追求做最小的路由库。如�
 - **声明式校验** — 请求字段上的 `#[validate(length/range/email/custom)]` 在绑定后执行，失败汇入同一个 `400 problem+json` `errors`，并把约束同步进 OpenAPI（`minLength`/`minItems`/`minimum`/`format`）。
 - **Keyset 分页、客户端信息、实例级校验** — `KeysetRequest`/`CursorPage` 与 offset `PagedRequest`/`PagedResult` 并存；`#[fromclient] ClientInfo` 绑定对端地址与受信 `X-Forwarded-For`；`RequestUser::require_owner`/`require_same_tenant` 收敛实例级 401/403。
 - **事务性 outbox** — `rust-webx-outbox` 提供端口、基于租约的 `OutboxDispatcher`（经 `EventDispatcher`：退避/死信/保留期）与 `InMemoryOutbox` 默认实现，`add_outbox` 注册。同事务入队属于数据适配：EF 参考实现在 `examples/adapters/outbox/ef`（`add_outbox_ef`，非发布）。
+- **面向 IM 规模的实时能力** — 一套事件模型、两种投递类（`EventDelivery::Competing` / `Broadcast`）：`RealtimeFanoutEvent` / `RealtimeUserFanoutEvent` 通过同一 `IEventPublisher` 跨节点扇出（Redis Pub/Sub、NATS 广播 subject、RabbitMQ fanout exchange），`RedisRealtimeEventStore` 共享续传日志，`IOnlinePresence`（含 Redis 实现与宿主心跳桥接）共享在线态，`WebSocketLimits::with_session_revalidation` 在 JWT/Cookie 会话被撤销后关闭实时连接（close `1008`）。见[多实例实时部署](docs/rust-webx/11-production/realtime-cluster.md)。
+- **移动推送** — `IPushSender` 三态裁决（`Accepted`/`TokenInvalid`/`Retryable`），死亡 token 不会被当成服务器错误；`HostBuilder::use_push` 接入 APNs（`rust-webx-apns`）或 FCM（`rust-webx-fcm`），`InMemoryPushSender` 供测试捕获。见[推送指南](docs/rust-webx/13-extensibility/push-notifications.md)。
 - **端口而非 starters** — 每个基础设施能力都是一个端口（`IIdempotencyStore`、`IOutbox`、`ISessionStore`、`IObjectStore`、`IMeter`、`IAdvisoryLock`、`IEmailSender` …），并带零配置的内存/no-op 默认实现。实体、表和数据/逻辑适配归下游服务：在业务 crate 实现端口，或复制 `examples/adapters/` 里的非发布参考实现，并跑 `testing/contract-tests` 的端口契约。见 [端口与适配器](docs/rust-webx/13-extensibility/integrations.md)。
 - **端点元数据服务** — `IEndpointCatalog` 在运行时暴露全部端点（`all()` / `localized()`），权限同步、管理导航与 OpenAPI 共用一份元数据。
 - **本地化** — `#[display]` / `#[description]` / `#[category]` 存资源键，全局 `Culture.Default` 决定语言；支持 JSON 资源文件或 `include_str!` 嵌入。
@@ -157,7 +159,7 @@ rust-webx 是刻意「有主见」的：它不追求做最小的路由库。如�
 
 ```
 rust-webx/
-├── Cargo.toml                 # workspace 根 (v2.9.1) — 只含已发布的运行时 crate
+├── Cargo.toml                 # workspace 根 (v2.9.2) — 只含已发布的运行时 crate
 ├── crates/
 │   ├── core/                  # rust-webx-core  — trait 与配置，重导出 rust-core 契约
 │   ├── engine/                # rust-webx-engine — 执行引擎：worker 池、直接分发
@@ -182,6 +184,9 @@ rust-webx/
 │   │   ├── nats/              #   rust-webx-nats
 │   │   ├── rabbitmq/          #   rust-webx-rabbitmq
 │   │   └── kafka/             #   rust-webx-kafka
+│   ├── push/                  # push provider adapters
+│   │   ├── apns/              #   rust-webx-apns — APNs (HTTP/2 token auth)
+│   │   └── fcm/               #   rust-webx-fcm — Firebase Cloud Messaging HTTP v1
 │   ├── transport/             # 可选的非 hyper 监听后端
 │   │   └── h3/                #   rust-webx-h3 — HTTP/3（QUIC + rustls + h3）
 │   ├── payment/               # 支付领域组（按需引入）
@@ -220,6 +225,7 @@ rust-webx/
 > `rust-webx-pay-paypal` → `webx_pay_paypal`、`rust-webx-pay-adyen` → `webx_pay_adyen`、
 > `rust-webx-pay-square` → `webx_pay_square`、
 > `rust-webx-h3` → `webx_h3`。
+> `rust-webx-apns` → `webx_apns`, `rust-webx-fcm` → `webx_fcm`.
 >
 > `examples/adapters/` 下的 `*-ef` 参考适配器**不是依赖**：它们 `publish = false`，
 > crates.io 上没有制品，也没有可供业务代码使用的导入名。

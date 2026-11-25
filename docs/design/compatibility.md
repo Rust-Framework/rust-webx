@@ -41,16 +41,16 @@
 ### semver（对上一发布）
 
 ```text
-cargo semver-checks --package rust-webx-core   --baseline-rev v2.7.0
-cargo semver-checks --package rust-webx-engine --baseline-rev v2.7.0
-cargo semver-checks --package rust-webx-host   --baseline-rev v2.7.0
-cargo semver-checks --package rust-webx        --baseline-rev v2.7.0
+cargo semver-checks --package rust-webx-core   --baseline-rev v2.9.1
+cargo semver-checks --package rust-webx-engine --baseline-rev v2.9.1
+cargo semver-checks --package rust-webx-host   --baseline-rev v2.9.1
+cargo semver-checks --package rust-webx        --baseline-rev v2.9.1
 ```
 
 例外：`constructible_struct_adds_field = "allow"`（见 §3），以及 2.8.0 幂等值类型的
 `struct_marked_non_exhaustive` / `enum_marked_non_exhaustive = "allow"`（同见 §3），
-限流枚举新增变体的 `enum_variant_added = "allow"`（**只在 `rust-webx-core`**，同见 §3），以及
-2.9.1 通知端口改名的 `inherent_method_missing = "allow"`（**只在 `rust-webx-host`**，同见 §3）。
+2.9.1 限流枚举/通知端口改名的两条 `allow` 已在 2.9.2 删除：semver baseline 前移到 v2.9.1，
+这些 2.9.1 例外不再参与门禁，只在 §3 留档。
 
 ### upgrade（N-2 源码兼容）
 
@@ -156,6 +156,8 @@ testing/upgrade-smoke/current/Cargo.toml  → rust-webx = { path = "../../../cra
      冲突方完成可重试"的 409 改用 `Error::conflict_retryable(msg)`；
    - 锁定：`crates/core/src/rate_limit.rs` 单测 + `docs/design/error-codes.md`
      的码表一致性测试。
+
+6. **2.9.2 加性补丁的字段（结构体字面量构造受影响）**：`WebSocketLimits` 新增 `session_revalidation`（用 `Default` + `.with_session_revalidation(d)` 构造）；`RedisEventsOptions` / `NatsOptions` / `RabbitMqOptions` 新增广播通道字段（serde 默认值，配置绑定属加性；字面量构造请用 `Default` + `with_*`）。本版不删除 API、不改默认行为，不需要迁移；`constructible_struct_adds_field` 的全局允许已在根 `Cargo.toml` 登记。
 
 需要保持字面量构造的结构体（如 `ProblemDetails`）由
 `crates/webx/tests/api_stability_test.rs` 锁定字段集合。

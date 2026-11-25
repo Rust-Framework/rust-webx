@@ -121,6 +121,21 @@ pub trait IAuthenticationScheme: Send + Sync {
         None
     }
 
+    /// The server-side session repository this scheme validates cookies against.
+    ///
+    /// This is a **host hook**, not an application-facing port: the host uses it
+    /// to re-check live WebSocket sessions after a cookie session is deleted.
+    ///
+    /// The host needs it to re-check a cookie-authenticated WebSocket session
+    /// after the credential was issued: a deleted session must close the live
+    /// connection (`WebSocketLimits::session_revalidation`). Non-cookie schemes
+    /// return `None`; the default keeps custom schemes source-compatible.
+    fn session_repository(
+        &self,
+    ) -> Option<std::sync::Arc<dyn crate::security::ISessionRepository>> {
+        None
+    }
+
     /// Whether this scheme recognizes the request's credential shape.
     ///
     /// Must be cheap and side-effect free — no I/O and no response mutation.

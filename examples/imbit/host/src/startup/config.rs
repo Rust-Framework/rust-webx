@@ -5,7 +5,16 @@
 //! this module only fills in what the reference app promises to run with out of
 //! the box.
 
+use std::time::Duration;
+
 use webx::{AppMode, AppOptions};
+
+/// Default interval of the live-session credential re-check (`IMBIT_REVALIDATION_MS`).
+///
+/// 500 ms is demo-friendly: a logout closes the browser's WebSocket within one
+/// second. A production deployment sets 10–30 s (the interval is the *longest*
+/// window in which a revoked credential can still hold a live socket).
+pub const DEFAULT_SESSION_REVALIDATION_MS: u64 = 500;
 
 /// Development JWT secret (32+ bytes).
 ///
@@ -28,6 +37,37 @@ pub fn app_mode() -> AppMode {
     } else {
         AppMode::Development
     }
+}
+
+/// Interval of the live-WebSocket credential re-check.
+///
+/// `IMBIT_REVALIDATION_MS` overrides the demo default; the framework clamps the
+/// value to at least 100 ms (a zero interval would poll in a hot loop).
+pub fn session_revalidation_interval() -> Duration {
+    let millis = std::env::var("IMBIT_REVALIDATION_MS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .unwrap_or(DEFAULT_SESSION_REVALIDATION_MS);
+    Duration::from_millis(millis)
+}
+
+/// Browser origins allowed to open a WebSocket session (`IMBIT_ORIGINS`).
+///
+/// Comma-separated, matched exactly (scheme + host + port). `None` — the
+/// variable is unset or empty — disables the handshake Origin check, which is
+/// what keeps non-browser clients (Bearer tokens, no `Origin` header) working.
+/// A deployment that serves a browser must set it; see
+/// [`WebSocketLimits`](webx::WebSocketLimits) and the framework's WebSocket
+/// manual chapter.
+pub fn websocket_origins() -> Option<Vec<String>> {
+    let raw = std::env::var("IMBIT_ORIGINS").ok()?;
+    let origins: Vec<String> = raw
+        .split(',')
+        .map(str::trim)
+        .filter(|origin| !origin.is_empty())
+        .map(str::to_string)
+        .collect();
+    (!origins.is_empty()).then_some(origins)
 }
 
 /// Options the reference app needs before the host validates them.

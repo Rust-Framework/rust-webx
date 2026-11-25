@@ -2,7 +2,7 @@ use redis::aio::ConnectionManager;
 use redis::Client;
 use tokio::sync::OnceCell;
 use webx_core::cache::CacheError;
-use webx_core::error::Error;
+use webx_core::error::{Error, Result};
 
 /// Lazily connected, auto-reconnecting Redis handle.
 ///
@@ -84,6 +84,70 @@ impl RedisConnection {
             .await
             .map(|_| ())
             .map_err(|error| CacheError::Unavailable(format!("Redis PING failed: {error}")))
+    }
+
+    /// Open a dedicated connection for the event consumer's **blocking** reads.
+    ///
+    /// `XREADGROUP BLOCK` holds its connection for the whole block window. On the
+    /// shared multiplexed handle it would stall every cache/publish/health
+    /// command behind it, and the shared handle's response timeout would fire
+    /// whenever the block window is as long as the timeout (the defaults are both
+    /// 5s). The reader connection deliberately has **no response timeout** and is
+    /// owned by one consumer; ordinary commands keep the bounded shared handle.
+    pub(crate) async fn blocking_reader(&self) -> Result<ConnectionManager> {
+        let client = self.client.as_ref().map_err(|error| {
+            Error::status(
+                503,
+                format!("invalid Redis URL '{}': {error}", redact_url(&self.url)),
+            )
+        })?;
+        let config =
+            redis::aio::ConnectionManagerConfig::new().set_connection_timeout(self.connect_timeout);
+        let connecting = ConnectionManager::new_with_config(client.clone(), config);
+        match tokio::time::timeout(self.connect_timeout, connecting).await {
+            Ok(Ok(connection)) => Ok(connection),
+            Ok(Err(error)) => Err(transport_error(
+                "redis event reader connection failed",
+                error,
+            )),
+            Err(_) => Err(Error::status(
+                503,
+                format!(
+                    "connecting the Redis event reader to '{}' timed out after {:?}",
+                    redact_url(&self.url),
+                    self.connect_timeout
+                ),
+            )),
+        }
+    }
+
+    /// Open a dedicated Pub/Sub connection.
+    ///
+    /// Redis puts a connection into subscribe mode for as long as it has
+    /// subscriptions, so it cannot run the ordinary commands the multiplexed
+    /// [`Self::manager`] handle serves. The caller owns the connection lifetime
+    /// and its reconnect loop; this method only performs the bounded first
+    /// connect.
+    pub(crate) async fn pubsub(&self) -> Result<redis::aio::PubSub> {
+        let client = self.client.as_ref().map_err(|error| {
+            Error::status(
+                503,
+                format!("invalid Redis URL '{}': {error}", redact_url(&self.url)),
+            )
+        })?;
+        let connecting = tokio::time::timeout(self.connect_timeout, client.get_async_pubsub());
+        match connecting.await {
+            Ok(Ok(pubsub)) => Ok(pubsub),
+            Ok(Err(error)) => Err(transport_error("redis pub/sub connection failed", error)),
+            Err(_) => Err(Error::status(
+                503,
+                format!(
+                    "connecting the Redis pub/sub connection to '{}' timed out after {:?}",
+                    redact_url(&self.url),
+                    self.connect_timeout
+                ),
+            )),
+        }
     }
 }
 

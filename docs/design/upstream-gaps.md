@@ -51,6 +51,20 @@
 | 19 | keyset / cursor 分页 | **已覆盖（2.7.0）** | `KeysetRequest`（cursor + page_size、`from_parts`/`decoded`）+ `Cursor` 编解码（4 KiB 上限、typed 400）+ `CursorPage<T>`（`from_rows` 多取一行精确 `has_more`）；与 offset 并存 | 排序键与租户作用域仍由 Handler 校验 |
 | 20 | 声明式校验 / OpenAPI | **已覆盖（2.7.0）** | `#[validate(length/range/email/custom)]` 编译期展开、绑定后执行并汇入同一 `400 errors`；`ParamMeta::constraints` 让 spec 带 `minLength`/`maxLength`/`minItems`/`maxItems`/`minimum`/`maximum`/`format` | 跨字段/查库校验留在 Handler |
 
+## 2026-11 2.9.2：IM 实时硬化（2.9.1 评估的 5 项）
+
+来源：2.9.1 的 IM/音视频能力评估列出的 5 个必须先处理的坑；决策与验收见
+[im-hardening.md](im-hardening.md)。判定口径同上：**已覆盖** = 公开能力直接满足；
+**部分覆盖** = 端口/配方已交付，但仍有明确划归应用或后续版本的边界。
+
+| # | 2.9.1 缺口 | 判定 | 落点 | 边界 |
+|---|---|---|---|---|
+| R1 | 跨节点房间广播默认走竞争消费（实际只到一个节点）；无用户定向投递 | **已覆盖（2.9.2）** | `EventDelivery::{Competing, Broadcast}` + `IEventRequest::delivery()` + `IEventPublisher::broadcast`（默认 fail-closed）+ `RealtimeUserFanoutEvent`；Redis Pub/Sub、NATS 广播 subject、RabbitMQ fanout 适配；Kafka 明确登记不支持 | 广播是 at-most-once、不保证跨节点顺序；可靠投递仍需持久化 + 续传 / outbox；不新增第二套 pub/sub 端口（沿用 #1 架构决策） |
+| R2 | `IRealtimeEventStore` 只有进程内实现；presence 只有进程内注册表 | **已覆盖（2.9.2）** | `RedisRealtimeEventStore`（Redis Streams，全局单调游标）、`IOnlinePresence` 端口 + `InMemoryOnlinePresence` / `RedisOnlinePresence`、`HostBuilder::use_online_presence`（presence 桥接 + 心跳）、`use_realtime_event_store` | Redis 续传只支持条数保留（`max_age` 启动即拒绝）；`room:` scope 由业务显式维护，框架不自动跟踪房间成员；Redis Cluster/Sentinel 需独立适配器 |
+| R3 | 通知端口只有 email/sms；无移动推送，离线消息无法触达 | **部分覆盖（2.9.2）** | `IPushSender` 端口 + `PushMessage`/`PushOutcome` 三态 + `HostBuilder::use_push` + `InMemoryPushSender`；发布面新增 `rust-webx-apns` / `rust-webx-fcm` | WebPush 仅端口支持、适配器待办；设备令牌表、重试编排与「必达」的 outbox 属应用；端口不做自动重试 |
+| R4 | `ISessionStore` 吊销不会关闭 WS 长连接 | **已覆盖（2.9.2）** | `WebSocketLimits::with_session_revalidation`（宿主内部按 JWT `jti` / Cookie 会话复查）、`CloseReason::SessionRevoked`（close `1008`）、`close_user_connections`（同节点立即） | 跨节点在复查周期内生效（推荐 10–30s），不是秒级；API Key 凭据本版不复查；瞬时存储错误只重试、不误杀连接 |
+| R5 | 浏览器接入配方缺失（只有 Bearer 演示，无 Cookie/CSRF/Origin 端到端） | **已覆盖（2.9.2，配方而非新 API）** | `SessionCookieScheme` + `use_csrf` + `use_websocket_origins` + 会话交换端点模式；WebSocket 手册新增浏览器接入与吊销/重连章节；imbit e2e 覆盖 Cookie 升级、错误 Origin 403、登出后 close `1008` | 大部分能力 2.9 已存在，本版补端到端配方与验收；Origin 是精确白名单（不做通配）；API Key 会话的复查边界同 R4 |
+
 ## 架构决策
 
 - **#1 不新增 `IRealtimeBus`**：跨进程实时消息已经走唯一的事件传输端口（`RealtimeFanoutEvent`

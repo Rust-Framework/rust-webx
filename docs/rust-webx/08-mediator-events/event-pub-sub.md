@@ -182,9 +182,16 @@ Redis 6.2 以下可设 `claim_pending: false` 关闭 `XAUTOCLAIM` 回收（注�
 pending 重试与 PEL 清理）。`XREADGROUP` 与 `XAUTOCLAIM` 是顺序执行的（claim 不在读取
 进行中抢占），避免取消读取后消息只进 PEL 而丢失回复。
 
-死信重放用同一个 consumer：
+消费者对**阻塞读使用独立连接**（无 response timeout，连接由 consumer 持有并自动重连）：
+`block_ms` 是服务端阻塞窗口，不会占用缓存/发布/健康检查共用的多路复用连接，也不需要为了
+它调大 `command_timeout`。`add_redis` 同时把连接与 consumer 注册进 DI（`Arc<RedisConnection>`、
+`Arc<RedisEventConsumer>`），运维代码直接 resolve 后重放死信：
 
 ```rust
+use std::sync::Arc;
+use webx_redis::RedisEventConsumer;
+
+let consumer = host.provider().get::<Arc<RedisEventConsumer>>()?;
 let replayed = consumer.replay_dead_letter(100).await?;
 ```
 
@@ -246,12 +253,33 @@ consumer-group offset 提交**，重启时按 `start_offset` 重新开始（`Lat
 
 ### 开关与自定义传输
 
-- Redis：`.cache_only()` 只要缓存；`.without_cache()` + `RedisEventsOptions { consumer_enabled: false, .. }` 只发不收。
+- Redis：`.cache_only()` 只要缓存；`.without_cache()` + `RedisEventsOptions { consumer_enabled: false, .. }` 只发不收（该开关只决定 `add_redis` 是否注册消费者；手动 `execute` 的消费者与 NATS/RabbitMQ/Kafka 一样同时消费竞争与广播两类）。
 - NATS / RabbitMQ / Kafka：`.publisher_only()` 只发不收。
 - 其他 broker：实现 `IEventPublisher`（把 `event_name` + `payload` 写入 broker），用
   `Host::builder().use_event_publisher(Arc::new(...))` 替换默认实现；消费端复用
   `EventDispatcher::dispatch`（解码 + 新 DI scope + 广播）。也可在 `.register` 里
   `svc.instance::<dyn IEventPublisher>(...)`，`add_mediator()` 不会覆盖已有注册。
+
+## 投递类：竞争还是广播
+
+事件到达订阅端的方式由**事件类型**声明（`IEventRequest::delivery()`，默认竞争）：
+
+| 投递类 | 语义 | 典型用途 |
+|---|---|---|
+| `EventDelivery::Competing`（默认） | 每个 broker 消费组/队列恰好一个消费者收到 | 领域事件、任务等“只做一次”的副作用 |
+| `EventDelivery::Broadcast` | 每个节点都收到一份 | 实时房间/用户扇出、跨节点缓存失效、控制消息 |
+
+```rust
+impl IEventRequest for CacheInvalidatedEvent {
+    fn delivery() -> EventDelivery { EventDelivery::Broadcast }
+}
+```
+
+`IMediator::publish` 按 `T::delivery()` 自动分派到 `IEventPublisher::publish` 或
+`IEventPublisher::broadcast`，事件编码、`EventDispatcher`、handler 注册都不变。
+`broadcast` 的默认实现 **fail-closed**：传输未声明广播能力时直接报错，而不是静默退化为
+“只到一个节点”（Kafka 适配器即明确不支持广播）。适配器实现与失败语义见
+[WebSocket · 投递类与跨节点扇出](../05-request-pattern/websocket.md#投递类与跨节点扇出)。
 
 ## 跨节点实时扇出（复用同一传输）
 
@@ -260,15 +288,20 @@ consumer-group offset 提交**，重启时按 `start_offset` 重新开始（`Lat
 
 ```rust
 // 任意节点发布；各节点的事件 consumer 把消息交给框架注册的 fan-out Handler，
-// 后者写入本节点房间内的连接（at-most-once，尽力而为）。
+// 后者写入本节点房间/用户连接（广播投递类，at-most-once，尽力而为）。
 mediator
     .publish(RealtimeFanoutEvent::to_room("room-1", "hello"))
     .await?;
+mediator
+    .publish(RealtimeUserFanoutEvent::to_user("user-1", "hello"))
+    .await?;
 ```
 
-这样只有一条跨进程传输通道（`IEventPublisher`）、一套 wire（`event_name` + JSON）和一次
-适配器实现（Redis/NATS 适配器 crate 已实现事件传输）。语义/取舍见
-[架构 ADR](../../design/mediator-handler-architecture.md)。
+两个事件都是 `EventDelivery::Broadcast`，所以 `publish` 会走传输的广播通道（Redis Pub/Sub /
+NATS 广播 subject / RabbitMQ fanout）；竞争投递的领域事件语义不变。这样只有一条跨进程传输
+通道（`IEventPublisher`）、一套 wire（`event_name` + JSON）和一次适配器实现。语义/取舍见
+[架构 ADR](../../design/mediator-handler-architecture.md) 与
+[多实例实时部署](../11-production/realtime-cluster.md)。
 
 ## 与直接调用 / send 的选择
 

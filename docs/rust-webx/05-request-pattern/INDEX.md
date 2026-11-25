@@ -15,7 +15,7 @@
 | [用户身份与多租户](user-identity.md) | 用 `IdentityUser` 直接携带身份：登录、匿名、角色、租户隔离 |
 | [文件上传与下载](file-upload-download.md) | multipart 表单、FormFile、文件响应与 Range |
 | [流式响应（SSE）](streaming-sse.md) | SseResult、逐帧推送、断连回调与长流停机 |
-| [WebSocket 会话](websocket.md) | `use_websocket`、101 升级、`IConnection` 消息抽象与连接级生命周期 |
+| [WebSocket 会话](websocket.md) | 升级、`IConnection` 与消息即请求；广播投递、Cookie/CSRF/Origin 接入、吊销与重连 |
 | [请求体流式读取](request-body-streaming.md) | body_stream、413 上限与裸流场景 |
 | [错误处理与 ProblemDetails](error-handling.md) | Error 变体与 RFC 7807 |
 

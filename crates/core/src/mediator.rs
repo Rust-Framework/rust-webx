@@ -7,8 +7,8 @@ pub mod pipeline;
 pub use default::Mediator;
 pub use dispatch::dispatch;
 pub use event::{
-    dispatch_event_handlers, BoxedEventDispatch, BoxedEventHandlerCall, EventDispatchFn,
-    EventDispatcher, EventHandlerCache, EventHandlerCall, EventHandlerFactory,
+    dispatch_event_handlers, BoxedEventDispatch, BoxedEventHandlerCall, EventDelivery,
+    EventDispatchFn, EventDispatcher, EventHandlerCache, EventHandlerCall, EventHandlerFactory,
     EventHandlerRegistration, EventMessage, EventMetrics, EventMetricsSnapshot, EventRegistration,
     IEventPublisher, InMemoryEventPublisher, InMemoryEventWorker, DEFAULT_EVENT_QUEUE_CAPACITY,
     EVENT_WIRE_VERSION, MAX_EVENT_NAME_BYTES,
@@ -72,6 +72,19 @@ pub trait IEventRequest: Clone + Send + 'static {
         Self: Sized,
     {
         std::any::type_name::<Self>()
+    }
+
+    /// Delivery class of this event.
+    ///
+    /// Defaults to [`EventDelivery::Competing`] (one subscriber per broker
+    /// group). Override with [`EventDelivery::Broadcast`] for real-time
+    /// fan-out and cross-node control messages: every node must receive its own
+    /// copy. The transport routes by class; the wire payload is unchanged.
+    fn delivery() -> crate::mediator::event::EventDelivery
+    where
+        Self: Sized,
+    {
+        crate::mediator::event::EventDelivery::Competing
     }
 }
 

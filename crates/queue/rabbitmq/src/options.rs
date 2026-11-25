@@ -10,6 +10,12 @@ pub struct RabbitMqOptions {
     pub connect_timeout_seconds: u64,
     /// Durable topic exchange.
     pub exchange: String,
+    /// Fanout exchange broadcast events are published to / consumed from.
+    ///
+    /// Empty means "derive `"<exchange>.broadcast"`"; see
+    /// `with_broadcast_exchange` fills it in.
+    /// Every node binds its own exclusive auto-delete queue to it.
+    pub broadcast_exchange: String,
     /// Routing key used by publisher and consumer binding.
     pub routing_key: String,
     /// Durable queue. Services that need their own copy of every event use a
@@ -33,6 +39,7 @@ impl Default for RabbitMqOptions {
             url: "amqp://guest:guest@127.0.0.1:5672/%2f".to_string(),
             connect_timeout_seconds: 5,
             exchange: "webx.events".to_string(),
+            broadcast_exchange: String::new(),
             routing_key: "webx.events".to_string(),
             queue: "webx.events".to_string(),
             consumer_enabled: true,
@@ -70,12 +77,38 @@ impl RabbitMqOptions {
         self.consumer_enabled = false;
         self
     }
+
+    /// Fanout exchange for broadcast delivery (empty = derive
+    /// `"<exchange>.broadcast"`).
+    pub fn with_broadcast_exchange(mut self, exchange: impl Into<String>) -> Self {
+        self.broadcast_exchange = exchange.into();
+        self
+    }
+
+    /// The fanout exchange broadcast events are published to / consumed from.
+    ///
+    /// Returns [`broadcast_exchange`](RabbitMqOptions::broadcast_exchange) when
+    /// it is set (non-blank); otherwise derives `"<exchange>.broadcast"` so
+    /// enabling broadcast support never requires a second configuration key.
+    pub(crate) fn effective_broadcast_exchange(&self) -> String {
+        let configured = self.broadcast_exchange.trim();
+        if configured.is_empty() {
+            derived_broadcast_exchange(&self.exchange)
+        } else {
+            configured.to_string()
+        }
+    }
 }
 
 impl RabbitMqOptions {
     pub(crate) fn connect_timeout(&self) -> std::time::Duration {
         std::time::Duration::from_secs(self.connect_timeout_seconds.max(1))
     }
+}
+
+/// Default broadcast exchange for `exchange` (`"<exchange>.broadcast"`).
+pub(crate) fn derived_broadcast_exchange(exchange: &str) -> String {
+    format!("{exchange}.broadcast")
 }
 
 impl From<&str> for RabbitMqOptions {

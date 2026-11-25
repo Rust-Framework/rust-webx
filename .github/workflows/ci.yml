@@ -291,7 +291,7 @@ jobs:
         run: cargo run -p alloc-probe --release --locked -- compare 500 13
 
   semver:
-    name: SemVer (vs v2.7.0)
+    name: SemVer (vs v2.9.1)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -305,7 +305,7 @@ jobs:
       - name: Check the public API against the previous release
         run: |
           for package in rust-webx-core rust-webx-engine rust-webx-host rust-webx; do
-            cargo semver-checks --package "$package" --baseline-rev v2.7.0
+            cargo semver-checks --package "$package" --baseline-rev v2.9.1
           done
 
   realdb:

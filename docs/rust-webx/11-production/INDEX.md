@@ -20,6 +20,7 @@
 | [OpenAPI 与 SPA 托管](openapi-spa.md) | 文档、前端与内嵌文件读取 |
 | [文件服务的生产部署](file-serving.md) | 缓存、断点续传、反代与 fd |
 | [优雅关闭与可观测性](graceful-shutdown.md) | 运维能力 |
+| [多实例实时部署](realtime-cluster.md) | 共享续传日志/在线态、广播传输、会话吊销复查与容量边界 |
 
 ## 下一步
 

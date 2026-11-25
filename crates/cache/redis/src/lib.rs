@@ -1,10 +1,19 @@
-//! Redis integration for rust-webx: distributed cache + event transport.
+//! Redis integration for rust-webx: distributed cache, event transport and
+//! shared real-time state.
 //!
 //! ASP.NET Core style: add the crate, call [`add_redis`](RedisHostBuilderExt::add_redis),
 //! and both `IDistributedCache` and `IEventPublisher` are wired against the same
-//! multiplexed connection. A background consumer reads the stream through a
-//! consumer group and dispatches events to the application's `#[handler]`
-//! event handlers.
+//! multiplexed connection. A background consumer reads competing events from a
+//! consumer group on the stream and subscribes to the broadcast Pub/Sub channel,
+//! then dispatches both through the application's `#[handler]` event handlers.
+//!
+//! The crate also ships the Redis implementations of the two real-time ports:
+//! [`RedisRealtimeEventStore`] (shared resume log for WebSocket sessions) and
+//! [`RedisOnlinePresence`] (cross-node online presence). Wire them into a host
+//! with the existing `HostBuilder::use_realtime_event_store` /
+//! `HostBuilder::use_online_presence` entries:
+//! `use_realtime_event_store(Arc::new(RedisRealtimeEventStore::new(connection)))`.
+//! There is no second registration vocabulary to learn.
 //!
 //! ```no_run
 //! use webx_core::route::ext::IServiceCollectionExt;
@@ -32,6 +41,8 @@ mod connection;
 mod events;
 mod health;
 mod options;
+mod presence;
+mod realtime;
 
 pub use advisory_lock::RedisAdvisoryLock;
 pub use cache::RedisCache;
@@ -39,10 +50,12 @@ pub use connection::RedisConnection;
 pub use events::{RedisEventConsumer, RedisEventPublisher};
 pub use health::RedisHealthCheck;
 pub use options::{RedisEventsOptions, RedisOptions};
+pub use presence::{RedisOnlinePresence, RedisOnlinePresenceOptions};
+pub use realtime::{RedisRealtimeEventStore, RedisRealtimeEventStoreOptions};
 
 use std::sync::Arc;
 
-use rust_dix::ServiceCollection;
+use rust_dix::{IServiceResolverExt, ServiceCollection};
 use webx_core::cache::IDistributedCache;
 use webx_core::hosted::BackgroundServiceSpec;
 use webx_core::locking::IAdvisoryLock;
@@ -76,7 +89,10 @@ impl RedisServiceCollectionExt for ServiceCollection {
     }
 
     fn add_redis_with(self, connection: Arc<RedisConnection>, options: RedisOptions) -> Self {
-        let mut services = self;
+        // The connection is a singleton too: real-time ports built on the same
+        // deployment (shared resume log / presence) resolve it instead of opening
+        // a second one.
+        let mut services = self.instance::<RedisConnection>(Arc::clone(&connection));
 
         if options.cache_enabled {
             let cache = Arc::new(RedisCache::new(Arc::clone(&connection), &options));
@@ -93,19 +109,27 @@ impl RedisServiceCollectionExt for ServiceCollection {
             services = services.instance::<dyn IEventPublisher>(publisher);
 
             if events.consumer_enabled {
-                services = services.add_background_service(BackgroundServiceSpec::with_factory(
-                    move |resolver| {
+                // Register the worker as a singleton *and* start it, so
+                // operations code can resolve it for dead-letter replay and
+                // consumer introspection.
+                let consumer_connection = Arc::clone(&connection);
+                let consumer_events = events.clone();
+                services = services
+                    .try_add_singleton::<RedisEventConsumer>(move |resolver| {
                         let provider = resolver
                             .provider_arc()
                             .expect("ServiceProvider not available from DI resolver");
-                        let dispatcher = Arc::new(EventDispatcher::new(provider));
                         Arc::new(RedisEventConsumer::new(
-                            Arc::clone(&connection),
-                            events.clone(),
-                            dispatcher,
+                            Arc::clone(&consumer_connection),
+                            consumer_events.clone(),
+                            Arc::new(EventDispatcher::new(provider)),
                         ))
-                    },
-                ));
+                    })
+                    .add_background_service(BackgroundServiceSpec::with_factory(|resolver| {
+                        resolver
+                            .resolve_arc::<RedisEventConsumer>()
+                            .expect("the Redis event consumer is registered above")
+                    }));
             }
         }
 
@@ -184,6 +208,11 @@ mod tests {
         let events = options.events.clone().expect("events enabled by default");
         assert!(events.consumer_enabled);
         assert_eq!(events.stream, "webx:events");
+        assert!(events.broadcast_channel.is_empty());
+        assert_eq!(
+            events.effective_broadcast_channel(),
+            "webx:events:broadcast"
+        );
     }
 
     #[test]

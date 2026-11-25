@@ -103,7 +103,7 @@ jobs:
           . scripts/crates-index.sh
 
           # Publish order: dependencies must appear before their dependents.
-          CRATES="rust-webx-macros rust-webx-core rust-webx-engine rust-webx-client rust-webx-ai rust-webx-build rust-webx-spa rust-webx-openapi rust-webx-host rust-webx-outbox rust-webx-mfa rust-webx-webauthn rust-webx rust-webx-oauth2 rust-webx-oidc rust-webx-redis rust-webx-nats rust-webx-rabbitmq rust-webx-kafka rust-webx-ai-gateway rust-webx-pay rust-webx-pay-stripe rust-webx-pay-alipay rust-webx-pay-wechatpay rust-webx-pay-paypal rust-webx-pay-adyen rust-webx-pay-square rust-webx-h3"
+          CRATES="rust-webx-macros rust-webx-core rust-webx-engine rust-webx-client rust-webx-ai rust-webx-build rust-webx-spa rust-webx-openapi rust-webx-host rust-webx-outbox rust-webx-mfa rust-webx-webauthn rust-webx rust-webx-oauth2 rust-webx-oidc rust-webx-redis rust-webx-nats rust-webx-rabbitmq rust-webx-kafka rust-webx-ai-gateway rust-webx-pay rust-webx-pay-stripe rust-webx-pay-alipay rust-webx-pay-wechatpay rust-webx-pay-paypal rust-webx-pay-adyen rust-webx-pay-square rust-webx-h3 rust-webx-apns rust-webx-fcm"
 
           # `--no-deps` reports only the root workspace members and does not
           # resolve the registry. The unpublished `examples/adapters/` workspace

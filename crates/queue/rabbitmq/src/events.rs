@@ -1,5 +1,6 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures_util::StreamExt;
 use lapin::message::Delivery;
@@ -26,6 +27,12 @@ struct CachedChannel {
 ///
 /// `publish` returns after the broker confirms the message; handler execution
 /// happens in [`RabbitMqEventConsumer`] (or another service sharing the queue).
+/// A broker-side unroutable message (`NO_ROUTE`, e.g. while a fresh deployment
+/// is still creating/ binding the queue) is reported as a retryable `503`; a
+/// publisher that must not lose the event retries with backoff.
+/// Broadcast events (`IEventPublisher::broadcast`) are published to a fanout
+/// exchange (`"<exchange>.broadcast"` by default) where every node binds its own
+/// exclusive auto-delete queue, so each node receives one copy.
 pub struct RabbitMqEventPublisher {
     connection: Arc<RabbitConnection>,
     options: RabbitMqOptions,
@@ -55,6 +62,7 @@ impl RabbitMqEventPublisher {
             Error::status(503, format!("RabbitMQ channel open failed: {error}"))
         })?;
         ensure_topology(&channel, &self.options).await?;
+        ensure_broadcast_exchange(&channel, &self.options).await?;
 
         // Enable publisher confirms so `publish` observes broker acceptance.
         channel
@@ -70,21 +78,24 @@ impl RabbitMqEventPublisher {
         });
         Ok(channel)
     }
-}
 
-#[async_trait::async_trait]
-impl IEventPublisher for RabbitMqEventPublisher {
-    async fn publish(&self, message: EventMessage) -> Result<()> {
+    async fn publish_to(
+        &self,
+        exchange: String,
+        routing_key: String,
+        mandatory: bool,
+        message: EventMessage,
+    ) -> Result<()> {
         let frame = message.to_wire()?;
         let channel = self.channel().await?;
         let confirmation = channel
             .basic_publish(
-                self.options.exchange.clone().into(),
-                self.options.routing_key.clone().into(),
+                exchange.into(),
+                routing_key.into(),
                 BasicPublishOptions {
-                    // Unroutable events must surface as errors instead of an
-                    // implicit drop with an "acked" publisher confirm.
-                    mandatory: true,
+                    // Unroutable competing events must surface as errors instead
+                    // of an implicit drop with an "acked" publisher confirm.
+                    mandatory,
                     ..Default::default()
                 },
                 &frame,
@@ -118,7 +129,41 @@ impl IEventPublisher for RabbitMqEventPublisher {
     }
 }
 
+#[async_trait::async_trait]
+impl IEventPublisher for RabbitMqEventPublisher {
+    async fn publish(&self, message: EventMessage) -> Result<()> {
+        self.publish_to(
+            self.options.exchange.clone(),
+            self.options.routing_key.clone(),
+            true,
+            message,
+        )
+        .await
+    }
+
+    /// Publish to the broadcast fanout exchange.
+    ///
+    /// Delivery is at-most-once: when no node has a queue bound, RabbitMQ
+    /// accepts and drops the event (it is not an error — a broadcast has no
+    /// "the one consumer" to route to).
+    async fn broadcast(&self, message: EventMessage) -> Result<()> {
+        self.publish_to(
+            self.options.effective_broadcast_exchange(),
+            String::new(),
+            // No queue bound is a valid broadcast state (no node listening).
+            false,
+            message,
+        )
+        .await
+    }
+}
+
 /// RabbitMQ consumer with manual acks and requeue-on-handler-failure.
+///
+/// Two independent loops share one [`EventDispatcher`]: the competing loop
+/// consumes the durable quorum queue (unchanged semantics), and the broadcast
+/// loop consumes a per-process exclusive auto-delete queue bound to the fanout
+/// exchange, so every node receives its own copy of a broadcast event.
 pub struct RabbitMqEventConsumer {
     connection: Arc<RabbitConnection>,
     options: RabbitMqOptions,
@@ -232,24 +277,111 @@ impl RabbitMqEventConsumer {
         }
         Ok(())
     }
-}
 
-#[async_trait::async_trait]
-impl BackgroundService for RabbitMqEventConsumer {
-    async fn execute(&self, ct: CancellationToken) -> Result<()> {
+    /// Declare the broadcast topology (fanout exchange + this process's
+    /// exclusive auto-delete queue), then consume and dispatch broadcast events.
+    async fn run_broadcast_once(&self, ct: &CancellationToken) -> Result<()> {
+        let connection = self.connection.connection().await?;
+        let channel = connection.create_channel().await.map_err(|error| {
+            Error::status(503, format!("RabbitMQ channel open failed: {error}"))
+        })?;
+        channel
+            .basic_qos(self.options.prefetch.max(1), BasicQosOptions::default())
+            .await
+            .map_err(|error| Error::status(503, format!("RabbitMQ basic.qos failed: {error}")))?;
+        ensure_broadcast_exchange(&channel, &self.options).await?;
+
+        // `exclusive + auto_delete` gives every node its own queue, so a
+        // broadcast event is copied to each node instead of being load-balanced.
+        let queue = broadcast_queue_name();
+        channel
+            .queue_declare(
+                queue.clone().into(),
+                broadcast_queue_options(),
+                FieldTable::default(),
+            )
+            .await
+            .map_err(|error| {
+                Error::status(503, format!("RabbitMQ queue.declare failed: {error}"))
+            })?;
+        channel
+            .queue_bind(
+                queue.clone().into(),
+                self.options.effective_broadcast_exchange().into(),
+                "".into(),
+                QueueBindOptions::default(),
+                FieldTable::default(),
+            )
+            .await
+            .map_err(|error| Error::status(503, format!("RabbitMQ queue.bind failed: {error}")))?;
+
+        let mut consumer = channel
+            .basic_consume(
+                queue.into(),
+                "".into(),
+                BasicConsumeOptions::default(),
+                FieldTable::default(),
+            )
+            .await
+            .map_err(|error| {
+                Error::status(503, format!("RabbitMQ basic.consume failed: {error}"))
+            })?;
+
+        loop {
+            tokio::select! {
+                _ = ct.cancelled() => return Ok(()),
+                delivery = consumer.next() => {
+                    match delivery {
+                        Some(Ok(delivery)) => self.handle_broadcast(delivery).await?,
+                        Some(Err(error)) => {
+                            return Err(Error::status(
+                                503,
+                                format!("RabbitMQ broadcast consumer error: {error}"),
+                            ));
+                        }
+                        None => return Ok(()),
+                    }
+                }
+            }
+        }
+    }
+
+    /// Broadcast is at-most-once: a failing handler is logged, never requeued
+    /// (redelivery would only reach this same node).
+    async fn handle_broadcast(&self, delivery: Delivery) -> Result<()> {
+        let event = match EventMessage::from_wire(&delivery.data) {
+            Ok(event) => event,
+            Err(error) => {
+                tracing::error!(error = %error, "RabbitMQ broadcast event frame is invalid; acking");
+                return ack(&delivery).await;
+            }
+        };
+
+        if let Err(error) = self.dispatcher.dispatch(&event).await {
+            tracing::error!(
+                event = %event.event_name,
+                error = %error,
+                "RabbitMQ broadcast event handler failed; not requeueing"
+            );
+        }
+        ack(&delivery).await
+    }
+
+    /// Reconnect loop for the competing quorum queue (pre-2.9.2 behaviour).
+    async fn competing_loop(&self, ct: CancellationToken) {
         let mut backoff = Duration::from_secs(1);
         loop {
             if ct.is_cancelled() {
-                return Ok(());
+                return;
             }
             // Cancellation must interrupt a slow connect/consume, not just the
             // idle wait between attempts.
             let result = tokio::select! {
-                _ = ct.cancelled() => return Ok(()),
+                _ = ct.cancelled() => return,
                 result = self.run_once(&ct) => result,
             };
             match result {
-                Ok(()) if ct.is_cancelled() => return Ok(()),
+                Ok(()) if ct.is_cancelled() => return,
                 Ok(()) => backoff = Duration::from_secs(1),
                 Err(error) => {
                     if let Some(metrics) = self.dispatcher.metrics() {
@@ -263,10 +395,55 @@ impl BackgroundService for RabbitMqEventConsumer {
                 }
             }
             if !delay(&ct, backoff).await {
-                return Ok(());
+                return;
             }
             backoff = (backoff * 2).min(Duration::from_secs(30));
         }
+    }
+
+    /// Reconnect loop for this node's exclusive broadcast queue.
+    async fn broadcast_loop(&self, ct: CancellationToken) {
+        let mut backoff = Duration::from_secs(1);
+        loop {
+            if ct.is_cancelled() {
+                return;
+            }
+            let result = tokio::select! {
+                _ = ct.cancelled() => return,
+                result = self.run_broadcast_once(&ct) => result,
+            };
+            match result {
+                Ok(()) if ct.is_cancelled() => return,
+                Ok(()) => backoff = Duration::from_secs(1),
+                Err(error) => {
+                    if let Some(metrics) = self.dispatcher.metrics() {
+                        metrics.record_consumer_reconnect();
+                    }
+                    tracing::warn!(
+                        exchange = %self.options.effective_broadcast_exchange(),
+                        error = %error,
+                        "RabbitMQ broadcast consumer lost its subscription; reconnecting"
+                    );
+                }
+            }
+            if !delay(&ct, backoff).await {
+                return;
+            }
+            backoff = (backoff * 2).min(Duration::from_secs(30));
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl BackgroundService for RabbitMqEventConsumer {
+    async fn execute(&self, ct: CancellationToken) -> Result<()> {
+        // Both deliveries must run concurrently: a stalled broadcast queue must
+        // not stop competing consumption, and vice versa.
+        tokio::join!(
+            self.competing_loop(ct.clone()),
+            self.broadcast_loop(ct.clone()),
+        );
+        Ok(())
     }
 }
 
@@ -339,6 +516,58 @@ async fn ensure_topology(channel: &Channel, options: &RabbitMqOptions) -> Result
     Ok(())
 }
 
+/// Declare the durable fanout exchange used for broadcast delivery.
+async fn ensure_broadcast_exchange(channel: &Channel, options: &RabbitMqOptions) -> Result<()> {
+    channel
+        .exchange_declare(
+            options.effective_broadcast_exchange().into(),
+            ExchangeKind::Fanout,
+            ExchangeDeclareOptions {
+                durable: true,
+                ..Default::default()
+            },
+            FieldTable::default(),
+        )
+        .await
+        .map_err(|error| Error::status(503, format!("RabbitMQ exchange.declare failed: {error}")))
+}
+
+/// Per-process broadcast queue declaration: exclusive and auto-delete, so
+/// RabbitMQ removes it when the connection closes and no two nodes can ever
+/// share one broadcast queue.
+fn broadcast_queue_options() -> QueueDeclareOptions {
+    QueueDeclareOptions {
+        durable: false,
+        exclusive: true,
+        auto_delete: true,
+        ..Default::default()
+    }
+}
+
+/// Unique broadcast queue name for this process (pid + time + sequence).
+fn broadcast_queue_name() -> String {
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or_default();
+    format!(
+        "webx.broadcast.{}.{nanos}.{}",
+        std::process::id(),
+        SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+/// Acknowledge one delivery.
+async fn ack(delivery: &Delivery) -> Result<()> {
+    delivery
+        .acker
+        .ack(BasicAckOptions::default())
+        .await
+        .map(|_| ())
+        .map_err(|error| Error::status(503, format!("RabbitMQ basic.ack failed: {error}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -380,6 +609,39 @@ mod tests {
         assert_eq!(
             argument(&arguments, "x-delivery-limit"),
             Some(&AMQPValue::LongUInt(5))
+        );
+    }
+
+    #[test]
+    fn broadcast_queue_is_exclusive_and_auto_deleted() {
+        let options = broadcast_queue_options();
+        assert!(options.exclusive, "each node must own its queue");
+        assert!(
+            options.auto_delete,
+            "the queue must disappear on disconnect"
+        );
+        assert!(!options.durable);
+    }
+
+    #[test]
+    fn broadcast_queue_names_are_unique_per_process() {
+        let first = broadcast_queue_name();
+        let second = broadcast_queue_name();
+        assert_ne!(first, second);
+        assert!(first.starts_with("webx.broadcast."), "{first}");
+        assert!(first.contains(&std::process::id().to_string()), "{first}");
+    }
+
+    #[test]
+    fn broadcast_frames_round_trip_through_the_wire_format() {
+        let message = EventMessage::new(
+            "webx.realtime.user-fanout",
+            br#"{"user_id":"u1","payload":"hello"}"#.to_vec(),
+        );
+        let wire = message.to_wire().expect("encode broadcast frame");
+        assert_eq!(
+            EventMessage::from_wire(&wire).expect("decode broadcast frame"),
+            message
         );
     }
 }

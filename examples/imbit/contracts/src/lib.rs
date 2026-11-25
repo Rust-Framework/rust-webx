@@ -8,6 +8,7 @@
 //! | Context | Operations |
 //! |---------|------------|
 //! | [`auth`] | login, logout |
+//! | [`session`] | bearer → browser cookie session exchange |
 //! | [`room`] | create, join, list |
 //! | [`message`] | offline catch-up history |
 //! | [`recording`] | start, upload segment, complete, get, play segment |
@@ -20,3 +21,4 @@ pub mod message;
 pub mod realtime;
 pub mod recording;
 pub mod room;
+pub mod session;

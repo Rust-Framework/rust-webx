@@ -12,7 +12,7 @@
 
 | 位置 | 内容 | 是否发布 |
 |---|---|---|
-| `crates/` | 框架本体（core/engine/host/macros/spa/openapi/client/webx）、领域组（ai/auth/cache/queue/payment/transport）、`rust-webx-outbox` | **是**（家族内部精确 pin `=x.y.z`） |
+| `crates/` | 框架本体（core/engine/host/macros/spa/openapi/client/webx）、领域组（ai/auth/cache/queue/payment/push/transport）、`rust-webx-outbox` | **是**（家族内部精确 pin `=2.9.2`） |
 | `examples/` | 三个参考应用（各自独立 workspace）与 `examples/adapters/` 参考适配器 | 否 |
 | `testing/` | `contract-tests`、`alloc-probe`、`upgrade-smoke`、`load-probe` | 否 |
 | `fuzz/` | 独立 cargo-fuzz workspace | 否 |
@@ -22,11 +22,11 @@
 ```text
 rust-core → rust-dix → rust-ef
   → rust-webx 家族：rust-webx-core/host/engine/macros/spa/openapi/client/webx、
-    领域组各 crate、rust-webx-outbox
+    领域组各 crate（含 rust-webx-apns / rust-webx-fcm）、rust-webx-outbox
 ```
 
-- 家族内部用精确 pin（`=2.9.1`）互约束，`rust-webx-outbox` 与家族同版本；
-- `rust-ef` 在应用侧保持 semver 范围（`"2.6"`），不要收紧成 `=2.9.1`，否则 ORM 发布前 lockfile 不可解析；
+- 家族内部用精确 pin（`=2.9.2`）互约束，`rust-webx-outbox` 与家族同版本；
+- `rust-ef` 在应用侧保持 semver 范围（`"2.6"`），不要收紧成 `=2.9.2`，否则 ORM 发布前 lockfile 不可解析；
 - `examples/adapters/*` 全部 `publish = false`，**不进入发布序列**，也不参与 semver 检查；
 - `scripts/check-publish-order.py` 校验 `publish.sh` / `publish.yml` 与 workspace 成员顺序一致；
   非发布成员（`publish = false`）不进入这份清单。
@@ -84,6 +84,7 @@ examples/adapters/
 | `crates/auth/` | oidc / oauth2 / mfa / webauthn | 认证协议适配器；HTTP 认证 scheme 管线仍在 `host` |
 | `crates/cache/` | redis | 第三方缓存；Redis 同时提供事件传输 |
 | `crates/queue/` | nats / rabbitmq / kafka | 第三方消息队列（事件传输） |
+| `crates/push/` | apns / fcm | 移动推送协议适配器（`IPushSender`）；WebPush 适配器待办，端口已支持 |
 | `crates/payment/` | core / stripe / alipay / wechatpay / paypal / adyen / square | 支付领域：端口与供应商协议适配器 |
 | `crates/outbox/` | `rust-webx-outbox` | 事务性 outbox 的端口、派发器与内存实现（不链接 rust-ef） |
 | `examples/adapters/<domain>/ef` | ai / auth / idempotency / outbox / payment | 非发布参考实现：与 ORM/数据库耦合的数据适配 |
@@ -163,8 +164,15 @@ dispatcher.dispatch(&EventMessage::from_wire(bytes)?).await?;
 ```
 
 装配：`.use_event_publisher(Arc::new(publisher))`（`add_mediator()` 不会覆盖应用注册）。
-**实时跨节点扇出自动复用该通道**：发布 `RealtimeFanoutEvent` 即可，各节点的框架
-fan-out handler 会写入本节点房间连接（见 [架构 ADR](mediator-handler-architecture.md) §2/§6）。
+**实时跨节点扇出自动复用该通道**：发布 `RealtimeFanoutEvent` / `RealtimeUserFanoutEvent` 即可，
+各节点的框架 fan-out handler 会写入本节点房间/用户连接（见
+[架构 ADR](mediator-handler-architecture.md) §2/§6）。
+
+2.9.2 起事件有**投递类**（`EventDelivery::{Competing, Broadcast}`，由 `IEventRequest::delivery()`
+声明，默认 `Competing`）：`IMediator::publish` 按类分派到 `IEventPublisher::publish` /
+`IEventPublisher::broadcast`。广播投递要求适配器路由到广播通道（Redis Pub/Sub、NATS 广播
+subject、RabbitMQ fanout），未声明能力的适配器由 `broadcast` 默认实现 **fail-closed** 报错
+（Kafka 明确不支持）；语义矩阵见 [broker 能力矩阵](broker-capability-matrix.md)。
 
 真实 broker 的能力/语义边界以 [broker-capability-matrix.md](broker-capability-matrix.md) 为权威。
 四个适配器都带 env-gated 集成测试（无 broker 时提前返回并通过，PR CI 零依赖），并已接入

@@ -92,6 +92,8 @@ rust-webx is opinionated on purpose: it does not try to be the smallest router. 
 - **Declarative validation** — `#[validate(length/range/email/custom)]` on request fields runs after binding, merges failures into the same `400 problem+json` `errors` map, and reflects the constraints into OpenAPI (`minLength`/`minItems`/`minimum`/`format`).
 - **Keyset pagination, client info, instance checks** — `KeysetRequest`/`CursorPage` complement offset `PagedRequest`/`PagedResult`; `#[fromclient] ClientInfo` binds the listener peer plus trusted `X-Forwarded-For` resolution; `RequestUser::require_owner`/`require_same_tenant` centralize instance-level 401/403 decisions.
 - **Transactional outbox** — `rust-webx-outbox` ships the port, the lease-based `OutboxDispatcher` (through `EventDispatcher`: backoff, dead-letter, retention) and an `InMemoryOutbox` default, registered with `add_outbox`. Same-transaction enqueue is data adaptation: a non-published EF reference lives in `examples/adapters/outbox/ef` (`add_outbox_ef`).
+- **Realtime at IM scale** — one event model with two delivery classes (`EventDelivery::Competing` vs `Broadcast`): `RealtimeFanoutEvent` / `RealtimeUserFanoutEvent` fan out across nodes through the same `IEventPublisher` (Redis Pub/Sub, a NATS broadcast subject, a RabbitMQ fanout exchange), `RedisRealtimeEventStore` shares the replay log, `IOnlinePresence` (+ Redis implementation and a host heartbeat bridge) shares online state, and `WebSocketLimits::with_session_revalidation` closes a live socket when its JWT/cookie session is revoked (close `1008`). See the [multi-instance realtime guide](docs/rust-webx/11-production/realtime-cluster.md).
+- **Mobile push** — `IPushSender` with a three-way outcome (`Accepted`/`TokenInvalid`/`Retryable`) so dead device tokens are not mistaken for server errors; `HostBuilder::use_push` wires APNs (`rust-webx-apns`) or FCM (`rust-webx-fcm`), and `InMemoryPushSender` captures pushes in tests. See the [push guide](docs/rust-webx/13-extensibility/push-notifications.md).
 - **Ports, not starters** — every infrastructure capability is a port (`IIdempotencyStore`, `IOutbox`, `ISessionStore`, `IObjectStore`, `IMeter`, `IAdvisoryLock`, `IEmailSender`, …) with a zero-config in-memory or no-op default. Entities, tables and the data/logic adaptation belong to the downstream service: implement the port in your crate, or copy a non-published reference adapter from `examples/adapters/` and run the port contracts in `testing/contract-tests`. See the [ports & adapters guide](docs/rust-webx/13-extensibility/integrations.md).
 - **Endpoint metadata service** — `IEndpointCatalog` exposes every endpoint at runtime (`all()` / `localized()`), so permission sync, admin navigation and OpenAPI share one source.
 - **Localization** — `#[display]` / `#[description]` / `#[category]` store resource keys; a host-wide `Culture.Default` selects the language, with `.json` resources or `include_str!` embedding.
@@ -158,7 +160,7 @@ The framework is split into a small set of focused crates, re-exported through t
 
 ```
 rust-webx/
-├── Cargo.toml                 # workspace root (v2.9.1) — published runtime crates
+├── Cargo.toml                 # workspace root (v2.9.2) — published runtime crates
 ├── crates/
 │   ├── core/                  # rust-webx-core  — traits, configuration, rust-core re-exports
 │   ├── engine/                # rust-webx-engine — worker pool, direct dispatch
@@ -184,6 +186,9 @@ rust-webx/
 │   │   ├── nats/              #   rust-webx-nats
 │   │   ├── rabbitmq/          #   rust-webx-rabbitmq
 │   │   └── kafka/             #   rust-webx-kafka
+│   ├── push/                  # push provider adapters
+│   │   ├── apns/              #   rust-webx-apns — APNs (HTTP/2 token auth)
+│   │   └── fcm/               #   rust-webx-fcm — Firebase Cloud Messaging HTTP v1
 │   ├── transport/             # optional non-hyper listener backends
 │   │   └── h3/                #   rust-webx-h3 — HTTP/3 (QUIC + rustls + h3)
 │   ├── payment/               # payment domain group (opt-in)
@@ -223,6 +228,7 @@ rust-webx/
 > `rust-webx-pay-wechatpay` → `webx_pay_wechatpay`, `rust-webx-pay-paypal` → `webx_pay_paypal`,
 > `rust-webx-pay-adyen` → `webx_pay_adyen`, `rust-webx-pay-square` → `webx_pay_square`,
 > `rust-webx-h3` → `webx_h3`.
+> `rust-webx-apns` → `webx_apns`, `rust-webx-fcm` → `webx_fcm`.
 >
 > The `*-ef` reference adapters under `examples/adapters/` are **not dependencies**:
 > they are `publish = false`, so they have no crates.io package and no import name to rely on.

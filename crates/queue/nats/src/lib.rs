@@ -15,8 +15,16 @@
 //!     .build();
 //! ```
 //!
-//! Core NATS is at-most-once. Use [`rust-webx-redis`](https://crates.io/crates/rust-webx-redis)
-//! or [`rust-webx-rabbitmq`](https://crates.io/crates/rust-webx-rabbitmq) when
+//! Core NATS is at-most-once. Competing events go to `subject` (load-balanced
+//! across instances by `queue_group`); broadcast events
+//! ([`IEventPublisher::broadcast`]) go to a separate broadcast subject
+//! (`"<subject>.broadcast"` by default) that every node subscribes to **without**
+//! a queue group, so one copy reaches every node. Enabling broadcast needs no
+//! extra configuration; set `broadcast_subject` only to name the channel
+//! explicitly.
+//!
+//! Use [`rust-webx-redis`](https://crates.io/crates/rust-webx-redis) or
+//! [`rust-webx-rabbitmq`](https://crates.io/crates/rust-webx-rabbitmq) when
 //! events must survive a consumer outage.
 
 mod connection;
@@ -58,10 +66,10 @@ impl NatsServiceCollectionExt for ServiceCollection {
     }
 
     fn add_nats_with(self, connection: Arc<NatsConnection>, options: NatsOptions) -> Self {
-        let publisher = Arc::new(NatsEventPublisher::new(
-            Arc::clone(&connection),
-            options.subject.clone(),
-        ));
+        let publisher = Arc::new(
+            NatsEventPublisher::new(Arc::clone(&connection), options.subject.clone())
+                .with_broadcast_subject(options.broadcast_subject.clone()),
+        );
         let mut services = self.instance::<dyn IEventPublisher>(publisher);
 
         if options.consumer_enabled {
@@ -135,5 +143,44 @@ mod tests {
             .publisher_only();
         assert!(!options.consumer_enabled);
         assert_eq!(options.queue_group.as_deref(), Some("workers"));
+    }
+
+    #[test]
+    fn broadcast_subject_defaults_to_the_derived_sibling() {
+        let options = NatsOptions::new("nats://nats:4222");
+        assert!(options.broadcast_subject.is_empty());
+        assert_eq!(
+            options.effective_broadcast_subject(),
+            "webx.events.broadcast"
+        );
+    }
+
+    #[test]
+    fn explicit_broadcast_subject_wins_and_a_blank_one_derives() {
+        let options = NatsOptions::new("nats://nats:4222").with_subject("app.events");
+        assert_eq!(
+            options.effective_broadcast_subject(),
+            "app.events.broadcast"
+        );
+
+        let explicit = options.clone().with_broadcast_subject("app.fanout");
+        assert_eq!(explicit.effective_broadcast_subject(), "app.fanout");
+
+        let blank = options.with_broadcast_subject("   ");
+        assert_eq!(blank.effective_broadcast_subject(), "app.events.broadcast");
+    }
+
+    #[test]
+    fn options_deserialize_without_the_new_broadcast_field() {
+        // `#[serde(default)]`: configuration written before 2.9.2 keeps working
+        // and broadcast is derived from `subject`.
+        let options: NatsOptions =
+            serde_json::from_str(r#"{"url":"nats://nats:4222","subject":"app.events"}"#)
+                .expect("options deserialize");
+        assert_eq!(
+            options.effective_broadcast_subject(),
+            "app.events.broadcast"
+        );
+        assert!(options.consumer_enabled, "other defaults still apply");
     }
 }

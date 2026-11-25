@@ -26,19 +26,21 @@
 |---|---|---|---|
 | `IIdempotencyStore` | `InMemoryIdempotencyStore`（有界 + TTL + fence token） | `Idempotency.Enabled=true` 时取 DI 最后一个注册，没有才用内存 | `idempotency/ef` → `EfIdempotencyStore`（`webx_idempotency` 表，多实例） |
 | `IOutbox` | `InMemoryOutbox` + `OutboxDispatcher`（租约、退避、死信、保留期） | `add_outbox(store, OutboxOptions)`（`store` 传 `Arc<dyn IOutbox>`，用 `InMemoryOutbox` 即零配置） | `outbox/ef` → `add_outbox_ef`（EF 表 + 同事务 `enqueue_outbox`） |
-| `ISessionStore`（jti 吊销） | `InMemorySessionStore` | 否（未注册 = 关闭吊销校验） | 无；下游实现吊销表 |
+| `ISessionStore`（jti 吊销） | `InMemorySessionStore` | 否（未注册 = 关闭吊销校验） | 无；下游实现吊销表；`WebSocketLimits::session_revalidation` 开启时用于长连接吊销复查 |
 | `ISessionRepository` / `IRefreshTokenStore` | `InMemorySessionRepository` / `InMemoryRefreshTokenStore` | 否 | `auth/ef` → `EfSessionRepository` / `EfRefreshTokenStore` |
 | `ITokenIssuer` | `JwtTokenIssuer` | 启用认证且 `Jwt.Secret` / `Jwt.SecretFile` 非空时 | 无 |
 | `IPasswordHasher` | `Argon2PasswordHasher`（`BoundedPasswordHasher` 包裹；默认 feature `password-argon2`） | 是 | 无 |
 | `IEmailSender` / `ISmsSender` | 无默认注册；`InMemoryEmailSender` / `InMemorySmsSender` 供测试 | 否（`use_email` / `use_sms`） | 无；SMTP/SES/Twilio 在宿主实现 |
+| `IPushSender` | 无默认注册；`InMemoryPushSender` 供测试 | 否（`use_push`） | 已发布适配器 `rust-webx-apns` / `rust-webx-fcm`（`crates/push/`）；WebPush 适配器待办 |
 | `ISecretProtector` / `ISecretStore` | 无默认 protector；`AesGcmSecretProtector` + `EnvSecretStore` / `FileSecretStore` / `ChainSecretStore` 可直接装配 | 否（`use_secret_protector`） | 无；KMS/信封加密在宿主实现 |
 | `IObjectStore` | `InMemoryObjectStore` | 否 | 无；S3/OSS 等由下游实现并跑契约 |
 | `IMeter` | `NoopMeter`；`Metrics.Enabled` 时换成 `MemoryMeter` 并接 `/metrics` | 是（仅内存指标桥） | 无；OTLP exporter 在宿主实现 |
 | `IAdvisoryLock` | 无默认注册；`InMemoryAdvisoryLock` 供单节点/测试 | 否（`use_advisory_lock`） | 无；`rust-webx-redis` 的 `RedisAdvisoryLock` 是已发布实现 |
 | `IRateLimiter` | `InMemoryRateLimiter` | `RateLimit` 配置节启用时 | 无；共享限流（Redis）在宿主实现 |
-| `IEventPublisher` | 进程内内存队列 | `add_mediator()` 装配；`use_event_publisher` 替换 | 已发布的 broker 适配器 `rust-webx-redis` / `nats` / `rabbitmq` / `kafka`（`crates/`） |
+| `IEventPublisher` | 进程内内存队列 | `add_mediator()` 装配；`use_event_publisher` 替换 | 已发布的 broker 适配器 `rust-webx-redis` / `nats` / `rabbitmq` / `kafka`（`crates/`）；广播投递类需适配器实现 `broadcast` |
 | `IHealthCheck` | 无默认 | 否（`add_health_check(HealthCheckSpec::sync / async_check / async_arc)`，异步探针各自超时） | 无；DB/HTTP 探针在宿主实现 |
-| `IRealtimeEventStore` | `InMemoryRealtimeEventStore` | 宿主存在 WebSocket 路由时 | 无；共享回放存储由下游实现 |
+| `IRealtimeEventStore` | `InMemoryRealtimeEventStore` | 宿主存在 WebSocket 路由时 | 已发布 `rust-webx-redis` 的 `RedisRealtimeEventStore`（Redis Streams 共享续传）；PG 表实现由下游提供 |
+| `IOnlinePresence` | `InMemoryOnlinePresence` | 否（`use_online_presence`；宿主同时装配 presence 桥接与心跳） | 已发布 `rust-webx-redis` 的 `RedisOnlinePresence`（ZSET + TTL） |
 
 两点约定：
 

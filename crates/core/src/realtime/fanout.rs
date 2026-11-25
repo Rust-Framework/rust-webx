@@ -24,7 +24,8 @@ use serde::{Deserialize, Serialize};
 use rust_dix::ScopeFactory;
 
 use crate::mediator::{
-    dispatch_event_handlers, BoxedEventDispatch, EventRegistration, IEventRequest,
+    dispatch_event_handlers, event::EventDelivery, BoxedEventDispatch, EventRegistration,
+    IEventRequest,
 };
 
 /// Stable wire name of [`RealtimeFanoutEvent`].
@@ -68,6 +69,13 @@ impl IEventRequest for RealtimeFanoutEvent {
     fn event_name() -> &'static str {
         Self::EVENT_NAME
     }
+
+    /// Fan-out is broadcast-class: every node must deliver its own copy to the
+    /// room's local connections. Competing delivery would reach exactly one
+    /// node.
+    fn delivery() -> EventDelivery {
+        EventDelivery::Broadcast
+    }
 }
 
 fn dispatch_realtime_fanout(
@@ -95,6 +103,75 @@ inventory::submit! {
     }
 }
 
+/// Stable wire name of [`RealtimeUserFanoutEvent`].
+pub const REALTIME_USER_FANOUT_EVENT_NAME: &str = "webx.realtime.user-fanout";
+
+/// Broadcast one text payload to every connection of one user, on every node.
+///
+/// A room is not always the right address: 1:1 signaling, direct messages and
+/// "kick this device" control messages target a **user**, and the user may have
+/// connections on several nodes. Publishing through the broadcast-class event
+/// transport reaches every node; each node writes the payload to its local
+/// `user_connections(user_id)`, which covers all of that user's devices.
+///
+/// The event is framework-reserved exactly like [`RealtimeFanoutEvent`]: one
+/// registered handler (the host's) consumes it, and it carries text frames only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RealtimeUserFanoutEvent {
+    /// Authenticated user id whose local connections receive the payload.
+    pub user_id: String,
+    /// Text frame payload (already encoded for the client).
+    pub payload: String,
+}
+
+impl RealtimeUserFanoutEvent {
+    /// Stable routing name.
+    pub const EVENT_NAME: &'static str = REALTIME_USER_FANOUT_EVENT_NAME;
+
+    /// Build a user-targeted fan-out message.
+    pub fn to_user(user_id: impl Into<String>, payload: impl Into<String>) -> Self {
+        Self {
+            user_id: user_id.into(),
+            payload: payload.into(),
+        }
+    }
+}
+
+impl IEventRequest for RealtimeUserFanoutEvent {
+    fn event_name() -> &'static str {
+        Self::EVENT_NAME
+    }
+
+    fn delivery() -> EventDelivery {
+        EventDelivery::Broadcast
+    }
+}
+
+fn dispatch_realtime_user_fanout(
+    provider: Arc<rust_dix::ServiceProvider>,
+    payload: Vec<u8>,
+) -> BoxedEventDispatch {
+    Box::pin(async move {
+        let event: RealtimeUserFanoutEvent = serde_json::from_slice(&payload).map_err(|error| {
+            crate::error::Error::internal(format!(
+                "realtime user fan-out payload is not valid JSON: {error}"
+            ))
+        })?;
+        let scope = provider.create_scope();
+        dispatch_event_handlers(&scope, event).await
+    })
+}
+
+// Same one-handler rule as the room fan-out event: the registration lets a
+// broker consumer route the wire message back to the framework handler.
+inventory::submit! {
+    EventRegistration {
+        event_name: || REALTIME_USER_FANOUT_EVENT_NAME,
+        event_type_id: std::any::TypeId::of::<RealtimeUserFanoutEvent>(),
+        dispatch: dispatch_realtime_user_fanout,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -117,6 +194,35 @@ mod tests {
         assert!(
             registered,
             "the fan-out event must have a routing registration"
+        );
+    }
+
+    #[test]
+    fn the_user_fanout_registration_is_emitted_and_round_trips() {
+        let registered = inventory::iter::<EventRegistration>
+            .into_iter()
+            .any(|registration| (registration.event_name)() == RealtimeUserFanoutEvent::EVENT_NAME);
+        assert!(
+            registered,
+            "the user fan-out event must have a routing registration"
+        );
+        let message =
+            EventMessage::from_event(&RealtimeUserFanoutEvent::to_user("user-1", "hello"))
+                .expect("event encode");
+        let decoded: RealtimeUserFanoutEvent = message.decode().expect("event decode");
+        assert_eq!(decoded, RealtimeUserFanoutEvent::to_user("user-1", "hello"));
+    }
+
+    #[test]
+    fn both_fanout_events_are_broadcast_class() {
+        use crate::mediator::event::EventDelivery;
+        assert_eq!(
+            <RealtimeFanoutEvent as IEventRequest>::delivery(),
+            EventDelivery::Broadcast
+        );
+        assert_eq!(
+            <RealtimeUserFanoutEvent as IEventRequest>::delivery(),
+            EventDelivery::Broadcast
         );
     }
 }

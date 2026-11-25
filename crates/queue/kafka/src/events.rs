@@ -25,6 +25,11 @@ use crate::options::{KafkaOptions, KafkaStartOffset};
 /// `Earliest` replays retention). Scale by running one instance per partition;
 /// a group-aware adapter can replace this one without changing the
 /// `IEventPublisher` / `EventDispatcher` contract.
+///
+/// Broadcast delivery is **not supported** and is not faked: Kafka has no
+/// "every consumer gets a copy" primitive in this follower model, so
+/// [`IEventPublisher::broadcast`] keeps its fail-closed default (an explicit
+/// error) instead of silently degrading to single-node competing delivery.
 pub struct KafkaEventPublisher {
     connection: Arc<KafkaConnection>,
     options: KafkaOptions,

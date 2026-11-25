@@ -32,8 +32,8 @@ let host = Host::builder()
 ```
 
 - 路径匹配是**精确匹配**（不含路径参数）；同一路径的普通 HTTP 请求返回 `426 Upgrade Required`。
-- 浏览器无法在升级请求上设置 `Authorization`，认证应走 Cookie 或查询参数（认证中间件在
-   接入同一管线；本页只描述当前能力）。
+- 浏览器无法在升级请求上设置 `Authorization`，认证应走 Cookie（推荐）或查询参数；完整的
+  Cookie + CSRF + Origin 配方见[浏览器接入](#浏览器接入cookie--csrf--origin)。
 
 ## 协议与生命周期
 
@@ -166,32 +166,65 @@ WebSocket 中间件运行时已填充。
   Handler 内的 `RequestContext::identity()/operator_id()` 一致；
 - 未携带凭据：按匿名升级（`identity()` 为 `None`），是否拒绝由业务 Handler 决定；
 - 显式无效凭据：认证中间件在握手前返回 `401`，WebSocket 握手失败；
-- 身份来自升级请求，连接中途不重新认证（需要会话续期时由业务层处理）。
+- 身份来自升级请求；连接中途不会重新认证身份，但可以开启会话复查在运行期发现吊销
+  （见[令牌过期、吊销与重连](#令牌过期吊销与重连)）。
 
-### Origin 校验
+## 浏览器接入：Cookie + CSRF + Origin
 
-浏览器在跨站 WebSocket 握手时会自动携带 cookie，因此不匹配的握手必须在升级前拒绝：
+浏览器在升级请求上不能设置 `Authorization`，但同源请求会自动携带 Cookie。因此浏览器实时接入
+= **Cookie 会话** + **CSRF 保护变更型 HTTP 端点** + **Origin 白名单保护握手**：
 
 ```rust
-Host::builder().use_websocket_origins(vec!["https://app.example.com".to_string()])
+use std::sync::Arc;
+use webx::*;
+
+let repo = Arc::new(InMemorySessionRepository::new()); // 多实例换成共享实现
+let scheme = Arc::new(SessionCookieScheme::new(
+    repo,
+    CookieOptions::default(), // __Host-webx_session; HttpOnly; Secure; SameSite=Lax
+)?);
+
+Host::builder()
+    .add_authentication_scheme(scheme)
+    .use_csrf(CsrfConfig::double_submit()) // Cookie scheme 必需，否则启动失败
+    .use_websocket_origins(vec!["https://app.example.com".to_string()])
+    .use_websocket("/ws", Arc::new(handler))
+    .build();
 ```
+
+### 会话交换端点（Bearer → Cookie）
+
+登录/鉴权仍走现有 HTTP API，浏览器再调用一个「会话交换」端点把凭据换成 HttpOnly Cookie：
+
+```text
+POST /api/session        Authorization: Bearer <token>
+  → Set-Cookie: __Host-webx_session=...; HttpOnly; Secure; SameSite=Lax
+  → Set-Cookie: <csrf cookie>; ...
+  → 200 {"user": {...}}
+```
+
+之后浏览器用 Cookie 升级 WebSocket（`Authorization` 不参与），会话状态由服务端
+`ISessionRepository` 决定。响应同时写 JSON 与两个 `Set-Cookie` 的写法见
+[Cookie 会话与 CSRF](../09-auth-security/cookie-session.md)。
+
+- **CSRF 只拦变更型 HTTP 请求**：升级握手是 GET（安全方法），CSRF 中间件不会拦截；它保护的是
+  登录 / 换会话 / 登出等 POST/PUT/PATCH/DELETE。握手侧的跨站风险由 Origin 白名单兜住。
+- **Bearer 与 Cookie 并存**：同一 Host 可同时启用 JWT/API Key 与 Cookie scheme；请求带
+  `Authorization` 时 Cookie scheme 主动让位，非浏览器客户端完全不受 CSRF 影响。
+- **登出即断线**：登出删除会话后，开启会话复查的节点会在复查周期内以 close `1008`
+  （`SessionRevoked`）关闭该会话的 WebSocket；未开启复查的长连接会活到断开或寿命到期
+  （见[令牌过期、吊销与重连](#令牌过期吊销与重连)）。
+
+### Origin 规则
+
+浏览器在跨站 WebSocket 握手时会自动携带 Cookie，因此不匹配的握手必须在升级前拒绝：
 
 - 显式白名单（非空）：`Origin` 缺失或不匹配 → `403`；
 - 未显式配置：回落到 `Cors.Origins`（非空且不含 `*` 时），规则同上；
 - 两者都没有：不校验，适合非浏览器客户端（它们不带 `Origin`）。
 
 非浏览器客户端在启用了 CORS 白名单的部署里必须显式 `use_websocket_origins(Vec::new())`。
-
-```rust
-#[async_trait::async_trait]
-impl IWebSocketHandler for PresenceHandler {
-    async fn on_connect(&self, connection: Arc<dyn IConnection>) -> Result<()> {
-        let user = connection.context().identity();   // 升级请求认证结果
-        // ...
-        Ok(())
-    }
-}
-```
+白名单是**精确字符串匹配**（scheme + host + port），多域名部署逐条列出。
 
 ## 帧绑定错误
 
@@ -212,8 +245,10 @@ impl IWebSocketHandler for PresenceHandler {
 
 - `IConnectionRegistry`（`InMemoryConnectionRegistry`）：连接 id、认证用户、房间三个索引；
 - `RealtimeMetrics`：实时指标收集器（`/metrics` 直接渲染，并可镜像到 `IMeter`）；
-- 框架事件 Handler（`IEventHandler<RealtimeFanoutEvent>`）：消费事件传输上的跨节点扇出消息，
-  写入本节点房间连接。事件传输本身是 `IEventPublisher`（默认内存队列，可替换 Redis/NATS）。
+- 两个框架事件 Handler（`IEventHandler<RealtimeFanoutEvent>` 与
+  `IEventHandler<RealtimeUserFanoutEvent>`）：分别消费事件传输上的房间扇出与用户定向扇出消息，
+  写入本节点的 `room_connections` / `user_connections`。事件传输本身是 `IEventPublisher`
+  （默认内存队列，可替换 Redis/NATS 等）。
 
 会话在握手成功后自动 `register`，会话结束时 `unregister`。Handler 从连接作用域解析注册表：
 
@@ -294,15 +329,73 @@ Host::builder()
 跨节点扇出：发布事件即可（单进程直接 `room_connections` 仍可即时扇出）：
 
 ```rust
+// 房间广播：每个节点的框架 handler 写入本节点房间连接
 mediator.publish(RealtimeFanoutEvent::to_room("room-1", "hello")).await?;
+
+// 用户定向：每个节点写入本节点 user_connections（1:1 信令、私信、踢设备）
+mediator.publish(RealtimeUserFanoutEvent::to_user("user-1", "hello")).await?;
 ```
+
+两个框架事件都是**广播投递类**，`IMediator::publish` 会自动走传输的广播通道；投递类、
+适配器实现与失败语义见下一节。
 
 注意：
 
 - 扇出直接 `await` 每个连接；慢客户端由每连接有界队列/丢弃策略隔离；
-- 进程内注册表只覆盖单实例；跨节点扇出复用事件传输（`RealtimeFanoutEvent`，at-most-once，
+- 进程内注册表只覆盖单实例；跨节点扇出复用事件传输（广播投递类，at-most-once，
   Handler 失败由传输层记录）——详见 [架构 ADR](../../design/mediator-handler-architecture.md)；
 - 不要在 Singleton 里长期持有 `Arc<dyn IConnection>` 之外的连接状态，会话销毁由 `unregister` 决定。
+
+## 投递类与跨节点扇出
+
+跨进程事件只有一条传输通道（`IEventPublisher`），但到达订阅端的方式有两种，由**事件类型**声明：
+
+```rust
+/// 事件到达订阅端的方式（`IEventRequest::delivery()`，默认 `Competing`）。
+pub enum EventDelivery {
+    /// 每个 broker 消费组/队列恰好一个消费者收到（领域事件、任务）。
+    Competing,
+    /// 每个节点都收到一份（实时扇出、缓存失效、跨节点控制消息）。
+    Broadcast,
+}
+
+impl IEventRequest for MyRealtimeEvent {
+    fn delivery() -> EventDelivery { EventDelivery::Broadcast }
+}
+```
+
+- `IMediator::publish` 按 `T::delivery()` **自动分派**：`Competing → publisher.publish`，
+  `Broadcast → publisher.broadcast`；事件编码、`EventDispatcher`、DI 与 handler 注册完全不变
+  （一种事件模型，两种投递类）。
+- `IEventPublisher::broadcast` 的默认实现 **fail-closed**（返回 `Error::di`）：传输没有声明
+  广播能力时，发布广播事件直接报错，而不是静默退化成只到一个节点。
+- 框架保留两个广播事件，各只允许一个框架 handler（重复注册会双投递）：
+
+| 事件 | 事件名 | 语义 |
+|---|---|---|
+| `RealtimeFanoutEvent { room, payload }` | `webx.realtime.fanout` | 写到每个节点的房间连接 |
+| `RealtimeUserFanoutEvent { user_id, payload }` | `webx.realtime.user-fanout` | 写到每个节点该用户的全部连接 |
+
+适配器广播实现（发布前逐项实现或明确「不支持」，完整矩阵见
+[broker 能力矩阵](../../design/broker-capability-matrix.md)）：
+
+| 适配器 | 竞争投递 | 广播投递 |
+|---|---|---|
+| `InMemory` | 有界队列单 worker | 同一队列（单进程即全节点） |
+| `rust-webx-redis` | Streams consumer group | **Pub/Sub 频道**（默认 `<stream>:broadcast`） |
+| `rust-webx-nats` | core NATS subject（可配 queue group） | **独立广播 subject**（默认 `<subject>.broadcast`，无 queue group） |
+| `rust-webx-rabbitmq` | quorum queue 竞争消费 | **fanout exchange**（默认 `<exchange>.broadcast`）+ 每节点独占/自动删除队列 |
+| `rust-webx-kafka` | 单分区 follower | **不支持**：返回显式错误，不假装支持 |
+
+语义与兜底：
+
+- 广播是 **at-most-once**：不重投，接收方 handler 失败由传输记录；广播不保证跨节点顺序，
+  单节点内仍按传输顺序写入本节点连接。
+- `publish`/`broadcast` 返回 `Err` 表示传输**未接受**事件（连接失败、队列满、不支持广播），
+  调用方（handler）决定是否失败请求；实时扇出场景通常记日志并依赖客户端重连补拉。
+- 需要“不丢”时不要指望广播：业务消息先**持久化**（DB / outbox），再用续传日志
+  （`IRealtimeEventStore`）回放；广播只负责在线节点的实时投递。可靠性边界见
+  [IM 实时硬化设计](../../design/im-hardening.md) 与[多实例实时部署](../11-production/realtime-cluster.md)。
 
 ## 连接级限流与背压
 
@@ -317,6 +410,7 @@ mediator.publish(RealtimeFanoutEvent::to_room("room-1", "hello")).await?;
 | `idle_timeout` | `None` | 关闭连接（close `1001`） |
 | `max_connection_lifetime` | `None` | 绝对生命周期到点关闭（close `1001`，reason `connection lifetime exceeded`）；入站流量不会续期 |
 | `close_at_token_expiry` | `false` | 升级令牌的 `exp` 到点即关闭（close `1008`，reason `access token expired`）；与 `max_connection_lifetime` 取较早者 |
+| `session_revalidation` | `None`（关闭） | 每隔该间隔复查升级凭据；已吊销 → close `1008`（`SessionRevoked`），瞬时存储错误只记录并在下轮重试 |
 
 ```rust
 use std::time::Duration;
@@ -330,14 +424,14 @@ Host::builder()
             .with_outbound_queue(32, BackpressurePolicy::Drop)
             .with_idle_timeout(Duration::from_secs(120))
             .with_max_connection_lifetime(Duration::from_secs(3600))
+            .with_session_revalidation(Duration::from_secs(15))
             .close_at_token_expiry(),
     )
     .build();
 ```
 
-浏览器客户端无法刷新升级时所用的凭据：长连接默认不会因 JWT 过期而断开。需要“令牌过期即重连”的部署
-启用 `close_at_token_expiry()`；把 `max_connection_lifetime` 设得略小于令牌有效期，还可以让客户端在
-过期前主动重连（服务端到点关闭时客户端按 close code 重连即可）。
+浏览器客户端无法刷新升级时所用的凭据：长连接默认不会因 JWT 过期而断开，也不会因登出/会话删除
+而断开。三个生命周期与复查开关的组合、立即踢线与客户端重连策略见下一节。
 
 实现要点：
 
@@ -346,20 +440,102 @@ Host::builder()
 - **生命周期**：`idle_timeout` 由接收循环计时；`max_connection_lifetime` / 令牌 `exp` 是绝对期限，会话与 Handler 的接收循环竞速，到点主动关闭（Handler 之后从 `recv()` 得到 `None`）；
 - **统计**：`IConnection::stats()` 返回 `ConnectionStats`（in/out、字节、`dropped_outbound`、`rate_limited`）， 会把它接到 `/metrics`。
 
+## 令牌过期、吊销与重连
+
+JWT/Cookie 会话在连接存活期间可能过期或被吊销，浏览器又无法在保持连接时刷新升级凭据。
+框架提供三个开关，部署按需要组合（都在 `WebSocketLimits` 上，默认关闭）：
+
+| 开关 | 作用 | 关闭原因 | 客户端观察 |
+|---|---|---|---|
+| `close_at_token_expiry()` | 升级令牌 `exp` 到点关闭 | `TokenExpired` | close `1008` |
+| `with_max_connection_lifetime(d)` | 绝对寿命到点关闭（流量不续期） | `LifetimeExceeded` | close `1001` |
+| `with_session_revalidation(d)` | 运行期每 `d` 复查升级凭据 | `SessionRevoked` | close `1008` |
+
+`close_at_token_expiry` 与 `max_connection_lifetime` 取较早者到点；适合场景：短令牌 + 客户端
+按 close code 重新认证重连。`with_session_revalidation` 用于**吊销**：登出、“全端下线”、
+会话被删除后，长连接必须在一个有界窗口内关闭，而不是活到断开。
+
+### 凭据复查（with_session_revalidation）
+
+宿主在升级时按认证方式**在内部**构造校验器（不新增公开端口），在 `session_revalidation`
+周期复查：
+
+- JWT：`jti` 查 `ISessionStore::is_revoked`；
+- Cookie：会话 id 查 `ISessionRepository::get`（会话不存在/过期即失效）；
+- API Key：本版不复查（key 校验端口无法枚举），文档与验收明确此边界。
+
+没有注册对应的会话存储/仓库时，该连接没有可复查的凭据，复查不会生效（行为等同关闭该开关）。
+
+```rust
+WebSocketLimits::default().with_session_revalidation(Duration::from_secs(15))
+```
+
+- 复查结论「已吊销」→ 记录 `CloseReason::SessionRevoked`，发送 close `1008`；
+- 存储错误是**瞬时错误** → 记日志，下一轮重试：存储抖动不能把所有在线用户踢下线；
+- 复查周期是吊销生效的**最长窗口**（服务端推荐 10–30s）；会话存储/会话仓库必须多实例共享，
+  否则其他节点上的吊销看不到。`ConnectContext` 不新增公开字段，业务 API 不变。
+
+### 立即踢线（同节点 / 跨节点）
+
+```rust
+// 同节点：对本地 user_connections 逐连接 close，返回被要求关闭的连接数
+let targeted = close_user_connections(
+    registry.as_ref(),
+    "user-1",
+    1008,
+    "session revoked",
+)
+.await;
+```
+
+跨节点时框架无法关闭别的节点上的 socket：共享 `ISessionStore`/`ISessionRepository` 完成吊销后，
+各节点在复查周期内关闭本地连接；需要「立即」时由应用在路由层协调（例如广播一条控制事件，
+各节点收到后调用 `close_user_connections`）。
+
+### 客户端重连策略
+
+| close code | 原因 | 客户端动作 |
+|---|---|---|
+| `1000` | 正常完成（Handler 返回） | 按业务决定是否重开 |
+| `1001` | 停机 / 空闲超时 / 寿命到期 | 指数退避 + jitter 重连；滚动升级期间属正常现象 |
+| `1008` + `TokenExpired` | 升级令牌过期 | 先刷新令牌/重新登录，再带新凭据重连 |
+| `1008` + `SessionRevoked` | 会话被吊销 | **不要重试**，跳转登录/重新认证 |
+| `1008` + 协议错误 | 入站限流等策略违规 | 退避后重连，先降低发送速率 |
+| `1011` | 内部错误 | 退避重连并上报 |
+
+建议：
+
+- 重连成功先发 `ResumeRequest { subscription, cursor }` 续传；收到 `truncated=true` 时按快照重建
+  （见[断线续传与回放](#断线续传与回放)）；
+- 把 `max_connection_lifetime` 设得略小于令牌有效期，客户端可在服务端关闭前主动换票重连；
+  需要“令牌过期即断”就开 `close_at_token_expiry`，按 `1008` 重新认证；
+- 服务端定位用 `IConnection::close_reason()`（原因已在发帧前记录）与 `/metrics` 的
+  `realtime_connection_closes_total{code}`；客户端只能看到 wire code，按上表分支。
+
 ## 断线续传与回放
 
 框架提供统一的续传契约与可替换的事件日志：连接断开期间产生的事件仍可回放。
 
 | 类型 | 作用 |
 |---|---|
-| `RealtimeEvent { event_id, subscription, payload, created_at_unix_secs }` | 一条被保留的事件；`event_id` 进程内单调递增，就是游标 |
+| `RealtimeEvent { event_id, subscription, payload, created_at_unix_secs }` | 一条被保留的事件；`event_id` 单调递增（进程内实现按进程、Redis 共享实现全局单调），就是游标 |
 | `ResumeRequest { subscription, cursor }` | 客户端重连时声明“我已处理到 `cursor`”（`null` 表示从头） |
 | `ResumeFrame { subscription, events, next_cursor, truncated }` | 服务端回放；`truncated=true` 表示游标之后的事件已被保留策略淘汰，客户端必须按快照重建 |
 | `IRealtimeEventStore` | 端口：`append` / `resume` / `latest_cursor`，可换 Redis Stream、PG 表等共享实现 |
 | `InMemoryRealtimeEventStore` | 默认实现：每 subscription 保留 1024 条（`RealtimeEventStoreLimits` 可配 `max_age`） |
 
 存在 WebSocket 路由时 host 自动注册默认（进程内）实现在连接作用域里；多实例部署用
-`HostBuilder::use_realtime_event_store(Arc<dyn IRealtimeEventStore>)` 换成共享实现。
+`HostBuilder::use_realtime_event_store(Arc<dyn IRealtimeEventStore>)` 换成共享实现
+（例如 `use_realtime_event_store(Arc::new(RedisRealtimeEventStore::new(connection)))`）。
+
+2.9.2 起 `rust-webx-redis` 提供共享实现 `RedisRealtimeEventStore`：每个 subscription 两个 key
+（`seq` 用 `INCR` 分配游标、`log` 是显式 ID 的 Stream），`append` = `INCR` + `XADD` + 精确条数
+裁剪（同一 Lua 脚本内原子完成），`resume` / `latest_cursor` 与内存实现同语义。要点：
+
+- 游标仍是 `u64`：Stream ID 的毫秒段就是全局单调 `event_id`，多实例共享同一游标，端口契约不变；
+- 只支持**条数**保留（`max_events`）；`max_age` 在 Redis 实现中启动即拒绝（fail-closed），
+  需要时间保留时用 PG 表实现同一端口；
+- 共享日志解决“跨节点续传”，不负责在线投递——见[多实例实时部署](../11-production/realtime-cluster.md)。
 
 ```rust
 struct ChatHandler;
@@ -394,7 +570,7 @@ presence 判断不再由业务自己数连接。
 | 形态 | 行为 | 需要做什么 |
 |---|---|---|
 | 单进程 | 注册表、presence 转移、事件日志、指标全在进程内，零外部依赖 | 无 |
-| 多实例 | 房间扇出只在节点内直发；跨节点用 `RealtimeFanoutEvent`（事件传输 + broker，at-most-once）；在线数与 presence 是节点局部的 | 用 `use_connection_registry` 换成共享注册表，或用事件同步 presence；续传改用共享 `IRealtimeEventStore`（Redis Stream/PG 表），并由共享 store 分配全局单调游标 |
+| 多实例 | 房间/用户扇出：广播类事件跨节点投递（传输需支持 `Broadcast`）；在线数、presence、续传日志默认仍是节点局部 | 换共享实现四件套：`use_realtime_event_store`（Redis Stream 续传）、`use_online_presence`（Redis 在线态 + 心跳）、共享 `ISessionStore`/`ISessionRepository` + `with_session_revalidation`（吊销复查）、支持广播的事件传输；完整配方见[多实例实时部署](../11-production/realtime-cluster.md) |
 | 容器 | 不依赖本地持久状态；重启后事件日志为空，重连客户端会得到空回放或 `truncated=true`，必须按快照重建；滚动升级时旧实例以 close `1001`/`1008` 让客户端重连 | 客户端按 close code 重连并按 `truncated` 重同步；容器配置只来自 `appsettings`/`APP__`；优雅停机沿用 host 的排空 |
 
 性能边界（已实现）：
@@ -406,18 +582,21 @@ presence 判断不再由业务自己数连接。
 
 ### 多实例 presence 配方
 
-框架不新增第二套 pub/sub：跨节点在线数二选一，都由应用在适配器层落地。
+2.9.2 起框架提供端口 + 宿主桥接，不再要求应用自己拼一套在线表：
 
-1. **共享注册表（推荐，计数权威）**：`IPresenceObserver` 的 first/last 转移在应用层写共享
-   store——Redis 用 `SADD presence:room:<id> <conn>` / 断开 `SREM`，查询 `SCARD`；连接键带实例
-   id 与心跳 TTL，节点崩溃后自动过期。节点内 `IConnectionRegistry` 仍负责本节点扇出。
-2. **事件回传（最终一致）**：把 `PresenceTransition` 经 `IEventPublisher` 发布成
-   `RealtimeFanoutEvent`（或业务事件），各节点按 `conn_id + joined/left` 幂等更新聚合计数。
-   只适合展示型 presence，不能用于计费或写权限判断。
+1. **`IOnlinePresence`（推荐，计数权威）**：宿主把 `IPresenceObserver` 的 first/last 转移映射到
+   `user:` / `tenant:` scope（`use_online_presence` 负责桥接与 TTL/3 心跳，内部类型不进入
+   公开 API）；多实例传入 `Arc::new(RedisOnlinePresence::new(connection))`（每个 scope 一个
+   ZSET，score = 过期时刻）。节点崩溃后成员在 TTL 内过期，不会留下幽灵在线。
+2. **房间 scope 由业务显式维护**：`PresenceScope::room("...")` 的成员归属业务数据模型，
+   框架不自动跟踪 room membership；业务在 join/leave 房间时自行 `join`/`leave`。
+3. **节点内扇出仍用 `IConnectionRegistry`**：注册表的 user/room 索引是节点局部的；
+   `RealtimeMetrics.realtime_connections_active` 始终是**本节点**计数，全局在线数读
+   `IOnlinePresence::count`（或监控端按实例求和）。
+4. **没有共享 store 时**退回旧路径：应用在 `IPresenceObserver` 里写共享 Redis/DB，或把
+   `PresenceTransition` 当事件发布（最终一致，只适合展示型 presence，不能用于计费或写权限判断）。
 
-两者都复用现有的唯一事件传输：`crates/queue/*` 的 broker 适配或 `crates/cache/redis`。
-`RealtimeMetrics.realtime_connections_active` 始终是**本节点**计数；全局数字由共享 store 提供，
-或在监控端按实例求和。
+装配与容量建议见[多实例实时部署](../11-production/realtime-cluster.md)。
 
 ### HTTP/3 上的 WebSocket
 
@@ -460,11 +639,15 @@ pre-accept 钩子 fail-closed 默认拒绝，失败 → 403；session + bidi str
 | `realtime_connection_closes_total{code}` | counter | 按关闭码（1000/1001/1008/…） |
 | `realtime_message_dispatch_seconds` | histogram | 消息即请求的分发延迟 |
 
-定位顺序：连接异常先看 `closes{code}`（1008=限流或令牌过期、1001=空闲或生命周期到期），吞吐问题看
-`dropped_total`/`rate_limited_total`，延迟看 dispatch 直方图。
+定位顺序：连接异常先看 `closes{code}`（1008=限流/令牌过期/会话吊销、1001=空闲或生命周期到期），
+吞吐问题看 `dropped_total`/`rate_limited_total`，延迟看 dispatch 直方图。
 
 ## 当前边界
 
-- 已支持自定义会话 Handler、连接作用域、消息即请求、升级鉴权与帧绑定错误、进程内注册表/房间扇出/presence、跨节点扇出（事件传输上的 `RealtimeFanoutEvent`）、连接级背压与限流、连接级绝对生命周期（含令牌过期）、断线续传契约与事件日志、按 user/room/tenant 的在线数、presence 原子转移（first/last）、`realtime_*` 指标；
-- 事件日志与在线数默认都是进程局部的：多实例部署用共享 `IRealtimeEventStore` / 共享注册表实现，或继续用事件传输同步 presence；
+- 已支持自定义会话 Handler、连接作用域、消息即请求、升级鉴权与帧绑定错误、进程内注册表/房间扇出/presence、连接级背压与限流、连接级绝对生命周期（含令牌过期）、断线续传契约与事件日志、按 user/room/tenant 的在线数、presence 原子转移（first/last）、`realtime_*` 指标；
+- 2.9.2 新增：事件投递类（`EventDelivery::Competing`/`Broadcast`）与广播类框架事件（`RealtimeFanoutEvent`/`RealtimeUserFanoutEvent`）、共享续传日志 `RedisRealtimeEventStore`、`IOnlinePresence` 端口与内存/Redis 实现 + 宿主桥接/心跳、连接凭据复查（`with_session_revalidation`，校验器是宿主内部实现）与 `SessionRevoked`（close `1008`）、`close_user_connections`、浏览器 Cookie + CSRF + Origin 接入配方；
+- 默认仍是进程内：事件日志/在线数/`IEventPublisher` 默认都在进程内，多实例按[多实例实时部署](../11-production/realtime-cluster.md)换共享实现；
+- 广播是 at-most-once，不保证跨节点顺序；Kafka 适配器不支持广播（显式报错）；需要可靠投递用持久化 + 续传/outbox；
+- 跨节点「立即踢线」不存在：吊销靠共享会话存储 + 复查周期生效（最长窗口 = 复查间隔）；API Key 凭据本版不做运行期复查；
+- room membership 由业务维护（框架不自动跨节点跟踪）；非浏览器客户端在启用 CORS 白名单的部署里必须显式 `use_websocket_origins(Vec::new())`；
 - 非文本/二进制控制帧（Ping/Pong）不进入业务层。

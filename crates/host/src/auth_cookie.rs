@@ -275,6 +275,13 @@ impl IAuthenticationScheme for SessionCookieScheme {
         Some(self.options.name.as_str())
     }
 
+    /// The repository this scheme authenticates against, so a live WebSocket
+    /// session can be re-checked after the session is deleted
+    /// (`WebSocketLimits::session_revalidation`).
+    fn session_repository(&self) -> Option<Arc<dyn webx_core::security::ISessionRepository>> {
+        Some(Arc::clone(&self.repository))
+    }
+
     fn matches(&self, ctx: &dyn IHttpContext) -> bool {
         // A Bearer request belongs to the JWT/API-key schemes; never let a
         // stale session cookie shadow an explicit Authorization header.

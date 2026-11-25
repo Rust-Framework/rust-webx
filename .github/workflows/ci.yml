@@ -390,15 +390,15 @@ jobs:
         run: bash scripts/test-brokers.sh
 
   # N-2 source-compatibility gate: the same smoke app is compiled against the
-  # previous-but-one published release (for 2.9.0 that is rust-webx 2.7.0) and
+  # previous-but-one published release (for 2.9.2 that is rust-webx 2.9.0) and
   # against the current workspace path. See docs/design/compatibility.md.
   upgrade:
-    name: Upgrade smoke (N-2 = 2.7.0)
+    name: Upgrade smoke (N-2 = 2.9.0)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Build against rust-webx 2.7.0 (N-2)
+      - name: Build against rust-webx 2.9.0 (N-2)
         run: cargo build --manifest-path testing/upgrade-smoke/stable/Cargo.toml
       - name: Build the same source against the current workspace
         run: cargo build --manifest-path testing/upgrade-smoke/current/Cargo.toml

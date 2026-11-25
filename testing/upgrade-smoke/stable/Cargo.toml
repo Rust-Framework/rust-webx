@@ -4,26 +4,26 @@ version = "0.0.0"
 edition = "2021"
 publish = false
 
-# N-2 (rust-webx 2.7.0) source-compatibility check: the N-2 baseline for the
-# 2.9.1 release is 2.7.0.
+# N-2 (rust-webx 2.9.0) source-compatibility check: the N-2 baseline for the
+# 2.9.2 release is 2.9.0.
 [[bin]]
 name = "upgrade-smoke"
 path = "../src/main.rs"
 
 [dependencies]
 async-trait = "0.1"
-rust-webx = "=2.7.0"
+rust-webx = "=2.9.0"
 serde = { version = "1", features = ["derive"] }
 
 # Pin the whole 2.7.0 graph exactly, mirroring the framework's own `=x.y.z`
 # internal pins. A fresh resolution then cannot mix 2.7.0 with a newer internal
 # crate, and the committed lockfile proves the resolved set.
-rust-webx-core = "=2.7.0"
-rust-webx-host = "=2.7.0"
-rust-webx-engine = "=2.7.0"
-rust-webx-macros = "=2.7.0"
-rust-webx-spa = "=2.7.0"
-rust-webx-openapi = "=2.7.0"
+rust-webx-core = "=2.9.0"
+rust-webx-host = "=2.9.0"
+rust-webx-engine = "=2.9.0"
+rust-webx-macros = "=2.9.0"
+rust-webx-spa = "=2.9.0"
+rust-webx-openapi = "=2.9.0"
 
 # Standalone: this manifest must not join the framework workspace (it pins an
 # older rust-webx release on purpose).

@@ -1172,6 +1172,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust-core"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fe3be606f23660735036bd4486167999ba0c90284aa26ea832cdc8dd148964b"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "rust-dix"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1197,7 +1207,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx"
-version = "2.9.1"
+version = "2.9.2"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1211,6 +1221,7 @@ dependencies = [
  "rust-webx-host",
  "rust-webx-macros",
  "rust-webx-openapi",
+ "rust-webx-outbox",
  "rust-webx-spa",
  "serde",
  "serde_json",
@@ -1219,7 +1230,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-client"
-version = "2.9.1"
+version = "2.9.2"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1242,7 +1253,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-core"
-version = "2.9.1"
+version = "2.9.2"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1251,6 +1262,7 @@ dependencies = [
  "hmac",
  "inventory",
  "libc",
+ "rust-core",
  "rust-dix",
  "serde",
  "serde_ignored",
@@ -1266,7 +1278,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-engine"
-version = "2.9.1"
+version = "2.9.2"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1294,7 +1306,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-host"
-version = "2.9.1"
+version = "2.9.2"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -1339,7 +1351,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-macros"
-version = "2.9.1"
+version = "2.9.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1348,7 +1360,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-openapi"
-version = "2.9.1"
+version = "2.9.2"
 dependencies = [
  "inventory",
  "rust-webx-core",
@@ -1356,8 +1368,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust-webx-outbox"
+version = "2.9.2"
+dependencies = [
+ "async-trait",
+ "rust-dix",
+ "rust-webx-core",
+ "rust-webx-host",
+ "serde",
+ "tracing",
+]
+
+[[package]]
 name = "rust-webx-spa"
-version = "2.9.1"
+version = "2.9.2"
 dependencies = [
  "async-trait",
  "brotli-decompressor",

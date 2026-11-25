@@ -33,8 +33,8 @@
    消费者无法解析出 umbrella 与子 crate 混版本组合。与 ORM/数据库耦合的持久化适配器不在发布序列里
    （`examples/adapters/*` 全部 `publish = false`）：它们是参考实现，可复制不可依赖
    （见 [端口与适配器归属](integrations.md)）。
-3. **N-2 源码兼容**：同一份只使用 2.7 API 的应用源码，必须能同时编译
-   针对 N-2 发布 `rust-webx = "=2.7.0"`（2.9 的 N-2）与当前工作区路径。
+3. **N-2 源码兼容**：同一份只使用 N-2 稳定 API 的应用源码，必须能同时编译
+   针对 N-2 发布 `rust-webx = "=2.9.0"`（2.9.2 的 N-2）与当前工作区路径。
 
 ## 2. 门禁
 
@@ -54,11 +54,11 @@ cargo semver-checks --package rust-webx        --baseline-rev v2.9.1
 
 ### upgrade（N-2 源码兼容）
 
-`testing/upgrade-smoke/src/main.rs` 只用 2.7 时代 API，分别在两个独立 workspace 编译。
-N-2 基线随当前版本滚动：2.9.1 的 N-2 是 **rust-webx 2.7.0**（下一个 minor 发布时同步前移）。
+`testing/upgrade-smoke/src/main.rs` 只用 N-2 稳定 API，分别在两个独立 workspace 编译。
+N-2 基线随当前版本滚动：2.9.2 的 N-2 是 **rust-webx 2.9.0**（下一个 minor 发布时同步前移）。
 
 ```text
-testing/upgrade-smoke/stable/Cargo.toml   → rust-webx = "=2.7.0"（固定 2.7 全套）
+testing/upgrade-smoke/stable/Cargo.toml   → rust-webx = "=2.9.0"（固定 2.9.0 全套）
 testing/upgrade-smoke/current/Cargo.toml  → rust-webx = { path = "../../../crates/webx" }
 ```
 
@@ -296,7 +296,7 @@ rust-ef 发布后、给 rust-webx 打 tag 前，执行 `cargo update -p rust-ef 
 □ 配对 ORM 已先行发布（rust-ef x.y.z → rust-webx x.y.z；`rust-ef = "2.6"` 范围覆盖 2.9.x，不收紧为精确 pin）
 □ 配对验证已跑：`RUST_EF_PATH=… bash scripts/check-pairing-rust-ef.sh`（或 CI `pairing` job）通过，证据边界见 §4
 □ semver-checks 对上一发布通过（例外仅 §3）
-□ N-2 冒烟通过（testing/upgrade-smoke；2.9.1 的 N-2 = rust-webx 2.7.0）
+□ N-2 冒烟通过（testing/upgrade-smoke；2.9.2 的 N-2 = rust-webx 2.9.0）
 □ cargo audit 0 漏洞（根 + `examples/adapters/Cargo.lock` 两个 lockfile）+ 依赖重复基线通过 + 内部版本钉一致
 □ LTS backport 只含安全/关键缺陷修复
 ```

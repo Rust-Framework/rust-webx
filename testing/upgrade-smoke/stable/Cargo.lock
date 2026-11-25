@@ -1197,9 +1197,9 @@ dependencies = [
 
 [[package]]
 name = "rust-webx"
-version = "2.7.0"
+version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09cb270e3a9368be30594d6702d264f04038d34a3b336276a45395b7a7ce4660"
+checksum = "0dbc63d35934e5d5ae314a6cfebd31e7788dc07bc5096c9d5ad88f5825aebda1"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1221,9 +1221,9 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-client"
-version = "2.7.0"
+version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2005ee395ea64865112d81b98546230d5d7738f86d849800f07e69476e5abde6"
+checksum = "de05399d8c145df89f589ff645107ef64d9f458566e9a70a8f706a95f42bbfa5"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1235,7 +1235,7 @@ dependencies = [
  "hyper-util",
  "rust-webx-core",
  "rustls",
- "rustls-pemfile",
+ "rustls-pki-types",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -1246,9 +1246,9 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-core"
-version = "2.7.0"
+version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aea20fb191d81ee673ec92d4c98ddaf0fbed68afb95ca64daae9935936af4625"
+checksum = "fc0cdb5a5558068a77a81317fac1e485a7c626d0a590407a1a43dba01f573e88"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1272,9 +1272,9 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-engine"
-version = "2.7.0"
+version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "123685c3a2c7418015fcf60caf93082e3b6a774aaa40acebead157c782468dc3"
+checksum = "53ef3b93153966f858d2e3d9bf7bf0da05f87508a0275d3f79becaadde47dbac"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1289,7 +1289,7 @@ dependencies = [
  "multer",
  "rust-webx-core",
  "rustls",
- "rustls-pemfile",
+ "rustls-pki-types",
  "serde_json",
  "sha2",
  "socket2",
@@ -1302,9 +1302,9 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-host"
-version = "2.7.0"
+version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58d77a85f911e27b040a0de1ab73a187db9ece61e02e86003068944cdd503f3d"
+checksum = "ba23b8e544342211b07a72b7888e6f2ff3c69b966f32b616ddc1343a2799b292"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -1332,7 +1332,6 @@ dependencies = [
  "rust-webx-openapi",
  "rust-webx-spa",
  "rustls",
- "rustls-pemfile",
  "serde",
  "serde_json",
  "serde_path_to_error",
@@ -1350,9 +1349,9 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-macros"
-version = "2.7.0"
+version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "abd5acf0d5d5026782c22e2fbc18b4855a786e72e10098d9effb4c7367335727"
+checksum = "750f366b1e7dfbfb9f0eba34bf558eb1f4671e0577cb7660536fd7baaa2bd91a"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1361,9 +1360,9 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-openapi"
-version = "2.7.0"
+version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a04ab16fbc6bed641f300151e92e547d0c6140e0ad6a8b3ff20345c73455c68d"
+checksum = "87be6d1f4bbaaaa9ecf53b9b6386e35240c43b87c738329d20a0b9e8d1cbe2af"
 dependencies = [
  "inventory",
  "rust-webx-core",
@@ -1372,9 +1371,9 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-spa"
-version = "2.7.0"
+version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5e3258b95845318049928ecd6a732ef50948be22a610cbcd3fbd0e7b14233ee"
+checksum = "0c13283cb8a6769d587ecc98d3659d9f65c5be3b391e186285a63d3336f340b9"
 dependencies = [
  "async-trait",
  "brotli-decompressor",
@@ -1408,15 +1407,6 @@ dependencies = [
  "rustls-webpki",
  "subtle",
  "zeroize",
-]
-
-[[package]]
-name = "rustls-pemfile"
-version = "2.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dce314e5fee3f39953d46bb63bb8a46d40c2f8fb7cc5a3b6cab2bde9721d6e50"
-dependencies = [
- "rustls-pki-types",
 ]
 
 [[package]]

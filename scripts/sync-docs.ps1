@@ -7,7 +7,7 @@
     mirror under rust-webx/docs/ (e.g. testing standalone layout). Daily monorepo
     development does NOT need this — DocService reads sibling repos live.
 
-    For production bundles, use starters/starters/docbit/publish.ps1 which copies directly from
+    For production bundles, use examples/docbit/publish.ps1 which copies directly from
     source repos at publish time.
 
 .EXAMPLE
@@ -41,4 +41,4 @@ if ($FrameworkRoot) {
 }
 
 Copy-EcosystemDocs @params
-Write-Host 'Done. Run: cargo run -p docbit-host'
+Write-Host 'Done. Run: cargo run --manifest-path examples/docbit/Cargo.toml -p docbit-host'

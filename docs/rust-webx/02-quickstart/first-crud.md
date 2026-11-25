@@ -181,11 +181,11 @@ async fn handle(&mut self, req: GetUserRequest) -> ActionResult<UserDto> {
     self.store
         .get(&req.id)
         .await
-        .ok_or_else(|| Error::NotFound(format!("User {} not found", req.id)))
+        .ok_or_else(|| Error::not_found(format!("User {} not found", req.id)))
 }
 ```
 
-`Error::NotFound` 自动映射为 HTTP 404，响应体为 RFC 7807 `application/problem+json`（`type` / `title` / `status` / `detail`）。
+`Error::not_found` 自动映射为 HTTP 404，响应体为 RFC 9457 `application/problem+json`（`type` / `title` / `status` / `detail`）。
 
 ## 需要登录的接口：身份直接进 Request
 

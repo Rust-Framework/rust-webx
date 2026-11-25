@@ -148,7 +148,7 @@ async fn soak_keeps_serving_without_leaks() {
         .mode(AppMode::Development)
         .no_spa()
         .configure(|app| {
-            app.useOptions(|options| {
+            app.options(|options| {
                 options.metrics.enabled = true;
                 options.server.workers = 2;
             })

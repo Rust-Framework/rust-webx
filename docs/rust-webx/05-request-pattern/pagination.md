@@ -9,93 +9,96 @@
 
 | 位置 | 类型 | 说明 |
 |------|------|------|
-| Query | `page: Option<u32>`、`page_size: Option<u32>` | 两个**平铺**字段；不要 `#[serde(flatten)] PagedRequest` |
-| 响应 | `PagedResult<T>` | 200 + `{items, total, page, page_size, total_pages}` |
+| Query | `#[fromquery(nested)] paging: PagedRequest` | `PagedRequest` 只有 `page: u32` / `page_size: u32` 两个字段；缺省 1 / 20，越界 400 |
+| 响应 | `PagedResult<T>` | 200 + `{success, status, message, items, total}` 扁平页信封 |
 
 ```rust
 #[derive(WebxRequestMeta)]
 pub struct ListUsersRequest {
     #[fromquery]
-    pub page: Option<u32>,
-    #[fromquery]
-    pub page_size: Option<u32>,
-    #[fromquery]
     pub keyword: Option<String>,
+    #[fromquery(nested)]
+    pub paging: PagedRequest,
 }
 
 #[get("/api/users")]
 impl IRequest<PagedResult<UserDto>> for ListUsersRequest {}
 ```
 
-绑定层负责类型合法性：`page` / `page_size` 是 `u32`，负数或非数字在绑定阶段就是
-`400 problem+json`（按字段聚合错误），不会进 Handler（见[参数绑定](parameter-binding.md)）。
+- 请求侧不再把 `page` / `page_size` 写成两个平铺的 `Option<u32>` 字段：`#[fromquery(nested)]`
+  把 `paging` 委托给 `PagedRequest` 自己的 `RequestModel` 绑定，并把 `page` / `page_size`
+  拼进 OpenAPI 参数。
+- 响应侧 `PagedResult<T>` 是**扁平页信封**：`success`、`status`、`message`、`items`、`total`
+  五个字段都是结构体直接成员，没有嵌套的 `operation`，也没有页码、页大小的请求回声；
+  客户端用自己发出的 `page_size` 计算总页数。
+- 结果由 `PagedResult::new(items, total)` 构造；`map_items` 把实体页映射成 DTO 页，
+  `with_status` / `with_message` 覆盖业务状态与文案。
 
-## 归一化：`clamped()` 与 `from_parts()`
+## 默认值与校验在 binding 层
 
-`PagedRequest` 的默认值与边界是框架约定，Handler 不应重复判断：
+`PagedRequest` 没有 `new`、`Default`、serde 默认值，也没有任何归一化方法：默认值与范围
+属于 binding，Handler 拿到的一定是已校验的值。
 
 | 情况 | 结果 |
 |------|------|
 | 未提供 | `page = 1`、`page_size = 20` |
-| `page = 0` | 归一为 `1`（0 无法计算 offset） |
-| `page_size = 0` | 归一为 `1`（避免 `total_pages` 除零） |
-| `page_size > 100` | 限制为 `100`（防止一次拉全表） |
+| `page < 1` | `400 problem+json`，`errors.page` |
+| `page_size` 不在 `1..=100` | `400 problem+json`，`errors.page_size` |
+| 负数 / 非数字 | 绑定阶段 `400`，不会进 Handler |
 
-- `PagedRequest::new(page, page_size)` 原样构造后调用 `.clamped()` 归一。
-- `PagedRequest::from_parts(Option<u32>, Option<u32>)`（1.3.0 新增）把「默认值 + 边界」
-  合成一步，等价于 `PagedRequest::new(page.unwrap_or(1), page_size.unwrap_or(20)).clamped()`：
-
-```rust
-let paging = PagedRequest::from_parts(req.page, req.page_size);
-// 省略参数 => 1 / 20；越界值被夹紧，而不是报错
-```
-
-| 输入 | `from_parts` 结果 |
-|------|------------------|
-| `(None, None)` | `page = 1`、`page_size = 20` |
-| `(Some(0), Some(0))` | `page = 1`、`page_size = 1` |
-| `(Some(3), Some(1_000))` | `page = 3`、`page_size = 100` |
-| `(Some(4), None)` | `page = 4`、`page_size = 20` |
+Handler 不要再写 `unwrap_or` / `clamp` 做二次归一：越界是客户端错误（400），静默夹紧会
+让客户端按请求页大小算出的总页数与实际收到的页不一致。
 
 ## Handler 示例
 
-分页查询有三个必须一起满足的点：**同条件 `count`**、**稳定排序**、**`offset` + `page_size`**。
+**优先用 `to_page`**：同一条过滤链上先 `COUNT` 再取本页，直接返回 `PagedResult<T>`。
 
 ```rust
 #[handler(inject)]
 #[async_trait]
 impl IRequestHandler<ListUsersRequest, PagedResult<UserDto>> for ListUsersHandler {
     async fn handle(&mut self, req: ListUsersRequest) -> ActionResult<PagedResult<UserDto>> {
-        let paging = PagedRequest::from_parts(req.page, req.page_size);
+        // 过滤条件只构建一次；租户条件最先 AND，租户只来自身份
+        let query = self
+            .users
+            .query()
+            .filter(/* 租户 + keyword 等条件 */);
 
-        // 1. 过滤条件只构建一次，count 与列表复用（含租户条件，租户只来自身份）
-        let query = self.users.query().filter(/* keyword 等条件 */);
+        // 同一过滤链：count 去掉 ORDER BY/skip/take，本页 skip/take
+        let page = query
+            .order_by_field_desc(User::created_at)
+            .then_by_field_desc(User::id) // 唯一列兜底，翻页不漂移
+            .to_page(&req.paging)
+            .await?; // 持久层错误在框架边界转换
 
-        // 2. 同条件总数
-        let total = query.clone().count().await? as u64;
-
-        // 3. 稳定排序（末位用唯一列兜底，避免翻页漂移）+ skip/take
-        let items = query
-            .order_by_asc(/* created_at */)
-            .order_by_asc(/* id */)
-            .skip(paging.offset() as usize)
-            .take(paging.page_size as usize)
-            .all()
-            .await?;
-
-        // 4. 统一信封；total_pages 由框架按 page_size 计算
-        Ok(PagedResult::from_request(items, total, &paging))
+        // 实体页 → DTO 页；total 与 success/status/message 原样保留
+        Ok(page.map_items(UserDto::from))
     }
 }
 ```
 
+**手写等价做法**（需要自定义语句形状时，仍然只用框架类型收口）：
+
+```rust
+let total = query.clone().count().await? as u64;
+let items = query
+    .order_by_field_desc(User::created_at)
+    .then_by_field_desc(User::id)
+    .skip(req.paging.offset() as usize)
+    .take(req.paging.limit() as usize)
+    .to_list()
+    .await?;
+Ok(PagedResult::new(items, total).map_items(UserDto::from))
+```
+
 要点：
 
-- `offset()` 基于**归一化后**的 `page` / `page_size` 计算：`(page - 1) * page_size`（饱和运算）。
-- `PagedResult::from_request(items, total, &paging)` 直接复用归一化后的页码，
-  不要再把原始 query 值写回响应（否则前端拿到的页码与实际数据不一致）。
+- `offset() -> u64`、`limit() -> u32` 是分页参数的唯一入口；`offset` 在 `u64` 上计算，
+  `page` / `page_size` 再大也不会溢出。
 - 排序必须**稳定且唯一**：只按 `created_at` 排序时，同时间戳的行在两次查询间顺序可能变化，
   翻页会重复/漏行；用主键或其它唯一列兜底。
+- 强类型排序用 `order_by_field(User::created_at)` / `then_by_field_desc(User::id)`，
+  字段类型必须实现 `Sortable`；字符串列名的 `order_by(&str)` 本版仍保留但不推荐。
 - 深分页（`page` 很大）仍是 `OFFSET` 扫描：持续追加、需要翻到很深的数据改用下面的
   Keyset 分页；导出/批量场景用独立端点。
 
@@ -124,8 +127,12 @@ impl IRequestHandler<ListMessagesRequest, CursorPage<MessageDto>> for ListMessag
         let paging = KeysetRequest::from_parts(req.cursor, req.page_size);
         let (created_at, id) = match paging.decoded()?.as_slice() {
             [] => (i64::MIN, String::new()),           // 第一页
-            [at, id, ..] => (at.parse()?, id.clone()), // 客户端输入：必须校验
-            _ => return Err(Error::Validation("invalid cursor".into())),
+            [at, id, ..] => (
+                at.parse()
+                    .map_err(|_| Error::validation("invalid cursor"))?, // 客户端输入：必须校验
+                id.clone(),
+            ),
+            _ => return Err(Error::validation("invalid cursor")),
         };
         // WHERE room_id = ? AND (created_at, id) > (?, ?)
         // ORDER BY created_at ASC, id ASC LIMIT page_size + 1
@@ -156,11 +163,12 @@ impl IRequestHandler<ListMessagesRequest, CursorPage<MessageDto>> for ListMessag
 struct Page<T> { items: Vec<T>, total: u64 }
 struct PageQuery { limit: Option<u32>, cursor: Option<String> }
 
-// ❌ 每个端点各写一套默认值与边界
+// ❌ 每个端点各写一套默认值与手工夹紧
 let page = req.page.unwrap_or(1).max(1);
 let page_size = req.page_size.unwrap_or(20).clamp(1, 100);
-// ✅ 一行替代
-let paging = PagedRequest::from_parts(req.page, req.page_size);
+// ✅ 缺省 1 / 20、越界 400 交给嵌套绑定，Handler 直接
+//    `#[fromquery(nested)] paging: PagedRequest` + `query.to_page(&req.paging)`
+// ✅ Keyset 才用框架的 `from_parts` 归一
 let keyset = KeysetRequest::from_parts(req.cursor, req.page_size);
 
 // ❌ 响应信封自造 { list, count, current, size } / { data, next }
@@ -169,10 +177,12 @@ let keyset = KeysetRequest::from_parts(req.cursor, req.page_size);
 
 ## 小结
 
-- offset：请求两个平铺 `Option<u32>` 字段 + `PagedRequest::from_parts`；响应 `PagedResult<T>`
-  （同条件 `count` + 稳定排序 + `offset`/`page_size`）。
+- offset：请求 `#[fromquery(nested)] paging: PagedRequest`（缺省 1 / 20、越界 400 由 binding
+  负责）；响应 `PagedResult<T>` 扁平信封（`success`/`status`/`message`/`items`/`total`）。
+  `to_page` 在同一过滤链上 count + skip/take；排序末位用唯一列兜底。
 - keyset：请求 `cursor` + `page_size` + `KeysetRequest::from_parts`；响应 `CursorPage<T>`
   （多取一行、稳定全序、游标值校验）。
-- 两套都用框架类型；不要为某个端点另造第三种分页结构。
+- 两套都用框架类型；不要为某个端点另造第三种分页结构，也不要在两套之间混用（别拿
+  `CursorPage` 当 offset 分页，也别把 `PagedResult` 套进游标逻辑）。
 
 下一节：[用户身份与多租户](user-identity.md)

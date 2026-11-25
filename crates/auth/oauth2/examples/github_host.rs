@@ -144,7 +144,7 @@ async fn main() -> Result<()> {
 
     Host::builder()
         .configure(|app| {
-            app.useOptions(|options| {
+            app.options(|options| {
                 options.app.urls = vec!["http://localhost:5000".to_string()];
                 options.jwt.secret = "dev-only-github-oauth-secret-change-me".to_string();
             });

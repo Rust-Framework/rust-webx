@@ -24,12 +24,13 @@ my-app/
         ├── lib.rs
         └── startup/
             ├── mod.rs
-            ├── extensions/  # Add* / Use* 扩展方法
+            ├── services/    # Add* / Use* 扩展方法（基础设施）
             ├── hosted/      # IHostedService 实现
             └── seed/        # 一次性数据初始化
 ```
 
-**不设** `services/`、`requests/` 目录。业务接口在 `contracts/`，实现在 `handlers/`。
+**不设**业务 `services/` crate、`requests/` 目录：业务接口在 `contracts/`，实现在 `handlers/`。
+`host/startup/services/` 只放组合根的基础设施扩展（`Add*` / `Use*`），不是业务服务层。
 
 ## 模块声明
 
@@ -40,7 +41,7 @@ my-app/
 pub mod startup;
 
 // host/src/startup/mod.rs
-pub mod extensions;
+pub mod services;
 pub mod hosted;
 pub mod seed;
 ```
@@ -52,7 +53,7 @@ pub mod seed;
 | `contracts/` | `IRequest`、DTO、enum、`IDocumentService` 等 trait | 仅框架 |
 | `handlers/` | `DocService`（impl `IDocumentService`）、各 `IRequestHandler` | contracts、domain |
 | `domain/` | `UserEntity`、EF 配置、seed | contracts（可选）、无 host |
-| `host/startup/extensions/` | `Add*` / `Use*` DI 扩展；用 `webx::app_base()` 定位数据库 | 基础设施 |
+| `host/startup/services/` | `Add*` / `Use*` DI 扩展；用 `webx::app_base()` 定位数据库 | 基础设施 |
 | `host/startup/hosted/` | `IHostedService`（schema 初始化、seed、索引构建） | handlers |
 | `appsettings.json` | 端口、JWT、缓存等框架配置 | — |
 
@@ -64,20 +65,22 @@ pub mod seed;
 
 ### 多应用（monorepo）
 
-多个应用各自拥有四个 crate，共享同一个 workspace：
+多个应用各自拥有四个 crate；每个应用是 `examples/` 下的**独立 workspace**（各自 `Cargo.toml` + lockfile）：
 
 ```
-Cargo.toml                # members = ["docbit/*", "dmbit/*", ...]
-docbit/
-├── contracts/
-├── domain/
-├── handlers/
-└── host/
-dmbit/
-├── contracts/
-├── domain/
-├── handlers/
-└── host/
+examples/
+├── docbit/
+│   ├── Cargo.toml         # workspace 根：members = ["contracts", "domain", "handlers", "host"]
+│   ├── contracts/
+│   ├── domain/
+│   ├── handlers/
+│   └── host/
+└── dmbit/
+    ├── Cargo.toml         # 同上，独立 workspace
+    ├── contracts/
+    ├── domain/
+    ├── handlers/
+    └── host/
 ```
 
 跨 crate 时仍遵守：contracts 不依赖 domain；domain 可依赖 contracts 与框架核心原语。

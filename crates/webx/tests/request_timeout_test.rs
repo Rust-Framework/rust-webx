@@ -34,7 +34,7 @@ async fn spawn_host(timeout_seconds: u64) -> (String, ServerHandle) {
         .mode(AppMode::Development)
         .no_spa()
         .configure(move |app| {
-            app.useOptions(move |o| o.server.request_timeout_seconds = timeout_seconds)
+            app.options(move |o| o.server.request_timeout_seconds = timeout_seconds)
         })
         .build();
     let handle = host.server_handle();

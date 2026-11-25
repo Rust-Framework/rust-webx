@@ -1,0 +1,34 @@
+[package]
+name = "rust-webx-outbox"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+documentation.workspace = true
+description = "Transactional outbox for rust-webx events: worker-facing port, lease-based dispatcher with retry/backoff and dead-letter, plus an in-memory store (durable storage lives in the ecosystem)"
+readme = "../../README.md"
+keywords = ["web", "outbox", "events", "background-worker"]
+categories = ["web-programming", "asynchronous"]
+publish = true
+
+[lib]
+name = "webx_outbox"
+
+[dependencies]
+rust-webx-core.workspace = true
+rust-webx-host.workspace = true
+rust-dix.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+inventory.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true

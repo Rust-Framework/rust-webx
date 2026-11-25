@@ -96,7 +96,7 @@ Host::builder()
 
 ```rust
 // ✅ 业务错误用 Error 变体
-return Err(Error::Validation("email is required".into()));
+return Err(Error::validation("email is required"));
 
 // ❌ 不要用 panic 处理可预期错误
 panic!("user not found");

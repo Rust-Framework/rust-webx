@@ -107,7 +107,7 @@ fn wire_latency_p99_stays_within_budget() {
             .mode(AppMode::Development)
             .no_spa()
             .configure(|app| {
-                app.useOptions(|options| {
+                app.options(|options| {
                     options.server.workers = 1;
                     options.metrics.enabled = false;
                 })

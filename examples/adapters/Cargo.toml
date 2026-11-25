@@ -1,0 +1,160 @@
+# Reference adapters: the `rust-ef` implementations behind the framework
+# ports (auth sessions, idempotency store, outbox store, payment webhook inbox,
+# AI usage ledger). They are ecosystem reference implementations, not part of
+# the release line: every member sets `publish = false`, so crates.io only sees
+# the contracts/ports from the root workspace. Copy a crate from here into a
+# downstream service instead of depending on it.
+[workspace]
+resolver = "2"
+members = [
+    "ai/ef",
+    "auth/ef",
+    "outbox/ef",
+    "payment/ef",
+    "idempotency/ef",
+]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+[workspace.package]
+version = "2.9.1"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT"
+authors = ["Start"]
+homepage = "https://rust-framework.github.io/rust-webx/"
+repository = "https://github.com/Rust-Framework/rust-webx"
+documentation = "https://docs.rs/rust-webx"
+[workspace.dependencies]
+# Internal crates
+rust-webx-core = { version = "=2.9.1", path = "../../crates/core" }
+rust-webx-host = { version = "=2.9.1", path = "../../crates/host" }
+rust-webx-engine = { version = "=2.9.1", path = "../../crates/engine" }
+rust-webx-macros = { version = "=2.9.1", path = "../../crates/macros" }
+rust-webx = { version = "=2.9.1", path = "../../crates/webx" }
+rust-webx-spa = { version = "=2.9.1", path = "../../crates/spa" }
+rust-webx-build = { version = "=2.9.1", path = "../../crates/build" }
+rust-webx-openapi = { version = "=2.9.1", path = "../../crates/openapi" }
+rust-webx-outbox = { version = "=2.9.1", path = "../../crates/outbox" }
+rust-webx-ai = { version = "=2.9.1", path = "../../crates/ai/core" }
+rust-webx-ai-ef = { version = "=2.9.1", path = "ai/ef" }
+rust-webx-auth-ef = { version = "=2.9.1", path = "auth/ef" }
+rust-webx-oidc = { version = "=2.9.1", path = "../../crates/auth/oidc" }
+rust-webx-oauth2 = { version = "=2.9.1", path = "../../crates/auth/oauth2" }
+rust-webx-mfa = { version = "=2.9.1", path = "../../crates/auth/mfa" }
+rust-webx-webauthn = { version = "=2.9.1", path = "../../crates/auth/webauthn" }
+rust-webx-client = { version = "=2.9.1", path = "../../crates/client" }
+rust-webx-redis = { version = "=2.9.1", path = "../../crates/cache/redis" }
+rust-webx-nats = { version = "=2.9.1", path = "../../crates/queue/nats" }
+rust-webx-rabbitmq = { version = "=2.9.1", path = "../../crates/queue/rabbitmq" }
+rust-webx-kafka = { version = "=2.9.1", path = "../../crates/queue/kafka" }
+rust-webx-ai-gateway = { version = "=2.9.1", path = "../../crates/ai/gateway" }
+# Payment domain group (opt-in; the umbrella never links these).
+rust-webx-pay = { version = "=2.9.1", path = "../../crates/payment/core" }
+rust-webx-pay-stripe = { version = "=2.9.1", path = "../../crates/payment/stripe" }
+rust-webx-pay-alipay = { version = "=2.9.1", path = "../../crates/payment/alipay" }
+rust-webx-pay-wechatpay = { version = "=2.9.1", path = "../../crates/payment/wechatpay" }
+rust-webx-pay-paypal = { version = "=2.9.1", path = "../../crates/payment/paypal" }
+rust-webx-pay-adyen = { version = "=2.9.1", path = "../../crates/payment/adyen" }
+rust-webx-pay-square = { version = "=2.9.1", path = "../../crates/payment/square" }
+rust-webx-pay-ef = { version = "=2.9.1", path = "payment/ef" }
+
+# ORM adapters (opt-in; core/umbrella never link rust-ef). The 2.9.1 compat shell
+# crate that only re-exported the idempotency store is gone; depend on the
+# concrete adapter below.
+rust-webx-idempotency-ef = { version = "=2.9.1", path = "idempotency/ef" }
+# Transactional outbox starter (opt-in; own crate group).
+rust-webx-outbox-ef = { version = "=2.9.1", path = "outbox/ef" }
+# Optional non-hyper listener backends (opt-in; core/umbrella never link quinn/h3).
+rust-webx-h3 = { version = "=2.9.1", path = "../../crates/transport/h3" }
+
+# DI framework (crates.io 鈥?no local path required)
+# Local sibling checkout for the 2.9.1 workspace (rust-dix 1.1 adds
+# From<RdiError> for AppError); published builds use the 1.0..2.0 range.
+rust-dix = "1.0"
+# Shared contract layer (error carrier, pagination/cursor/OperationResult).
+# 2.9.1 re-exports these types; the 2.9.x definitions were deleted.
+# Publish rust-core first; the path serves the sibling RF checkout.
+rust-core = "0.1"
+rust-dix-macros = "1.0"
+
+# rust-ef ORM (rust-ef 2.6+, paired/verified with rust-ef 2.9.0 in this release;
+# rust-dix 1.0 integration via add_dbcontext + owned resolution).
+# Keep the `"2.6"` semver range: it admits 2.9.x, and the release order is
+# rust-ef 2.9.0 first, then rust-webx 2.9.x. Do not tighten it to `=2.9`, which
+# would make the lockfile unresolvable before the ORM release is on crates.io.
+# rust-ef is Web-agnostic (no `webx` feature and no dependency on rust-webx);
+# applications map EFError at their boundary (reference apps: handlers/src/db.rs).
+rust-ef = "2.6"
+rust-ef-sqlite = "2.6"
+# Optional providers for rust-webx-idempotency-ef's env-driven real-database
+# idempotency tests (`--features postgres,mysql`); never pulled into a default build.
+rust-ef-postgres = "2.6"
+rust-ef-mysql = "2.6"
+
+# External dependencies
+arc-swap = "1"
+async-trait = "0.1"
+tokio = { version = "1", features = ["full"] }
+hyper = { version = "1", features = ["full"] }
+hyper-util = { version = "0.1", features = ["full"] }
+hyper-rustls = { version = "0.27", default-features = false, features = ["http1", "http2", "ring", "tls12", "webpki-tokio"] }
+http = "1"
+http-body-util = "0.1"
+bytes = "1"
+# Documentation bundle uploads (docbit admin): archive extraction.
+zip = { version = "9", default-features = false, features = ["deflate"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+tokio-util = { version = "0.7", features = ["io"] }
+# WebSocket (RFC 6455) framing for the host session layer; the engine only
+# transports the upgraded byte stream.
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake", "stream"] }
+multer = "3"
+mime_guess = "2"
+sha2 = "0.10"
+sha1 = "0.10"
+hmac = "0.12"
+data-encoding = "2"
+# Embedded static assets: brotli at build time, decoded on demand at runtime.
+brotli = "9"
+brotli-decompressor = "6"
+tempfile = "3"
+httpdate = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Field-path-aware JSON binding for real-time request frames.
+serde_path_to_error = "0.1"
+thiserror = "2"
+inventory = "0.3"
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
+tracing = "0.1"
+jsonwebtoken = "9"
+base64 = "0.22"
+uuid = { version = "1", features = ["v4"] }
+# Payment protocol adapters: request signing (Stripe/Alipay/WeChat/Adyen/Square),
+# X.509 platform certificates (WeChat, Alipay cert mode) and Alipay cert SNs.
+rsa = { version = "0.10", features = ["pkcs1v15"] }
+aes-gcm = "0.10"
+x509-cert = { version = "0.2", features = ["pem"] }
+der = "0.7"
+md-5 = "0.10"
+percent-encoding = "2"
+url = "2"
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12", "ring"] }
+rustls-pki-types = { version = "1", features = ["std"] }
+webpki-roots = "1"
+zeroize = { version = "1", features = ["alloc"] }
+criterion = "0.5"
+ctrlc = "3.4"
+# Adapter drivers (2.5-7 starter family). Each adapter crate owns the driver
+# dependency; the umbrella stays free of broker SDKs.
+redis = { version = "0.32", default-features = false, features = ["tokio-rustls-comp", "connection-manager", "keep-alive"] }
+async-nats = { version = "0.53", default-features = false, features = ["ring"] }
+lapin = { version = "4.12", default-features = false, features = ["tokio", "rustls"] }
+# Pure-Rust Kafka client: no C toolchain/librdkafka requirement.
+rskafka = { version = "0.6", default-features = false, features = ["compression-gzip"] }
+
+

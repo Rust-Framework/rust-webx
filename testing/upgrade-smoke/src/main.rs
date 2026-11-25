@@ -33,7 +33,7 @@ fn build_host() -> Host {
     Host::builder()
         .mode(AppMode::Development)
         .no_spa()
-        .configure(|app| app.useOptions(|options| options.metrics.enabled = false))
+        .configure(|app| app.options(|options| options.metrics.enabled = false))
         .build()
 }
 

@@ -32,22 +32,28 @@ impl IMiddleware for RequestLoggingMiddleware {
 ### 3. 注册
 
 ```rust
+use webx::MiddlewareSpec;
+
 Host::builder()
-    .use_middleware::<RequestLoggingMiddleware>()   // 默认 AfterAuth 槽
+    // 默认 AfterAuth 槽
+    .use_middleware(MiddlewareSpec::new::<RequestLoggingMiddleware>())
     .build();
 ```
 
-`use_middleware` 的默认槽位是 **`MiddlewareSlot::AfterAuth`**：中间件在 JWT 认证之后运行，
+`MiddlewareSpec::new` 的默认槽位是 **`MiddlewareSlot::AfterAuth`**：中间件在 JWT 认证之后运行，
 因此 `ctx.claims()` 能拿到已登录主体（框架自带的 `RequestTracing` 就是靠这一点记录真实用户）。
-需要更早/更晚的位置时用 `use_middleware_at` / `use_middleware_with_at`：
+需要更早/更晚的位置时用 `.at(slot)`，需要构造参数时用 `MiddlewareSpec::factory(..)`：
 
 ```rust
-use webx::MiddlewareSlot;
+use webx::{MiddlewareSlot, MiddlewareSpec};
 
 Host::builder()
-    .use_middleware_at::<PreflightAudit>(MiddlewareSlot::BeforeCors)
-    .use_middleware::<TenantGuard>()                            // AfterAuth：能读身份
-    .use_middleware_with_at(MiddlewareSlot::AfterSpa, || Arc::new(Fallback::new()))
+    .use_middleware(MiddlewareSpec::new::<PreflightAudit>().at(MiddlewareSlot::BeforeCors))
+    .use_middleware(MiddlewareSpec::new::<TenantGuard>())   // AfterAuth：能读身份
+    .use_middleware(
+        MiddlewareSpec::factory(|| Arc::new(Fallback::new()) as Arc<dyn IMiddleware>)
+            .at(MiddlewareSlot::AfterSpa),
+    )
     .build();
 ```
 
@@ -67,7 +73,9 @@ pub trait HostBuilderExt {
 impl HostBuilderExt for HostBuilder {
     fn use_tenant_resolver(self, resolver: Arc<TenantResolver>) -> Self {
         // `tenant_middleware(resolver) -> Arc<dyn IMiddleware>`
-        self.use_middleware_with(move || tenant_middleware(Arc::clone(&resolver)))
+        self.use_middleware(MiddlewareSpec::factory(move || {
+            tenant_middleware(Arc::clone(&resolver))
+        }))
     }
 }
 ```
@@ -76,12 +84,12 @@ impl HostBuilderExt for HostBuilder {
 
 ## 工厂函数模式
 
-需要构造参数的中间件用工厂函数 + `HostBuilder::use_middleware_with` 挂载：
+需要构造参数的中间件用工厂函数 + `MiddlewareSpec::factory` 挂载：
 
 ```rust
-Host::builder().use_middleware_with(move || {
+Host::builder().use_middleware(MiddlewareSpec::factory(move || {
     Arc::new(TenantMiddleware::new(Arc::clone(&resolver))) as Arc<dyn IMiddleware>
-})
+}))
 ```
 
 也可以直接注册到 `register()` 的 `ServiceCollection`：
@@ -98,7 +106,7 @@ svc.add(ServiceLifetime::Singleton, move |_| {
 pub fn jwt_middleware(handler: Arc<dyn IAuthenticationHandler>) -> impl IMiddleware
 ```
 
-它由 `add_authentication()` 自动接入管道，通常无需手动注册。
+它由 `use_authentication()` 自动接入管道，通常无需手动注册。
 
 ## 小结
 

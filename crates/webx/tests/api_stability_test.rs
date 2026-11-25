@@ -52,7 +52,7 @@ fn documented_constructors_still_exist() {
         .with_detail("detail")
         .with_instance("/x");
 
-    // Pagination contract (3.0: plain fields; binding owns defaults/validation).
+    // Pagination contract (2.9.1: plain fields; binding owns defaults/validation).
     let paging = PagedRequest {
         page: 2,
         page_size: 50,

@@ -67,31 +67,25 @@ fn validate_options_reports_all_violations_in_stable_order() {
     assert!(admission < request && request < tls, "{report}");
 }
 
-/// Development may switch the inbound deadline off and still configure the
-/// legacy `RateLimit` trust keys (warning only); Production rejects the keys.
+/// Development may switch the inbound deadline off and still start; Production
+/// rejects the unbounded limits.
 #[test]
 fn mode_specific_exemptions_are_not_flagged() {
     let mut options = AppOptions::default();
     options.server.request_timeout_seconds = 0;
     options.server.admission_timeout_ms = 0;
-    options.rate_limit.trust_proxy = true;
-    options.rate_limit.trusted_proxies = vec!["10.0.0.0/8".to_string()];
 
     assert_eq!(
         validate_options(&options, AppMode::Development),
         Vec::new(),
-        "Development keeps the unbounded server limits and the migration warning"
+        "Development keeps the unbounded server limits"
     );
 
     let production = validate_options(&options, AppMode::Production);
     let keys: Vec<&str> = production.iter().map(|v| v.key.as_str()).collect();
     assert_eq!(
         keys,
-        vec![
-            "RateLimit.TrustProxy",
-            "Server.AdmissionTimeoutMs",
-            "Server.RequestTimeoutSeconds",
-        ],
+        vec!["Server.AdmissionTimeoutMs", "Server.RequestTimeoutSeconds"],
         "got {production:?}"
     );
 }
@@ -128,7 +122,7 @@ fn try_build_reports_every_violation_at_once() {
         .mode(AppMode::Production)
         .no_spa()
         .configure(|app| {
-            app.use_options(|options| {
+            app.options(|options| {
                 options.server.request_timeout_seconds = 0;
                 options.server.admission_timeout_ms = 0;
                 options.tls.client_auth = TlsClientAuth::Required;
@@ -180,7 +174,7 @@ fn builder_context_guards_are_aggregated() {
         .mode(AppMode::Production)
         .no_spa()
         .configure(|app| {
-            app.use_options(|options| {
+            app.options(|options| {
                 options.server.request_timeout_seconds = 0;
             });
         })
@@ -206,7 +200,7 @@ fn builder_context_guards_are_aggregated() {
         .mode(AppMode::Production)
         .no_spa()
         .configure(|app| {
-            app.use_options(|options| {
+            app.options(|options| {
                 options.server.admission_timeout_ms = 0;
             });
         })
@@ -229,7 +223,7 @@ fn builder_context_guards_are_aggregated() {
         .mode(AppMode::Development)
         .no_spa()
         .configure(|app| {
-            app.use_options(|options| {
+            app.options(|options| {
                 options.jwt.algorithms = Vec::new();
             });
         })
@@ -250,7 +244,7 @@ fn builder_context_guards_are_aggregated() {
         .mode(AppMode::Development)
         .no_spa()
         .configure(|app| {
-            app.use_options(|options| {
+            app.options(|options| {
                 options.turn.secret = "shared-secret".to_string();
             });
         })
@@ -271,7 +265,7 @@ fn build_panics_with_the_same_aggregate_message() {
             .mode(AppMode::Production)
             .no_spa()
             .configure(|app| {
-                app.use_options(|options| {
+                app.options(|options| {
                     options.server.request_timeout_seconds = 0;
                     options.server.admission_timeout_ms = 0;
                 });

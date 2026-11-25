@@ -1,6 +1,6 @@
 //! Keyset (cursor) pagination contract types.
 //!
-//! Since 3.0 these are the shared `rust-core` contracts; this module only
+//! Since 2.9.1 these are the shared `rust-core` contracts; this module only
 //! re-exports them so the historical `webx_core::keyset::*` paths keep working.
 //! Do not define a second copy here.
 //!

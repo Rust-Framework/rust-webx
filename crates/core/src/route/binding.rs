@@ -20,7 +20,7 @@
 //! deserializers keep working exactly as written) and each field is then taken
 //! from that document, which is what lets every field report its own error. A
 //! single-pass shadow-struct path for bodies without custom field handling is
-//! tracked for 3.0.
+//! tracked for the next breaking release.
 
 use crate::auth::IClaims;
 use crate::error::{Error, Result};

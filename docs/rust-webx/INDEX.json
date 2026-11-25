@@ -15,7 +15,7 @@
     "demoUrl": "",
     "featured": true,
     "sortOrder": 1,
-    "version": "3.0.0",
+    "version": "2.9.1",
     "language": "zh-CN",
     "author": "Start",
     "logo": "logo.svg",
@@ -461,8 +461,8 @@
             },
             {
               "id": "resource-authorization",
-              "title": "基于资源的授权",
-              "summary": "路由模式匹配与角色权限",
+              "title": "资源授权与实例级归属",
+              "summary": "路由级 #[authorize] / IDynamicAuthorizer 边界与 Handler 内 owner/tenant 校验",
               "readingTime": 14,
               "difficulty": "intermediate"
             },
@@ -476,7 +476,7 @@
             {
               "id": "token-session-password",
               "title": "令牌签发、会话吊销与口令哈希",
-              "summary": "ITokenIssuer / ISessionStore / IPasswordHasher 端口与 DeclaredRules 动态授权",
+              "summary": "ITokenIssuer / ISessionStore / IPasswordHasher 端口与 authorize_with_declared_rules 动态授权",
               "readingTime": 14,
               "difficulty": "intermediate"
             },
@@ -718,6 +718,13 @@
               "difficulty": "advanced"
             },
             {
+              "id": "integrations",
+              "title": "端口与适配器（下游接入）",
+              "summary": "端口清单、默认实现、复制参考适配器、契约测试与 outbox 边界",
+              "readingTime": 10,
+              "difficulty": "intermediate"
+            },
+            {
               "id": "outbound-http",
               "title": "出站 HTTP（rust-webx-client）",
               "summary": "命名客户端、连接池、流式响应与 SSE 解码",
@@ -832,6 +839,13 @@
               "id": "upgrade-to-2.5",
               "title": "升级到 2.5（2.x 加性演进）",
               "summary": "2.1 应用升级到 2.5、可选能力清单、稳定面与弃用承诺",
+              "readingTime": 18,
+              "difficulty": "intermediate"
+            },
+            {
+              "id": "upgrade-to-2.9.1",
+              "title": "升级到 2.9.1（破坏性补丁）",
+              "summary": "2.9.0 → 2.9.1：Error 载体、分页、嵌套绑定、raw 排序、组合根动词、webx_ef 删除、*-ef 移出发布序列与 outbox 拆分",
               "readingTime": 18,
               "difficulty": "intermediate"
             },

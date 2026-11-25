@@ -1,0 +1,16 @@
+[lints]
+workspace = true
+
+[package]
+name = "dmbit-domain"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+# 领域层可依赖契约层（读模型）与 rust-ef（实体）；不依赖应用层/宿主层。
+dmbit-contracts.workspace = true
+rust-webx-core.workspace = true
+rust-ef.workspace = true
+serde.workspace = true
+uuid.workspace = true

@@ -94,7 +94,7 @@ impl IRequestHandler<MeRequest, MeResponse> for MeHandler {
 async fn main() -> Result<()> {
     Host::builder()
         .configure(|app| {
-            app.useOptions(|options| {
+            app.options(|options| {
                 options.app.urls = vec!["http://127.0.0.1:5000".to_string()];
                 options.jwt.secret = "dev-only-secret-change-me-at-least-32-bytes".to_string();
             });

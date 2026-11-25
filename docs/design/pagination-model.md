@@ -25,29 +25,32 @@
 ## 2. 固定契约（精简后）
 
 ```rust
-/// 请求：字段即绑定字段，默认值 + 范围校验在 binding 层完成。
-/// 不再提供 `new` / `from_parts` / `clamped`——没有需要"归一"的状态。
-#[derive(Deserialize, WebxRequestMeta)]
+/// 请求：只有两个字段。默认值（1 / 20）与范围校验（1..=100）在 binding 的
+/// `RequestModel for PagedRequest`（`#[fromquery(nested)]`）里完成，越界是 400 字段错误。
+#[derive(Deserialize)]
 pub struct PagedRequest {
-    #[serde(default = "one")]                  // binding 默认值
-    pub page: u32,                             // #[validate(range(min = 1))]
-    #[serde(default = "twenty")]
-    pub page_size: u32,                        // #[validate(range(min = 1, max = 100))]
+    pub page: u32,
+    pub page_size: u32,
 }
 
 impl PagedRequest {
-    pub fn offset(&self) -> u32;               // (page - 1) * page_size，饱和运算
+    pub fn offset(&self) -> u64;               // (page - 1) * page_size，饱和运算
+    pub fn limit(&self) -> u32;                // 即 page_size
 }
 
-/// 响应：只保留服务端独有信息。
+/// 响应：业务结果 + 本页，扁平在同一个结构里（无嵌套 operation）。
 #[derive(Serialize)]
 pub struct PagedResult<T> {
+    pub success: bool,
+    pub status: i32,
+    pub message: String,
     pub items: Vec<T>,
     pub total: u64,
 }
 
-impl<T: Serialize> PagedResult<T> {
-    pub fn new(items: Vec<T>, total: u64) -> Self;
+impl<T> PagedResult<T> {
+    pub fn new(items: Vec<T>, total: u64) -> Self;   // success=true / status=0 / "ok"
+    pub fn map_items<U>(self, map: impl FnMut(T) -> U) -> PagedResult<U>;
 }
 ```
 
@@ -59,13 +62,15 @@ impl<T: Serialize> PagedResult<T> {
 ```rust
 async fn handle(&mut self, req: ListOrdersRequest) -> ActionResult<PagedResult<OrderModel>> {
     // req.paging: PagedRequest —— binding 已给默认值、已校验范围
-    self.orders
+    let page = self
+        .orders
         .query()
         .filter(tenant_scope)                       // 租户/权限先于分页
-        .order_by(Order::created_at)                // 强类型字段常量（见 §3.1）
-        .then_by(Order::id)                         // 末位唯一列兜底
-        .to_page(&req.paging, OrderModel::from)     // count + skip/take + map + 信封
-        .await
+        .order_by_field(Order::created_at)          // 强类型字段常量（见 §3.1）
+        .then_by_field(Order::id)                   // 末位唯一列兜底
+        .to_page(&req.paging)                       // count + skip/take + 扁平信封
+        .await?;
+    Ok(page.map_items(OrderModel::from))
 }
 ```
 
@@ -86,10 +91,10 @@ impl Order {
 }
 
 // QueryBuilder<T>
-pub fn order_by(self, field: Field<T, impl Sortable>) -> Self;      // ASC
-pub fn order_by_desc(self, field: Field<T, impl Sortable>) -> Self; // DESC
-pub fn then_by(self, field: Field<T, impl Sortable>) -> Self;       // 语义同 order_by，只表意图
-pub fn then_by_desc(self, field: Field<T, impl Sortable>) -> Self;
+pub fn order_by_field(self, field: Field<T, impl Sortable>) -> Self;      // ASC
+pub fn order_by_field_desc(self, field: Field<T, impl Sortable>) -> Self; // DESC
+pub fn then_by_field(self, field: Field<T, impl Sortable>) -> Self;       // 语义同 order_by_field，只表意图
+pub fn then_by_field_desc(self, field: Field<T, impl Sortable>) -> Self;
 ```
 
 收益（全部编译期）：
@@ -99,53 +104,45 @@ pub fn then_by_desc(self, field: Field<T, impl Sortable>) -> Self;
 - IDE 补全 `Order::` 就能列出全部可排序列；`#[column("legacy_name")]` 改名不影响调用点；
 - `column!(Order::created_at)` 与 `Order::created_at` 同源，`column!` 返回 `Field` 而不是裸 `&str`。
 
-若更喜欢 lambda 写法，可提供纯语法糖宏（零运行时成本）：
-
-```rust
-.order_by(col!(|o: Order| o.created_at))   // 宏展开为 Order::created_at
-```
-
-但推荐常量形式：没有宏、IDE 友好，且与 EF Core 的 `x => x.CreatedAt` 语义等价——都是"编译期确定的列"。
+常量形式即最终形态：不提供 lambda 糖宏（Rust 无法在运行期从闭包还原成员名，宏糖只增加学习面，
+不增加安全性）。它与其语义等价物 EF Core 的 `x => x.CreatedAt` 一样，都是"编译期确定的列"。
 
 **唯一的编译期不可验项**：末位排序列必须唯一。这一点只能靠文档 + `to_page` 的集成测试约定；
 若实体元数据暴露唯一键，`to_page` 可在 `debug_assert` 里校验最后一个排序列属于主键/唯一键。
 
-`to_page`（`webx_ef`，基于 rust-ef `QueryBuilder<T>`）：
+`to_page`（rust-ef 的终端，`crates/core/src/query/builder/page.rs`）：
 
 ```rust
-#[async_trait]
-pub trait PageExt<T>: Sized {
-    /// count（同过滤链、skip/take 之前）+ 本页取数 + 映射 + 信封。
+impl<T> QueryBuilder<T> {
+    /// count（同过滤链、skip/take 之前）+ 本页；直接返回扁平页信封。
     /// 要求：调用前已完成稳定排序（末位唯一列）；否则翻页会漏行/重行。
-    async fn to_page<M: Serialize>(
-        self,
-        paging: &PagedRequest,
-        map: impl FnMut(T) -> M + Send,
-    ) -> webx_core::error::Result<PagedResult<M>>;
+    pub async fn to_page(self, paging: &PagedRequest) -> EFResult<PagedResult<T>>;
 }
 ```
 
 实现语义：
 
-1. `total = self.clone().count()`；2. `items = self.skip(offset).take(page_size).to_list()`；
-3. `items.into_iter().map(map)`；4. `PagedResult::new(items, total)`。越界页 `items=[]`、`total` 照实。
+1. `total = self.clone().count()`（clone 上清 `ORDER BY`/`skip`/`take`，FROM/JOIN/WHERE 不变）；
+2. `items = self.skip(offset).take(limit).to_list()`；
+3. `PagedResult::new(items, total)`；端点再用 `map_items` 映射 DTO。越界页 `items=[]`、`total` 照实。
+4. count 与本页不是同一快照：两者必须一致时包显式事务。
 
-### 3.0 分层：执行归 rust-ef，信封归 webx，webx_ef 只做翻译
+### 2.9.1 分层：执行归 rust-ef，契约归 rust-core，webx 只重导出
 
 分页的**执行**（count + skip/take + 排序语义）与 Web 无关：CLI 导出、后台任务、测试同样需要。
-因此终端应落在 rust-ef，而不是适配层：
+因此终端落在 rust-ef，而不是适配层：
 
 ```rust
-// rust-ef：与 Web 无关的分页终端（新增，加性）
+// rust-ef：与 Web 无关的分页终端（2.9.1）
 impl<T> QueryBuilder<T> {
-    /// `count`（同一过滤链、在 skip/take 之前）+ 本页；`offset/limit` 是中性数字。
-    pub async fn to_page(self, offset: u64, limit: u32) -> EFResult<(Vec<T>, u64)>;
+    /// `count`（同一过滤链、在 skip/take 之前）+ 本页；直接返回扁平页信封。
+    pub async fn to_page(self, paging: &PagedRequest) -> EFResult<PagedResult<T>>;
 }
 ```
 
-`webx_ef` 只保留两件交叉边界的翻译：`page/page_size → offset/limit` 与
-`(items, total) → PagedResult`（外加可选的 `map`）。没有 ORM 执行逻辑，删掉它应用也能直接
-用 `rust-ef` 的终端 + `PagedResult::new` 组装。
+`webx_core::pagination` 只是 `rust_core::pagination` 的 re-export；持久化侧不参与分页或错误翻译
+（`rust-webx-ef` 已在 2.9.1 删除；幂等 store 是下游端口实现，参考适配器在
+`examples/adapters/idempotency/ef`）。应用直接用 rust-ef 的终端 + `PagedResult::new` 组装。
 
 ## 4. 为什么 `from_parts` 能删
 
@@ -157,11 +154,9 @@ impl<T> QueryBuilder<T> {
 | 越界夹紧 `1..=100` | binding 层校验（`#[validate(range)]` → 400） |
 | `Option<u32>` → `u32` | 字段本身就是 `u32`，没有中间态 |
 
-当前 binding 还没有"默认值"能力（`#[fromquery]` 走 `FromStr`，缺值即错，所以现状用
-`Option<u32>` + `from_parts`）。要落到本模型，需要给 `#[fromquery]` 增加默认值支持
-（`#[fromquery(default = 20)]`，与 `#[validate(range)]` 组合），这是本次唯一的框架侧前置改动。
-
-在它落地之前，`from_parts` 仍是默认值的唯一住处；一旦默认值进 binding，`from_parts` 直接删除。
+当初的顾虑（binding 没有"默认值"能力，缺值只能靠 `Option<u32>` + `from_parts` 归一）已在 2.9.1
+解决：`RequestModel for PagedRequest` 在 `#[fromquery(nested)]` 绑定里给默认值、按 `1..=100`
+校验并返回 400，`from_parts` 因此直接删除，不存在"过渡期两套写法"。
 
 ## 5. 语义
 
@@ -176,15 +171,18 @@ impl<T> QueryBuilder<T> {
 
 ## 6. 与游标分页的关系
 
-游标分页仍用独立的 `KeysetRequest → CursorPage` 契约（追加流/深翻页），同样按本模型的思路精简：
-请求侧去掉 `from_parts`（默认值进 binding），响应侧 `CursorPage { items, cursor, has_more }`
-本来就是服务端独有信息（`has_more` 例外，可用 `cursor.is_some()` 表达，后续再评估）。
+游标分页仍用独立的 `KeysetRequest → CursorPage` 契约（追加流/深翻页）。两套契约**判别规则**：
+能跳页（用户可见页码）用 offset；只向前续读（消息流/审计日志）用 keyset，同一端点只用一种。
+
+keyset 侧本次**不改**：`KeysetRequest::from_parts(cursor, page_size)` 仍是它的默认值/夹紧入口
+（响应 `CursorPage { items, cursor, has_more }`）；`has_more` 是否简化为 `cursor.is_some()`
+属于后续评估，不在 2.9.1。
 
 ## 7. 影响与迁移
 
 | 旧 | 新 |
 |---|---|
-| `PagedResult { items, total, page, page_size, total_pages }` | `PagedResult { items, total }` |
+| `PagedResult { items, total, page, page_size, total_pages }` | `PagedResult { success, status, message, items, total }` |
 | `PagedResult::from_request(items, total, &req)` | `to_page(..)` 或 `PagedResult::new(items, total)` |
 | `PagedRequest::from_parts(page, size)` | binding 默认值 + 校验；字段直接是 `u32` |
 | `PagedRequest::new` / `clamped` | 删除（没有归一状态） |
@@ -196,4 +194,4 @@ impl<T> QueryBuilder<T> {
 
 - 框架测试：binding 默认值、范围 400、`offset()`、越界页、`total` 与过滤一致。
 - `to_page` SQLite 集成测试：与 `count` 同过滤、`LIMIT/OFFSET` 正确、映射后行数、空页。
-- 文档：`pagination.md` 只保留本模型的一段模板，删除第二套写法。
+- 文档：`pagination.md` 已按本模型重写（嵌套绑定 + `to_page` + 扁平信封），不再保留第二套写法。

@@ -9,7 +9,7 @@
 //!
 //! The rules are the existing startup guards — TLS client auth, the bounded
 //! engine server (request/admission deadlines and the connection ceiling) and
-//! the Production legacy-`RateLimit`-trust rejection. Checks that need builder
+//! the Production secret/CORS fail-closed checks. Checks that need builder
 //! state rather than [`AppOptions`] alone (whether authentication is enabled,
 //! an explicit `use_cors` / `use_turn_config` / `JwtValidation` override) are
 //! collected by the host with the helpers this module exposes for them; the
@@ -66,7 +66,6 @@ pub fn validate_options(options: &AppOptions, mode: AppMode) -> Vec<ConfigViolat
     let mut violations = Vec::new();
     collect_tls_client_auth(options, &mut violations);
     collect_engine_server(options, mode, &mut violations);
-    collect_legacy_rate_limit_trust(options, mode, &mut violations);
     collect_rate_limit(options, &mut violations);
     collect_cors(options, &mut violations);
     sort_violations(&mut violations);
@@ -194,28 +193,6 @@ pub(crate) fn production_jwt_secret_violation(
     })
 }
 
-/// Production refuses the legacy `RateLimit.TrustProxy` /
-/// `RateLimit.TrustedProxies` keys.
-///
-/// Ignoring them silently would key every client by the reverse-proxy address
-/// (one global bucket an attacker can drain), so the operator must move the
-/// trust configuration to `ClientInfo`.
-pub(crate) fn legacy_rate_limit_trust_keys_violation(mode: AppMode) -> Option<ConfigViolation> {
-    (mode == AppMode::Production).then(|| {
-        ConfigViolation::new(
-            "RateLimit",
-            "RateLimit.TrustProxy",
-            LEGACY_RATE_LIMIT_TRUST_MESSAGE,
-        )
-    })
-}
-
-/// Operator-facing text of the legacy `RateLimit` trust-key failure.
-const LEGACY_RATE_LIMIT_TRUST_MESSAGE: &str =
-    "RateLimit.TrustProxy / RateLimit.TrustedProxies are legacy and ignored since 2.8.0. Move the trust \
-     configuration to ClientInfo.TrustForwardedHeaders / ClientInfo.TrustedProxies (see \
-     docs/rust-webx/10-configuration/appsettings.md). Development/Test hosts keep starting with a warning.";
-
 /// Turn the message of an existing validator into a structured violation.
 ///
 /// The retained validators return only an [`Error`]; their messages begin with
@@ -292,20 +269,6 @@ fn collect_engine_server(
     let effective_max_connections = options.app.max_connections.max(1);
     if let Err(error) = webx_engine::config::validate_max_connections(effective_max_connections) {
         violations.push(violation_from_error("App", "App.MaxConnections", &error));
-    }
-}
-
-fn collect_legacy_rate_limit_trust(
-    options: &AppOptions,
-    mode: AppMode,
-    violations: &mut Vec<ConfigViolation>,
-) {
-    let legacy_keys_configured =
-        options.rate_limit.trust_proxy || !options.rate_limit.trusted_proxies.is_empty();
-    if legacy_keys_configured {
-        if let Some(violation) = legacy_rate_limit_trust_keys_violation(mode) {
-            violations.push(violation);
-        }
     }
 }
 

@@ -66,7 +66,8 @@ let watcher = CatalogFileWatcher::new(
     Duration::from_secs(5),
 );
 // 作为后台服务注册（PeriodicBackgroundService）：
-// svc.add_background_service_with(move |_| Arc::new(watcher.clone()))
+// svc.add_background_service(BackgroundServiceSpec::with_factory(
+//     move |_| Arc::new(watcher.clone())))
 ```
 
 语义：

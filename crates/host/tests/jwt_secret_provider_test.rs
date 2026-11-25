@@ -41,7 +41,7 @@ fn configure_secret_file(
     path: std::path::PathBuf,
 ) -> impl FnOnce(&mut HostAppBuilder) + Send + 'static {
     move |app| {
-        app.useOptions(move |options| {
+        app.options(move |options| {
             options.jwt.secret.clear();
             options.jwt.secret_file = Some(path.to_string_lossy().into_owned());
         });
@@ -159,7 +159,7 @@ fn jwt_secret_is_absent_when_no_secret_is_configured() {
         .mode(AppMode::Development)
         .no_spa()
         .configure(|app| {
-            app.useOptions(|options| {
+            app.options(|options| {
                 options.jwt.secret.clear();
                 options.jwt.secret_file = None;
             });

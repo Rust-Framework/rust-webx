@@ -1,0 +1,38 @@
+[package]
+name = "rust-webx-outbox-ef"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+documentation.workspace = true
+publish = false
+description = "Transactional outbox for rust-webx events: same-transaction enqueue and a durable lease-based store over rust-ef, driving the framework dispatcher"
+readme = "README.md"
+keywords = ["web", "outbox", "events", "rust-ef"]
+categories = ["web-programming", "database"]
+
+[lib]
+name = "webx_outbox_ef"
+
+[dependencies]
+rust-webx-core.workspace = true
+rust-webx-host.workspace = true
+rust-webx-outbox.workspace = true
+rust-dix.workspace = true
+rust-ef.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+rust-webx.workspace = true
+rust-ef-sqlite.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

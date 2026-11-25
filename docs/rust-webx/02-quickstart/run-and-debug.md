@@ -26,7 +26,7 @@ Host::builder()
 
 ```bash
 # Docbit 作品集
-cargo run -p docbit-host
+cargo run --manifest-path examples/docbit/Cargo.toml -p docbit-host
 
 # 仅编译检查
 cargo check --workspace
@@ -77,7 +77,7 @@ RUST_LOG=debug cargo run
 | `No #[handler] registered for request type '...'` | 缺少 `#[handler]` 的 inventory 注册 | 确认 `impl IRequestHandler` 上标注了 `#[handler]` / `#[handler(inject)]` |
 | `route not found` 404 | 路由未收集 | 确认 `#[get]` 标注在 `impl IRequest` 上 |
 | 端口占用 | 5000 已被使用 | 修改 `App.Urls` |
-| 类型不匹配 | Request/Handler 响应类型不一致（编译错误，受 `T: IRequest<R>` 约束） | 确保 `IRequest<T>` 的 T = Handler 的 R；运行期 downcast 失败返回 `Error::Internal` |
+| 类型不匹配 | Request/Handler 响应类型不一致（编译错误，受 `T: IRequest<R>` 约束） | 确保 `IRequest<T>` 的 T = Handler 的 R；运行期 downcast 失败返回 `Error::internal` |
 
 ### 编译时检查清单
 

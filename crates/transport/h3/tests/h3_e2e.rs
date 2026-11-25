@@ -855,7 +855,7 @@ async fn h3_connection_without_a_first_request_is_closed_by_the_deadline() {
             .mode(AppMode::Development)
             .no_spa()
             .configure(|app| {
-                app.use_options(|options| options.server.first_request_timeout_seconds = 1)
+                app.options(|options| options.server.first_request_timeout_seconds = 1)
             }),
     );
     let engine_shutdown = host.engine_handle();
@@ -1062,7 +1062,7 @@ async fn h3_connections_share_the_engine_admission_governor() {
         .mode(AppMode::Development)
         .no_spa()
         .configure(|app| {
-            app.useOptions(|options| {
+            app.options(|options| {
                 options.app.max_connections = 1;
                 options.server.admission_timeout_ms = 100;
             })

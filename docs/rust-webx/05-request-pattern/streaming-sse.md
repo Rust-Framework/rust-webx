@@ -64,7 +64,7 @@ SseEvent::event("tick", "1")
 ```
 
 - `data` 中的 `\n` 会拆成多条 `data:` 行；SSE 客户端会再用 `\n` 拼回。
-- `event` / `id` 不允许包含 CR、LF、NUL；框架返回 `Error::Validation` 并结束流（防止协议行注入）。
+- `event` / `id` 不允许包含 CR、LF、NUL；框架返回 `Error::validation` 并结束流（防止协议行注入）。
 - 空 `data` 仍输出一条空的 `data:` 行，保证事件会被分发。
 
 ## 生命周期与计量

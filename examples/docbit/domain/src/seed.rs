@@ -1,0 +1,399 @@
+//! Seed data — default roles, categories, and core resources (stable UUID PKs).
+//!
+//! Only **foreign-key-independent** tables register rows with `has_data`:
+//! `bootstrap()` applies every `has_data` batch in metadata order, which is a
+//! hash order rather than a dependency order — a `role_users` row could be
+//! inserted before its `roles` parent and fail the FK check. Dependent rows are
+//! written explicitly, principals first:
+//!
+//! - `role_users` (→ users, roles) by `startup::seed::admin_user`
+//! - `exhibitions` (→ categories) by `docbit_handlers::catalog` during boot, from
+//!   `exhibition_seed_rows()` and each work's INDEX.json
+
+use rust_ef::prelude::*;
+
+use crate::entities::{Category, Exhibition, Resource, Role, User};
+use crate::ids::seed as id;
+
+/// 资源分类常量
+pub const RES_TYPE_APP: &str = "应用";
+pub const RES_TYPE_MODULE: &str = "模块";
+pub const RES_TYPE_PAGE: &str = "页面";
+pub const RES_TYPE_ACTION: &str = "操作";
+pub const RES_TYPE_DATA: &str = "数据";
+pub const RES_TYPE_OTHER: &str = "其他";
+
+/// GitHub org hosting the five portfolio repositories.
+pub const GITHUB_ORG_BASE: &str = "https://github.com/Rust-Framework";
+
+/// Canonical `(slug, repo_url)` for the five ecosystem exhibitions.
+/// Used by EF seed and by startup upsert for existing databases.
+pub fn canonical_exhibition_repo_urls() -> &'static [(&'static str, &'static str)] {
+    &[
+        ("rust-dix", "https://github.com/Rust-Framework/rust-dix"),
+        ("rust-ef", "https://github.com/Rust-Framework/rust-ef"),
+        ("rust-webx", "https://github.com/Rust-Framework/rust-webx"),
+        (
+            "rust-agent-framework",
+            "https://github.com/Rust-Framework/rust-agent-framework",
+        ),
+        (
+            "rust-gpui-rml",
+            "https://github.com/Rust-Framework/rust-gpui-rml",
+        ),
+    ]
+}
+
+/// Category row for an INDEX.json `meta.category` value, for works that have no
+/// seed template (anything an operator uploads).
+///
+/// Unknown or empty categories fall back to "uncategorized" rather than failing
+/// the insert, since `Exhibition.category_id` is a required foreign key.
+pub fn category_id_for(category: &str) -> &'static str {
+    match category.trim().to_ascii_lowercase().as_str() {
+        "orm" => id::CAT_ORM,
+        "framework" => id::CAT_FRAMEWORK,
+        "di" | "dependency-injection" => id::CAT_DI,
+        "agent" => id::CAT_AGENT,
+        "ui" => id::CAT_UI,
+        _ => id::CAT_UNCATEGORIZED,
+    }
+}
+
+/// Full exhibition seed rows (stable UUIDs). Shared by `has_data` and startup upsert.
+pub fn exhibition_seed_rows() -> Vec<Exhibition> {
+    let now = 0i64;
+    vec![
+        Exhibition {
+            id: id::EXH_RUST_DIX.into(),
+            slug: "rust-dix".into(),
+            title: "Rust DI Framework".into(),
+            subtitle: "面向接口·键控服务·设计模式落地".into(),
+            description: "面向接口的 Rust 依赖注入框架 — 三种生命周期、键控服务、循环依赖检测与过程宏自动注册。 | Interface-oriented DI for Rust — lifetimes, keyed services, circular dependency detection, and proc-macro auto-registration.".into(),
+            category_id: id::CAT_DI.into(),
+            tags: r#"["rust","di","dependency-injection","interface-oriented"]"#.into(),
+            repo_url: Some("https://github.com/Rust-Framework/rust-dix".into()),
+            demo_url: None,
+            docs_slug: Some("rust-dix".into()),
+            featured: true,
+            sort_order: 1,
+            logo_url: Some("/assets/works/rust-dix.svg".into()),
+            created_at: now,
+            updated_at: now,
+            created_id: None,
+            updated_id: None,
+            is_deleted: false,
+            category: BelongsTo::new(),
+        },
+        Exhibition {
+            id: id::EXH_RUST_EF.into(),
+            slug: "rust-ef".into(),
+            title: "Rust Entity Framework".into(),
+            subtitle: "接口导向 · EF Core 风格 · DI 集成 ORM".into(),
+            description: "EF Core 风格的 Rust ORM — DbContext、linq! 宏、变更跟踪与多数据库支持，与 rust-dix DI 无缝集成。 | EF Core-inspired ORM for Rust — DbContext, LINQ queries, change tracking, migrations, and multi-database support.".into(),
+            category_id: id::CAT_ORM.into(),
+            tags: r#"["rust","orm","ef-core","database","linq"]"#.into(),
+            repo_url: Some("https://github.com/Rust-Framework/rust-ef".into()),
+            demo_url: None,
+            docs_slug: Some("rust-ef".into()),
+            featured: true,
+            sort_order: 2,
+            logo_url: Some("/assets/works/rust-ef.svg".into()),
+            created_at: now,
+            updated_at: now,
+            created_id: None,
+            updated_id: None,
+            is_deleted: false,
+            category: BelongsTo::new(),
+        },
+        Exhibition {
+            id: id::EXH_WEBX.into(),
+            slug: "rust-webx".into(),
+            title: "Rust Web Framework".into(),
+            subtitle: "高内聚·编译时路由·DI+中介者双核心".into(),
+            description: "以 ASP.NET Core 为蓝本的生产级 Rust Web 框架 — 编译时路由、DI+中介者双核心、JWT 认证，请求即端点，零配置 Handler。 | ASP.NET Core-inspired Web API framework for Rust — compile-time routing, DI + Mediator, JWT auth, and zero-config handlers.".into(),
+            category_id: id::CAT_FRAMEWORK.into(),
+            tags: r#"["rust","webapp","webapi","mediator"]"#.into(),
+            repo_url: Some("https://github.com/Rust-Framework/rust-webx".into()),
+            demo_url: None,
+            docs_slug: Some("rust-webx".into()),
+            featured: true,
+            sort_order: 3,
+            logo_url: Some("/assets/works/rust-webx.svg".into()),
+            created_at: now,
+            updated_at: now,
+            created_id: None,
+            updated_id: None,
+            is_deleted: false,
+            category: BelongsTo::new(),
+        },
+        Exhibition {
+            id: id::EXH_RUST_AGENT.into(),
+            slug: "rust-agent-framework".into(),
+            title: "Rust Agent Framework".into(),
+            subtitle: "异步·流式·多智能体编排平台".into(),
+            description: "企业级 Rust AI 智能体框架 — 流式输出、工具调用、人机协同审批与六种多智能体编排模式。 | Async-native LLM agent framework with streaming, tool-calling, HITL approval, and multi-agent orchestration.".into(),
+            category_id: id::CAT_AGENT.into(),
+            tags: r#"["rust","agent","llm","multi-agent","workflow","ai"]"#.into(),
+            repo_url: Some("https://github.com/Rust-Framework/rust-agent-framework".into()),
+            demo_url: None,
+            docs_slug: Some("rust-agent-framework".into()),
+            featured: true,
+            sort_order: 4,
+            logo_url: Some("/assets/works/rust-agent-framework.svg".into()),
+            created_at: now,
+            updated_at: now,
+            created_id: None,
+            updated_id: None,
+            is_deleted: false,
+            category: BelongsTo::new(),
+        },
+        Exhibition {
+            id: id::EXH_RUST_GPUI_RML.into(),
+            slug: "rust-gpui-rml".into(),
+            title: "Rust GPUI RML".into(),
+            subtitle: "为 GPUI 设计的 HTML 友好型声明式 UI 框架".into(),
+            description: "为 GPUI 打造的 HTML 友好型声明式 UI 框架 — .rml 标记 + code-behind，编译期生成 GPUI 代码，零运行时开销。 | HTML-friendly declarative UI for GPUI — markup in .rml, logic in code-behind, compile-time rendering with zero runtime overhead.".into(),
+            category_id: id::CAT_UI.into(),
+            tags: r#"["rust","gpui","ui","rml","desktop"]"#.into(),
+            repo_url: Some("https://github.com/Rust-Framework/rust-gpui-rml".into()),
+            demo_url: None,
+            docs_slug: Some("rust-gpui-rml".into()),
+            featured: true,
+            sort_order: 5,
+            logo_url: Some("/assets/works/rust-gpui-rml.svg".into()),
+            created_at: now,
+            updated_at: now,
+            created_id: None,
+            updated_id: None,
+            is_deleted: false,
+            category: BelongsTo::new(),
+        },
+        Exhibition {
+            id: id::EXH_RUST_AGENT_FLOW.into(),
+            slug: "rust-agent-flow".into(),
+            title: "Rust Agent Flow".into(),
+            subtitle: "GPUI 流程图设计器·图灵完备控制流·策略模式扩展".into(),
+            description: "基于 GPUI 与 gpui-component 的框架无关流程图设计组件库 — 图灵完备控制流节点、dagre 自动布局、ReactFlow 风格边路径算法与 Schema 驱动属性面板。 | Framework-agnostic flow-chart editor for GPUI — Turing-complete control-flow nodes, dagre layout, ReactFlow-style edge routing, and schema-driven property panels.".into(),
+            category_id: id::CAT_FRAMEWORK.into(),
+            tags: r#"["rust","gpui","flow-editor","agent-flow","reactflow"]"#.into(),
+            repo_url: Some("https://github.com/Rust-Framework/rust-flow".into()),
+            demo_url: None,
+            docs_slug: Some("rust-agent-flow".into()),
+            featured: true,
+            sort_order: 6,
+            logo_url: None,
+            created_at: now,
+            updated_at: now,
+            created_id: None,
+            updated_id: None,
+            is_deleted: false,
+            category: BelongsTo::new(),
+        },
+    ]
+}
+
+/// Register seed data on the DbContext model builder.
+pub fn register(ctx: &mut DbContext) {
+    let now = 0i64;
+
+    ctx.model().entity::<Role>().has_data(&[
+        Role {
+            id: id::ROLE_ADMIN.into(),
+            name: "admin".into(),
+            description: "管理员".into(),
+            created_id: None,
+            created_at: now,
+            updated_id: None,
+            updated_at: now,
+            is_deleted: false,
+            users: HasMany::new(),
+            resources: HasMany::new(),
+        },
+        Role {
+            id: id::ROLE_USER.into(),
+            name: "user".into(),
+            description: "普通用户".into(),
+            created_id: None,
+            created_at: now,
+            updated_id: None,
+            updated_at: now,
+            is_deleted: false,
+            users: HasMany::new(),
+            resources: HasMany::new(),
+        },
+    ]);
+
+    ctx.model().entity::<Category>().has_data(&[
+        Category {
+            id: id::CAT_UNCATEGORIZED.into(),
+            name: "未分类".into(),
+            slug: "uncategorized".into(),
+            parent_id: None,
+            sort_order: 0,
+            created_id: None,
+            created_at: now,
+            updated_id: None,
+            updated_at: now,
+            is_deleted: false,
+            parent: BelongsTo::new(),
+            children: HasMany::new(),
+        },
+        Category {
+            id: id::CAT_ORM.into(),
+            name: "ORM框架".into(),
+            slug: "orm".into(),
+            parent_id: None,
+            sort_order: 1,
+            created_id: None,
+            created_at: now,
+            updated_id: None,
+            updated_at: now,
+            is_deleted: false,
+            parent: BelongsTo::new(),
+            children: HasMany::new(),
+        },
+        Category {
+            id: id::CAT_FRAMEWORK.into(),
+            name: "Web框架".into(),
+            slug: "framework".into(),
+            parent_id: None,
+            sort_order: 2,
+            created_id: None,
+            created_at: now,
+            updated_id: None,
+            updated_at: now,
+            is_deleted: false,
+            parent: BelongsTo::new(),
+            children: HasMany::new(),
+        },
+        Category {
+            id: id::CAT_DI.into(),
+            name: "依赖注入".into(),
+            slug: "di".into(),
+            parent_id: None,
+            sort_order: 3,
+            created_id: None,
+            created_at: now,
+            updated_id: None,
+            updated_at: now,
+            is_deleted: false,
+            parent: BelongsTo::new(),
+            children: HasMany::new(),
+        },
+        Category {
+            id: id::CAT_AGENT.into(),
+            name: "AI智能体".into(),
+            slug: "agent".into(),
+            parent_id: None,
+            sort_order: 4,
+            created_id: None,
+            created_at: now,
+            updated_id: None,
+            updated_at: now,
+            is_deleted: false,
+            parent: BelongsTo::new(),
+            children: HasMany::new(),
+        },
+        Category {
+            id: id::CAT_UI.into(),
+            name: "桌面UI".into(),
+            slug: "ui".into(),
+            parent_id: None,
+            sort_order: 5,
+            created_id: None,
+            created_at: now,
+            updated_id: None,
+            updated_at: now,
+            is_deleted: false,
+            parent: BelongsTo::new(),
+            children: HasMany::new(),
+        },
+    ]);
+
+    ctx.model().entity::<User>().has_data(&[User {
+        id: id::USER_ADMIN.into(),
+        name: "Administrator".into(),
+        email: "admin@docbit.local".into(),
+        password_hash: "$2b$04$0Txv1I1N9PmPg4I9fkbZUuFVeDWIDtmlD6CEjiwxAuLzSNMHVQ/3W".into(),
+        created_id: None,
+        created_at: now,
+        updated_id: None,
+        updated_at: now,
+        is_deleted: false,
+        roles: HasMany::new(),
+    }]);
+
+    ctx.model().entity::<Resource>().has_data(&[
+        Resource {
+            id: id::RES_USERS_LIST.into(),
+            name: "用户管理-列表".into(),
+            description: "查看用户列表".into(),
+            resource_type: RES_TYPE_ACTION.into(),
+            value: "/api/users".into(),
+            properties: r#"{"method":"GET"}"#.into(),
+            created_id: None,
+            created_at: now,
+            updated_id: None,
+            updated_at: now,
+            is_deleted: false,
+            roles: HasMany::new(),
+        },
+        Resource {
+            id: id::RES_ROLES.into(),
+            name: "角色管理".into(),
+            description: "角色 CRUD".into(),
+            resource_type: RES_TYPE_ACTION.into(),
+            value: "/api/roles/*".into(),
+            properties: r#"{"method":"*"}"#.into(),
+            created_id: None,
+            created_at: now,
+            updated_id: None,
+            updated_at: now,
+            is_deleted: false,
+            roles: HasMany::new(),
+        },
+        Resource {
+            id: id::RES_RESOURCES.into(),
+            name: "资源管理".into(),
+            description: "权限资源 CRUD".into(),
+            resource_type: RES_TYPE_ACTION.into(),
+            value: "/api/resources/*".into(),
+            properties: r#"{"method":"*"}"#.into(),
+            created_id: None,
+            created_at: now,
+            updated_id: None,
+            updated_at: now,
+            is_deleted: false,
+            roles: HasMany::new(),
+        },
+        Resource {
+            id: id::RES_AUTHORIZES.into(),
+            name: "授权管理".into(),
+            description: "角色-资源授权 CRUD".into(),
+            resource_type: RES_TYPE_ACTION.into(),
+            value: "/api/authorizes/*".into(),
+            properties: r#"{"method":"*"}"#.into(),
+            created_id: None,
+            created_at: now,
+            updated_id: None,
+            updated_at: now,
+            is_deleted: false,
+            roles: HasMany::new(),
+        },
+        Resource {
+            id: id::RES_TRACKING.into(),
+            name: "访问统计".into(),
+            description: "站点访问统计查询".into(),
+            resource_type: RES_TYPE_ACTION.into(),
+            value: "/api/tracking/*".into(),
+            properties: r#"{"method":"GET"}"#.into(),
+            created_id: None,
+            created_at: now,
+            updated_id: None,
+            updated_at: now,
+            is_deleted: false,
+            roles: HasMany::new(),
+        },
+    ]);
+}

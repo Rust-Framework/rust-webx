@@ -26,7 +26,7 @@ fn start_http_host(port: u16) -> webx_host::server::ServerHandle {
         .mode(webx_core::mode::AppMode::Development)
         .no_spa()
         .configure(move |app| {
-            app.useOptions(move |o| o.app.urls = vec![url.clone()]);
+            app.options(move |o| o.app.urls = vec![url.clone()]);
         })
         .build();
     let handle = host.server_handle();
@@ -119,7 +119,7 @@ async fn http2_over_tls_negotiates_h2_via_alpn() {
         .mode(webx_core::mode::AppMode::Development)
         .no_spa()
         .configure(move |app| {
-            app.useOptions(move |o| {
+            app.options(move |o| {
                 o.app.urls = vec![url.clone()];
                 o.tls.cert_path = cert_s.clone();
                 o.tls.key_path = key_s.clone();

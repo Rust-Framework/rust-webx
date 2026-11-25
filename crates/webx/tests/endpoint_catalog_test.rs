@@ -129,7 +129,7 @@ fn find<'a>(endpoints: &'a [EndpointInfo], path: &str) -> &'a EndpointInfo {
 
 #[test]
 fn descriptors_carry_resource_keys_not_translations() {
-    let catalog = EndpointCatalog::from_inventory();
+    let catalog = EndpointCatalog::try_from_inventory().expect("catalog builds");
     let descriptor = catalog.get("POST", "/api/endpoints/blog").unwrap();
 
     assert_eq!(descriptor.name.key, "endpoint.blog.create.name");
@@ -144,7 +144,7 @@ fn descriptors_carry_resource_keys_not_translations() {
 
 #[test]
 fn localized_view_uses_the_default_culture() {
-    let catalog = EndpointCatalog::from_inventory();
+    let catalog = EndpointCatalog::try_from_inventory().expect("catalog builds");
     let endpoints = catalog.localized(&localizer());
 
     let create = find(&endpoints, "/api/endpoints/blog");
@@ -158,7 +158,7 @@ fn localized_view_uses_the_default_culture() {
 
 #[test]
 fn explicit_culture_overrides_the_default() {
-    let catalog = EndpointCatalog::from_inventory();
+    let catalog = EndpointCatalog::try_from_inventory().expect("catalog builds");
     let endpoints = catalog.localized_for(&localizer(), "en-US");
 
     let create = find(&endpoints, "/api/endpoints/blog");
@@ -169,7 +169,7 @@ fn explicit_culture_overrides_the_default() {
 
 #[test]
 fn doc_comment_is_the_fallback_when_no_display_attribute_exists() {
-    let catalog = EndpointCatalog::from_inventory();
+    let catalog = EndpointCatalog::try_from_inventory().expect("catalog builds");
     let descriptor = catalog.get("GET", "/api/endpoints/blog/{slug}").unwrap();
     assert!(descriptor.name.key.is_empty());
     assert_eq!(descriptor.name.text, "文档回退-博客详情");
@@ -186,7 +186,7 @@ fn doc_comment_is_the_fallback_when_no_display_attribute_exists() {
 
 #[test]
 fn text_attributes_may_precede_the_route_macro() {
-    let catalog = EndpointCatalog::from_inventory();
+    let catalog = EndpointCatalog::try_from_inventory().expect("catalog builds");
     let descriptor = catalog.get("GET", "/api/endpoints/order").unwrap();
     assert_eq!(descriptor.name.text, "顺序无关-名称");
     assert_eq!(descriptor.description.text, "顺序无关-描述");
@@ -200,7 +200,7 @@ fn text_attributes_may_precede_the_route_macro() {
 
 #[test]
 fn name_falls_back_to_the_request_type() {
-    let catalog = EndpointCatalog::from_inventory();
+    let catalog = EndpointCatalog::try_from_inventory().expect("catalog builds");
     let descriptor = catalog.get("GET", "/api/endpoints/ping").unwrap();
     assert!(descriptor.name.key.is_empty());
     assert_eq!(descriptor.name.text, "ping");
@@ -211,13 +211,15 @@ fn name_falls_back_to_the_request_type() {
 
 #[test]
 fn catalog_serializes_to_method_path_name_description_and_rules() {
-    let catalog = EndpointCatalog::from_inventory();
+    let catalog = EndpointCatalog::try_from_inventory().expect("catalog builds");
     let endpoints = catalog.localized(&localizer());
     let create = find(&endpoints, "/api/endpoints/blog");
 
     assert_eq!(
         serde_json::to_value(create).unwrap(),
         serde_json::json!({
+            "id": create.id,
+            "guid": create.guid,
             "method": "POST",
             "path": "/api/endpoints/blog",
             "name": "博客模块-创建博客",
@@ -227,13 +229,55 @@ fn catalog_serializes_to_method_path_name_description_and_rules() {
                 { "roles": ["admin"], "permissions": [] },
                 { "roles": [], "permissions": ["blog:create"] },
             ],
+            "dynamic": false,
+            "requires_auth": true,
+            "response_type": "String",
         })
     );
 }
 
 #[test]
+fn descriptors_carry_a_stable_id_and_authorization_flags() {
+    let catalog = EndpointCatalog::try_from_inventory().expect("catalog builds");
+
+    let protected = catalog.get("POST", "/api/endpoints/blog").unwrap();
+    assert!(
+        protected.id.ends_with("CreateBlogRequest"),
+        "id is the qualified request type name, got {}",
+        protected.id
+    );
+    assert!(!protected.dynamic);
+    assert!(protected.requires_auth);
+    assert_eq!(protected.response_type, "String");
+    assert_eq!(
+        catalog.get_by_id(protected.id).unwrap().path,
+        "/api/endpoints/blog"
+    );
+
+    let public = catalog.get("GET", "/api/endpoints/ping").unwrap();
+    assert!(!public.requires_auth);
+    assert!(!public.dynamic);
+
+    // The GUID is deterministic (v5) and stable across repeated builds of the
+    // same source: same id → same GUID, different endpoints → different GUIDs.
+    let guid = protected.guid.to_string();
+    assert_eq!(guid.len(), 36, "hyphenated UUID, got {guid}");
+    assert_eq!(guid.as_bytes()[14], b'5', "RFC 4122 version 5");
+    assert_eq!(protected.guid, EndpointGuid::from_request_id(protected.id));
+    assert_eq!(
+        catalog.get_by_guid(protected.guid).unwrap().id,
+        protected.id
+    );
+    assert_ne!(public.guid, protected.guid);
+    assert_eq!(
+        serde_json::to_value(protected).unwrap()["guid"],
+        serde_json::json!(guid)
+    );
+}
+
+#[test]
 fn descriptors_serialize_with_resource_references() {
-    let catalog = EndpointCatalog::from_inventory();
+    let catalog = EndpointCatalog::try_from_inventory().expect("catalog builds");
     let descriptor = catalog.get("POST", "/api/endpoints/blog").unwrap();
     let value = serde_json::to_value(descriptor).unwrap();
 
@@ -245,7 +289,7 @@ fn descriptors_serialize_with_resource_references() {
 
 #[test]
 fn catalog_is_sorted_by_path_then_method() {
-    let catalog = EndpointCatalog::from_inventory();
+    let catalog = EndpointCatalog::try_from_inventory().expect("catalog builds");
     for pair in catalog.all().windows(2) {
         assert!(
             (pair[0].path, pair[0].method) <= (pair[1].path, pair[1].method),
@@ -264,7 +308,7 @@ fn host_exposes_the_catalog_and_uses_the_global_culture_config() {
         .mode(AppMode::Development)
         .no_spa()
         .configure(|builder| {
-            builder.useOptions(|options| {
+            builder.options(|options| {
                 options.culture.default = "zh-CN".to_string();
             });
         })

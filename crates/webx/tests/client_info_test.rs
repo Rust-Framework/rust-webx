@@ -57,7 +57,7 @@ async fn spawn_host(port: u16, trust: bool, trusted_proxies: &[&str]) -> ServerH
         .mode(AppMode::Development)
         .no_spa()
         .configure(move |app| {
-            app.useOptions(move |options| {
+            app.options(move |options| {
                 options.client_info.trust_forwarded_headers = trust;
                 options.client_info.trusted_proxies = trusted;
             });

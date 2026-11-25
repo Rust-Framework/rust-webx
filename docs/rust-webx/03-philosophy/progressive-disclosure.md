@@ -53,10 +53,10 @@ impl IRequestHandler<MyRequest, MyResponse> for MyHandler {
 ```rust
 Host::builder()
     .use_authentication()
-    .add_localization()   // 可选：locales/<culture>.json
+    .use_localization(LocalizationOptions::new())   // 可选：locales/<culture>.json
     .use_cors(config)
-    .add_memory_cache()
-    .configure(|app| app.useOptions(|o| { ... }))
+    .add_memory_cache(CacheOptions::default())
+    .configure(|app| app.options(|o| { ... }))
 ```
 
 生产级能力通过 Builder 方法按需链接。
@@ -66,8 +66,7 @@ Host::builder()
 - 自定义 `IMiddleware`
 - 自定义 `IEndpoint`
 - 实现 `IPipelineBehavior`
-- 实现 `IDynamicAuthorizer`（运行时路由级授权）
-- 实现 `IAuthorizationPolicy`（旧式自定义策略）
+- 实现 `IDynamicAuthorizer`（运行时路由级授权：`authorize` / `authorize_with_declared_rules`）
 
 仅在默认能力不够时披露。
 
@@ -113,7 +112,7 @@ graph TD
     B -->|路由层| D[IEndpoint]
     B -->|业务层| E[IPipelineBehavior]
     B -->|认证| F[IAuthenticationHandler]
-    B -->|授权| G[IAuthorizationPolicy]
+    B -->|授权| G[IDynamicAuthorizer]
     B -->|缓存| H[IDistributedCache]
     B -->|后台任务| I[IHostedService]
 ```

@@ -131,7 +131,7 @@ async fn chaos_connection_storm_is_shed_with_503() {
         .mode(AppMode::Development)
         .no_spa()
         .configure(|app| {
-            app.useOptions(|options| {
+            app.options(|options| {
                 options.app.max_connections = 4;
                 options.server.admission_timeout_ms = 50;
             })

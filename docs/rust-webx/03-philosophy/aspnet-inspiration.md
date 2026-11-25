@@ -41,7 +41,7 @@ ASP.NET Core 的 Generic Host 统一管理配置、DI、生命周期。rust-webx
 Host::builder()
     .mode(AppMode::Development)
     .register(|svc| { ... })
-    .configure(|app| app.useOptions(|o| { ... }))
+    .configure(|app| app.options(|o| { ... }))
     .use_spa("wwwroot")
     .use_authentication()
     .build()
@@ -56,7 +56,7 @@ Host::builder()
 | 槽 | 职责 | 典型内容 |
 |---|---|---|
 | `register(\|svc\| …)` | 注册槽：DI 对象图 | `add_mediator`、DbContext、端口适配器、`#[inject]` 解析的底层服务 |
-| `configure(\|app\| …)` | 应用槽：`AppOptions` 运行期开关 | 超时、body 上限、metrics、CORS/JWT 等配置节；`use_options` 修改本 Host 的选项 |
+| `configure(\|app\| …)` | 应用槽：`AppOptions` 运行期开关 | 超时、body 上限、metrics、CORS/JWT 等配置节；`app.options(..)` 修改本 Host 的选项 |
 
 纪律：
 

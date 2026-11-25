@@ -52,7 +52,7 @@ svc.singleton::<dyn IRequestHandler<HelloRequest, String>>(
 
 ## 6. 401/403 授权问题
 
-- 是否启用了 `add_authentication()`？
+- 是否启用了 `use_authentication()`？
 - JWT Secret 是否一致？
 - `#[authorize(role = "...")]` 的 role 是否与 token 中的 roles 匹配？
 
@@ -68,8 +68,8 @@ svc.singleton::<dyn IRequestHandler<HelloRequest, String>>(
 
 ## 8. 端点文本没有生效
 
-- 是否调用了 `.add_localization()`（约定读取 `locales/<culture>.json`）或
-  `.add_localization_with(...)`？
+- 是否调用了 `.use_localization(LocalizationOptions::new())`（约定读取 `locales/<culture>.json`）或
+  `.use_localization(LocalizationOptions::none().resources(...))`？
 - `Culture.Default` 是否与资源文件名匹配？
 - 资源键是否在 JSON 中？缺失时按 `text` → key 回退；
 - `#[display]` / `#[description]` / `#[category]` 写在路由宏前后都可以；写在 struct 上无效。

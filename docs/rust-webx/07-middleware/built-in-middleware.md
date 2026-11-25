@@ -8,13 +8,13 @@
 | RequestId | 自动 | 生成 X-Request-Id |
 | SecurityHeaders | 自动 | X-Frame-Options 等 |
 | CORS | `use_cors(config)` | 跨域 |
-| JWT Auth | `add_authentication()` | Bearer Token 认证 |
+| JWT Auth | `use_authentication()` | Bearer Token 认证 |
 | Resource Auth | 自动（端点上的 `#[authorize]`） | 基于端点元数据的授权 |
 | RateLimit | 配置 `RateLimit.enabled` | 请求速率限制 |
 | SPA | `use_spa("wwwroot")` | 静态文件托管 |
-| RequestTracing | 需手动 `use_middleware::<RequestTracing>()` | 请求日志、注入 `x-trace-id`，并写入请求上下文（Handler 用 `RequestContext::trace_id()` 读取） |
-| Timing | 需手动 `use_middleware::<TimingMiddleware>()` | 注入 `x-request-count` |
-| Compression | 需手动 `use_middleware::<CompressionMiddleware>()` | Gzip 压缩 |
+| RequestTracing | 需手动 `use_middleware(MiddlewareSpec::new::<RequestTracing>())` | 请求日志、注入 `x-trace-id`，并写入请求上下文（Handler 用 `RequestContext::trace_id()` 读取） |
+| Timing | 需手动 `use_middleware(MiddlewareSpec::new::<TimingMiddleware>())` | 注入 `x-request-count` |
+| Compression | 需手动 `use_middleware(MiddlewareSpec::new::<CompressionMiddleware>())` | Gzip 压缩 |
 
 ## CORS
 
@@ -36,7 +36,7 @@ Host::builder()
 Host::builder().use_authentication()
 ```
 
-`add_authentication()` 注册 `jwt_middleware` 并从 `Jwt.Secret` 读取密钥。管道顺序见
+`use_authentication()` 注册 `jwt_middleware` 并从 `Jwt.Secret` 读取密钥。管道顺序见
 [中间件编排策略](ordering-strategy.md)，授权语义见 [认证与授权](../09-auth-security/INDEX.md)。
 
 ## SPA 托管
@@ -52,14 +52,16 @@ Host::builder().use_spa("wwwroot")
 在 `appsettings.json` 的 `RateLimit` 节启用即自动接入；也可手动提供配置：
 
 ```rust
-Host::builder().use_middleware_with(|| {
+use webx::MiddlewareSpec;
+
+Host::builder().use_middleware(MiddlewareSpec::factory(|| {
     Arc::new(RateLimitMiddleware::from_config(&RateLimitSection {
         enabled: true,
         requests_per_second: 10.0,
         burst_size: 20,
         ..Default::default()
     })) as Arc<dyn IMiddleware>
-})
+}))
 ```
 
 `RateLimitMiddleware` 没有 `Default`，必须用 `new(requests_per_second, burst_size)` 或

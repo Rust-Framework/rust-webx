@@ -2,53 +2,70 @@
 
 ## Error 类型
 
-框架统一错误类型 `webx::Error`：
+框架统一错误类型 `webx::Error` 是 `rust_core::AppError` 的别名（2.9.1 起不再有第二套 enum），
+字段私有，用语义构造器创建、用访问器读取：
 
 ```rust
-pub enum Error {
-    Http(String),
-    Status(u16, String),
-    Unauthorized(String),
-    Forbidden(String),
-    Di(String),
-    Routing(String),
-    Serialization(serde_json::Error),
-    Internal(String),
-    Message(String),
-    Validation(String),
-    NotFound(String),
-    Conflict(String),
-    TooManyRequests { retry_after_secs: u64, detail: String },
-    ConflictRetryable(String),
-    PayloadTooLarge(String),
-    UnsupportedMediaType(String),
-    Problem(Box<ProblemDetails>),   // 绑定/校验失败，原样写出
+use rust_core::AppError; // `webx::Error` 就是它的别名
+
+impl AppError {
+    // 400：JSON 解析 / 通用请求错误 / 业务校验
+    pub fn invalid_json(error: serde_json::Error) -> Self;
+    pub fn bad_request(detail: impl Into<String>) -> Self;
+    pub fn validation(detail: impl Into<String>) -> Self;       // 字段级错误用 with_field
+    // 401 / 403 / 404 / 409
+    pub fn unauthorized(detail: impl Into<String>) -> Self;
+    pub fn forbidden(detail: impl Into<String>) -> Self;
+    pub fn not_found(detail: impl Into<String>) -> Self;
+    pub fn route_not_found(detail: impl Into<String>) -> Self;
+    pub fn conflict(detail: impl Into<String>) -> Self;         // 永久 409
+    pub fn conflict_retryable(detail: impl Into<String>) -> Self; // 可等待的 409
+    // 413 / 415 / 429 / 503
+    pub fn payload_too_large(detail: impl Into<String>) -> Self;
+    pub fn unsupported_media_type(detail: impl Into<String>) -> Self;
+    pub fn too_many_requests(retry_after_secs: u64, detail: impl Into<String>) -> Self;
+    pub fn unavailable(detail: impl Into<String>) -> Self;      // 可重试 503
+    // 500：消息只进 operator 日志，客户端拿不到 detail
+    pub fn internal(operator: impl Into<String>) -> Self;
+    pub fn di(operator: impl Into<String>) -> Self;
+    pub fn response_serialization(error: serde_json::Error) -> Self;
+    pub fn status(status: u16, detail: impl Into<String>) -> Self; // 显式状态码逃生口
 }
 ```
 
+读取用访问器，不再 match 变体：
+
+```rust
+let status = err.status_code();      // 429 / 503 / ...
+let code = err.code();               // "too_many_requests"
+let public = err.public_detail();    // 可展示给客户端的文案
+let operator = err.operator();       // 只进日志 / 5xx 细节
+let fields = err.fields();           // 绑定/校验的字段问题
+```
+
+`kind()` 返回 `rust_core::ErrorKind`（`#[non_exhaustive]`）；跨 crate 判断优先用
+`status_code()` / `code()`，不要依赖内部枚举的穷举 match。
+
 ## HTTP 状态码映射
 
-| Error 变体 | HTTP 状态码 | 典型场景 |
-|-----------|-----------|---------|
-| `Http` | 400 | 通用 HTTP 错误 |
-| `Status(code, _)` | `code` | 显式指定状态码 |
-| `Unauthorized` | 401 | 认证失败、缺少令牌 |
-| `Forbidden` | 403 | 权限不足 |
-| `Di` | 500 | DI 解析失败 |
-| `Routing` | 404 | 路由错误 |
-| `Serialization` | 400 | JSON 解析错误 |
-| `ResponseSerialization` | 500 | 响应序列化失败（服务端 DTO 缺陷，不归咎客户端） |
-| `State` | 500 | 服务端状态机 / 编程错误 |
-| `Internal` | 500 | 未预期内部错误 |
-| `Message` | 500 | 通用错误 |
-| `Validation` | 400 | 业务校验失败 |
-| `NotFound` | 404 | 资源不存在 |
-| `Conflict` | 409 | 状态冲突 / 并发冲突（永久冲突） |
-| `TooManyRequests { .. }` | 429 | 被限流；同时写出 `Retry-After`（秒） |
-| `ConflictRetryable` | 409 | 可等待的冲突：冲突方完成后重试可能成功（`retryable: true`） |
-| `PayloadTooLarge` | 413 | 请求体或上传文件超限 |
-| `UnsupportedMediaType` | 415 | 请求内容类型不受支持 |
-| `Problem(details)` | `details.status` | 字段级校验/绑定失败，携带 `errors` |
+| 构造器 | HTTP 状态码 | code | 典型场景 |
+|-----------|-----------|------|---------|
+| `bad_request(..)` | 400 | `bad_request` | 通用 HTTP 错误 |
+| `validation(..)` | 400 | `validation_failed` | 业务校验失败 |
+| `invalid_json(e)` | 400 | `invalid_json` | JSON 解析错误 |
+| `unauthorized(..)` | 401 | `unauthorized` | 认证失败、缺少令牌 |
+| `forbidden(..)` | 403 | `forbidden` | 权限不足 |
+| `not_found(..)` | 404 | `not_found` | 资源不存在 |
+| `route_not_found(..)` | 404 | `route_not_found` | 路由错误 |
+| `conflict(..)` | 409 | `conflict` | 状态冲突 / 并发冲突（永久冲突） |
+| `conflict_retryable(..)` | 409 | `conflict_retryable` | 可等待的冲突：冲突方完成后重试可能成功 |
+| `payload_too_large(..)` | 413 | `payload_too_large` | 请求体或上传文件超限 |
+| `unsupported_media_type(..)` | 415 | `unsupported_media_type` | 请求内容类型不受支持 |
+| `too_many_requests(secs, ..)` | 429 | `too_many_requests` | 被限流；同时写出 `Retry-After`（秒） |
+| `unavailable(..)` | 503 | `service_unavailable` | 上游不可用；可重试 |
+| `internal(..)` / `di(..)` | 500 | `internal_error` / `dependency_injection` | 服务端缺陷 / DI 解析失败；detail 不回显 |
+| `status(code, ..)` | `code` | 由状态码推导 | 显式指定状态码 |
+| `ProblemDetails::validation(..).to_error()` | `problem.status` | `validation_failed` | 字段级校验/绑定失败，携带 `errors` |
 
 ## 机器可读错误码
 
@@ -68,10 +85,10 @@ pub enum Error {
 `ProblemDetails::new(..).with_code("...")` 自定义。
 
 限流用 `Error::too_many_requests(retry_after_secs, detail)`：引擎写出 `Retry-After` 响应头
-（只写一次），不要手写 `Error::Status(429, …)` 再自己拼头；`Status(429)` 的既有行为保留
+（只写一次），不要手写 `Error::status(429, …)` 再自己拼头；`status(429)` 的既有行为保留
 （不带头）。可等待的冲突用 `Error::conflict_retryable(detail)`：`409` +
 `retryable: true`，表示等冲突方完成后重试，**不是**自动盲目重试；永久冲突仍用
-`Error::Conflict`（`retryable: false`）。
+`Error::conflict`（`retryable: false`）。
 
 ## 默认错误响应格式
 
@@ -98,11 +115,11 @@ pub enum Error {
 async fn handle(&mut self, req: GetUserRequest) -> ActionResult<UserDto> {
     // 资源不存在
     let user = self.repo.find(&req.id)
-        .ok_or_else(|| Error::NotFound(format!("User {} not found", req.id)))?;
+        .ok_or_else(|| Error::not_found(format!("User {} not found", req.id)))?;
 
     // 业务校验
     if user.is_banned {
-        return Err(Error::Forbidden("Account is banned".into()));
+        return Err(Error::forbidden("Account is banned"));
     }
 
     Ok(user)
@@ -113,10 +130,10 @@ async fn handle(&mut self, req: GetUserRequest) -> ActionResult<UserDto> {
 
 ```rust
 let data = self.external_api.fetch().await
-    .map_err(|e| Error::Internal(e.to_string()))?;
+    .map_err(|e| Error::internal(e.to_string()))?;
 ```
 
-## ProblemDetails（RFC 7807）
+## ProblemDetails（RFC 9457）
 
 框架支持标准化问题详情；同一字段的多条错误会合并进 `errors` 数组：
 
@@ -142,39 +159,38 @@ return Err(ProblemDetails::validation(vec![
 ```
 
 `ProblemDetails` 还提供 `not_found(...)`、`with_detail(...)`、`with_instance(...)` 与 `to_error()`。
-参数绑定失败产生的也是 `Error::Problem`，因此客户端拿到的 `errors` 结构与手动校验完全一致
+参数绑定失败产生的也是携带 `errors` 的 `AppError`（`ProblemDetails::validation(..).to_error()`），
+因此客户端拿到的 `errors` 结构与手动校验完全一致
 （见[参数绑定](parameter-binding.md#错误响应)）。
 
 ## 持久层错误（rust-ef）
 
-`rust-ef` 是 Web 无关的 ORM（2.6 起没有 `webx` feature），`EFError` 到
-`webx::Error` 的翻译由独立的适配 crate `rust-webx-ef` 承担一次（`webx_ef`），
-应用只依赖它、不再自己写映射：
+`rust-ef` 是 Web 无关的 ORM（2.9.1 起没有 `webx` feature），并且自己实现了
+`From<EFError> for rust_core::AppError` 的脱敏映射。**不需要任何框架侧适配 crate**：
+`rust-webx-ef`（`webx_ef`）连同 `map_ef_error` / `EfResultExt` 已在 2.9.1 删除
+（见 [upgrade-to-2.9.1.md](../16-migration/upgrade-to-2.9.1.md)），应用在 Handler 里直接用 `?`：
 
 ```rust
-// handlers/src/db.rs（应用侧只需 re-export，或不写任何文件直接 use）
-pub use webx_ef::{map_ef_error, EfResultExt};
-
-// Handler
-let blogs = self.ctx.set::<Blog>().query().to_list().await.map_ef()?;
+// Handler：`?` 即完成 EFError → webx::Error 映射，不需要应用侧映射文件
+let blogs = self.ctx.set::<Blog>().query().to_list().await?;
 ```
 
 `NotFound`/`ModelValidation`/`ConcurrencyConflict` 保留业务文案；`Query`/`TypeConversion`
 是固定文案的 400，`UniqueViolation` 不回显 constraint/table，`Database` 的瞬态条件
 （`SQLSTATE` 08/40/57P0*、SQLite busy/locked、MySQL 1205/1213）与 `Connection`/`Transaction`
 一样是可重试 503，其余只在日志展开、客户端拿 500 且无 detail。
-运行期 DI 解析失败用 `?` 即转 `Error::Di`（500、detail 不回显），不需要本地助手。
+运行期 DI 解析失败同样用 `?`（`RdiError` → `Error::di`，500、detail 不回显），不需要本地助手。
 完整映射表见 [兼容性政策 §4](../../design/compatibility.md#4-边界约定rust-ef-错误映射)。
 
 ## 错误处理最佳实践
 
 | 实践 | 说明 |
 |------|------|
-| 可预期错误用 Error 变体 | 不用 panic |
-| 404 用 NotFound | 不要用 Internal 代替 |
-| 校验失败用 Validation | 与序列化错误区分 |
-| 认证失败用 Unauthorized，权限不足用 Forbidden | 或依赖中间件统一处理 |
-| 不要泄露内部细节 | Internal 消息不暴露堆栈给客户端 |
+| 可预期错误用 `Error` 构造器 | 不用 panic |
+| 404 用 `Error::not_found` | 不要用 `internal` 代替 |
+| 校验失败用 `Error::validation` | 与 `invalid_json` 区分 |
+| 认证失败用 `Error::unauthorized`，权限不足用 `Error::forbidden` | 或依赖中间件统一处理 |
+| 不要泄露内部细节 | `internal` 的消息只进 `operator()` 日志，不出现在客户端 |
 
 ## 小结
 

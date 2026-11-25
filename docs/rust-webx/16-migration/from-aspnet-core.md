@@ -48,7 +48,7 @@ impl IRequest<UserDto> for GetUserRequest {}
 impl IRequestHandler<GetUserRequest, UserDto> for GetUserHandler {
     async fn handle(&mut self, req: GetUserRequest) -> ActionResult<UserDto> {
         self.repo.find(&req.id)
-            .ok_or_else(|| Error::NotFound(format!("User {}", req.id)))
+            .ok_or_else(|| Error::not_found(format!("User {}", req.id)))
     }
 }
 ```
@@ -87,14 +87,14 @@ Host::builder()
 |-------------|-----------|------|
 | `[Authorize]` / 多个 `[Authorize]` | `#[authorize]` | 多条规则 AND；any-of 用 `roles = ["a", "b"]` |
 | `AddAuthorization()` / `UseAuthorization()` | 无单独开关 | `#[authorize]` 规则由 endpoint 执行 |
-| `AddLocalization()` / `UseRequestLocalization()` | `add_localization()` + `Culture.Default` | 当前为全局 culture，不做请求头协商 |
+| `AddLocalization()` / `UseRequestLocalization()` | `use_localization(LocalizationOptions::new())` + `Culture.Default` | 当前为全局 culture，不做请求头协商 |
 | `IStringLocalizer<T>["Key"]` | `localizer.get("key")` | 资源键 + 父 culture 回退 |
 | `EndpointDataSource` | `IEndpointCatalog` | `all()` / `localized()` |
 
 ```rust
 Host::builder()
     .use_authentication()
-    .add_localization()   // locales/<culture>.json
+    .use_localization(LocalizationOptions::new())   // locales/<culture>.json
     .build();
 ```
 

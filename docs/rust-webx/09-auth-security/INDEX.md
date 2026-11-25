@@ -16,9 +16,9 @@
 | [Token Introspection/Revocation](introspection.md) | RFC 7662/7009、active=false 语义、JWT/refresh 吊销 |
 | [mTLS 客户端证书](mtls.md) | TLS 客户端证书链、指纹身份映射、代理边界 |
 | [API Key 认证](api-key-auth.md) | 认证 scheme 链、sk- 校验与 JWT 共存 |
-| [基于资源的授权](resource-authorization.md) | 自定义策略/旧式中间件 |
+| [资源授权与实例级归属](resource-authorization.md) | 路由级 `#[authorize]` / `IDynamicAuthorizer` 边界、Handler 内 owner/tenant 校验 |
 | [authorize 宏与声明式授权](authorize-macro.md) | 静态规则 + IDynamicAuthorizer 动态授权 |
-| [令牌签发、会话吊销与口令哈希](token-session-password.md) | ITokenIssuer / ISessionStore / IPasswordHasher 端口，DeclaredRules 与统一入口 |
+| [令牌签发、会话吊销与口令哈希](token-session-password.md) | ITokenIssuer / ISessionStore / IPasswordHasher 端口，authorize_with_declared_rules 与统一入口 |
 | [密钥存储](secret-store.md) | ISecretStore / SecretValue：env、文件与链式解析 |
 | [安全最佳实践](security-best-practices.md) | 生产安全清单 |
 

@@ -1,12 +1,12 @@
 //! Business result envelope for command-style endpoints.
 //!
-//! Since 3.0 this is the shared `rust-core` contract; this module only
+//! Since 2.9.1 this is the shared `rust-core` contract; this module only
 //! re-exports it so the historical `webx_core::operation::*` path keeps working.
 //! Do not define a second copy here.
 //!
 //! `OperationResult<T>` answers "the operation ran — did it succeed, what does
 //! the business call this outcome, and what should we tell the caller". A list
-//! endpoint uses the flat `PagedResult` instead (it composes the same outcome
+//! endpoint uses the flat `PagedResult` instead (it inlines the same outcome
 //! fields); neither is a transport status.
 
 pub use rust_core::operation::OperationResult;

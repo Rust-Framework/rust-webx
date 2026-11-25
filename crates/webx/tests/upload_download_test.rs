@@ -385,7 +385,7 @@ async fn large_upload_is_spooled_to_disk_and_still_readable() {
     let spool_for_config = spool.clone();
     let base = spawn(move |builder| {
         let dir = spool_for_config.to_string_lossy().into_owned();
-        builder.useOptions(move |o| {
+        builder.options(move |o| {
             o.form.memory_threshold = 16;
             o.form.temp_dir = Some(dir);
         });
@@ -466,7 +466,7 @@ async fn missing_required_form_field_reports_400() {
 #[tokio::test]
 async fn oversized_file_part_is_rejected_with_413() {
     let base = spawn(|builder| {
-        builder.useOptions(|o| {
+        builder.options(|o| {
             o.form.max_file_size = 100;
             o.form.max_request_size = 1024 * 1024;
         });
@@ -497,7 +497,7 @@ async fn oversized_file_part_is_rejected_with_413() {
 #[tokio::test]
 async fn declared_content_length_above_the_limit_is_rejected_before_upload() {
     let base = spawn(|builder| {
-        builder.useOptions(|o| {
+        builder.options(|o| {
             o.form.max_request_size = 256;
         });
     })
@@ -530,7 +530,7 @@ async fn declared_content_length_above_the_limit_is_rejected_before_upload() {
 #[tokio::test]
 async fn oversized_text_field_is_rejected_with_413() {
     let base = spawn(|builder| {
-        builder.useOptions(|o| {
+        builder.options(|o| {
             o.form.max_field_size = 32;
             o.form.max_request_size = 1024 * 1024;
         });

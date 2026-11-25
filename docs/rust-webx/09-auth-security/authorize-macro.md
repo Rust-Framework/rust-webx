@@ -80,16 +80,15 @@ pub struct AuthorizeRule {
 - 有规则但无 claims → 仍然 `401 Unauthorized`（认证是动态模式的前提，不会被跳过）；
 - 有 claims → **跳过** claims 快照上的 `matches` 判定，把整条声明（`&'static [AuthorizeRule]`）
   交给已注册的 `IDynamicAuthorizer`；由它决定放行或返回 `403`；
-- 没有注册任何 `IDynamicAuthorizer` → 保持"无动态检查即通过"，即已认证的请求会被放行。
-  **这是文档化的行为，不是安全默认值**：使用 dynamic 就必须注册授权器（或接受"仅认证"），
-  否则声明的 permission 不会被执行。
+- 没有注册任何 `IDynamicAuthorizer` → `Host::build()` 直接失败（fail-closed），
+  **不会**降级成"仅已认证"：使用 dynamic 就必须注册授权器。
 
 > 动态模式下 `required_roles` / `required_permissions` 不再由框架的静态 403 产生；拒绝时的
-> problem 详情由你的授权器返回的 `Error::Forbidden` 决定。
+> problem 详情由你的授权器返回的 `Error::forbidden` 决定。
 
-## 与 add_authentication() 的关系
+## 与 use_authentication() 的关系
 
-`add_authentication()` 只负责启用 JWT 认证，让受保护端点能拿到 claims；`#[authorize]` 的规则
+`use_authentication()` 只负责启用 JWT 认证，让受保护端点能拿到 claims；`#[authorize]` 的规则
 由 endpoint 自己执行，不依赖额外开关。未启用认证时，受保护路由因无 claims 返回 401，规则
 并非只收集不执行。
 
@@ -124,7 +123,7 @@ Handler 里 `req.user.id`、`req.user.tenant_id`、`req.user.is_in_role("admin")
 ```rust
 #[async_trait]
 pub trait IDynamicAuthorizer: Send + Sync {
-    // 1.1 起：只看身份 + 路由 + 方法
+    // 无规则兜底：只看身份 + 路由 + 方法
     async fn authorize(
         &self,
         claims: &dyn IClaims,
@@ -132,16 +131,7 @@ pub trait IDynamicAuthorizer: Send + Sync {
         method: &str,        // 大写方法，如 POST
     ) -> Result<()>;
 
-    // 兼容视图：额外拿到端点声明的角色/权限（DeclaredRules，legacy）
-    async fn authorize_with_rules(
-        &self,
-        claims: &dyn IClaims,
-        route_pattern: &str,
-        method: &str,
-        declared: &DeclaredRules<'_>,
-    ) -> Result<()>;
-
-    // 零分配主路径：直接传 RouteEntry.authorization 切片
+    // 声明规则入口：直接传 RouteEntry.authorization 切片
     async fn authorize_with_declared_rules(
         &self,
         claims: &dyn IClaims,
@@ -152,9 +142,9 @@ pub trait IDynamicAuthorizer: Send + Sync {
 }
 ```
 
-只覆写**任意一个**即可：`authorize_with_declared_rules` 的默认实现转调
-`authorize_with_rules`（再默认转调 `authorize`），旧实现无需改代码。框架调用的是
-`authorize_with_declared_rules`；`DeclaredRules` 与 `authorize_with_rules` 为兼容路径。
+只覆写 `authorize` 即可获得无规则兜底：`authorize_with_declared_rules` 的默认实现转调它。
+需要端点声明的角色/权限（`#[authorize]` 的字面量）时实现 `authorize_with_declared_rules`；
+框架调用的就是后者，没有第二套声明视图（`DeclaredRules` / `authorize_with_rules` 已在 2.9.1 删除）。
 
 - `route_pattern` 与 `IEndpointCatalog` 的 `path`、运行时 `route_pattern()` 是同一个字符串；
   它**不是**具体请求路径，参数变化不会改变键，适合做授权资源键。
@@ -266,7 +256,7 @@ impl IDynamicAuthorizer for RouteGrantAuthorizer {
     ) -> Result<()> {
         // 只接受目录中声明的路由，避免 DB 里残留的旧授权生效。
         if self.catalog.get(method, route_pattern).is_none() {
-            return Err(Error::Forbidden(format!(
+            return Err(Error::forbidden(format!(
                 "unknown route {method} {route_pattern}"
             )));
         }
@@ -277,7 +267,7 @@ impl IDynamicAuthorizer for RouteGrantAuthorizer {
         if self.grants.allows(claims.subject(), method, route_pattern) {
             Ok(())
         } else {
-            Err(Error::Forbidden(format!(
+            Err(Error::forbidden(format!(
                 "no grant for {method} {route_pattern}"
             )))
         }
@@ -312,7 +302,7 @@ if method == "POST"
     && route_pattern.starts_with("/api/billing/")
     && self.flags.maintenance_mode()
 {
-    return Err(Error::Forbidden(
+    return Err(Error::forbidden(
         "billing writes are temporarily disabled".into(),
     ));
 }
@@ -336,7 +326,7 @@ Ok(())
 | 「用户是否能修改 id=123 这条记录」 | Handler 内读取路径参数/实体后判断 |
 | 「租户只能访问自己租户的数据」 | Handler 内按路径参数/实体判断 |
 | 全局限流、CORS、压缩 | 中间件 |
-| 自定义策略对象（旧式） | `IAuthorizationPolicy` 仅作策略数据；`resource_auth_middleware` 已弃用并 fail-closed |
+| 自定义策略（按路由/开关） | `IDynamicAuthorizer`（实现 `authorize` 或 `authorize_with_declared_rules`） |
 
 ### 选择哪种授权
 
@@ -346,7 +336,6 @@ Ok(())
 | `#[authorize(dynamic)]` | 编译期声明作为输入，运行时由授权器裁决 | endpoint 内（跳过 claim gate） | DB 为权限真相、每请求动态判定 |
 | `IDynamicAuthorizer` | DB/cache/配置 | 静态规则之后（dynamic 端点上代替静态规则） | 路由级动态授权、功能开关、维护模式 |
 | Handler 检查 | 请求上下文/实体 | handler 内 | 资源实例所有权、租户隔离 |
-| `IAuthorizationPolicy` | 自定义 | 手动中间件/端点 | 旧式自定义策略 |
 
 静态与动态的差异：
 
@@ -359,7 +348,7 @@ Ok(())
 | 新增授权何时生效 | 重新登录/刷新 token 快照 | 下一次请求（授权器查 DB/cache） |
 | 声明规则是否保留 | 是 | 是（作为授权器输入） |
 
-错误映射遵循 `Error`：`Error::Forbidden` → 403，`Error::Unauthorized` → 401；多个授权器
+错误映射遵循 `Error`：`Error::forbidden` → 403，`Error::unauthorized` → 401；多个授权器
 按注册顺序执行，第一个 `Err` 决定响应。
 
 ## Docbit 实例

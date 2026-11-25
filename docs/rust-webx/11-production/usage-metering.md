@@ -68,9 +68,10 @@ let estimate = tokenizer.count(model, prompt);
 `HeuristicTokenizer` 只是数量级估算（英文约 4 bytes/token；CJK/emoji 差异大）。需要精确计价时
 换真实 tokenizer 表；权威值始终以上游 usage 为准。
 
-## 持久化账本（rust-ef）
+## 持久化账本（参考适配器）
 
-`rust-webx-ai-ef` 提供幂等的 `EfUsageSink`，实体表 `ai_usage_events`：
+`examples/adapters/ai/ef`（`publish = false`，不随框架发布）提供幂等的 `EfUsageSink` 参考实现，
+实体表 `ai_usage_events`；复制进业务仓、改成自己的包名后使用（下面的 `webx_ai_ef` 是参考实现导入名）：
 
 ```rust
 use std::sync::Arc;
@@ -111,20 +112,22 @@ let rows = rollup.rollup_window(window_start, 60).await?; // 幂等
   `(window_start, tenant, model)` 幂等插入 `ai_usage_rollups`。
 - 后台 worker 已提供：`UsageOutboxWorker`（批量投递 + ack/退避）与 `UsageRollupWorker`
   （每 tick 聚合上一窗口），实现 `PeriodicBackgroundService`，用
-  `add_background_service_with` 注册即可。
+  `add_background_service(BackgroundServiceSpec::with_factory(..))` 注册即可。
 - 后台 worker 的典型装配：
 
 ```rust
+use webx::BackgroundServiceSpec;
+
 let outbox_worker = UsageOutboxWorker::new(outbox, handler, 100, Duration::from_secs(5));
 let rollup_worker = UsageRollupWorker::new(rollup, Duration::from_secs(60), Duration::from_secs(30));
 
 Host::builder().register(move |svc| {
     let outbox_worker = outbox_worker.clone();
     let rollup_worker = rollup_worker.clone();
-    svc.add_background_service_with::<UsageOutboxWorker, _>(
-            move |_| Arc::new(outbox_worker.clone()))
-        .add_background_service_with::<UsageRollupWorker, _>(
-            move |_| Arc::new(rollup_worker.clone()))
+    svc.add_background_service(BackgroundServiceSpec::with_factory(
+            move |_| Arc::new(outbox_worker.clone())))
+        .add_background_service(BackgroundServiceSpec::with_factory(
+            move |_| Arc::new(rollup_worker.clone())))
 })
 ```
 
@@ -141,10 +144,10 @@ let windows = rollup_events(events, 60); // 按 60s 窗口、tenant+model 分组
 
 ## 边界
 
-- 已有：内存 sink、EF 账本、outbox、rollup、后台 workers。
+- 已有：框架内存 sink（`IUsageSink` 端口在 `rust-webx-ai`）、参考适配器的 EF 账本/outbox/rollup 与后台 workers。
 - 事件是追加写；修正用量应写冲正事件，不要原地改历史。
 - 不要把 prompt/response 文本写进事件；只保留计量与标识字段。
 
 单测覆盖事件 serde、token 桶、saturating、estimator、sink 幂等/盖章/空 id、rollup 分组与窗口
-（`crates/ai/core/src/usage.rs`）；EF 账本/outbox/rollup 与 workers（`crates/ai/ef/src/{lib,worker}.rs`，
-8 个 SQLite 测试）。
+（`crates/ai/core/src/usage.rs`）；EF 账本/outbox/rollup 与 workers（`examples/adapters/ai/ef/src/{lib,worker}.rs`，
+8 个 SQLite 测试，用 `cargo test --workspace --manifest-path examples/adapters/Cargo.toml` 运行）。

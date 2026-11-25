@@ -3,7 +3,7 @@
 //! The framework automatically loads `appsettings.json` (merged with
 //! `appsettings.Development.json` in dev mode) and binds it to the
 //! built-in `AppOptions` struct.  Users customize options via
-//! `HostBuilder::configure(|app| app.useOptions(|o| { ... }))`.
+//! `HostBuilder::configure(|app| app.options(|o| { ... }))`.
 
 use crate::mode::AppMode;
 use serde::Deserialize;
@@ -27,6 +27,7 @@ impl<T> IAppOptions for T where T: for<'de> Deserialize<'de> + Default + Send + 
 
 /// Top-level application section.
 #[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
 pub struct AppSection {
     /// Application display name.
     #[serde(default, rename = "Name")]
@@ -79,8 +80,8 @@ fn default_max_connections() -> usize {
 ///
 /// 1. `APP__Jwt__Secret` / `JWT_SECRET` env vars — applied over the JSON during
 ///    `load_appsettings`, so they arrive here as `Secret`;
-/// 2. `Jwt.Secret` in `appsettings.json` (or a code-level `useOptions`
-///    override);
+/// 2. `Jwt.Secret` in `appsettings.json` (or a code-level
+///    `configure(|app| app.options(..))` override);
 /// 3. `Jwt.SecretFile` — a path to a file holding the secret, read by
 ///    `rust_webx_host::auth_jwt::apply_jwt_secret_file`. The file must be at
 ///    least 32 bytes of non-whitespace content and, on Unix, must not grant
@@ -88,6 +89,7 @@ fn default_max_connections() -> usize {
 ///    or over-permissive file fails host startup instead of running with a
 ///    broken key.
 #[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
 pub struct JwtSection {
     /// HMAC secret for signing/verifying JWT tokens.
     #[serde(default, rename = "Secret")]
@@ -172,6 +174,7 @@ pub struct JwtSection {
 
 /// Remote JSON Web Key Set (JWKS) configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[non_exhaustive]
 pub struct JwtJwksSection {
     /// Absolute `https://` URL of the JWKS document.
     #[serde(default, rename = "Url")]
@@ -308,6 +311,7 @@ impl Default for JwtSection {
 /// and ASP.NET Core conventions — same as `App` / `Jwt` / `RateLimit`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "PascalCase")]
+#[non_exhaustive]
 pub struct CorsSection {
     /// Allowed origins. Default: ["*"].
     #[serde(default = "default_origins")]
@@ -376,6 +380,7 @@ fn default_max_age() -> u32 {
 /// culture. Request-header negotiation is deliberately not part of this:
 /// administrative output must not change with the caller's browser language.
 #[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
 pub struct CultureSection {
     /// Default BCP-47 culture, e.g. `"zh-CN"` or `"en"`. Default: `"en"`.
     #[serde(default = "default_culture", rename = "Default")]
@@ -399,9 +404,9 @@ fn default_culture() -> String {
 /// The limiter keys by the request's resolved
 /// [`ClientInfo`](crate::client_info::ClientInfo) — the peer address, or the
 /// trusted forwarded client when the `ClientInfo` middleware ran. Forwarded
-/// header trust is configured in [`ClientInfoSection`]; the legacy
-/// `TrustProxy` / `TrustedProxies` keys below are accepted but ignored.
+/// header trust is configured only in [`ClientInfoSection`].
 #[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
 pub struct RateLimitSection {
     /// Enable rate-limit middleware. Default: false (enable in Production appsettings).
     #[serde(default, rename = "Enabled")]
@@ -415,23 +420,6 @@ pub struct RateLimitSection {
     /// Maximum distinct client IPs tracked (LRU eviction when exceeded).
     #[serde(default = "default_rate_limit_max_ips", rename = "MaxTrackedIps")]
     pub max_tracked_ips: usize,
-    /// Legacy since 2.8.0: trust for `X-Forwarded-For` / `X-Real-IP` moved to the
-    /// `ClientInfo` section (`TrustForwardedHeaders` / `TrustedProxies`).
-    ///
-    /// The field is retained only so existing `appsettings.json` files keep
-    /// parsing; the rate limiter ignores it and reads the resolved
-    /// [`ClientInfo`](crate::client_info::ClientInfo) instead. A non-default
-    /// value makes a `Production` host fail to start (silently falling back to
-    /// proxy-address limiting would hand an attacker a global bucket); migrate
-    /// the value to `ClientInfo.TrustForwardedHeaders` (planned removal in 3.0).
-    #[serde(default, rename = "TrustProxy")]
-    pub trust_proxy: bool,
-    /// Legacy since 2.8.0: trusted proxy CIDRs moved to the `ClientInfo` section
-    /// (`ClientInfo.TrustedProxies`); ignored by the rate limiter.
-    ///
-    /// Kept for configuration compatibility only (planned removal in 3.0).
-    #[serde(default, rename = "TrustedProxies")]
-    pub trusted_proxies: Vec<String>,
 }
 
 impl Default for RateLimitSection {
@@ -441,8 +429,6 @@ impl Default for RateLimitSection {
             requests_per_second: default_rate_limit_rps(),
             burst_size: default_rate_limit_burst(),
             max_tracked_ips: default_rate_limit_max_ips(),
-            trust_proxy: false,
-            trusted_proxies: Vec::new(),
         }
     }
 }
@@ -461,6 +447,7 @@ fn default_rate_limit_max_ips() -> usize {
 
 /// HTTP request metrics (`GET /metrics` Prometheus text when enabled).
 #[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
 pub struct MetricsSection {
     #[serde(default, rename = "Enabled")]
     pub enabled: bool,
@@ -491,13 +478,13 @@ fn default_metrics_max_series() -> usize {
 /// This is the framework's **single** forwarded-header configuration: the host
 /// installs the `ClientInfo` middleware from it, and every consumer (rate
 /// limiting included) reads the resolved value instead of parsing the headers
-/// again. The legacy `RateLimit.TrustProxy` / `RateLimit.TrustedProxies` keys
-/// migrate here.
+/// again.
 ///
 /// Forwarded headers are only honoured when both `TrustForwardedHeaders` is on
 /// **and** the direct peer belongs to `TrustedProxies`; a directly reachable
 /// client could otherwise rotate `X-Forwarded-For` to spoof its address.
 #[derive(Debug, Clone, Deserialize, Default)]
+#[non_exhaustive]
 pub struct ClientInfoSection {
     /// Resolve the client address from forwarded headers behind trusted proxies.
     #[serde(default, rename = "TrustForwardedHeaders")]
@@ -509,6 +496,7 @@ pub struct ClientInfoSection {
 
 /// Request-level idempotency (`Idempotency-Key`).
 #[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
 pub struct IdempotencySection {
     /// Install the idempotency middleware. Default: false.
     #[serde(default, rename = "Enabled")]
@@ -617,6 +605,7 @@ pub enum TlsClientAuth {
 /// contains one or more `https://` entries. The certificate
 /// and key paths are read from this section.
 #[derive(Debug, Clone, Deserialize, Default)]
+#[non_exhaustive]
 pub struct TlsSection {
     /// Path to TLS certificate PEM file.
     #[serde(default, rename = "CertPath")]
@@ -640,6 +629,7 @@ pub struct TlsSection {
 /// `Content-Type: multipart/form-data`, and against `App.MaxBodySize`
 /// otherwise.
 #[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
 pub struct FormSection {
     /// Largest accepted multipart request body, in bytes. Default: 256 MiB.
     #[serde(default = "default_max_request_size", rename = "MaxRequestSize")]
@@ -716,6 +706,7 @@ fn default_stream_drain_timeout_seconds() -> u64 {
 /// Server lifecycle settings.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "PascalCase")]
+#[non_exhaustive]
 pub struct ServerSection {
     /// How long normal (non-streaming) connections may drain during shutdown.
     #[serde(default = "default_drain_timeout_seconds")]
@@ -785,6 +776,7 @@ impl Default for ServerSection {
 /// [`TurnRestConfig`]: crate::realtime::TurnRestConfig
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "PascalCase")]
+#[non_exhaustive]
 pub struct TurnSection {
     /// coturn `static-auth-secret` shared secret.
     #[serde(default)]
@@ -831,7 +823,7 @@ fn default_turn_ttl_seconds() -> u64 {
 /// Standard application options loaded from appsettings.json.
 ///
 /// Bound automatically by the framework.  Access via `host.options()`
-/// or customize via `app.useOptions(|o| { ... })`.
+/// or customize via `configure(|app| app.options(..))`.
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct AppOptions {
     /// Application settings.

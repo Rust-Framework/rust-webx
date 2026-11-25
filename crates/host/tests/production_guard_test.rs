@@ -4,7 +4,7 @@ use webx_core::mode::AppMode;
 use webx_host::server::Host;
 
 fn production_options(app: &mut webx_host::server::HostAppBuilder) {
-    app.useOptions(|o| {
+    app.options(|o| {
         o.cors.origins = vec!["https://example.com".into()];
     });
 }
@@ -29,7 +29,7 @@ fn production_build_rejects_wildcard_cors() {
         .mode(AppMode::Production)
         .no_spa()
         .configure(|app| {
-            app.useOptions(|o| {
+            app.options(|o| {
                 o.cors.origins = vec!["*".into()];
             });
         })
@@ -45,7 +45,7 @@ fn production_rejects_wildcard_use_cors_override() {
         .mode(AppMode::Production)
         .no_spa()
         .configure(|app| {
-            app.useOptions(|o| {
+            app.options(|o| {
                 o.cors.origins = vec!["https://example.com".into()];
             });
         })
@@ -73,7 +73,7 @@ fn production_build_succeeds_with_strong_jwt_and_explicit_cors() {
         .mode(AppMode::Production)
         .no_spa()
         .configure(|app| {
-            app.useOptions(|o| {
+            app.options(|o| {
                 o.cors.origins = vec!["https://example.com".into()];
                 o.jwt.secret = "production-jwt-secret-at-least-32-chars".into();
             });
@@ -111,7 +111,7 @@ fn try_build_returns_err_instead_of_panicking() {
         .mode(AppMode::Production)
         .no_spa()
         .configure(|app| {
-            app.useOptions(|o| {
+            app.options(|o| {
                 o.cors.origins = vec!["*".into()];
                 o.jwt.secret = "production-jwt-secret-at-least-32-chars".into();
             });
@@ -133,7 +133,7 @@ fn try_build_succeeds() {
         .mode(AppMode::Production)
         .no_spa()
         .configure(|app| {
-            app.useOptions(|o| {
+            app.options(|o| {
                 o.cors.origins = vec!["https://example.com".into()];
                 o.jwt.secret = "production-jwt-secret-at-least-32-chars".into();
             });

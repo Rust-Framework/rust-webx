@@ -15,7 +15,7 @@ async fn turn_section_registers_a_validated_config_for_injection() {
         .mode(AppMode::Development)
         .no_spa()
         .configure(|app| {
-            app.useOptions(|options| {
+            app.options(|options| {
                 options.turn.secret = "turn-test-secret-32-bytes-minimum-ok".to_string();
                 options.turn.urls = vec!["turn:turn.example:3478".to_string()];
                 options.turn.ttl_seconds = 120;
@@ -45,7 +45,7 @@ async fn partial_turn_section_fails_host_startup() {
         .mode(AppMode::Development)
         .no_spa()
         .configure(|app| {
-            app.useOptions(|options| {
+            app.options(|options| {
                 // URLs without a secret: configured, but unusable.
                 options.turn.urls = vec!["turn:turn.example:3478".to_string()];
             });

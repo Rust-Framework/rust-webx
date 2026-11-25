@@ -9,7 +9,7 @@
 | 层 | 归属 | 内容 |
 |---|---|---|
 | 控制面（core/host） | 框架 | 信令消息、房间成员/权限、TURN REST 凭据、QoS 指标标签规范 |
-| 业务控制面（参考应用） | `imbit/` | 房间创建/加入、成员校验、把信令路由给目标连接 |
+| 业务控制面（参考应用） | `examples/imbit/` | 房间创建/加入、成员校验、把信令路由给目标连接 |
 | 媒体面（适配器） | 外部/SFU | SDP 协商、ICE、RTP/RTCP、转码、录制、SFU 转发（适配器契约） |
 
 框架不依赖任何编解码器、RTP 栈或 SFU 实现；换 SFU（LiveKit/mediasoup/Janus/自研）
@@ -28,7 +28,7 @@ pub struct SignalingMessage {
 ```
 
 传输：复用实时通道（IM 参考应用里就是消息即请求的 `{"type":"signal",...}` 帧）。
-服务端职责（参考实现 `imbit/src/handlers.rs`）：
+服务端职责（参考实现 `examples/imbit/handlers/src/realtime/message.rs`）：
 
 1. **鉴权**：只接受已认证连接（JWT/cookie）；
 2. **成员校验**：sender 必须是房间成员（否则 `forbidden`）；定向目标也必须是成员；
@@ -178,7 +178,7 @@ pub trait IObjectStore: Send + Sync {
   created_at_unix, completed_at_unix }`；`RecordingStatus::{Recording,Completed,Failed}`。
   播放索引用 `RecordingMeta::replace_segment`（重试同一 part 时**重算** total，不会膨胀）。
 
-参考应用端点（`imbit`，成员校验见前文）：
+参考应用端点（`examples/imbit`，成员校验见前文）：
 
 ```text
 POST /api/recordings                              {"room_id","content_type"} -> RecordingView
@@ -192,7 +192,10 @@ GET  /api/recordings/{id}/parts/{part}            -> 原始字节（ContentResul
 断线后只需重传未确认的分片；`complete` 要求至少一个分片。生产传输建议 multipart
 或预签名直传，参考应用用 base64 JSON 保持依赖最小。
 
-实现：`imbit/src/recording.rs`；验收：`imbit/tests/recording_e2e_test.rs`（分片上传、
+实现：`examples/imbit/handlers/src/recording/`（`start_recording.rs` / `upload_segment.rs` /
+`complete_recording.rs` / `get_recording.rs` / `get_segment.rs`）+ 播放索引
+`examples/imbit/domain/src/store/recording_registry.rs`；验收：
+`examples/imbit/host/tests/recording_e2e_test.rs`（分片上传、
 重试不重复计入、完成、按 content-type 回放、非成员 403、缺分片 404、空录制 400）。
 
 ## 7. 验收总览
@@ -201,7 +204,7 @@ GET  /api/recordings/{id}/parts/{part}            -> 原始字节（ContentResul
   配置校验、信令消息往返）、[storage.rs](../../crates/core/src/storage.rs)（内存/文件系统
   两种实现的 put/get/续传/中断/路径校验、录制索引与重算）、
   [media.rs](../../crates/core/src/media.rs)（适配器契约 + QoS 指标写入/钳制）；
-- 端到端：[signaling_e2e_test.rs](../../imbit/tests/signaling_e2e_test.rs)、
-  [recording_e2e_test.rs](../../imbit/tests/recording_e2e_test.rs)；
+- 端到端：[signaling_e2e_test.rs](../../examples/imbit/host/tests/signaling_e2e_test.rs)、
+  [recording_e2e_test.rs](../../examples/imbit/host/tests/recording_e2e_test.rs)；
 - 信令与聊天共用同一 WS 管线（鉴权、限流、背压、指标）——见
   [im-reference.md](im-reference.md) 与 `docs/rust-webx/05-request-pattern/websocket.md`。

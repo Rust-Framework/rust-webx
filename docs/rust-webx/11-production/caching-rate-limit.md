@@ -3,7 +3,7 @@
 ## 内存缓存
 
 ```rust
-Host::builder().add_memory_cache()
+Host::builder().add_memory_cache(CacheOptions::default())
 ```
 
 Handler 通过 `Arc<MemoryCache>` 或 `IDistributedCache` trait 注入使用。
@@ -92,14 +92,11 @@ TTL）。
 | `RequestsPerSecond` | 每个客户端 IP 的 sustained 速率 | `100` |
 | `BurstSize` | 突发容量 | `200` |
 | `MaxTrackedIps` | 最大跟踪 IP 数（最旧淘汰） | `10000` |
-| ~~`TrustProxy`~~ | **legacy（2.8.0 起被忽略）**：转发头信任统一由 `ClientInfo.TrustForwardedHeaders` 控制，限流器不再读取该键 | `false` |
-| ~~`TrustedProxies`~~ | **legacy（2.8.0 起被忽略）**：可信代理 CIDR 统一由 `ClientInfo.TrustedProxies` 控制，限流器不再读取该键 | `[]` |
+| ~~`TrustProxy`~~ | **已于 2.9.1 删除**：转发头信任统一由 `ClientInfo.TrustForwardedHeaders` 控制，限流器只读 `ClientInfo` | — |
+| ~~`TrustedProxies`~~ | **已于 2.9.1 删除**：可信代理 CIDR 统一由 `ClientInfo.TrustedProxies` 控制 | — |
 
-> **Production 启动保护**：`Production` 模式下检测到 `RateLimit.TrustProxy` 或
-> `RateLimit.TrustedProxies` 非默认值会直接启动失败，而不是静默忽略——反代部署下若按
-> 代理对端地址计桶，所有客户端会塌缩到一个桶，攻击者打满后全站持续 429。请先迁移到
-> `ClientInfo.TrustForwardedHeaders` / `ClientInfo.TrustedProxies`；`Development` /
-> `Test` 模式仍只打 `warn` 继续启动。
+> **迁移**：`RateLimit.TrustProxy` / `RateLimit.TrustedProxies` 已在 2.9.1 删除（不再被解析）；
+> 把两个键搬到 `ClientInfo.TrustForwardedHeaders` / `ClientInfo.TrustedProxies` 即可。
 
 桶的键来自请求的**已解析客户端地址**（`IHttpContext::client_info().client_ip`）：默认是对端地址
 （`IHttpRequest::remote_addr`，由 host 在 accept 时记录）；配置了 `ClientInfo` 的可信转发头解析后，
@@ -112,23 +109,9 @@ TTL）。
 
 #### 迁移：转发头信任改由 `ClientInfo` 控制
 
-2.8.0 起 `RateLimit.TrustProxy` / `RateLimit.TrustedProxies` 成为 legacy（不再生效，计划 3.0 移除）：旧配置仍能被
-serde 解析（不会启动失败），但限流器忽略它们，并在启动时打一条 `warn` 指向新位置。把两个键搬到
-`ClientInfo` 节即可。
-
-2.7 及更早（legacy）：
-
-```json
-{
-  "RateLimit": {
-    "Enabled": true,
-    "TrustProxy": true,
-    "TrustedProxies": ["10.0.0.0/8"]
-  }
-}
-```
-
-2.8 起：
+`RateLimit.TrustProxy` / `RateLimit.TrustedProxies` 已在 2.9.1 删除：限流器只读 `ClientInfo`
+中间件解析出的 `IHttpContext::client_info().client_ip`，配置里出现旧键不会再被解析。
+把信任配置放到 `ClientInfo` 节：
 
 ```json
 {
@@ -249,8 +232,9 @@ Host::builder().use_rate_limiter(Arc::new(RedisLimiter { /* ... */ }));
 
 ## 小结
 
-`add_memory_cache()` 一行启用进程内缓存；多实例用 `add_redis(...)` 换共享缓存与事件传输；
-`RateLimit` 配置节做鉴权前 IP 防护，`use_rate_limit_policy` 做按路由/主体的预算，
+`add_memory_cache(CacheOptions::default())` 一行启用进程内缓存（默认上限
+`MemoryCache::DEFAULT_MAX_ENTRIES`，用 `.max_entries(n)` 收紧）；多实例用 `add_redis(...)`
+换共享缓存与事件传输；`RateLimit` 配置节做鉴权前 IP 防护，`use_rate_limit_policy` 做按路由/主体的预算，
 `use_rate_limiter` 注入共享存储；`Metrics` 配置节用于可观测性。
 
 下一节：[OpenAPI 与 SPA 托管](openapi-spa.md)

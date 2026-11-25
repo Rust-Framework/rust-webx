@@ -230,7 +230,7 @@ impl fmt::Debug for SquareAccountOptions {
 /// Square adapter options.
 ///
 /// `HostBuilder::add_square()` binds the `"Square"` configuration section
-/// through `add_options_monitor`; a prebuilt configuration is passed to
+/// through `add_options`; a prebuilt configuration is passed to
 /// `HostBuilder::add_square_with(options)`. Settings can also be built in code
 /// with [`SquareOptions::new`] / [`SquareOptions::with_account`].
 ///

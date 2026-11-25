@@ -62,7 +62,7 @@ async fn route_authorization_is_enforced_on_the_direct_dispatch_host() {
         .mode(AppMode::Development)
         .no_spa()
         .configure(|app| {
-            app.useOptions(|options| {
+            app.options(|options| {
                 options.jwt.secret = "direct-guard-test-secret-at-least-32-bytes".to_string();
             });
         })

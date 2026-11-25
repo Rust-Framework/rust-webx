@@ -1,0 +1,46 @@
+[lints]
+workspace = true
+
+[package]
+name = "docbit-host"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lib]
+name = "docbit_host"
+path = "src/lib.rs"
+
+[[bin]]
+name = "docbit-host"
+path = "src/main.rs"
+
+[dependencies]
+docbit-contracts.workspace = true
+docbit-domain.workspace = true
+docbit-handlers.workspace = true
+rust-ef.workspace = true
+rust-ef-sqlite.workspace = true
+rust-webx.workspace = true
+rust-dix.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+inventory.workspace = true
+# First-boot JWT signing key generation (`startup/services/jwt_key.rs`).
+uuid.workspace = true
+
+[build-dependencies]
+rust-webx-build.workspace = true
+
+[dev-dependencies]
+rust-webx = { workspace = true, features = ["testing"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart"] }
+tempfile = "3"
+zip.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tracing-subscriber = { version = "0.3", features = ["fmt"] }
+serde_json.workspace = true
+serial_test = "3"

@@ -3,10 +3,19 @@
 //! Scans the inventory for all registered routes and builds
 //! a rich OpenAPI JSON document with parameters, request bodies,
 //! response schemas, names, and descriptions.
+//!
+//! Each operation carries the same endpoint identity the
+//! [`IEndpointCatalog`](webx_core::route::catalog::IEndpointCatalog) exposes:
+//! `x-webx-endpoint-id` (the module-qualified request identity) and
+//! `x-webx-endpoint-guid` (the RFC 4122 v5 GUID derived from it with
+//! [`EndpointGuid::from_request_id`](webx_core::route::catalog::EndpointGuid::from_request_id)).
+//! `operationId` stays the human-facing camelCase name derived from the request
+//! type; the extensions are the machine-readable join key.
 
 use serde_json::{json, Value as JsonValue};
 use std::collections::{BTreeSet, HashMap};
 use webx_core::localization::IStringLocalizer;
+use webx_core::route::catalog::EndpointGuid;
 use webx_core::route::scan::{ParamConstraint, ParamMeta, RequestParamEntry, RouteEntry};
 use webx_core::routing::HttpMethod;
 
@@ -84,9 +93,17 @@ pub fn generate_openapi_spec(
         let operation_id = to_operation_id(entry.handler_type);
         let summary = localizer.resolve(entry.name).value;
 
+        // The endpoint identity, derived exactly like the runtime catalog:
+        // same `request_id`, same RFC 4122 v5 GUID. `operationId` stays the
+        // human-facing camelCase name; these two keys are the machine-readable
+        // join to a permission table.
+        let endpoint_guid = EndpointGuid::from_request_id(entry.request_id).to_string();
+
         let mut operation = json!({
             "operationId": operation_id,
             "summary": summary,
+            "x-webx-endpoint-id": entry.request_id,
+            "x-webx-endpoint-guid": endpoint_guid,
             "responses": build_responses(entry.rsp_type, &mut schema_names),
             "tags": [tag],
         });

@@ -49,12 +49,14 @@ svc.singleton::<dyn IRequestHandler<GetUserRequest, UserDto>>(
 svc.add_middleware::<LoggingMiddleware>()
 ```
 
-需要构造参数的中间件用 `HostBuilder::use_middleware_with(...)`：
+需要构造参数的中间件用 `MiddlewareSpec::factory(...)` 挂载：
 
 ```rust
-Host::builder().use_middleware_with(|| {
+use webx::MiddlewareSpec;
+
+Host::builder().use_middleware(MiddlewareSpec::factory(|| {
     Arc::new(RateLimitMiddleware::new(10.0, 20)) as Arc<dyn IMiddleware>
-})
+}))
 ```
 
 或在 `register()` 里用 `svc.add(ServiceLifetime::Singleton, |_| ...)` 注册为 `dyn IMiddleware`。
@@ -62,7 +64,9 @@ Host::builder().use_middleware_with(|| {
 ## 注册后台服务
 
 ```rust
-svc.add_hosted_service::<DbInitService>()
+use webx::HostedServiceSpec;
+
+svc.add_hosted_service(HostedServiceSpec::new::<DbInitService>())
 ```
 
 ## 框架自动注册
@@ -72,9 +76,9 @@ svc.add_hosted_service::<DbInitService>()
 - 把 `#[handler]` 提交的 `HandlerRegistration` 收集进 inventory `HandlerCache`（不做 DI 注册）
 - `ServiceCollection::from_injected()` 收集 `#[inject] impl`，包括 `IDynamicAuthorizer` 实现
 - 构建并注册 `Arc<dyn IEndpointCatalog>`（端点元数据）与 `Arc<dyn IStringLocalizer>`（资源解析）
-- `add_authentication()` 时构建 JWT 中间件并加入管道
-- `add_localization()` / `add_localization_with(...)` 时加载资源并构建 localizer
-- `add_memory_cache()` 时把 `Arc<MemoryCache>` 注册为具体实例
+- `use_authentication()` 时构建 JWT 中间件并加入管道
+- `use_localization(LocalizationOptions)` 时加载资源并构建 localizer
+- `add_memory_cache(CacheOptions)` 时把 `Arc<MemoryCache>` 注册为具体实例
 
 需要显式调用的：
 

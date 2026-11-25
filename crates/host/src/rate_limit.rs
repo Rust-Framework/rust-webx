@@ -1,4 +1,4 @@
-﻿//! Token-bucket rate-limiting middleware with a pluggable counter store.
+//! Token-bucket rate-limiting middleware with a pluggable counter store.
 //!
 //! The default store is an in-process, **sharded** token bucket keyed by client
 //! IP: sharding removes the single global mutex from the hot path while
@@ -264,31 +264,13 @@ pub fn token_bucket(
 /// New code should depend on [`IRateLimiter`] / [`InMemoryRateLimiter`].
 pub struct RateLimiter {
     inner: InMemoryRateLimiter,
-    /// Retained only by the legacy [`RateLimiter::with_trust_proxy`]
-    /// compatibility shell; the limiter keys by the address it is handed and
-    /// never reads this flag.
-    #[allow(dead_code)]
-    trust_proxy: bool,
 }
 
 impl RateLimiter {
     pub fn new(requests_per_second: f64, burst_size: u32, max_tracked_ips: usize) -> Self {
         Self {
             inner: InMemoryRateLimiter::new(requests_per_second, burst_size, max_tracked_ips),
-            trust_proxy: false,
         }
-    }
-
-    /// Legacy compatibility shell (since 2.8.0 it is a no-op).
-    ///
-    /// Forwarded-header trust is configured once in the `ClientInfo` section
-    /// (`TrustForwardedHeaders` / `TrustedProxies`) and resolved by the
-    /// `ClientInfo` middleware; [`RateLimitMiddleware`] always reads
-    /// [`IHttpContext::client_info`] and this flag is ignored. Kept so existing
-    /// call sites keep compiling; planned removal in 3.0.
-    pub fn with_trust_proxy(mut self, trust: bool) -> Self {
-        self.trust_proxy = trust;
-        self
     }
 
     pub async fn allow(&self, ip: IpAddr) -> bool {
@@ -310,8 +292,7 @@ impl RateLimiter {
 /// The IP subject is read from [`IHttpContext::client_info`]: without a
 /// `ClientInfo` middleware that is the peer address, with one it is the resolved
 /// trusted client address. Both construction paths ([`Self::from_policy`] and
-/// [`Self::from_config`]) therefore behave identically; the legacy
-/// `RateLimit.TrustProxy` / `RateLimit.TrustedProxies` keys are not consulted.
+/// [`Self::from_config`]) therefore behave identically.
 pub struct RateLimitMiddleware {
     policy: RateLimitPolicy,
 }
@@ -366,9 +347,8 @@ impl RateLimitMiddleware {
 
     /// Build the default IP rule from the `RateLimit` configuration section.
     ///
-    /// The legacy `TrustProxy` / `TrustedProxies` keys are ignored: the IP
-    /// subject reads the resolved [`IHttpContext::client_info`], whose trusted
-    /// proxy ranges come from the `ClientInfo` section.
+    /// The IP subject reads the resolved [`IHttpContext::client_info`], whose
+    /// trusted proxy ranges come from the `ClientInfo` section.
     pub fn from_config(cfg: &RateLimitSection) -> Self {
         let limiter: Arc<dyn IRateLimiter> = Arc::new(InMemoryRateLimiter::new(
             cfg.requests_per_second,
@@ -610,17 +590,5 @@ mod tests {
 
         // The middleware accepts any store through the port.
         let _middleware = RateLimitMiddleware::with_limiter(limiter);
-    }
-
-    #[tokio::test]
-    async fn trust_proxy_compat_shell_is_accepted_and_ignored() {
-        // The pre-2.8 compatibility shell still compiles and limits; the flag it
-        // stores is never read (the middleware keys by `ctx.client_info()`).
-        let trusted = RateLimiter::new(100.0, 10, 10).with_trust_proxy(true);
-        let plain = RateLimiter::new(100.0, 10, 10);
-        let ip = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7));
-        assert!(trusted.allow(ip).await);
-        assert!(plain.allow(ip).await);
-        assert_eq!(trusted.retry_after_secs(), plain.retry_after_secs());
     }
 }

@@ -67,7 +67,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
 use std::path::Path;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use webx_core::auth::{IAuthenticationHandler, IClaims};
 use webx_core::config::{
@@ -880,34 +880,6 @@ pub fn jwt_middleware_with_revocation(
 }
 
 // ---------------------------------------------------------------------------
-// Global JWT encoding secret (for token creation in handlers)
-// ---------------------------------------------------------------------------
-
-static JWT_ENCODING_SECRET: OnceLock<String> = OnceLock::new();
-
-/// Deprecated 2.5 compatibility shim: initialize the global JWT encoding
-/// secret.
-///
-/// `.use_authentication()` still populates this for applications that have not
-/// migrated yet, but new code must inject `Arc<dyn ITokenIssuer>` and call
-/// `issue(TokenClaims)` instead. The global will be removed in the next major.
-/// (No `#[deprecated]` attribute in 2.x: adding one would break downstream
-/// `-D warnings` builds in a minor release.)
-pub fn init_jwt_secret(secret: &str) {
-    let _ = JWT_ENCODING_SECRET.set(secret.to_owned());
-}
-
-/// Deprecated 2.5 compatibility shim: retrieve the global JWT encoding secret.
-///
-/// # Panics
-/// Panics if the global was never initialized.
-pub fn jwt_secret() -> &'static str {
-    JWT_ENCODING_SECRET
-        .get()
-        .expect("init_jwt_secret must be called before jwt_secret")
-}
-
-// ---------------------------------------------------------------------------
 // Jwt.SecretFile resolution (XR-2)
 // ---------------------------------------------------------------------------
 
@@ -956,15 +928,14 @@ impl JwtSecret {
 /// 1. `APP__Jwt__Secret` / `JWT_SECRET` — applied over the JSON by
 ///    `webx_core::config::load_appsettings`, so they are already in `Secret`;
 /// 2. `Jwt.Secret` — an explicit value in `appsettings.json` or a
-///    `HostBuilder` `useOptions` override;
+///    `configure(|app| app.options(..))` override;
 /// 3. `Jwt.SecretFile` — the path configured here, read from disk.
 ///
 /// The host calls this once while preparing itself (before any application
 /// service registration, the default `ITokenIssuer` and the authentication
 /// middleware are built), registers the resolved value as [`JwtSecret`] in DI,
-/// and every later reader of `options.jwt.secret` — issuer, verifier,
-/// `init_jwt_secret`, the Production weak-secret guard — sees the resolved
-/// value.
+/// and every later reader of `options.jwt.secret` — issuer, verifier, the
+/// Production weak-secret guard — sees the resolved value.
 ///
 /// # Behaviour
 ///

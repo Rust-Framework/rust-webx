@@ -215,7 +215,7 @@ fn host_with_jwt(expiration_minutes: Option<u64>) -> webx_host::Host {
         .no_spa()
         .use_authentication()
         .configure(move |b| {
-            b.useOptions(move |o| {
+            b.options(move |o| {
                 o.jwt.secret = SECRET.to_string();
                 if let Some(minutes) = expiration_minutes {
                     o.jwt.expiration_minutes = minutes;

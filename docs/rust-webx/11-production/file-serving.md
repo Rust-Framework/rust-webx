@@ -139,7 +139,7 @@ Ok(Box::new(ContentResult::bytes(Vec::new(), "application/pdf")
 | 落盘目录 | `Form.TempDir` 指到**数据盘**，别用系统盘；目录必须可写 |
 | 临时文件清理 | 框架在请求结束（`FormFile` 释放）时自动删除；进程被 `kill -9` 时可能残留，安排定期清理 |
 | 磁盘配额 | `Form.MaxFileSize` × 并发上传数 是峰值占用上界，据此规划 |
-| 单端点收紧 | 头像上传可以只要几 MiB，用 `app.useOptions` 调小；`Form` 是全局的，端点级校验在 Handler 里补 |
+| 单端点收紧 | 头像上传可以只要几 MiB，用 `configure(\|app\| app.options(..))` 调小；`Form` 是全局的，端点级校验在 Handler 里补 |
 | 请求提前拒绝 | 声明超限的 `Content-Length` 在**读取上传内容之前**就返回 `413`，不消耗带宽与磁盘 |
 | 反代 | `client_max_body_size`、`proxy_request_buffering off` |
 

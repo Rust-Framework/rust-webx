@@ -1,6 +1,6 @@
 # 分配预算（Allocation Budget）
 
-> 本文是原则 P4「性能是预算」在分配维度的落地口径。基线：rust-webx 2.9.0。
+> 本文是原则 P4「性能是预算」在分配维度的落地口径。线线：rust-webx 2.9.0。
 > 工具：`testing/alloc-probe`（dev-only，不发布；`crates/` 只放可发布 crate）。
 
 ## 1. 测量方法
@@ -18,20 +18,20 @@
 - **窗口**：50 次预热 → 500 次请求；计数在窗口前后读取，
   `allocs/request = Δallocs / (Δrequests + 1)`（+1 为窗口末尾的 stats 请求）。
 
-## 2. 当前基线
+## 2. 当前线线
 
 同机、同窗口、release（thin LTO）实测：
 
 | 模式 | Windows 参考 | Linux CI |
 |---|---:|---:|
-| hyper 基线（无框架） | **6.00** | **6.00** |
+| hyper 线线（无框架） | **6.00** | **6.00** |
 | 框架（CORS on） | **16.42** | **18.43** |
 | **框架税 = 总分配 − 地板** | **10.42** | **12.42** |
 
 直连分发目前仍走类型擦除的 binder：每个请求一次 boxed future + 一次 `Box<dyn Any>` 请求装箱。
 把 `bind_request::<T>` 换成 `RequestModel::bind_inline` 可省 **1.00 alloc/req**（实测
 10.42 → 9.42），但要求请求类型实现 `RequestModel`，会让「消息即请求」的 WS 枚举请求类型
-无法编译，因此列为 3.0 项（需要同时为枚举请求提供空绑定元数据）。
+无法编译，因此列为下一破坏性版本项（需要同时为枚举请求提供空绑定元数据）。
 
 地板随 hyper 版本移动，因此预算必须按 **地板 + 框架税** 定义；CI 比较框架税，不硬编码总数。
 Linux 的 allocator/runtime 比 Windows 多 2 allocs/request，因此 CI 预算为 **≤13**，Windows

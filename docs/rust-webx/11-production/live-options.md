@@ -1,6 +1,7 @@
 # 配置热更新（IOptionsMonitor）
 
-`HostBuilder::add_options::<T>` 只在启动时绑定一次 appsettings。需要"改配置不重启"时，用
+`HostBuilder::add_options::<T>` 把 appsettings 的一个节绑定一次，并同时注册 `Arc<T>`、
+`Arc<OptionsMonitor<T>>` 与 `Arc<dyn IOptionsMonitor<T>>`。需要"改配置不重启"时，用
 `IOptionsMonitor<T>`：当前快照放在 `ArcSwap` 里，替换时通过 `tokio::sync::watch` 通知订阅者。
 热路径只做一次无锁 `Arc` 读取，不查库、不持全局锁。
 
@@ -11,8 +12,12 @@
 | 读取 | `IOptionsMonitor::current() -> Arc<T>`（无锁，热路径可用） |
 | 订阅 | `subscribe() -> watch::Receiver<Arc<T>>`，每次替换后 `changed()` 就绪 |
 | 替换 | 整个不可变快照替换，不原地修改；读方只会看到旧值或新值 |
-| 注册 | `add_options_monitor::<T>("Section")`（启动快照）/ `watch_options_file`（文件轮询） |
+| 注册 | `add_options::<T>("Section")`（一次注册三种注入形态）/ `add_options_with::<T>("Section", \|t\| …)`（绑定后应用代码级覆盖）/ `watch_options_file`（文件轮询） |
 | 注入 | `Arc<dyn IOptionsMonitor<T>>` 或 `Arc<OptionsMonitor<T>>` |
+
+`add_options_with` 在绑定之后、创建三种实例之前运行覆盖闭包，因此 `Arc<T>` 与 monitor 看到的是
+同一个覆盖后的值。它只用于环境差异（CI 端点、本地开关）：生产弱密钥与通配 CORS 仍由 Host 的
+fail-closed 启动校验拒绝，代码级覆盖不是绕过部署校验的入口。
 
 ## 启动快照 + 文件热加载
 
@@ -53,16 +58,17 @@ impl ChatHandler {
 }
 ```
 
-只想要启动快照、由应用自己推送新值时，用 `add_options_monitor`；任何持有
-`Arc<OptionsMonitor<T>>` 的地方（后台任务、管理端点）都可以替换快照：
+只想要启动快照、由应用自己推送新值时，用 `add_options`（`add_options_monitor` 已删除并并入 `add_options`，见 [upgrade-to-2.9.1.md](../16-migration/upgrade-to-2.9.1.md)）；
+任何持有 `Arc<OptionsMonitor<T>>` 的地方（后台任务、管理端点）都可以替换快照：
 
 ```rust
 // 注入 Arc<OptionsMonitor<GatewayConfig>> 后
 monitor.set(GatewayConfig { rpm: 1_000, model: "fast".into() });
 ```
 
-> 两个方法都会注册 monitor，选一个即可。热加载文件的根节点与 appsettings 同形，watcher 取其中的
-> `Gateway` 节；`"Gateway"` 参数与 `add_options` 的节名一致。`"."` / 空串表示绑定整个文件。
+> `add_options` 与 `watch_options_file` 都会注册同一个 monitor，选一个即可。热加载文件的根节点与
+> appsettings 同形，watcher 取其中的 `Gateway` 节；`"Gateway"` 参数与 `add_options` 的节名一致。
+> `"."` / 空串表示绑定整个文件。
 
 ## 文件 watcher 语义
 
@@ -71,9 +77,9 @@ monitor.set(GatewayConfig { rpm: 1_000, model: "fast".into() });
 | 首次 tick | 在**一个 interval 之后**执行；之前使用 appsettings 启动快照 |
 | 文件不存在 | 不算错误，保留当前快照（允许先启动、后投放文件） |
 | 内容未变 | 按字节 hash 跳过，不发布、不通知 |
-| JSON 非法 / 节绑定失败 | 返回 typed `Error::Validation`，worker 记录日志；**旧快照继续生效** |
+| JSON 非法 / 节绑定失败 | 返回 typed `Error::validation`，worker 记录日志；**旧快照继续生效** |
 | 修好文件 | 内容 hash 变化，下一 tick 重新尝试 |
-| 读取失败（权限/IO） | 返回 `Error::Internal`，旧快照继续生效 |
+| 读取失败（权限/IO） | 返回 `Error::internal`，旧快照继续生效 |
 
 "坏配置不生效、不宕机"是刻意的：热更新失败应退化为"继续用上一版"，而不是把运行中的服务打挂。
 
@@ -95,7 +101,7 @@ tokio::spawn(async move {
 
 ## 生效范围与边界
 
-- 已实现：通用 options 快照、文件轮询、变更通知、typed 失败、`add_options_monitor` / `watch_options_file`。
+- 已实现：通用 options 快照、文件轮询、变更通知、typed 失败、`add_options`（含 monitor 注册）/ `watch_options_file`。
 - 配置所有权在应用：watcher 只负责"读文件 → 绑定 → 发布"，不校验业务约束；需要校验时订阅变更并
   自行拒绝（保留旧快照）。
 - 不监听环境变量：`APP__*` 只在启动时合并；运行期改环境变量没有意义。

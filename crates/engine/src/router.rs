@@ -8,8 +8,9 @@
 //! * the ordered `{param}` names as `&'static str` slices of the pattern, so a
 //!   request never allocates a parameter-name `String`; it allocates the values
 //!   of the parameters it actually has plus the small name→value table the 2.x
-//!   context exposes (a static route allocates neither). The 3.0 target is to
-//!   expose the borrowed (&'static str, &str) pairs and drop that table.
+//!   context exposes (a static route allocates neither). The next breaking
+//!   release targets exposing the borrowed (&'static str, &str) pairs and
+//!   dropping that table.
 //!
 //! `match_route` returns the target, the pattern and the parameters, and
 //! implements the same dispatch rules as the 1.5 host router:

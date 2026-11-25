@@ -363,7 +363,7 @@ fn host_build_rejects_unsupported_jwt_algorithm() {
         .mode(AppMode::Development)
         .no_spa()
         .configure(|app| {
-            app.useOptions(|options| {
+            app.options(|options| {
                 options.jwt.secret = SECRET.to_string();
                 options.jwt.algorithms = vec![JwtAlgorithm::Rs256];
             });
@@ -389,7 +389,7 @@ fn host_build_accepts_explicit_validation_override() {
         .mode(AppMode::Development)
         .no_spa()
         .configure(|app| {
-            app.useOptions(|options| {
+            app.options(|options| {
                 options.jwt.secret = SECRET.to_string();
             });
         })
@@ -405,7 +405,7 @@ async fn default_issuer_mints_the_configured_iss_and_aud() {
         .mode(AppMode::Development)
         .no_spa()
         .configure(|app| {
-            app.useOptions(|options| {
+            app.options(|options| {
                 options.jwt.secret = SECRET.to_string();
                 options.jwt.issuer = Some("https://id.example.com".to_string());
                 options.jwt.audience = Some("travel-api".to_string());

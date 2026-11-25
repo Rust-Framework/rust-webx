@@ -25,12 +25,14 @@ Cargo **包名**带连字符，Rust **导入名**用下划线库名。两者不�
 | `rust-webx-spa` | `webx_spa` | 静态文件 / SPA |
 | `rust-webx-openapi` | `webx_openapi` | OpenAPI 生成 + UI |
 | `rust-webx-ai` | `webx_ai` | AI 网关领域包（用量/记账/端口；不进入伞 crate） |
-| `rust-webx-ai-ef` | `webx_ai_ef` | rust-ef 持久化用量账本（`EfUsageSink`） |
 | `rust-webx-ai-gateway` | `webx_ai_gateway` | OpenAI 兼容 `/v1` HTTP 表面（依赖 webx + webx-ai） |
 | `rust-webx-client` | `webx_client` | 出站 HTTP（连接池/流式/SSE；伞 crate 只重导出传输类型） |
-| `rust-webx-ef` | `webx_ef` | rust-ef 边界适配：`EFError → webx::Error` 脱敏映射 + `EfResultExt`（应用按需依赖，core/伞不链接） |
+| `rust-webx-outbox` | `webx_outbox` | 事务性 outbox 的端口（`IOutbox`/`OutboxEntry`）、派发器、`OutboxOptions` 与内存实现（不链接 rust-ef） |
 | `rust-webx-h3` | `webx_h3` | 可选 HTTP/3 监听传输（QUIC + rustls + h3；不进伞 crate，默认构建不链接） |
 | `rust-webx-build` | `webx` | 构建期（`build-dependencies`） |
+
+> 与 ORM/数据库耦合的持久化参考适配器（`examples/adapters/{ai,auth,idempotency,outbox,payment}/ef`）
+> **不在上表**：它们 `publish = false`，不是可依赖的包，只供复制。
 
 `crates/` 只包含**可发布** crate（`publish = false` 会被布局门禁拒绝）；非发布的测试工具在
 `testing/`（`alloc-probe`、`contract-tests`、`upgrade-smoke`），`fuzz/` 是独立的 cargo-fuzz
@@ -57,7 +59,7 @@ workspace。应用代码只依赖 `crates/` 下的包。
 | `http` | `IHttpContext`, `IHttpRequest`, `IHttpResponse` |
 | `middleware` | `IMiddleware` |
 | `routing` | `IRouter`, `IEndpoint`, `RouteMeta` |
-| `auth` | `IClaims`, `IAuthenticationHandler`, `IAuthenticationScheme`, `IAuthorizationPolicy`, `IDynamicAuthorizer` |
+| `auth` | `IClaims`, `IAuthenticationHandler`, `IAuthenticationScheme`, `IDynamicAuthorizer`, `IdentityUser` / `RequestUser` |
 | `route` | 扫描类型、`HandlerCache`、`RouteEntry`、`IEndpointCatalog` / `EndpointCatalog` |
 | `localization` | `TextRef`, `IStringLocalizer`, `StringLocalizer`, `LocalizationOptions` |
 | `stream` | `SseEvent`, `SseResult`, `StreamEnd`（`text/event-stream` 响应） |
@@ -75,7 +77,7 @@ workspace。应用代码只依赖 `crates/` 下的包。
 | 上下文 | `webx_engine::EngineContext`（应用契约是 `IHttpContext`） |
 | 管道 | `webx_engine::Pipeline`（生产路径）；`MiddlewarePipeline::execute` 仅为 1.5 兼容执行器 |
 | 认证 | `JwtAuth`, `jwt_middleware`, `AuthenticationMiddleware` + `JwtScheme` / `ApiKeyScheme` 链 |
-| 授权 | 端点执行 `#[authorize]` 规则；`resource_auth_middleware` 已弃用（路由前无法读取 `route_pattern`） |
+| 授权 | 端点执行 `#[authorize]` 静态规则；`#[authorize(dynamic)]` 把声明交给 `IDynamicAuthorizer::authorize_with_declared_rules`；实例归属在 Handler |
 | 端点 | `StubEndpoint`（路由宏端点）, `RequestEndpoint`, `ControllerEndpoint`, `StaticJsonEndpoint`, `StaticHtmlEndpoint` |
 | 宿主 | `Host`, `HostBuilder`, `Server` |
 
@@ -121,7 +123,8 @@ HTTP 数据面端点、非 OpenAI 适配器与租户级路由后续加入。
 
 ## payment — 可选支付领域组
 
-`crates/payment/` 是与 ai/auth/cache/queue 同级的封闭领域组：
+`crates/payment/` 是与 ai/auth/cache/queue 同级的封闭领域组；回调 inbox 的参考实现在
+`examples/adapters/payment/ef`（`publish = false`，复制使用）：
 
 | crate | 导入名 | 职责 |
 |---|---|---|
@@ -132,7 +135,7 @@ HTTP 数据面端点、非 OpenAI 适配器与租户级路由后续加入。
 | `rust-webx-pay-paypal` | `webx_pay_paypal` | Orders v2、OAuth2、capture/void/refund、验签 API |
 | `rust-webx-pay-adyen` | `webx_pay_adyen` | Checkout payments/captures/refunds、HMAC 回调 |
 | `rust-webx-pay-square` | `webx_pay_square` | Payments/Refunds、Payment Links、HMAC 回调 |
-| `rust-webx-pay-ef` | `webx_pay_ef` | 基于 rust-ef 的回调 inbox：唯一去重、重试、死信 |
+| `rust-webx-pay-ef` | `webx_pay_ef` | 回调 inbox 的**参考适配器**（`examples/adapters/payment/ef`）：唯一去重、重试、死信；非发布，复制使用 |
 
 - **不进入伞 crate**：应用显式依赖所需适配器；不需要支付的项目不引入。
 - **唯一 HTTP 栈**：适配器只依赖 `rust-webx-client`，不引入服务商 SDK（官方 SDK 无 Rust 版本）。
@@ -141,31 +144,40 @@ HTTP 数据面端点、非 OpenAI 适配器与租户级路由后续加入。
   `/webhooks/payments/{provider}/{account}`。
 - **版本跟随 workspace**：`version.workspace = true`，与 `rust-webx` 同一版本号。
 
-## ef — ORM 边界组
+## outbox — 事务性 outbox（框架 crate）
 
-`crates/ef/` 存放把 Web 框架与 ORM 连接起来的边界适配器；`rust-ef` 保持 Web 无关，
-core/伞 crate 不链接它：
+`rust-webx-outbox`（导入名 `webx_outbox`）是可发布的框架 crate，只做契约与派发，**不链接 rust-ef**：
 
-| crate | 导入名 | 职责 |
-|---|---|---|
-| `rust-webx-ef` | `webx_ef` | `EFError → webx::Error` 脱敏映射（404/400/409/503/500）与 `EfResultExt::map_ef()` |
+| 项 | 职责 |
+|---|---|
+| `IOutbox` / `OutboxEntry` | 端口与值类型：入队、领取、完成/失败 |
+| `OutboxOptions` | interval / batch / lease / attempts / retry base / retention |
+| `OutboxDispatcher` | `PeriodicBackgroundService` + `EventDispatcher`：租约领取、指数退避、死信、保留期清理 |
+| `add_outbox` / `add_outbox_with` | 注册 `Arc<dyn IOutbox>` + 派发器：`add_outbox(store, OutboxOptions)`，需要容器构建存储时用 `add_outbox_with` |
+| `InMemoryOutbox` | 单进程/测试用存储（作为 `store` 传给 `add_outbox`） |
 
-- **应用按需依赖**：`rust-webx-ef = "2.9"`，调用点 `.map_ef()?`；参考应用在
-  `handlers/src/db.rs` re-export 它。
-- **无状态边界**：不建立连接、不读配置；多实例/容器语义与纯函数一致。
-- **性能**：成功路径零开销，固定文案是常量，5xx 仅在日志侧拼接 source 链。
-
-## outbox — 事务性 outbox 组
-
-`crates/outbox/` 存放"业务事务与事件原子"的 starter：
-
-| crate | 导入名 | 职责 |
-|---|---|---|
-| `rust-webx-outbox-ef` | `webx_outbox_ef` | 同事务入队（`enqueue_outbox`）、租约领取、事件派发、重试/死信、保留期清理 |
-
-- **应用按需依赖**：`rust-webx-outbox-ef = "2.9"`；core/umbrella 不链接 rust-ef。
-- **表由实体声明**：`webx_outbox` 由官方 rust-ef 迁移生成，`bootstrap` 仅测试。
+- **存储归下游**：数据库表、同事务入队、租户字段属于数据适配；参考实现是
+  `examples/adapters/outbox/ef`（`publish = false`，复制后 `add_outbox_ef`）；
+- **表由应用实体声明**：`webx_outbox` 由官方 rust-ef 迁移生成，`bootstrap` 仅测试；
 - **与事件传输分工**：outbox 保证本地事务与事件同生共死；跨进程投递交给 `IEventPublisher`。
+
+## examples/adapters — 参考适配器（非发布）
+
+`examples/adapters/` 是独立 workspace（自带 lockfile），五个与 ORM/数据库耦合的持久化适配器都在这里，
+全部 `publish = false`：
+
+| 适配器 | 实现的端口 | 说明 |
+|---|---|---|
+| `ai/ef` | `IUsageSink` | 用量账本（`ai_usage_events`）+ outbox/rollup workers |
+| `auth/ef` | `ISessionRepository` / `IRefreshTokenStore` | 会话表与 refresh token 表 |
+| `idempotency/ef` | `IIdempotencyStore` | `webx_idempotency` 表、租约围栏、清理服务 |
+| `outbox/ef` | `IOutbox`（EF 存储） | 同事务 `enqueue_outbox` + `add_outbox_ef` |
+| `payment/ef` | 回调 inbox | 唯一去重、重试、死信 |
+
+- **定位是参考实现**：可复制不可依赖——复制进业务仓后包名、实体、迁移都归下游；
+- **不发布**：不在 crates.io，不参与 semver 检查，也不在发布顺序里；
+- **接入方式**（用默认 / 复制参考适配器 / 自己实现端口 + 契约测试）见
+  [端口与适配器（下游接入）](../13-extensibility/integrations.md)。
 
 ## transport — 可选监听传输组
 

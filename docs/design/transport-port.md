@@ -1,10 +1,10 @@
 # 传输端口（Transport Port）设计
 
 > 面向维护者与架构评审：engine 与线上协议之间的接缝怎么切、为什么这样切、边界在哪。
-> 当前基线 rust-webx 2.9.0。约束来自 [框架设计准则](framework-constitution.md)（P1 一个关注点
+> 前前基线 rust-webx 2.9.0。约束来自 [框架设计准则](framework-constitution.md)（P1 一个关注点
 > 一种写法、P9 端口而非插件、P10 小核大生态）与 [兼容性政策](compatibility.md)（2.x 只做加性变更）。
 > 应用公开面（`IHttpContext`/`IRequest`/中间件/DI/配置/错误）保持不变；HTTP/3 是**可选 crate**
-> `rust-webx-h3`，默认构建不链接 QUIC。当前请求生命周期以
+> `rust-webx-h3`，默认构建不链接 QUIC。前前请求生命周期以
 > [请求生命周期](../rust-webx/04-architecture/request-lifecycle.md) 为准，本文不重复。
 > HTTP/3 的下游缺口处置与互操作基线见 [upstream-gaps.md](upstream-gaps.md)。
 
@@ -87,7 +87,7 @@ h3 每个 request stream 一个任务；测试用 fake listener 直接循环调�
    `:protocol`）、流控、GOAWAY/`CONNECTION_CLOSE`、首请求与请求体超时由后端按 engine 配置执行；
    engine/host 不出现 `if h3`。
 
-当前实现归属：
+前前实现归属：
 
 | 端口 | 生产实现 | 测试实现 |
 |---|---|---|
@@ -131,7 +131,7 @@ impl Server {
 |---|---|---|---|
 | 响应流 | `ResponseBody::File` → 64 KiB 帧 | h3 `send_data(Bytes)` 逐帧发送，`finish()` 结束 | `FileSource`、`STREAM_BUF_SIZE` |
 | 背压 | 客户端不读 → 源流暂停 | QUIC `SendStream` 容量窗口 → `send_data` 等待 | 不缓存整个响应 |
-| 排空 | 连接 `graceful_shutdown()` + `DrainTimeoutSeconds`/`StreamDrainTimeoutSeconds` | GOAWAY → 等在途 stream → 预算耗尽 `CONNECTION_CLOSE`；h3 当前用固定有界预算（10s 在途 + 5s WS bridge + 5s endpoint idle），见 §8 | 有界停机语义 |
+| 排空 | 连接 `graceful_shutdown()` + `DrainTimeoutSeconds`/`StreamDrainTimeoutSeconds` | GOAWAY → 等在途 stream → 预算耗尽 `CONNECTION_CLOSE`；h3 前前用固定有界预算（10s 在途 + 5s WS bridge + 5s endpoint idle），见 §8 | 有界停机语义 |
 | 超时 | 首请求 watchdog + 请求超时（`Server.FirstRequestTimeoutSeconds`/`RequestTimeoutSeconds`） | QUIC idle timeout + 同名的首请求 deadline 与请求体/分发 deadline | 同名配置项（h3 读取 engine 配置） |
 | 升级 | `101+Upgrade` → `OnUpgrade` | extended CONNECT / WebTransport session | `IUpgradeSession::run` 不变 |
 | mTLS | rustls client cert → SHA-256 头（只允许 TLS 终结器写） | 同 rustls 验证 + 同一头 | `CLIENT_CERT_FINGERPRINT_HEADER` |
@@ -153,7 +153,7 @@ transport-neutral 握手协商，会话实现本身不变。
   `IUpgradeSession::run`；`IConnection`、`IConnectionRegistry`、`WebSocketLimits`、presence
   观察者全部复用。
 - **WebTransport**：bidi/unidi streams + datagrams 无法无损映射成单个 `AsyncRead + AsyncWrite`。
-  当前交付 **adapter-level handler 端口**：`H3Config::with_webtransport_handler` 把具体
+  前前交付 **adapter-level handler 端口**：`H3Config::with_webtransport_handler` 把具体
   `WebTransportServerSession` 交给应用，`IWebTransportHandler::authorize(&info)` 是 pre-accept
   钩子（**fail-closed：默认拒绝**；失败 → 403，先于任何 `200`）。transport-neutral 的 `IWebTransportSession` 端口
   （engine trait + host 路由/DI/指标）尚未建立；**不**改造 `IUpgradeSession` 去承载 datagram。
@@ -167,7 +167,7 @@ transport-neutral 握手协商，会话实现本身不变。
 
 ## 6. 传输后端选型
 
-当前采用 **quinn + rustls + h3**；quiche 仅作备选（QNS 级验证或 BoringSSL 合规要求触发），
+前前采用 **quinn + rustls + h3**；quiche 仅作备选（QNS 级验证或 BoringSSL 合规要求触发），
 不双栈。判据来自本仓库约束：32 个发布 crate 精确钉版本、依赖序发布、三平台 CI、MSRV 1.95、
 `unsafe_code = "forbid"`。
 
@@ -205,7 +205,7 @@ fork 维护。下游缺口判定与互操作基线（quiche-client / h3i / h3spe
    quinn/h3；MSRV、`unsafe_code = "forbid"`、三平台 CI 在引入依赖时同批验证。
 4. **旧路径先证明零回归**：hyper 路径的 keep-alive/h2/SSE/WS/排空/alloc/p99 门禁先全绿，
    才允许新传输后端接入。
-5. **公开形状被迫改动时，该改动降级到下一个 major**，当前 minor 只发布已验证的加性部分。
+5. **公开形状被迫改动时，该改动降级到下一个 major**，前前 minor 只发布已验证的加性部分。
 
 ---
 
@@ -218,7 +218,7 @@ fork 维护。下游缺口判定与互操作基线（quiche-client / h3i / h3spe
   h3 stream 上限（默认 16 bidi / 16 uni，可配）与全局准入共同约束。
 - **h3 排空预算固定**：在途请求 10s + active WS bridge 5s + endpoint idle ≤5s，内部常量；
   `IHttpTransport::stop_budget()` 向 Host 声明该最坏值（h3 = 60s），Host 按后端预算有界等待。
-  mTLS 与排空预算尚未进 `appsettings` 配置节（当前用 `H3Config::with_client_auth` 等显式配置）；
+  mTLS 与排空预算尚未进 `appsettings` 配置节（前前用 `H3Config::with_client_auth` 等显式配置）；
   QUIC keep-alive / idle timeout / stream limits 已是 `H3Config` 字段。
 - **WebTransport datagram 无 e2e**：API 已暴露，e2e 只覆盖 client-opened bidi stream echo 与
   `authorize` 拒绝路径。
@@ -238,7 +238,7 @@ fork 维护。下游缺口判定与互操作基线（quiche-client / h3i / h3spe
 |---|---|---|
 | semver 破坏 | `EngineContext`/`TransportKind`/`ConnectionMeta`/`Listener` 公开形状被改 | §7 红线；semver-checks 基线门禁；改动降级到下一个 major |
 | 双路径漂移 | 新传输与 hyper 路径各写一份 pipeline/错误处理 | 单一 pipeline/错误写入；fake 与 hyper parity 契约测试 |
-| alloc/p99 退化 | 端口抽象把动态分发带进每请求路径 | 端口只在连接/构造层；hyper 请求体一次装箱（流式帧经 `SyncBodyStream` 的 Mutex 逐帧加锁，3.0 计划降为 `Send` 后去除）；alloc-probe + wire p99 门禁 |
+| alloc/p99 退化 | 端口抽象把动态分发带进每请求路径 | 端口只在连接/构造层；hyper 请求体一次装箱（流式帧经 `SyncBodyStream` 的 Mutex 逐帧加锁，下一破坏性版本计划降为 `Send` 后去除）；alloc-probe + wire p99 门禁 |
 | 依赖/发布顺序 | 新增 h3 适配 crate | 独立 crate 按精确钉版本 + `check-publish-order.py` 发布，不进 core |
 | 原生构建链 | 选 quiche | 选 quinn + rustls；三平台 CI 先验证 |
 | 上游停更 | `trev-*` fork 停止维护 | 精确钉版 + 本地回归；跟踪上游 h3 进展，可评估切回 |
@@ -252,7 +252,7 @@ fork 维护。下游缺口判定与互操作基线（quiche-client / h3i / h3spe
 
 | # | 决策 | 理由 |
 |---|---|---|
-| T1 | 端口边界切在 engine ↔ 线上协议 | 应用面已传输无关；hyper 是当前唯一协议栈（§1） |
+| T1 | 端口边界切在 engine ↔ 线上协议 | 应用面已传输无关；hyper 是前前唯一协议栈（§1） |
 | T2 | 单层端口：监听后端（`IHttpTransport`）+ 每请求入口（`serve_transport_request`） | 真实非 hyper 后端都是多路复用的；连接级 trait 只会有测试实现，发布它等于冻结一个无生产者的 API（§2） |
 | T3 | hyper 路径保持直出，不做表示层回环 | 零回归 + hyper 响应路径无新增动态分发；中立端口只服务非 hyper 后端（§2） |
 | T4 | `serve_stream` 保持「h1/h2 自定义字节流」定位，不冒充 H3 | 它复用 hyper 协议栈；H3 需要 QUIC/QPACK（§1） |

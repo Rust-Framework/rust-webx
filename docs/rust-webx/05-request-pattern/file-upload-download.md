@@ -462,7 +462,7 @@ impl IRequest<Response> for DownloadDocumentRequest {}
 ```rust
 Host::builder()
     .configure(|app| {
-        app.useOptions(|o| {
+        app.options(|o| {
             o.form.max_file_size = 32 * 1024 * 1024;
         });
     })

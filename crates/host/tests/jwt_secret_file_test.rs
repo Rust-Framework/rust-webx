@@ -248,7 +248,7 @@ fn configure_secret_file(
 ) -> impl FnOnce(&mut webx_host::server::HostAppBuilder) + Send + 'static {
     let secret_file = path.to_string_lossy().into_owned();
     move |app| {
-        app.useOptions(move |options| {
+        app.options(move |options| {
             options.jwt.secret.clear();
             options.jwt.secret_file = Some(secret_file);
         });
@@ -329,8 +329,8 @@ fn code_level_secret_override_wins_over_the_file() {
         .no_spa()
         .configure(move |app| {
             let secret_file = missing.to_string_lossy().into_owned();
-            app.useOptions(move |options| {
-                options.jwt.secret = "explicit-secret-from-useoptions".into();
+            app.options(move |options| {
+                options.jwt.secret = "explicit-secret-from-code-override".into();
                 options.jwt.secret_file = Some(secret_file);
             });
         })
@@ -338,7 +338,10 @@ fn code_level_secret_override_wins_over_the_file() {
         .try_build()
         .expect("an explicit secret must skip the file");
 
-    assert_eq!(host.options().jwt.secret, "explicit-secret-from-useoptions");
+    assert_eq!(
+        host.options().jwt.secret,
+        "explicit-secret-from-code-override"
+    );
 }
 
 #[test]
@@ -351,7 +354,7 @@ fn production_guard_accepts_a_file_backed_secret() {
         .no_spa()
         .configure(move |app| {
             let secret_file = path.to_string_lossy().into_owned();
-            app.useOptions(move |options| {
+            app.options(move |options| {
                 options.jwt.secret.clear();
                 options.jwt.secret_file = Some(secret_file);
                 options.cors.origins = vec!["https://example.com".into()];

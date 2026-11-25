@@ -129,13 +129,13 @@ handlers ──→ domain
 ## Docbit 实例（目标结构）
 
 ```
-docbit/
-├── contracts/src/   # LoginRequest, IDocumentService trait, BlogPostSummary DTO, ...
-├── domain/src/      # entities/（User 等实体）、seed
-├── handlers/src/    # LoginHandler, DocService (impl IDocumentService), ...
+examples/docbit/
+├── contracts/src/   # <context>/<operation>.rs：LoginRequest、IDocumentService trait、BlogPostSummary DTO …
+├── domain/src/      # entities/（User 等实体 + XxxConfiguration）、mappers/、seed
+├── handlers/src/    # <context>/<operation>.rs 一个操作一个 Handler；doc_service.rs
 └── host/src/        # Host::builder() 组合根
     ├── main.rs
-    └── startup/     # mod.rs、hosted/（DbInitService 等）、seed/
+    └── startup/     # mod.rs、services/、hosted/（DbInitService 等）、seed/
 ```
 
 ## 小结

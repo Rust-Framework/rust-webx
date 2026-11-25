@@ -874,7 +874,7 @@ pub trait StripeHostBuilderExt: Sized {
     /// Register the Stripe adapter with runtime configuration.
     ///
     /// Binds the `"Stripe"` configuration section through
-    /// `add_options_monitor`, so appsettings/file reloads are picked up by the
+    /// `add_options`, so appsettings/file reloads are picked up by the
     /// runtime cache (default 60s) or immediately after
     /// `Payments::invalidate`.
     fn add_stripe(self) -> Self;
@@ -885,7 +885,7 @@ pub trait StripeHostBuilderExt: Sized {
 
 impl StripeHostBuilderExt for HostBuilder {
     fn add_stripe(self) -> Self {
-        let builder = self.add_options_monitor::<StripeOptions>("Stripe");
+        let builder = self.add_options::<StripeOptions>("Stripe");
         builder.register(|services| {
             services
                 .add_payment_provider_factory_lazy(|resolver| {

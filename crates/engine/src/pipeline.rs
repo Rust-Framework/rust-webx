@@ -214,7 +214,10 @@ async fn convert_error(
 /// The ordered middleware stages plus the optimized execution loop.
 pub struct Pipeline {
     /// Stages in registration order (the host owns slot placement).
-    pub stages: Vec<Arc<dyn IMiddleware>>,
+    ///
+    /// Private so a pipeline can only be assembled through [`Self::new`]; a
+    /// struct literal would bypass the continuation-style detection below.
+    stages: Vec<Arc<dyn IMiddleware>>,
     /// Whether any stage uses the continuation style (2.4-4).
     ///
     /// Computed by [`Self::new`]. Default pipelines contain only legacy

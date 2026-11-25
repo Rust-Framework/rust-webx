@@ -1,0 +1,59 @@
+# docbit — portfolio / blog / RBAC / documentation-site reference service.
+#
+# Four-layer rust-xazgo layout: contracts (requests, routes, identity) →
+# domain (entities, mappers, rules) → handlers (one operation per file) →
+# host (composition root: config, DI, migrations, middleware).
+[workspace]
+resolver = "2"
+
+members = ["contracts", "domain", "handlers", "host"]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT"
+authors = ["Start"]
+homepage = "https://rust-framework.github.io/rust-webx/"
+repository = "https://github.com/Rust-Framework/rust-webx"
+documentation = "https://docs.rs/rust-webx"
+
+[workspace.dependencies]
+# Framework crates (this repository).
+rust-webx-core = { version = "=2.9.1", path = "../../crates/core" }
+rust-webx-host = { version = "=2.9.1", path = "../../crates/host" }
+rust-webx-engine = { version = "=2.9.1", path = "../../crates/engine" }
+rust-webx-macros = { version = "=2.9.1", path = "../../crates/macros" }
+rust-webx = { version = "=2.9.1", path = "../../crates/webx" }
+rust-webx-spa = { version = "=2.9.1", path = "../../crates/spa" }
+rust-webx-build = { version = "=2.9.1", path = "../../crates/build" }
+rust-webx-openapi = { version = "=2.9.1", path = "../../crates/openapi" }
+
+# Docbit sub-crates.
+docbit-contracts = { version = "0.1.0", path = "contracts" }
+docbit-domain = { version = "0.1.0", path = "domain" }
+docbit-handlers = { version = "0.1.0", path = "handlers" }
+
+# DI + shared contracts (sibling RF checkouts while 1.1 / 0.1 are unpublished).
+rust-dix = "1.0"
+rust-core = "0.1"
+rust-dix-macros = "1.0"
+
+# rust-ef ORM (paired with rust-ef 2.9.1; `"2.6"` admits 2.9.x).
+rust-ef = "2.6"
+rust-ef-sqlite = "2.6"
+
+# External dependencies.
+async-trait = "0.1"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+inventory = "0.3"
+uuid = { version = "1", features = ["v4"] }
+# Documentation bundle uploads (admin): archive extraction.
+zip = { version = "9", default-features = false, features = ["deflate"] }
+

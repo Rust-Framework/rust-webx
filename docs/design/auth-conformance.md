@@ -9,11 +9,11 @@
 | 能力 | 证据（测试文件） |
 |---|---|
 | JWT 校验：`iss`/`aud`/算法白名单/leeway/大小上限/空 `sub`/Reject 模式 | `host/tests/auth_validation_test.rs` |
-| Cookie 会话 + CSRF（`__Host-`、HttpOnly/Secure/SameSite、双提交、`Sec-Fetch-Site`） | `host/tests/cookie_auth_test.rs`、`csrf_test.rs`、`rust-webx-auth-ef` 会话测试 |
+| Cookie 会话 + CSRF（`__Host-`、HttpOnly/Secure/SameSite、双提交、`Sec-Fetch-Site`） | `host/tests/cookie_auth_test.rs`、`csrf_test.rs`、参考适配器 `examples/adapters/auth/ef` 的会话测试 |
 | 登录硬化：NIST 口令策略、限流/退避、dummy hash、Argon2id 有界并发 | `host/tests/login_hardening_test.rs` |
 | 吊销：`revoke_until` TTL、负缓存、存储故障 fail-closed | `host/tests/session_cache_test.rs`、`crates/core/src/security/` |
 | JWKS/非对称 JWT：RS256/ES256/PS256、`kid` 轮换、single-flight、SSRF 防护 | `host/tests/auth_jwks_test.rs` |
-| Refresh 令牌：SHA-256 存储、原子轮换、重用检测整族撤销、EF 持久化 | `host/tests/refresh_token_test.rs`、`rust-webx-auth-ef` |
+| Refresh 令牌：SHA-256 存储、原子轮换、重用检测整族撤销、EF 持久化 | `host/tests/refresh_token_test.rs`、参考适配器 `examples/adapters/auth/ef` |
 | OIDC：discovery、PKCE S256、id_token 校验、私有 CA HTTPS | `auth/oidc/tests/*` |
 | OAuth2 社交登录：授权码 + PKCE、provider 预设、userinfo → `IdentityUser` | `auth/oauth2/tests/*` |
 | MFA：RFC 6238 TOTP、恢复码、`amr`/`acr` | `auth/mfa` 单元测试 |

@@ -79,10 +79,10 @@ mod handlers;
 
 ## 从 Workspace 模板创建
 
-也可直接参考本仓库的 `docbit` 项目：
+也可直接参考本仓库的 `docbit` 项目（`examples/docbit/`，独立 workspace）：
 
 ```bash
-cargo run -p docbit-host
+cargo run --manifest-path examples/docbit/Cargo.toml -p docbit-host
 ```
 
 Docbit 展示了完整的中型项目结构，详见 [第十五章案例研究](../15-case-study/INDEX.md)。

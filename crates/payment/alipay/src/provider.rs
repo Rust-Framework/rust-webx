@@ -831,7 +831,7 @@ pub trait AlipayHostBuilderExt: Sized {
     /// Register the Alipay adapter with runtime configuration.
     ///
     /// Binds the `"Alipay"` configuration section through
-    /// `add_options_monitor`, so appsettings/file reloads are picked up by the
+    /// `add_options`, so appsettings/file reloads are picked up by the
     /// runtime cache (default 60s) or immediately after
     /// `Payments::invalidate`.
     fn add_alipay(self) -> Self;
@@ -842,7 +842,7 @@ pub trait AlipayHostBuilderExt: Sized {
 
 impl AlipayHostBuilderExt for HostBuilder {
     fn add_alipay(self) -> Self {
-        let builder = self.add_options_monitor::<AlipayOptions>("Alipay");
+        let builder = self.add_options::<AlipayOptions>("Alipay");
         builder.register(|services| {
             services
                 .add_payment_provider_factory_lazy(|resolver| {

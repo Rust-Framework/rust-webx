@@ -57,7 +57,7 @@ rust-webx folds these cross-cutting concerns into the framework layer:
 | Handler registration boilerplate | `#[handler]` auto-registers the handler with the DI container |
 | Tight coupling between modules | `IMediator::send()` dispatches requests; `publish()` publishes events |
 | Scattered error → HTTP mapping | Unified `Error` type + engine error pipeline (error status is visible to metrics/after hooks before the response is finalized) |
-| Ad-hoc auth/authorization | `add_authentication()` + declarative `#[authorize]` |
+| Ad-hoc auth/authorization | `use_authentication()` + declarative `#[authorize]` |
 
 rust-webx is **not** a full-stack UI framework (pair it with any frontend), **not** an ORM (bring your own or use [`rust-ef`](https://crates.io/crates/rust-ef)), and **not** a microservice-governance platform. The optional `rust-webx-ai*` crates build an OpenAI-compatible gateway on top of the framework; they are a separate, opt-in product surface, not a dependency of the core Web API story.
 
@@ -71,7 +71,8 @@ rust-webx is **not** a full-stack UI framework (pair it with any frontend), **no
 - **Identity on the request** — `#[fromclaim] user: IdentityUser` binds the authenticated identity (id, name, email, tenant, roles) as a plain request field; handlers stop parsing tokens. `#[fromclaim(optional)] viewer: Option<IdentityUser>` covers anonymous endpoints (anonymous access must be declared explicitly).
 - **Declarative validation** — `#[validate(length/range/email/custom)]` on request fields runs after binding, merges failures into the same `400 problem+json` `errors` map, and reflects the constraints into OpenAPI (`minLength`/`minItems`/`minimum`/`format`).
 - **Keyset pagination, client info, instance checks** — `KeysetRequest`/`CursorPage` complement offset `PagedRequest`/`PagedResult`; `#[fromclient] ClientInfo` binds the listener peer plus trusted `X-Forwarded-For` resolution; `RequestUser::require_owner`/`require_same_tenant` centralize instance-level 401/403 decisions.
-- **Transactional outbox** — opt-in `rust-webx-outbox-ef`: same-transaction enqueue, lease-based dispatch through `EventDispatcher`, backoff, dead-letter and retention, registered with `add_outbox`.
+- **Transactional outbox** — `rust-webx-outbox` ships the port, the lease-based `OutboxDispatcher` (through `EventDispatcher`: backoff, dead-letter, retention) and an `InMemoryOutbox` default, registered with `add_outbox`. Same-transaction enqueue is data adaptation: a non-published EF reference lives in `examples/adapters/outbox/ef` (`add_outbox_ef`).
+- **Ports, not starters** — every infrastructure capability is a port (`IIdempotencyStore`, `IOutbox`, `ISessionStore`, `IObjectStore`, `IMeter`, `IAdvisoryLock`, `IEmailSender`, …) with a zero-config in-memory or no-op default. Entities, tables and the data/logic adaptation belong to the downstream service: implement the port in your crate, or copy a non-published reference adapter from `examples/adapters/` and run the port contracts in `testing/contract-tests`. See the [ports & adapters guide](docs/rust-webx/13-extensibility/integrations.md).
 - **Endpoint metadata service** — `IEndpointCatalog` exposes every endpoint at runtime (`all()` / `localized()`), so permission sync, admin navigation and OpenAPI share one source.
 - **Localization** — `#[display]` / `#[description]` / `#[category]` store resource keys; a host-wide `Culture.Default` selects the language, with `.json` resources or `include_str!` embedding.
 - **Production capabilities out of the box** — graceful shutdown, live health checks, security headers, request IDs, CORS, TLS, rate limiting, compression, OpenAPI + SPA hosting.
@@ -83,7 +84,7 @@ rust-webx is **not** a full-stack UI framework (pair it with any frontend), **no
 
 - **File upload & download** — typed `FormFile` binding for `multipart/form-data` (streamed, spooled to disk, size-limited) and ASP.NET Core-shaped file responses (`FileResult::path` / `::stream` / `::seekable_stream`, `ContentResult`) with `Content-Disposition`, `ETag`, `Last-Modified` and `Range`.
 - **ORM-agnostic** — the framework does not depend on `rust-ef`; the `docbit` reference app wires it in with minimal glue.
-- **Payments as a domain group** — opt-in `rust-webx-pay*` crates: one `IPaymentProvider` port for Stripe, Alipay, WeChat Pay v3, PayPal, Adyen and Square, with runtime `IPaymentServiceFactory`/`PaymentScope` configuration, a frontend payment-method catalog (`PaymentOption`), multi-account routing, raw-body webhook verification, provider-specific ACKs and a rust-ef inbox. See the [payments chapter](docs/rust-webx/13-extensibility/payments.md).
+- **Payments as a domain group** — opt-in `rust-webx-pay*` crates: one `IPaymentProvider` port for Stripe, Alipay, WeChat Pay v3, PayPal, Adyen and Square, with runtime `IPaymentServiceFactory`/`PaymentScope` configuration, a frontend payment-method catalog (`PaymentOption`), multi-account routing, raw-body webhook verification and provider-specific ACKs. A durable webhook inbox is data adaptation: the non-published reference adapter lives in `examples/adapters/payment/ef`. See the [payments chapter](docs/rust-webx/13-extensibility/payments.md).
 - **Mediator without an annotation tax** — a `#[handler]` whose Request has no HTTP route is automatically an `IMediator` handler; its response does not need `Serialize`. HTTP capability belongs to the route, not to a handler mode flag.
 
 ## Why rust-webx
@@ -96,7 +97,7 @@ rust-webx is **not** a full-stack UI framework (pair it with any frontend), **no
 | **Performance without giving up correctness** | Allocation counts, wire-level correctness and stability suites are release gates. See the [allocation budget](docs/design/alloc-budget.md) and [stability gates](docs/design/stability-gates.md). |
 | **Production admission and lifecycle** | One global connection governor across all listeners, first-request deadline, HTTP/2 keepalive, graceful/immediate shutdown guards, Host single-use state, and per-worker SSE drain. |
 | **Errors that downstream systems can trust** | Error responses are written before reverse `after` hooks, so metrics/tracing/compression see the real status; representation headers from a failed success path are stripped and `problem+json` is consistent. |
-| **Native-first integrations** | `rust-dix` 1.0 DI scopes, `rust-ef` 2.6+ ORM (verified paired with rust-ef 2.9.0), JWT/session/password ports, and `rust-webx-client` are framework capabilities rather than ad-hoc app glue. |
+| **Native-first integrations** | `rust-dix` 1.0 DI scopes, `rust-ef` 2.6+ ORM (verified paired with rust-ef 2.9.1), JWT/session/password ports, and `rust-webx-client` are framework capabilities rather than ad-hoc app glue. |
 | **Explicit HTTP vs in-process capabilities** | `#[handler]` without a route is mediator-only; a route adds the response encoder. No `#[handler(in_process)]`-style mode flag and no hidden HTTP endpoint for a command handler. |
 
 The numbers above are a local same-window comparison, not a capacity guarantee.
@@ -137,9 +138,9 @@ The framework is split into a small set of focused crates, re-exported through t
 
 ```
 rust-webx/
-├── Cargo.toml                 # workspace root (v2.9.1)
+├── Cargo.toml                 # workspace root (v2.9.1) — published runtime crates
 ├── crates/
-│   ├── core/                  # rust-webx-core  — traits, configuration
+│   ├── core/                  # rust-webx-core  — traits, configuration, rust-core re-exports
 │   ├── engine/                # rust-webx-engine — worker pool, direct dispatch
 │   │                          #   zero-copy context, pipeline, TLS/HTTP2
 │   ├── host/                  # rust-webx-host  — Host builder, middleware
@@ -151,10 +152,8 @@ rust-webx/
 │   ├── webx/                  # rust-webx       — umbrella crate (re-exports)
 │   ├── ai/                    # AI domain group
 │   │   ├── core/              #   rust-webx-ai         — gateway domain kit
-│   │   ├── ef/                #   rust-webx-ai-ef      — durable EF usage ledger
 │   │   └── gateway/           #   rust-webx-ai-gateway — OpenAI-compatible /v1
 │   ├── auth/                  # authentication domain group
-│   │   ├── ef/                #   rust-webx-auth-ef — durable session/refresh stores
 │   │   ├── oidc/              #   rust-webx-oidc
 │   │   ├── oauth2/            #   rust-webx-oauth2
 │   │   ├── mfa/               #   rust-webx-mfa
@@ -165,27 +164,26 @@ rust-webx/
 │   │   ├── nats/              #   rust-webx-nats
 │   │   ├── rabbitmq/          #   rust-webx-rabbitmq
 │   │   └── kafka/             #   rust-webx-kafka
-│   ├── ef/                    # ORM boundary adapters
-│   │   └── webx/              #   rust-webx-ef — sanitized EFError → webx::Error mapping
-│   ├── outbox/                # transactional-outbox starters
-│   │   └── ef/                #   rust-webx-outbox-ef — same-transaction enqueue + dispatch
 │   ├── transport/             # optional non-hyper listener backends
 │   │   └── h3/                #   rust-webx-h3 — HTTP/3 (QUIC + rustls + h3)
-│   └── payment/               # payment domain group (opt-in)
-│       ├── core/              #   rust-webx-pay — ports, models, Payments runtime
-│       ├── stripe/            #   rust-webx-pay-stripe
-│       ├── alipay/            #   rust-webx-pay-alipay
-│       ├── wechatpay/         #   rust-webx-pay-wechatpay
-│       ├── paypal/            #   rust-webx-pay-paypal
-│       ├── adyen/             #   rust-webx-pay-adyen
-│       ├── square/            #   rust-webx-pay-square
-│       └── ef/                #   rust-webx-pay-ef — durable webhook inbox
+│   ├── payment/               # payment domain group (opt-in)
+│   │   ├── core/              #   rust-webx-pay — ports, models, Payments runtime
+│   │   ├── stripe/            #   rust-webx-pay-stripe
+│   │   ├── alipay/            #   rust-webx-pay-alipay
+│   │   ├── wechatpay/         #   rust-webx-pay-wechatpay
+│   │   ├── paypal/            #   rust-webx-pay-paypal
+│   │   ├── adyen/             #   rust-webx-pay-adyen
+│   │   └── square/            #   rust-webx-pay-square
+│   └── outbox/                #   rust-webx-outbox — outbox port, dispatcher, InMemoryOutbox
+├── examples/                  # reference apps & adapters (one cargo workspace each, own lockfile)
+│   ├── docbit/                #   portfolio + blog + RBAC + docs site
+│   ├── dmbit/                 #   device & inventory management
+│   ├── imbit/                 #   real-time IM (WS + signaling)
+│   └── adapters/              #   non-published reference adapters (publish = false)
+│       └── ai|auth|idempotency|outbox|payment/ef/   # ports implemented on rust-ef (copy, never depend)
 ├── testing/                   # non-published test harnesses (publish = false)
-│                              #   alloc-probe / contract-tests / upgrade-smoke
-├── fuzz/                      # standalone cargo-fuzz workspace (nightly CI)
-├── docbit/                    # reference app: portfolio + blog + RBAC + docs
-├── dmbit/                     # reference app: device & inventory management
-└── imbit/                     # reference app: real-time IM (WS + signaling)
+│                              #   alloc-probe / contract-tests / upgrade-smoke / load-probe
+└── fuzz/                      # standalone cargo-fuzz workspace (nightly CI)
 ```
 
 > **Package vs import name**: the dependency is `rust-webx`, the code is
@@ -194,17 +192,20 @@ rust-webx/
 > `rust-webx-macros` → `webx_macros`,
 > `rust-webx-spa` → `webx_spa`, `rust-webx-openapi` → `webx_openapi`,
 > `rust-webx-ai` → `webx_ai`, `rust-webx-client` → `webx_client`,
-> `rust-webx-ai-ef` → `webx_ai_ef`, `rust-webx-ai-gateway` → `webx_ai_gateway`,
-> `rust-webx-auth-ef` → `webx_auth_ef`, `rust-webx-oidc` → `webx_oidc`,
+> `rust-webx-ai-gateway` → `webx_ai_gateway`,
+> `rust-webx-oidc` → `webx_oidc`,
 > `rust-webx-oauth2` → `webx_oauth2`, `rust-webx-mfa` → `webx_mfa`,
 > `rust-webx-webauthn` → `webx_webauthn`, `rust-webx-redis` → `webx_redis`,
 > `rust-webx-nats` → `webx_nats`, `rust-webx-rabbitmq` → `webx_rabbitmq`,
-> `rust-webx-kafka` → `webx_kafka`, `rust-webx-ef` → `webx_ef`,
-> `rust-webx-outbox-ef` → `webx_outbox_ef`, `rust-webx-pay` → `webx_pay`,
+> `rust-webx-kafka` → `webx_kafka`, `rust-webx-outbox` → `webx_outbox`,
+> `rust-webx-pay` → `webx_pay`,
 > `rust-webx-pay-stripe` → `webx_pay_stripe`, `rust-webx-pay-alipay` → `webx_pay_alipay`,
 > `rust-webx-pay-wechatpay` → `webx_pay_wechatpay`, `rust-webx-pay-paypal` → `webx_pay_paypal`,
 > `rust-webx-pay-adyen` → `webx_pay_adyen`, `rust-webx-pay-square` → `webx_pay_square`,
-> `rust-webx-pay-ef` → `webx_pay_ef`, `rust-webx-h3` → `webx_h3`.
+> `rust-webx-h3` → `webx_h3`.
+>
+> The `*-ef` reference adapters under `examples/adapters/` are **not dependencies**:
+> they are `publish = false`, so they have no crates.io package and no import name to rely on.
 
 ## Request-as-Endpoint: Hello World
 
@@ -241,18 +242,22 @@ async fn main() {
 
 Routing discovery, handler resolution, middleware orchestration, and graceful shutdown are all handled automatically by `Host::build()`.
 
-### Composition root: two slots
+### Composition root: assembly slots
 
-Every application is assembled through exactly two slots on the builder:
+Every application is assembled through the same few slots on the builder:
 
 | Slot | What belongs there | Example |
 |---|---|---|
-| `register` | DI services, ports and adapters — the object graph | `.register(|svc| svc.add_mediator())` |
-| `configure` | `AppOptions` runtime knobs for this host | `.configure(\|app\| app.use_options(\|o\| o.metrics.enabled = false))` |
+| `register` | DI services, ports and adapters — the object graph | `.register(\|svc\| svc.add_mediator())` |
+| `configure` | `AppOptions` runtime knobs for this host | `.configure(\|app\| app.options(\|o\| o.metrics.enabled = false))` |
+| `add_options` / `add_options_with` | one configuration section bound to one `T`; `_with` applies a code-level override after binding | `.add_options_with::<SiteConfig>("Site", \|s\| s.public_url = site_url)` |
 
-Typed helpers (`use_spa`, `add_authentication`, `use_http_transport`, `use_alt_svc`, ...) are
+Typed helpers (`use_spa`, `use_authentication`, `use_http_transport`, `use_alt_svc`, ...) are
 sugar over the same builder state and never introduce a third assembly channel. Business code
 consumes interfaces; only the composition root knows concrete implementations.
+
+The full verb table (`add_*` / `use_*` / `register` / `configure` / `add_options*` /
+`watch_options_file`) lives in [api-convergence.md](docs/design/api-convergence.md).
 
 ## Core Concepts
 
@@ -268,7 +273,7 @@ consumes interfaces; only the composition root knows concrete implementations.
 | `IEventHandler<T>` | Event handler; `publish()` delivers asynchronously through `IEventPublisher` (default: in-memory queue). |
 | `Error` | Unified error type automatically mapped to HTTP status codes. |
 | `IClaims` / `IAuthenticationHandler` | JWT auth interfaces that extract identity from the Bearer token. |
-| `IAuthorizationPolicy` | Legacy custom-policy interface; route-pattern authorization. |
+| `RequestUser` | Instance-level ownership checks in handlers: `require_owner` / `require_same_tenant` (401 vs 403); route-level rules stay on `#[authorize]`. |
 | `IDynamicAuthorizer` | Route-level runtime authorization (DB/cache/feature flags) after static `#[authorize]` rules. |
 | `IEndpointCatalog` | Runtime endpoint metadata (`all()` / `localized()`); DI-injected or `host.endpoints()`. |
 | `IStringLocalizer` | Resource-key lookup for endpoint text and OpenAPI; default culture from `Culture.Default`. |
@@ -312,7 +317,7 @@ handlers stay unchanged.
 | [`rust-webx-redis`](https://crates.io/crates/rust-webx-redis) | `add_redis(RedisOptions::new(url))` — also registers `IDistributedCache` | at-least-once (Redis Streams consumer group; `XACK` after handlers, pending reclaimed, bounded retries → dead-letter stream) |
 | [`rust-webx-nats`](https://crates.io/crates/rust-webx-nats) | `add_nats(NatsOptions::new(url))` | at-most-once (core NATS; optional queue group) |
 | [`rust-webx-rabbitmq`](https://crates.io/crates/rust-webx-rabbitmq) | `add_rabbitmq(RabbitMqOptions::new(url))` | at-least-once (quorum topic queue, publisher confirms, manual ack + requeue, `x-delivery-limit` + optional DLX) |
-| [`rust-webx-kafka`](https://crates.io/crates/rust-webx-kafka) | `add_kafka(KafkaOptions::new(brokers, topic))` | single-partition follower; per-partition ordering; no consumer-group offset commits (restart uses the configured start offset); reference starter |
+| [`rust-webx-kafka`](https://crates.io/crates/rust-webx-kafka) | `add_kafka(KafkaOptions::new(brokers, topic))` | single-partition follower; per-partition ordering; no consumer-group offset commits (restart uses the configured start offset); reference adapter, published |
 
 Cache-only: `RedisOptions::cache_only()`. Publisher-only: `.publisher_only()` on NATS/RabbitMQ/Kafka;
 Redis uses `.without_cache()` + `RedisEventsOptions { consumer_enabled: false, .. }`. See
@@ -332,21 +337,23 @@ do not pull QUIC dependencies.
 
 ## Example Applications
 
-Two full reference applications ship in this repository, demonstrating the framework, layered project structure (`contracts` / `handlers` / `domain`), JWT auth, RBAC, and SPA hosting:
+Three full reference applications ship in this repository, demonstrating the framework, layered project structure (`contracts` / `domain` / `handlers` / `host`), JWT auth, RBAC, real-time channels, and SPA hosting. Each one is its own cargo workspace under [`examples/`](examples/README.md):
 
 | Application | Description | Dev URL |
 |-------------|-------------|---------|
-| [`docbit`](docbit/) | Portfolio + blog + RBAC + a full docs site (`docs/`). Uses `rust-ef` (SQLite in dev and production). | <http://localhost:5000> |
-| [`dmbit`](dmbit/) | Device & inventory management for a data-center rig (device/product/spec/stock management). SQLite-based. | <http://localhost:5100> |
+| [`docbit`](examples/docbit/) | Portfolio + blog + RBAC + a full docs site (`docs/`). Uses `rust-ef` (SQLite in dev and production). | <http://localhost:5000> |
+| [`dmbit`](examples/dmbit/) | Device & inventory management for a data-center rig (device/product/spec/stock management). SQLite-based. | <http://localhost:5100> |
+| [`imbit`](examples/imbit/) | Real-time IM: HTTP + WebSocket in one host, room messaging with replay, signaling, TURN credentials, recording. | <http://localhost:8090> |
 
-Run the reference apps in development:
+Run the reference apps in development (one workspace per app, so pass `--manifest-path`):
 
 ```bash
-cargo run -p docbit-host     # → http://localhost:5000
-cargo run -p dmbit-host      # → http://localhost:5100
+cargo run --manifest-path examples/docbit/Cargo.toml -p docbit-host   # → http://localhost:5000
+cargo run --manifest-path examples/dmbit/Cargo.toml -p dmbit-host     # → http://localhost:5100
+cargo run --manifest-path examples/imbit/Cargo.toml -p imbit-host     # → http://localhost:8090 (bin name: imbit)
 ```
 
-For production deployment details, see [`docbit/PRODUCTION.md`](docbit/PRODUCTION.md).
+For production deployment details, see [`examples/docbit/PRODUCTION.md`](examples/docbit/PRODUCTION.md).
 
 ## Quick Start
 
@@ -354,40 +361,40 @@ For production deployment details, see [`docbit/PRODUCTION.md`](docbit/PRODUCTIO
 
 ```bash
 # release build of a specific application
-cargo build --release -p docbit-host
-cargo build --release -p dmbit-host
+cargo build --release --manifest-path examples/docbit/Cargo.toml -p docbit-host
+cargo build --release --manifest-path examples/dmbit/Cargo.toml -p dmbit-host
 ```
 
 ### Run a reference app
 
 ```bash
-cargo run -p docbit-host     # development (SQLite), http://localhost:5000
+cargo run --manifest-path examples/docbit/Cargo.toml -p docbit-host     # development (SQLite), http://localhost:5000
 ```
 
 ### Publish (bare metal)
 
 ```bash
 # Linux / macOS
-chmod +x docbit/publish.sh
-./docbit/publish.sh /opt/docbit --production
+chmod +x examples/docbit/publish.sh
+./examples/docbit/publish.sh /opt/docbit --production
 
 # Windows
-.\docbit\publish.ps1 -Destination D:\deploy\docbit -Production
+.\examples\docbit\publish.ps1 -Destination D:\deploy\docbit -Production
 ```
 
 Set `DATABASE_URL` and `JWT_SECRET` before starting, or edit the generated `run.sh` / `run.cmd`.
 
 ### Docker (optional)
 
-Primary deployment is **Linux binary + static assets** via `docbit/publish.sh` (see [docbit/PRODUCTION.md](docbit/PRODUCTION.md)). Docker files are reference-only and not maintained in CI:
+Primary deployment is **Linux binary + static assets** via `examples/docbit/publish.sh` (see [docbit/PRODUCTION.md](examples/docbit/PRODUCTION.md)). Docker files are reference-only and not maintained in CI:
 
 ```bash
 # standalone image (verify locally before use)
-docker build -f docbit/Dockerfile .
+docker build -f examples/docbit/Dockerfile .
 
 # local stack (docbit + SQLite volume)
-cp docbit/.env.example docbit/.env     # edit JWT_SECRET
-docker compose -f docbit/docker-compose.yml --env-file docbit/.env up --build
+cp examples/docbit/.env.example examples/docbit/.env     # edit JWT_SECRET
+docker compose -f examples/docbit/docker-compose.yml --env-file examples/docbit/.env up --build
 # → http://localhost:8100
 ```
 
@@ -453,31 +460,41 @@ See the configuration chapter under `docs/rust-webx/` for the full variable refe
 
 ## Error Mapping
 
-| `Error` variant | HTTP status | Meaning |
-|-----------------|-------------|---------|
-| `Error::Http(msg)` | 400 | HTTP protocol error |
-| `Error::Status(code, msg)` | `code` | Explicit status code |
-| `Error::Unauthorized(msg)` | 401 | Authentication failed / missing token |
-| `Error::Forbidden(msg)` | 403 | Insufficient permissions |
-| `Error::Di(msg)` | 500 | DI container error |
-| `Error::Routing(msg)` | 404 | Routing error |
-| `Error::Serialization(e)` | 400 | Request (de)serialization error |
-| `Error::ResponseSerialization(e)` | 500 | Response serialization failed (server-side DTO defect) |
-| `Error::State(msg)` | 500 | Server-side state / programming error |
-| `Error::Internal(msg)` | 500 | Internal error |
-| `Error::Message(msg)` | 500 | Generic error message |
-| `Error::Validation(msg)` | 400 | Validation failure |
-| `Error::NotFound(msg)` | 404 | Resource not found |
-| `Error::Conflict(msg)` | 409 | Optimistic concurrency / state conflict |
-| `Error::PayloadTooLarge(msg)` | 413 | Request body or uploaded file too large |
-| `Error::UnsupportedMediaType(msg)` | 415 | Unsupported request content type |
-| `Error::Problem(details)` | `details.status` | Field-level binding/validation problem carrying `errors` |
+`webx::Error` is `rust_core::AppError` (2.9.1: a kind + private fields, built through constructors,
+read through accessors — the 2.9 enum is gone). `kind` decides the default status/code/retryable;
+constructors can tighten it:
+
+| Constructor | HTTP status | `code` | Retryable | Meaning |
+|-------------|-------------|--------|-----------|---------|
+| `Error::validation(msg)` | 400 | `validation_failed` | no | Validation failure (with `with_field`) |
+| `Error::bad_request(msg)` | 400 | `bad_request` | no | Invalid input |
+| `Error::invalid_json(err)` | 400 | `invalid_json` | no | Request (de)serialization error |
+| `Error::unauthorized(msg)` | 401 | `unauthorized` | no | Authentication failed / missing token |
+| `Error::forbidden(msg)` | 403 | `forbidden` | no | Insufficient permissions |
+| `Error::not_found(msg)` | 404 | `not_found` | no | Resource not found |
+| `Error::route_not_found(msg)` | 404 | `not_found` | no | Routing miss |
+| `Error::conflict(msg)` | 409 | `conflict` | no | Optimistic concurrency / state conflict |
+| `Error::conflict_retryable(msg)` | 409 | `conflict` | yes | Conflict that resolves by retrying |
+| `Error::payload_too_large(msg)` | 413 | `payload_too_large` | no | Request body or uploaded file too large |
+| `Error::unsupported_media_type(msg)` | 415 | `unsupported_media_type` | no | Unsupported request content type |
+| `Error::too_many_requests(secs, msg)` | 429 | `too_many_requests` | yes | Rate limited (`Retry-After`) |
+| `Error::unavailable(msg)` | 503 | `service_unavailable` | yes | Upstream unavailable / timeout |
+| `Error::internal(operator)` / `Error::state(operator)` | 500 | `internal_error` | no | Server-side defect; `public_detail() = None` |
+| `Error::di(operator)` | 500 | `dependency_injection` | no | DI container / composition-root defect |
+| `Error::response_serialization(err)` | 500 | `internal_error` | no | Response encoding failed (server-side DTO defect) |
+| `Error::status(code, msg)` | `code` | derived from status | derived | Explicit status override |
+| `ProblemDetails::validation(..).to_error()` | 400 | `validation_failed` | no | Field-level binding/validation problem carrying `errors` |
+
+Boundary errors need no adapter: `EFError` and `RdiError` implement `From` in their own crates, so
+handlers just use `?`. The classification authority is
+[`app-error-migration.md`](docs/design/app-error-migration.md); the code registry is
+`rust_core::error_codes::ERROR_CODES`.
 
 ## Documentation
 
 - **Online handbook** — the full book is published at <https://rust-framework.github.io/rust-webx/> (mdBook, Chinese; built from `docs/rust-webx/` by `.github/workflows/docs.yml`).
 - **rust-webx developer's manual** — a progressive-disclosure book under [`docs/rust-webx/`](docs/rust-webx/INDEX.md) (16 chapters, Chinese): introduction, quick start, architecture, DI & lifecycle, middleware, mediator & events, auth & security, configuration, production, project structure, extensibility, best practices, case study and migration guides.
-- **Upgrading** — 2.5.0 is additive over 2.1; see the [2.5 upgrade guide](docs/rust-webx/16-migration/upgrade-to-2.5.md).
+- **Upgrading** — 2.9.1 is a breaking patch (the planned 3.0 contract migration landed there); see the [2.9.1 upgrade guide](docs/rust-webx/16-migration/upgrade-to-2.9.1.md) and, for the 2.x additive line, the [2.5 upgrade guide](docs/rust-webx/16-migration/upgrade-to-2.5.md).
 - **rust-ef reference** — the ORM handbook lives with the [`rust-ef`](https://crates.io/crates/rust-ef) crate (see its [docs.rs](https://docs.rs/rust-ef) documentation), used by the `docbit` example.
 - The `docbit` reference app also serves these docs as a live website (`GET /api/docs/rust-webx/...`).
 

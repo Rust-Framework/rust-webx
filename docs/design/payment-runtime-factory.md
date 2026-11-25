@@ -494,7 +494,7 @@ add_*_with / payment_webhook!**；`IPaymentProviderFactory`/`IPaymentProviderBui
   ├── rust-webx（umbrella，可选）
   ├── rust-webx-pay（端口/门面/注册表）──► rust-webx-core + rust-webx-client + rust-webx-host
   ├── rust-webx-pay-stripe / -alipay / ...（适配器）──► rust-webx-pay + rust-webx-client
-  ├── rust-webx-pay-ef（可选 inbox）──► rust-webx-pay + rust-ef
+  ├── 回调 inbox 参考适配器（examples/adapters/payment/ef，可选）──► rust-webx-pay + rust-ef
   └── 业务 DbPaymentServiceFactory ──► rust-webx-pay（不依赖适配器 crate）
 ```
 
@@ -505,7 +505,7 @@ add_*_with / payment_webhook!**；`IPaymentProviderFactory`/`IPaymentProviderBui
   crate 数量。
 - 业务工厂只依赖端口 crate，适配器由宿主链接并注册 builder；这是运行时工厂最重要的
   依赖解耦点。
-- `rust-webx-pay-ef` 不反向依赖任何适配器。
+- 回调 inbox 参考适配器不反向依赖任何支付适配器（它只依赖 `rust-webx-pay` 的类型与 `rust-ef`）。
 
 ---
 

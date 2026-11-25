@@ -9,7 +9,7 @@
 |---|---|---|
 | `Jwt.Secret` + HS256 | 继续工作（默认算法不变） | 无 |
 | `Jwt.Issuer`/`Audience` | 继续校验；新配置可省略 | 无 |
-| `init_jwt_secret()` / `jwt_secret()` | **文档标注 deprecated，仍可用**（下一 major 删除） | 迁移到 `ITokenIssuer` |
+| `init_jwt_secret()` / `jwt_secret()` | 2.5 可用（文档标注 deprecated），**2.9.1 已删除**（无别名） | 迁移到 `ITokenIssuer`；密钥来自 `Jwt.SecretFile` |
 | 手写 `jsonwebtoken` 签发 | 继续编译 | 改为注入 `Arc<dyn ITokenIssuer>` |
 | bcrypt 密码哈希 | Argon2 hasher 不识别 bcrypt | 见 §3 |
 | 默认匿名请求 | 不变 | 无 |
@@ -83,7 +83,8 @@ if ok && hasher.needs_rehash(&user.password_hash) {
 
 ## 6. 已知限制
 
-- `jwt_secret()` 全局 shim 仍在，但不再建议读取；下一 major 删除。
+- 全局签名密钥 shim（`jwt_secret()`）已在 2.9.1 删除：密钥只来自 `Jwt.Secret` / `Jwt.SecretFile`
+  （解析为 `JwtSecret`），自定义 issuer 用 `register_with_options` 读 `options.jwt.secret`。
 - DPoP 默认 issuer 只能写字符串 claim，`cnf` 对象需自定义 issuer。
 - WebAuthn 仅 ES256 + `none` attestation；mTLS 仅 WebPKI 链。
 - 真实 IdP/认证器 e2e 与浸泡基线见 `auth-conformance.md`。

@@ -1,12 +1,12 @@
 //! Pagination contract types.
 //!
-//! Since 3.0 these are the shared `rust-core` contracts; this module only
+//! Since 2.9.1 these are the shared `rust-core` contracts; this module only
 //! re-exports them so the historical `webx_core::pagination::*` paths keep
 //! working. Do not define a second copy here.
 //!
 //! * [`PagedRequest`] carries the plain request fields; defaults and range
 //!   validation belong to the binding layer (no `from_parts` normalization).
-//! * [`PagedResult`] is the flat operation envelope
+//! * [`PagedResult`] is the flat page envelope
 //!   `{success,status,message,items,total}`; the page part has no `page` /
 //!   `page_size` / `total_pages` echo.
 

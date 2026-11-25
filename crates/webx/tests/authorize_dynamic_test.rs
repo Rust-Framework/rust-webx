@@ -279,7 +279,7 @@ async fn spawn_dynamic_host(port: u16, authorizer: Arc<dyn IDynamicAuthorizer>) 
         .no_spa()
         .use_authentication()
         .configure(|builder| {
-            builder.useOptions(|options| {
+            builder.options(|options| {
                 options.jwt.secret = TEST_SECRET.to_string();
             });
         })

@@ -8,17 +8,17 @@
 1.  RequestId                ← 为所有请求生成/透传 ID
 2.  ClientInfo（可选）        ← ClientInfo.TrustForwardedHeaders；解析 X-Forwarded-For/X-Real-IP
 3.  Metrics（可选）           ← Metrics.enabled；放在 CORS/RateLimit 之前，429/预检也计数
-4.  自定义 BeforeCors 槽      ← use_middleware_at(.., MiddlewareSlot::BeforeCors)
+4.  自定义 BeforeCors 槽      ← use_middleware(MiddlewareSpec::new::<M>().at(MiddlewareSlot::BeforeCors))
 5.  CORS（可选）              ← Cors.Origins 非空；只有真正的预检（Origin + Access-Control-Request-Method）在此短路
 6.  RateLimit（可选，认证前） ← use_rate_limiter 显式 store 或 RateLimit.enabled；按客户端 IP 计桶
 7.  CSRF（可选）              ← use_csrf；在认证之前拒绝跨站请求，只作用于携带会话 Cookie 的请求
-8.  Authentication            ← add_authentication() / 注册的认证方案（JWT、Session Cookie、API Key）
+8.  Authentication            ← use_authentication() / 注册的认证方案（JWT、Session Cookie、API Key）
 9.  RateLimitPolicy（可选）   ← use_rate_limit_policy；在认证之后，User/Tenant/ApiKey 主体可解析
 10. Idempotency（可选）       ← use_idempotency 或 Idempotency.Enabled；在认证之后按主体/租户分键
-11. 自定义 AfterAuth 槽（默认）← use_middleware* / DI 注册的 IMiddleware，此处可读到 claims
+11. 自定义 AfterAuth 槽（默认）← use_middleware(spec) / DI 注册的 IMiddleware，此处可读到 claims
 12. WebSocket（可选）         ← 升级请求走完认证后短路 101，会话接管连接
 13. SPA（可选）               ← 静态文件；跳过 /api/*，不吞 API 404
-14. 自定义 AfterSpa 槽        ← use_middleware_at(.., MiddlewareSlot::AfterSpa)
+14. 自定义 AfterSpa 槽        ← use_middleware(MiddlewareSpec::new::<M>().at(MiddlewareSlot::AfterSpa))
 15. Router / Endpoint         ← 框架内置（最终处理器）
 ```
 
@@ -34,12 +34,15 @@
 | `MiddlewareSlot::AfterSpa` | 静态文件之后、Router 之前 | 依赖“静态文件已处理”的兜底钩子 |
 
 ```rust
-use webx::MiddlewareSlot;
+use webx::{MiddlewareSlot, MiddlewareSpec};
 
 Host::builder()
-    .use_middleware::<TenantGuard>()                              // 默认 AfterAuth：能拿到身份
-    .use_middleware_at::<PreflightAudit>(MiddlewareSlot::BeforeCors)
-    .use_middleware_with_at(MiddlewareSlot::AfterSpa, || Arc::new(Fallback::new()))
+    .use_middleware(MiddlewareSpec::new::<TenantGuard>())    // 默认 AfterAuth：能拿到身份
+    .use_middleware(MiddlewareSpec::new::<PreflightAudit>().at(MiddlewareSlot::BeforeCors))
+    .use_middleware(
+        MiddlewareSpec::factory(|| Arc::new(Fallback::new()) as Arc<dyn IMiddleware>)
+            .at(MiddlewareSlot::AfterSpa),
+    )
     .build();
 ```
 
@@ -64,9 +67,9 @@ Host::builder()
 
 ## 认证与授权
 
-`add_authentication()` 注册认证方案中间件（位于 RateLimitPolicy 与 Idempotency 之前、
+`use_authentication()` 注册认证方案中间件（位于 RateLimitPolicy 与 Idempotency 之前、
 SPA 之前）。路由级 `#[authorize]` 授权在 endpoint 内执行——路由匹配后规则可用，不需要
-额外的策略开关。授权语义详见 [资源授权](../09-auth-security/resource-authorization.md)。
+额外的策略开关。授权语义详见 [资源授权与实例级归属](../09-auth-security/resource-authorization.md)。
 
 ## 小结
 

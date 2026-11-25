@@ -21,7 +21,7 @@ Cookie 里只放 **256 位随机 id**，不放 JWT：
 | `ISessionRepository` | `create/get/touch/delete/delete_all_for_subject` |
 | `SessionRecord` | `subject/name/email/tenant_id/roles/permissions/issued_at/expires_at/last_seen` |
 | `InMemorySessionRepository` | 测试与单进程部署；过期记录在 `get` 时惰性清理 |
-| `rust-webx-auth-ef::EfSessionRepository` | 多实例持久化（`auth_sessions` 表）；`purge_expired` 供后台清理 |
+| 参考适配器 `examples/adapters/auth/ef` 的 `EfSessionRepository` | 多实例持久化（`auth_sessions` 表）；`publish = false`，复制进业务仓使用；`purge_expired` 供后台清理 |
 
 仓库错误**不会**被吞掉：存储不可用时请求失败（5xx），不会降级成匿名。
 
@@ -104,9 +104,9 @@ response.append_header("set-cookie", &csrf_config.clear_cookie());
 
 ## 7. 多实例
 
-`InMemorySessionRepository` 只适合单进程；多实例用 `rust-webx-auth-ef` 的
-`EfSessionRepository`（`auth_sessions` 表，支持 `purge_expired`）。CSRF 双提交不依赖
-服务端状态，天然多实例可用。
+`InMemorySessionRepository` 只适合单进程；多实例复制参考适配器 `examples/adapters/auth/ef`
+（`publish = false`，不随框架发布）的 `EfSessionRepository`（`auth_sessions` 表，支持
+`purge_expired`），改成自己的包名后注册。CSRF 双提交不依赖服务端状态，天然多实例可用。
 
 ## 8. 验收
 

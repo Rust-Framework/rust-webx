@@ -29,7 +29,7 @@ async fn integration_https_health_with_generated_cert() {
         .mode(webx_core::mode::AppMode::Development)
         .no_spa()
         .configure(move |app| {
-            app.useOptions(move |o| {
+            app.options(move |o| {
                 o.app.urls = vec![url.clone()];
                 o.tls.cert_path = cert_s.clone();
                 o.tls.key_path = key_s.clone();
@@ -63,7 +63,7 @@ fn build_tls_acceptor_rejects_missing_cert() {
         .mode(webx_core::mode::AppMode::Development)
         .no_spa()
         .configure(|app| {
-            app.useOptions(|o| {
+            app.options(|o| {
                 o.app.urls = vec!["https://127.0.0.1:8443".into()];
                 o.tls.cert_path = "/nonexistent/cert.pem".into();
                 o.tls.key_path = "/nonexistent/key.pem".into();

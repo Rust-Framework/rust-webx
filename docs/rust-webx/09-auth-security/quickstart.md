@@ -24,7 +24,7 @@ use webx::*;
 async fn main() -> Result<()> {
     let host = Host::builder()
         .configure(|app| {
-            app.useOptions(|options| {
+            app.options(|options| {
                 options.app.urls = vec!["http://127.0.0.1:5000".to_string()];
                 // 生产从 APP__Jwt__Secret / Jwt.SecretFile 读取，不要提交仓库
                 options.jwt.secret =
@@ -66,7 +66,7 @@ impl IRequestHandler<LoginRequest, LoginResponse> for LoginHandler {
         // 替换为你的数据库查询；store_hash 来自 users.password_hash
         let store_hash = load_password_hash(&req.email).await?;
         if !self.hasher.verify(&req.password, &store_hash).await? {
-            return Err(Error::Unauthorized("invalid credentials".into()));
+            return Err(Error::unauthorized("invalid credentials"));
         }
         let claims = TokenClaims::new(&req.email) // 生产用稳定 user id
             .with_roles(["user"]);

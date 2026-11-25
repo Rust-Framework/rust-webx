@@ -2,7 +2,7 @@
 
 管理面通常用 JWT（人登录），数据面通常用 `sk-` API Key（SDK/服务调用）。框架用
 **认证 scheme 链**把两者放在同一台 host 上：`HostBuilder::use_authentication_scheme` 注册的
-scheme 先尝试，JWT 由 `add_authentication()` 追加在最后。
+scheme 先尝试，JWT 由 `use_authentication()` 追加在最后。
 
 ```rust
 use std::sync::Arc;
@@ -117,7 +117,8 @@ Host::builder()
 
 ## EF 账本 + TTL 缓存
 
-`rust-webx-ai-ef` 提供持久化 store，`rust-webx-ai` 提供缓存包装，validator 不需要改：
+`examples/adapters/ai/ef`（`publish = false`，复制进业务仓使用；下面的 `webx_ai_ef` 是参考实现的
+导入名）提供持久化 store，`rust-webx-ai` 提供缓存包装，validator 不需要改：
 
 ```rust
 use std::sync::Arc;
@@ -157,7 +158,7 @@ let hash = hash_secret(pepper, secret); // [u8; 32] = HMAC-SHA256(pepper, secret
 
 // 校验：按 key_id 查记录，再常量时间比较
 let parsed = parse_presented(presented, DEFAULT_PREFIX)
-    .ok_or_else(|| webx::Error::Unauthorized("invalid API key".into()))?;
+    .ok_or_else(|| webx::Error::unauthorized("invalid API key"))?;
 let record = store.find(parsed.key_id).await?; // 缓存 + DB
 if !verify_secret(pepper, parsed.secret, &record.secret_hash) {
     return Ok(None); // scheme 会转成 401
@@ -213,4 +214,4 @@ Host::builder()
 
 实现见 `rust-webx-host` 的 `auth` 模块；测试覆盖 Bearer、`x-api-key`、无效 key、JWT 共存与
 既有 JWT 匿名语义（`crates/webx/tests/api_key_auth_test.rs`）。EF store 与 TTL 缓存测试在
-`crates/ai/ef/src/api_key.rs`、`crates/ai/core/src/api_key_store.rs`。
+`examples/adapters/ai/ef/src/api_key.rs`、`crates/ai/core/src/api_key_store.rs`。

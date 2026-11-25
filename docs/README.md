@@ -25,18 +25,18 @@ docs/
 |------|------|
 | **Monorepo 开发** | 实时读取 sibling 仓库（如 `../rust-ef/docs/rust-ef`），可通过 `RUST_FRAMEWORK_ROOT` 指定根目录 |
 | **GitHub / standalone clone** | 仅 `docs/rust-webx/` 可用；其他 slug 需 sibling checkout 或发布 bundle |
-| **生产 publish bundle** | `docbit/publish.*` 在打包时从源仓库复制到 `<app_base>/docs/{slug}/` |
+| **生产 publish bundle** | `examples/docbit/publish.*` 在打包时从源仓库复制到 `<app_base>/docs/{slug}/` |
 
 优先级：`{app_base}/docs/{slug}` → `rust-webx/docs/{slug}` → `{framework_root}/{sibling}/docs/...`
 
 ## 阅读
 
 - **在线站点**：<https://rust-framework.github.io/rust-webx/>（mdBook，由 `.github/workflows/docs.yml` 自动构建部署）
-- **本地站点**：`cargo run -p docbit-host` → 作品集 → rust-webx → 文档
+- **本地站点**：`cargo run --manifest-path examples/docbit/Cargo.toml -p docbit-host` → 作品集 → rust-webx → 文档
 - **API**：`GET /api/docs/rust-webx/index`、`GET /api/docs/rust-webx/content/{path}`
 
 ## 维护
 
 - 编辑 **`docs/rust-webx/`** 下的 Markdown；Docbit 启动时会自动确保 `INDEX.json` 存在。
 - 新增/重命名章节或小节时，先更新 `INDEX.json`，再运行 `python scripts/gen-mdbook-summary.py` 重新生成 `SUMMARY.md`（`docs.yml` 会校验两者一致，否则部署失败）；本地预览：`mdbook serve docs/rust-webx`。
-- 更新 sibling 手册：在上游仓库修改；发布时由 `docbit/publish.*` 从源仓库复制进 bundle。**不要**将 sibling 镜像 commit 到 `rust-webx/docs/`。
+- 更新 sibling 手册：在上游仓库修改；发布时由 `examples/docbit/publish.*` 从源仓库复制进 bundle。**不要**将 sibling 镜像 commit 到 `rust-webx/docs/`。

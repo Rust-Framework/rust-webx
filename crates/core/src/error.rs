@@ -1,6 +1,6 @@
 //! Framework error type.
 //!
-//! 3.0 uses the shared [`rust_core::AppError`] as the one application error
+//! 2.9.1 uses the shared [`rust_core::AppError`] as the one application error
 //! carrier; `webx::Error` is an alias, not a second definition. `EFError` and
 //! `RdiError` remain typed domain diagnostics in their own crates and convert
 //! at the boundary (`From` impls live there).

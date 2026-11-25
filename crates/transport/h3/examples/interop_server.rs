@@ -128,7 +128,7 @@ async fn main() -> Result<()> {
         .no_spa()
         .add_health_check(HealthCheckSpec::sync("h3_transport", HealthStatus::pass))
         .configure(|app| {
-            app.use_options(|options| {
+            app.options(|options| {
                 // This example is only reached over QUIC; an ephemeral loopback
                 // listener satisfies the host's mandatory URL configuration.
                 options.app.urls = vec!["http://127.0.0.1:0".to_string()];

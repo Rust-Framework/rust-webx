@@ -133,7 +133,7 @@ fn serve(port: u16) {
         .mode(AppMode::Production)
         .no_spa()
         .configure(|app| {
-            app.useOptions(|options| {
+            app.options(|options| {
                 // One worker keeps the measurement window deterministic; the
                 // default middleware chain stays on so the number reflects the
                 // real hot path.

@@ -24,8 +24,8 @@ pub use webx_core::action::{
 };
 pub use webx_core::app::IHost;
 pub use webx_core::auth::{
-    DeclaredRules, IAuthenticationHandler, IAuthenticationScheme, IAuthorizationPolicy, IClaims,
-    IDynamicAuthorizer, IdentityUser, RequestUser,
+    IAuthenticationHandler, IAuthenticationScheme, IClaims, IDynamicAuthorizer, IdentityUser,
+    RequestUser,
 };
 pub use webx_core::cache::{
     cache_ext::DistributedCacheExtensions,
@@ -52,8 +52,8 @@ pub use webx_core::handler::{IEventHandler, IHostedService, IRequestHandler};
 /// Background worker helpers: `BackgroundService`, `delay`, `CancellationToken`.
 pub use webx_core::hosted as background;
 pub use webx_core::hosted::{
-    BackgroundService, BackgroundServiceHost, CancellationToken, PeriodicBackgroundService,
-    ShutdownToken,
+    BackgroundService, BackgroundServiceHost, BackgroundServiceSpec, CancellationToken,
+    HostedServiceSpec, PeriodicBackgroundService, ShutdownToken,
 };
 pub use webx_core::http::{
     content_disposition_value, read_json_body, write_json_response, ByteRange, Disposition,
@@ -114,7 +114,7 @@ pub use webx_core::realtime::{
 };
 pub use webx_core::request_context::RequestContext;
 pub use webx_core::route::catalog::{
-    EndpointCatalog, EndpointDescriptor, EndpointInfo, IEndpointCatalog,
+    EndpointCatalog, EndpointDescriptor, EndpointGuid, EndpointInfo, IEndpointCatalog,
 };
 pub use webx_core::route::diagnostics::{
     duplicate_handlers, format_route_diagnostics, orphan_handlers, orphan_route_details,
@@ -139,6 +139,7 @@ pub use webx_core::storage::{
 pub use webx_core::stream::{SseEvent, SseResult, StreamEnd};
 pub use webx_core::time::{IClock, SystemClock, TestClock};
 pub use webx_core::validation::{char_len, email_is_valid};
+pub use webx_core::IPatchable;
 
 // --- DI extensions ---
 pub use webx_core::route::binding;
@@ -177,16 +178,13 @@ pub use webx_host::auth_jwks::{
     ResolvedJwk, StaticKeyResolver, JWKS_MAX_DOCUMENT_BYTES,
 };
 pub use webx_host::auth_jwt::{
-    apply_jwt_secret_file, init_jwt_secret, jwt_middleware, jwt_middleware_with_revocation,
-    jwt_secret, JwtAuth, JwtClaims, JwtSecret, JwtTokenIssuer, JwtValidation, JwtValidationBuilder,
-    DEFAULT_CLOCK_SKEW_SECONDS, DEFAULT_MAX_TOKEN_BYTES, DEFAULT_TOKEN_LIFETIME,
-    MIN_JWT_SECRET_LEN,
+    apply_jwt_secret_file, jwt_middleware, jwt_middleware_with_revocation, JwtAuth, JwtClaims,
+    JwtSecret, JwtTokenIssuer, JwtValidation, JwtValidationBuilder, DEFAULT_CLOCK_SKEW_SECONDS,
+    DEFAULT_MAX_TOKEN_BYTES, DEFAULT_TOKEN_LIFETIME, MIN_JWT_SECRET_LEN,
 };
 pub use webx_host::auth_mtls::{IMtlsIdentityResolver, MtlsScheme};
 pub use webx_host::authz::collect_authorizers;
-#[allow(deprecated)]
-pub use webx_host::authz::resource_auth_middleware;
-pub use webx_host::authz::{AuthorizerSet, ResourceAuthorization};
+pub use webx_host::authz::AuthorizerSet;
 pub use webx_host::compression::{compress_gzip, CompressionConfig, CompressionMiddleware};
 pub use webx_host::config_validation::{format_violations, validate_options, ConfigViolation};
 pub use webx_host::cors::{CorsConfig, CorsMiddleware};
@@ -232,6 +230,12 @@ pub use webx_host::MiddlewareSpec;
 
 // --- Mediator ---
 pub use webx_core::mediator::Mediator;
+
+// --- Transactional outbox (framework contract; durable stores stay opt-in) ---
+pub use webx_outbox::{
+    IOutbox, InMemoryOutbox, OutboxDispatcher, OutboxEntry, OutboxHostBuilderExt, OutboxOptions,
+    OutboxRecord, OutboxServiceCollectionExt,
+};
 
 // --- Web (SPA) ---
 pub use webx_spa::SpaMiddleware;

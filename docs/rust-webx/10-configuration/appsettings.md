@@ -97,7 +97,7 @@ appsettings.Development.json        # 开发环境覆盖（Development 模式）
 ### 启动期聚合校验
 
 `HostBuilder::try_build` 先收集**全部**启动期配置违规，再一次性以
-`webx::Error::Di` 返回；`HostBuilder::build` panic 同一条消息。列表按
+`webx::Error::di(..)` 返回；`HostBuilder::build` panic 同一条消息。列表按
 `section + key` 稳定排序，运维不再需要“改一个键、重启、再看下一个”。
 
 被聚合的既有规则（规则与默认值均未改变，只改报错方式）：
@@ -111,13 +111,11 @@ appsettings.Development.json        # 开发环境覆盖（Development 模式）
 | `Cors.Origins` | `Production` 下为 `*`（校验中间件实际使用的列表，含 `use_cors` 显式覆盖） |
 | `Jwt.Secret` | `Production` + 启用认证 + HS256 + 空/弱密钥（不足 32 字节或占位符） |
 | `Jwt.*` | 启用认证时 `Jwt` 节本身非法（空算法列表、空 issuer/audience、JWKS 约束、超界的 ClockSkew/MaxTokenBytes 等） |
-| `RateLimit.TrustProxy` / `RateLimit.TrustedProxies` | `Production` 下检测到 legacy 键（迁移到 `ClientInfo`） |
 | `Turn.*` | `Turn` 节只配置了一部分，或 TTL 超界 |
 
 以下情况保持原行为，**不会**变成启动错误：
 
 - `Development`/`Test` 允许 `Server.RequestTimeoutSeconds=0`、`Server.AdmissionTimeoutMs=0`；
-- `Development` 下 legacy `RateLimit` 信任键只打 `warn`（见上一节）；
 - `Production` 下 `Idempotency.Enabled=true` + `AllowAnonymous=true` + 空 `Paths` 只打
   `warn`（见[请求级幂等](../11-production/idempotency.md)）；
 - `ClientInfo.TrustedProxies` 中的非法 CIDR 只打 `warn` 并忽略该条。
@@ -158,16 +156,17 @@ if !violations.is_empty() {
 - **反向代理之后**：开启 `ClientInfo.TrustForwardedHeaders` 并填写 `ClientInfo.TrustedProxies`。只有直连
   对端落在网段内才采信转发头；否则按对端地址计。`TrustForwardedHeaders=true` 但 `TrustedProxies` 为空时
   框架忽略转发头并打 `warn`（否则客户端可以轮换 `X-Forwarded-For` 绕过限流）。
-- **`RateLimit.TrustProxy` / `RateLimit.TrustedProxies` 成为 legacy**（2.8.0 起不再生效，计划 3.0 移除）：
-  `Development`/`Test` 模式下 serde 仍接受旧配置、限流器忽略并打 `warn`；**`Production` 模式下
-  检测到这两个旧键会启动失败**（避免静默塌缩为「代理 IP 一个全局桶」），迁移到
-  `ClientInfo.TrustForwardedHeaders` / `ClientInfo.TrustedProxies` 后即可启动。
-  迁移方式与示例见 [缓存与速率限制](../11-production/caching-rate-limit.md)。
+- **转发头信任只有一个入口**：`ClientInfo.TrustForwardedHeaders` / `ClientInfo.TrustedProxies`。
+  旧的 `RateLimit.TrustProxy` / `RateLimit.TrustedProxies`（与 `RateLimiter::with_trust_proxy`）
+  已在 2.9.1 删除：`RateLimitSection` 不再有这两个字段，写了也不生效（serde 忽略未知键）。
+  把它们搬到 `ClientInfo` 即可；`RateLimit` 节只留 `Enabled` / `RequestsPerSecond` /
+  `BurstSize` / `MaxTrackedIps`。迁移细节见
+  [upgrade-to-2.9.1](../16-migration/upgrade-to-2.9.1.md)。
 - **环境变量**：`APP__ClientInfo__TrustForwardedHeaders=true` 这类标量可覆盖；**数组不能**用
   `APP__ClientInfo__TrustedProxies__0=...` 按索引覆盖（当前实现只递归 JSON 对象，索引段会静默
   不生效或让严格绑定启动失败）。数组请在 `appsettings*.json` 或代码里配置。
-- 代码构造 `RateLimitSection` 时用 `..Default::default()` 即可跳过这两个 legacy 字段（字段仍保留以兼容
-  `appsettings.json`）。`Idempotency.AllowAnonymous`（默认 `true`）控制匿名请求是否启用幂等；
+- 代码构造 `RateLimitSection` 时同样只设置上面四个字段。
+  `Idempotency.AllowAnonymous`（默认 `true`）控制匿名请求是否启用幂等；
   对外服务建议设为 `false`，见 [请求级幂等](../11-production/idempotency.md)。
 
 ### Idempotency 的路径过滤与自动装配
@@ -188,8 +187,8 @@ if !violations.is_empty() {
 - `/api/orders` 命中 `/api/orders` 与 `/api/orders/123`，**不**命中 `/api/orders-archive`。
 - 不在范围内的请求不读 `Idempotency-Key`、不访问存储（无存储往返）。
 - `Enabled=true` 且未显式 `use_idempotency` 时，Host 自动使用 DI 中注册的
-  `dyn IIdempotencyStore`（如 `EfIdempotencyStore`），没有才退回有界内存存储；
-  显式 `use_idempotency(store, ttl)` 优先。
+  `dyn IIdempotencyStore`（如参考适配器 `examples/adapters/idempotency/ef` 的 `EfIdempotencyStore`），
+  没有才退回有界内存存储；显式 `use_idempotency(store, ttl)` 优先。
 - `Production` 下 `Enabled=true` + `AllowAnonymous=true` + 空 `Paths` 会在启动时打 `warn`
   （所有路径的匿名写请求按 IP 分键，NAT/反代后可能互相重放），不改变行为。
 - `LeaseSeconds`（默认 60）是进行中预约的租约，下传时取 `min(LeaseSeconds, TtlSeconds)`；
@@ -207,10 +206,10 @@ if !violations.is_empty() {
 资源默认从应用基准目录的 `locales/<culture>.json` 读取，只需：
 
 ```rust
-Host::builder().add_localization().build();
+Host::builder().use_localization(LocalizationOptions::new()).build();
 ```
 
-单文件部署用 `add_localization_with(LocalizationOptions::none().resources(...))` 把资源编译进二进制。
+单文件部署用 `use_localization(LocalizationOptions::none().resources(...))` 把资源编译进二进制。
 资源键、`#[display]` / `#[description]` / `#[category]` 与回退链详见
 [路由宏的端点名称章节](../05-request-pattern/route-macros.md#端点名称与描述资源键)。
 
@@ -294,11 +293,25 @@ token 生命周期仍由 `Jwt.ExpirationMinutes` 决定。
 ```rust
 Host::builder()
     .configure(|app| {
-        app.useOptions(|opts| {
+        app.options(|opts| {
             println!("Listening on: {:?}", opts.app.urls);
         });
     })
 ```
+
+`options` 是 `AppOptions` 的**唯一**入口（2.9.1 由 `HostAppBuilder::use_options` 改名，驼峰别名
+`useOptions` 删除），只能通过 `configure` 触达。
+
+自定义配置节（`add_options::<T>("Section")`）需要**绑定后再覆盖**时，用一行
+`add_options_with`——覆盖闭包在绑定之后、创建三种注入实例之前运行：
+
+```rust
+Host::builder()
+    .add_options_with::<SiteConfig>("Site", |s| s.public_url = std::env::var("SITE_URL").unwrap_or_default())
+```
+
+它只用于环境差异（CI 地址、本地开关）；生产弱密钥 / 通配 CORS 仍 fail-closed。
+详见 [配置热更新与 Options 注册](../11-production/live-options.md)。
 
 ## 小结
 

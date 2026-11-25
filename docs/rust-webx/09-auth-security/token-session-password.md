@@ -4,7 +4,7 @@
 
 | 端口 | 作用 | 框架默认实现 | 注册方式 |
 |------|------|--------------|----------|
-| `ITokenIssuer` | 由 claims 签发 token | `JwtTokenIssuer`（HS256） | `add_authentication()` 自动注册（读 `Jwt.Secret` / `Jwt.ExpirationMinutes`） |
+| `ITokenIssuer` | 由 claims 签发 token | `JwtTokenIssuer`（HS256） | `use_authentication()` 自动注册（读 `Jwt.Secret` / `Jwt.ExpirationMinutes`） |
 | `ISessionStore` | 按 `jti` 吊销/查询 token | `InMemorySessionStore`（可选） | `HostBuilder::use_session_store(...)` |
 | `IPasswordHasher` | PHC 口令哈希/校验/升级 | `Argon2PasswordHasher`（Argon2id） | Host 启动自动注册；`use_password_hasher(...)` 替换/改参 |
 
@@ -19,7 +19,7 @@
 }
 ```
 
-`add_authentication()` 会用 `Jwt.Secret` 注册 HS256 版 `JwtTokenIssuer`；Handler 注入端口即可：
+`use_authentication()` 会用 `Jwt.Secret` 注册 HS256 版 `JwtTokenIssuer`；Handler 注入端口即可：
 
 ```rust
 use webx::{ITokenIssuer, TokenClaims};
@@ -138,9 +138,9 @@ if ok && hasher.needs_rehash(&stored_phc) {
 
 - 返回 PHC 字符串（`$argon2id$v=19$m=…,t=…,p=…$salt$hash`），算法与参数随哈希存储，换参数无需改表。
 - 默认参数 = `Argon2::default()`（19 MiB / 2 / 1）；手写 `Argon2::default()` 产生的历史哈希可直接验证。
-- 未知算法 / 非法 PHC / 非法参数 → 500 `Error::Internal`（运维可见，**不是** `Ok(false)`，不会伪装成「密码错误」），不 panic。
+- 未知算法 / 非法 PHC / 非法参数 → 500 `Error::internal`（运维可见，**不是** `Ok(false)`，不会伪装成「密码错误」），不 panic。
 - 调参：`Host::builder().use_password_hasher(Arc::new(Argon2PasswordHasher::with_params(Argon2Params::new(65536, 3, 1))))`。
-- 不需要口令哈希的服务可关默认依赖：`rust-webx = { version = "1.2", default-features = false }`（trait 仍在，按需自行实现）。
+- 不需要口令哈希的服务可关默认依赖：`rust-webx = { version = "2.9", default-features = false }`（trait 仍在，按需自行实现）。
 
 ## 4. 刷新令牌轮换
 
@@ -194,7 +194,9 @@ match refresh.rotate_outcome(&presented).await? {
 - 错误 secret 只返回 401，**不**撤销 family（否则知道 token_id 就能把用户踢下线）。
 - 过期或超过 family 绝对上限 → 401；**不**撤销 family（客户端可能还持有合法的 sibling token）。
 - 登出用 `revoke_family`；全端下线用 `revoke_all_for_subject`。
-- `InMemoryRefreshTokenStore` 只适合单进程；多实例用 `rust-webx-auth-ef` 的 `EfRefreshTokenStore`（`auth_refresh_tokens` 表、条件更新 + 事务实现同一原子语义）。
+- `InMemoryRefreshTokenStore` 只适合单进程；多实例复制参考适配器 `examples/adapters/auth/ef`
+  （`publish = false`，不随框架发布）的 `EfRefreshTokenStore`（`auth_refresh_tokens` 表、条件更新 +
+  事务实现同一原子语义），改成自己的包名后注册。
 
 ## 5. 登录防护：策略、防枚举、限流与并发闸门
 
@@ -236,8 +238,8 @@ let throttle = MemoryLoginThrottle::new(ThrottlePolicy::default()); // 5 次后�
 
 let decision = throttle.check(&account, &client_ip).await?;
 if !decision.allowed {
-    return Err(webx::Error::Status(
-        429,
+    return Err(webx::Error::too_many_requests(
+        decision.retry_after.as_secs(),
         format!("too many attempts; retry in {}s", decision.retry_after.as_secs()),
     ));
 }
@@ -270,16 +272,18 @@ Host::builder().use_password_hasher(Arc::new(bounded)).build();
 
 ## 6. 动态授权读取 `#[authorize]` 声明
 
-声明式 `#[authorize]` 与 DB 授权不必是两套真相：实现 `IDynamicAuthorizer::authorize_with_rules` 即可拿到端点声明。
+声明式 `#[authorize]` 与 DB 授权不必是两套真相：实现
+`IDynamicAuthorizer::authorize_with_declared_rules` 即可拿到端点声明（`&'static [AuthorizeRule]`）。
 
 ```rust
-async fn authorize_with_rules(
-    &self, claims: &dyn IClaims, route: &str, method: &str, declared: &DeclaredRules<'_>,
+async fn authorize_with_declared_rules(
+    &self, claims: &dyn IClaims, route: &str, method: &str,
+    declared: &'static [AuthorizeRule],
 ) -> Result<()> {
     // 每条 #[authorize] 是一个规则，所有规则 AND；
     // 单条规则内 roles/permissions 各自 any-of，空列表 = 该维度不限制。
-    for permissions in declared.permissions() {
-        if !permissions.is_empty() && !permissions.iter().any(|p| claims.permissions().iter().any(|c| c == p)) {
+    for rule in declared {
+        if !rule.permissions.is_empty() && !rule.permissions.iter().any(|p| claims.permissions().iter().any(|c| c == p)) {
             // 交给业务侧资源/实例级判定，不再靠 route+method 反查
         }
     }
@@ -287,15 +291,17 @@ async fn authorize_with_rules(
 }
 ```
 
-- 只实现旧的 `authorize` 仍然可用（默认转调），但拿不到声明；新代码实现 `authorize_with_rules`。
-- `DeclaredRules` 是路由元数据的零分配视图（`rules()` / `roles()` / `permissions()`），多规则保持 AND 结构，不拍平。
+- 只实现 `authorize`（无规则兜底）仍然可用：`authorize_with_declared_rules` 的默认实现
+  转调它，但拿不到声明；需要声明时实现 `authorize_with_declared_rules`。
+- 拿到的是端点 `RouteEntry.authorization` 切片本身（进程内借用，零分配）；
+  `DeclaredRules` / `authorize_with_rules` 已随 2.9.1 删除，没有第二套声明视图。
 
 ## 7. 统一入口速查（避免同一件事两个入口）
 
 | 需求 | 唯一推荐入口 | 说明 |
 |------|--------------|------|
 | 启用会话吊销 | `HostBuilder::use_session_store` | 必须注册 `dyn ISessionStore`；`jwt_middleware_with_revocation` 仅自组 pipeline 的逃生用法 |
-| 动态授权 | `IDynamicAuthorizer::authorize_with_rules` | `AuthorizerSet::authorize` 保留仅为 1.1 兼容 |
+| 动态授权 | `IDynamicAuthorizer::authorize_with_declared_rules` | 无规则判断用 `authorize`（默认被转调）；`authorize_with_rules` / `DeclaredRules` 已于 2.9.1 删除 |
 | 读 trace id | 中间件用 `IHttpContext::trace_id()`；Handler 用 `RequestContext::trace_id()` | 两者同值；Handler 不接触 `IHttpContext` |
 | 后台服务类型 | `BackgroundService` / `PeriodicBackgroundService` / `CancellationToken` | `BackgroundServiceHost` 等适配器只在 `webx::background` 命名空间（逃生写法的 order 组合） |
 | 签发 / 哈希 / 吊销存储 | `ITokenIssuer` / `IPasswordHasher` / `ISessionStore` | 业务只做「替换/配置」，不引 `jsonwebtoken`/`argon2` 直用 |

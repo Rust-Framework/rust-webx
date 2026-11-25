@@ -86,7 +86,7 @@
 ### [第九章 认证与授权](09-auth-security/INDEX.md)
 
 - [JWT Bearer 认证](09-auth-security/jwt-authentication.md)
-- [基于资源的授权](09-auth-security/resource-authorization.md)
+- [资源授权与实例级归属](09-auth-security/resource-authorization.md)
 - [authorize 宏与声明式授权](09-auth-security/authorize-macro.md)
 - [令牌签发、会话吊销与口令哈希](09-auth-security/token-session-password.md)
 - [安全最佳实践](09-auth-security/security-best-practices.md)
@@ -122,6 +122,7 @@
 - [自定义 Endpoint](13-extensibility/custom-endpoints.md)
 - [样式与约定封装](13-extensibility/style-patterns.md)
 - [第三方库集成](13-extensibility/third-party-integration.md)
+- [端口与适配器（下游接入）](13-extensibility/integrations.md)
 - [支付](13-extensibility/payments.md)
 
 ### [第十四章 最佳实践](14-best-practices/INDEX.md)

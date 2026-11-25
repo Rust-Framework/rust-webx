@@ -19,14 +19,14 @@ impl IRequestHandler<GetDocIndexRequest, DocIndex> for GetDocIndexHandler { ... 
 ## 模式 2：中介者直连 DbContext（无 service 抽象）
 
 ```rust
-// contracts/blog.rs — 契约：DTO + 路由，不定义 service trait
+// contracts/blog/list_blog_posts.rs — 契约：DTO + 路由，不定义 service trait
 #[derive(Serialize)]
 pub struct BlogPostSummary { /* ... */ }
 
 #[get("/api/blog")]
 impl IRequest<Vec<BlogPostSummary>> for ListBlogPostsRequest {}
 
-// handlers/blog.rs — 直接持有 owned DbContext
+// handlers/blog/list_blog_posts.rs — 直接持有 owned DbContext
 #[derive(Inject)]
 pub struct ListBlogPostsHandler {
     #[inject(owned)]
@@ -37,7 +37,8 @@ pub struct ListBlogPostsHandler {
 #[async_trait]
 impl IRequestHandler<ListBlogPostsRequest, Vec<BlogPostSummary>> for ListBlogPostsHandler {
     async fn handle(&mut self, _: ListBlogPostsRequest) -> ActionResult<Vec<BlogPostSummary>> {
-        let blogs = linq!(self.ctx.set::<Blog>();).to_list().await.map_ef()?;
+        // `?` 即完成 EFError → webx::Error 映射（rust-ef 边界实现 From）
+        let blogs = linq!(self.ctx.set::<Blog>();).to_list().await?;
         Ok(blogs.into_iter().map(BlogPostSummary::from).collect())
     }
 }
@@ -58,7 +59,7 @@ pub struct DbInitService {
 #[async_trait]
 impl IHostedService for DbInitService {
     async fn start(&self) -> Result<()> {
-        // ensure_created → seed → 索引/资源同步
+        // ctx.bootstrap() 空库首装 → seed → 索引/资源同步
         Ok(())
     }
 }
@@ -70,7 +71,7 @@ impl IHostedService for DbInitService {
 
 ```rust
 async fn handle(&mut self, req: GetDocIndexRequest) -> ActionResult<DocIndex> {
-    self.docs.index(&req.work).map_err(Error::NotFound)
+    self.docs.index(&req.work).map_err(Error::not_found)
 }
 ```
 
@@ -79,7 +80,7 @@ Service 实现不感知 HTTP；Handler 只做参数传递与 `Error` 映射。
 ## 模式 5：组合根最小化
 
 ```rust
-.register(|svc| svc.add_docbit_db())  // 仅 DbContext 等基础设施
+.register(move |svc| svc.add_docbit_db(db))  // 仅 DbContext 等基础设施
 ```
 
 业务代码通过 `#[derive(Inject)]` + `#[inject]` 在 handlers 自注册，开发时聚焦 `contracts` / `handlers` / `domain`。
@@ -87,14 +88,14 @@ Service 实现不感知 HTTP；Handler 只做参数传递与 `Error` 映射。
 ## 模式 6：DTO 在 contracts，实体在 domain
 
 ```rust
-// contracts/blog.rs
+// contracts/blog/models.rs
 #[derive(Serialize)]
 pub struct BlogPostSummary { pub slug: String, pub title: String }
 
 // domain/entities/blog.rs — 仅持久化实体
 pub struct Blog { /* ... */ }
 
-// domain/conversions.rs — 映射
+// domain/mappers/blog_mapper.rs — 映射
 impl From<Blog> for BlogPostSummary { /* ... */ }
 ```
 
@@ -105,7 +106,7 @@ contracts 不引用 domain；domain 可通过 `use docbit_contracts::…` 复用
 docbit 的博客/评论端点把身份直接声明为 `IdentityUser`，Handler 不再读 claims：
 
 ```rust
-// contracts/comment.rs
+// contracts/comment/create_comment.rs
 #[derive(WebxRequestMeta)]
 pub struct CreateCommentRequest {
     #[fromclaim]
@@ -114,7 +115,7 @@ pub struct CreateCommentRequest {
     pub content: String,
 }
 
-// handlers/comment.rs
+// handlers/comment/create_comment.rs
 let user = req.require_user()?;
 let comment = Comment {
     user_id: user.id.clone(),

@@ -80,15 +80,15 @@ impl IRequest<BlogPostModel> for CreateBlogPostRequest {}
 默认约定只需一行：
 
 ```rust
-Host::builder().add_localization().build();
+Host::builder().use_localization(LocalizationOptions::new()).build();
 ```
 
-`add_localization()` 读取 `locales/<culture>.json`；缺少该目录不算错误。单文件部署可以把资源
-编译进二进制：
+`use_localization(LocalizationOptions::new())` 读取 `locales/<culture>.json`；缺少该目录不算错误。
+单文件部署可以把资源编译进二进制：
 
 ```rust
 Host::builder()
-    .add_localization_with(
+    .use_localization(
         LocalizationOptions::none()
             .resources("zh-CN", include_str!("../locales/zh-CN.json"))
             .resources("en", include_str!("../locales/en.json")),
@@ -106,7 +106,7 @@ Host::builder()
 业务代码可注入 `Arc<dyn IStringLocalizer>`：`get(key)` 使用 Host 默认 culture，
 `get_in(culture, key)` 显式切换；资源缺失时返回 `LocalizedString { resource_not_found: true }`。
 
-> 没有调用 `add_localization()` 时资源表为空，`key` 会回退为 key 本身；为可读性建议同时提供
+> 没有调用 `use_localization(...)` 时资源表为空，`key` 会回退为 key 本身；为可读性建议同时提供
 > `text` 字面量。`Culture.Default` 对应的资源文件应包含该语言的翻译。
 
 ## 运行时读取端点目录
@@ -334,7 +334,7 @@ impl IRequest<()> for DeleteOrderRequest {}
 授权元数据在编译期收集为 `RouteEntry.authorization`（`&[AuthorizeRule]`）与
 `RouteEntry.authorization_dynamic`（`#[authorize(dynamic)]` 为 `true`）。每个 `#[authorize]`
 是一条规则，所有规则全部满足才放行；规则内 `roles` / `permissions` 是 any-of 列表，两个维度
-同时存在时为 AND。`add_authentication()` 只负责启用 JWT；规则由 endpoint 在 dispatch 前执行。
+同时存在时为 AND。`use_authentication()` 只负责启用 JWT；规则由 endpoint 在 dispatch 前执行。
 静态模式下由 claims 快照判定；`#[authorize(dynamic)]` 端点跳过该 gate（无 claims 仍 401），
 把整条声明交给注册的 `IDynamicAuthorizer`。详见 [authorize 宏](../09-auth-security/authorize-macro.md)。
 

@@ -92,7 +92,7 @@ async fn realtime_counters_are_rendered_on_the_metrics_endpoint() {
         .mode(AppMode::Development)
         .no_spa()
         .configure(|app| {
-            app.useOptions(|options| options.metrics.enabled = true);
+            app.options(|options| options.metrics.enabled = true);
         })
         .register(|svc| svc.add_mediator())
         .use_websocket_request::<EchoRequest, EchoReply>("/rpc")
@@ -167,7 +167,7 @@ async fn realtime_snapshot_is_mirrored_into_the_app_meter_on_scrape() {
         .mode(AppMode::Development)
         .no_spa()
         .configure(|app| {
-            app.useOptions(|options| options.metrics.enabled = true);
+            app.options(|options| options.metrics.enabled = true);
         })
         .use_meter(Arc::clone(&meter) as Arc<dyn IMeter>)
         .register(|svc| svc.add_mediator())

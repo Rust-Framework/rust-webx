@@ -6,18 +6,23 @@ rust-webx 以 Cargo Workspace 组织，各 Crate 职责单一、依赖方向清�
 
 ```
 rust-webx/                    # Workspace 根
-├── crates/
+├── crates/                   # 已发布的运行时 crate
 │   ├── core/                   # rust-webx-core — 核心 trait（零实现依赖）
 │   ├── host/                   # rust-webx-host — Host、管道、路由、认证实现
 │   ├── macros/                 # rust-webx-macros — 过程宏
 │   ├── spa/                    # rust-webx-spa — SPA 静态托管
 │   ├── openapi/                # rust-webx-openapi — OpenAPI 生成
 │   ├── ai/                     # rust-webx-ai — AI 网关领域包（可选，版本跟随 workspace）
-│   ├── ai-ef/                  # rust-webx-ai-ef — rust-ef 持久化用量账本
 │   ├── client/                 # rust-webx-client — 出站 HTTP（连接池/流式/SSE）
 │   ├── gateway/                # rust-webx-ai-gateway — OpenAI 兼容 /v1 表面
+│   ├── outbox/                 # rust-webx-outbox — 事务性 outbox 端口/派发器/内存实现
 │   └── webx/                   # rust-webx — 伞 Crate，统一导出
-├── docbit/                     # 示例：作品集全栈应用
+├── examples/                   # 参考应用与参考适配器（各自独立 workspace + lockfile）
+│   ├── docbit/                 # 示例：作品集全栈应用
+│   ├── dmbit/                  # 示例：设备与库存管理
+│   ├── imbit/                  # 示例：实时 IM（WebSocket + 信令）
+│   └── adapters/               # 非发布参考适配器：ai|auth|idempotency|outbox|payment 的 ef/
+├── testing/                    # 非发布测试工具：端口契约套件、alloc/upgrade/load 探针
 └── docs/rust-webx/             # 本书文档（仓库根目录）
 ```
 
@@ -65,7 +70,7 @@ graph BT
 | `http` | `IHttpContext`, `IHttpRequest`, `IHttpResponse`, `IClaimsExt` |
 | `middleware` | `IMiddleware` |
 | `routing` | `IRouter`, `IEndpoint`, `RouteMeta`, `HttpMethod` |
-| `auth` | `IClaims`, `IAuthenticationHandler`, `IAuthorizationPolicy`, `IDynamicAuthorizer` |
+| `auth` | `IClaims`, `IAuthenticationHandler`, `IAuthenticationScheme`, `IDynamicAuthorizer`, `IdentityUser` / `RequestUser` |
 | `error` | `Error`, `Result`, `ActionResult` |
 | `action` | `IActionResult`, `Response`, `JsonResult`, `ContentResult`, `FileResult`, `NoContentResult`, `StatusCodeResult` |
 | `config` | `AppOptions`, `appsettings` 加载 |
@@ -82,7 +87,7 @@ graph BT
 - `Router` — 基于 Trie 的路由匹配（生产实现是 `webx_engine::Router`；`webx_host::router::Router` 为 1.5 兼容嵌入器）
 - `MiddlewarePipeline` — 中间件顺序执行（生产实现是 `webx_engine::Pipeline`）
 - `EngineContext` — 当前引擎的 HTTP 上下文具体实现（应用只依赖 `IHttpContext`）
-- `JwtAuth` / `ResourceAuthorization` — 认证授权实现
+- `JwtAuth` / `AuthenticationMiddleware` + `IDynamicAuthorizer` 注册 — 认证授权实现
 - `MemoryCache`, `RateLimiter`, `CorsMiddleware` 等内置中间件
 
 ### rust-webx-macros
@@ -113,10 +118,15 @@ AI 聚合网关的领域包：统一请求/流 IR、`ChatProvider` 端口、Open
 API key 解析/HMAC 与存储端口、配额预扣-结算、OpenAI 错误信封。它**不进入伞 crate**、不依赖 HTTP 实现，版本跟随 workspace
 （`version.workspace = true`，与 `rust-webx` 同版本）。不需要 AI 能力的项目不引入。
 
-### rust-webx-ai-ef
+### 持久化参考适配器（`examples/adapters/`，非发布）
 
-`rust-webx-ai` 的 `IUsageSink` 的 rust-ef 实现：`EfUsageSink` + `ai_usage_events` 实体，
-按 `request_id` 幂等写入，每次写使用独立 `DbContext`。outbox/rollup worker 后续加入。
+与 ORM/数据库耦合的持久化适配器不属于发布序列：它们在独立 workspace `examples/adapters/`，
+全部 `publish = false`，只作为**参考实现**供复制（`ai/ef`、`auth/ef`、`idempotency/ef`、
+`outbox/ef`、`payment/ef`）。例如 `ai/ef` 是 `rust-webx-ai` 的 `IUsageSink` 的 rust-ef 参考实现：
+`EfUsageSink` + `ai_usage_events` 实体，按 `request_id` 幂等写入，每次写使用独立 `DbContext`。
+
+框架侧只保留端口与默认实现；接入方式（用默认、复制参考实现、自己实现端口 + 契约测试）见
+[端口与适配器（下游接入）](../13-extensibility/integrations.md)。
 
 ### rust-webx-ai-gateway
 OpenAI 兼容的 HTTP 表面：`POST /v1/chat/completions` 的请求 DTO、IR 转换、JSON/SSE 响应与
@@ -158,6 +168,7 @@ use webx::*;  // 一次导入全部公开 API
 作为框架使用者，你**通常只需依赖 `rust-webx` 伞 Crate**。仅在以下情况直接接触子 Crate：
 
 - 编写独立中间件库 → 依赖 `rust-webx-core`
+- 需要事务性 outbox → 加 `rust-webx-outbox`（端口/派发器/内存实现；EF 存储参考实现在 `examples/adapters/outbox/ef`）
 - 贡献框架本身 → 修改对应子 Crate
 
 ## 示例项目 Docbit
@@ -170,7 +181,7 @@ use webx::*;  // 一次导入全部公开 API
 - `#[inject]` 依赖注入
 - 多模块 handlers（auth、blog、docs、works 等）
 
-运行：`cargo run -p docbit-host`
+运行：`cargo run --manifest-path examples/docbit/Cargo.toml -p docbit-host`
 
 ## 小结
 

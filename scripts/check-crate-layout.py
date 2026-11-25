@@ -4,15 +4,16 @@
 crates/ must not grow one top-level directory per vendor. Ownership is a closed
 taxonomy:
 
-    crates/<framework>      fixed framework set (core, engine, host, ...)
+    crates/<framework>      fixed framework set (core, engine, host, ..., outbox)
     crates/ai/<leaf>        AI domain (core/ef/gateway)
     crates/auth/<leaf>      authentication (ef/oidc/oauth2/mfa/webauthn)
     crates/cache/<leaf>     third-party cache adapters (redis)
     crates/queue/<leaf>     third-party message-queue adapters (nats/rabbitmq/kafka)
     crates/payment/<leaf>   payment domain (core/stripe/alipay/wechatpay/paypal/adyen/square/ef)
     crates/ef/<leaf>        ORM boundary adapters (webx)
-    crates/outbox/<leaf>    transactional-outbox starters (ef)
     crates/transport/<leaf> optional non-hyper listener backends (h3)
+    examples/<app>/<crate>  non-published reference apps (docbit/dmbit/imbit); each
+                            app is its own cargo workspace with its own lockfile
     testing/<leaf>          non-published test/dev harnesses (alloc-probe,
                             contract-tests, upgrade-smoke)
 
@@ -25,7 +26,7 @@ Rules enforced here (the dependency direction is the constitution's P10
 4. the `rust-webx` umbrella never links ai/auth/cache/queue adapters;
 5. `crates/` is the published surface: every member there must be publishable
    (`publish != false`), and every non-published package must live outside it
-   (reference apps or `testing/`);
+   (reference apps under `examples/` or `testing/`);
 6. `testing/` packages are never published.
 
 Run locally with `python3 scripts/check-crate-layout.py`; CI runs it in Lint
@@ -48,13 +49,31 @@ FRAMEWORK = {
     "client",
     "webx",
     "build",
+    # Outbox contract/dispatcher/in-memory store: framework-side, ORM-free. The
+    # durable store and producer enqueue helper live in
+    # `examples/adapters/outbox/ef` (the unpublished `rust-webx-outbox-ef`
+    # reference adapter, outside this workspace).
+    "outbox",
 }
-GROUPS = {"ai", "auth", "cache", "queue", "payment", "ef", "outbox", "transport"}
+GROUPS = {"ai", "auth", "cache", "queue", "payment", "ef", "transport"}
 # Non-published test/dev harnesses: allowed as workspace members, never in
 # `crates/` (the published surface).
 TESTING = {"testing"}
-# Non-published reference applications.
+# Non-published reference applications. Each app lives in its own cargo
+# workspace under `examples/` (own lockfile), so `examples/<app>` and
+# `examples/<app>/<crate>` are the accepted member paths; the bare `<app>` form
+# is still recognised for the pre-`examples/` layout.
 REFERENCE_APPS = {"docbit", "dmbit", "imbit"}
+REFERENCE_APPS_DIR = "examples"
+
+
+def is_reference_app(parts: tuple) -> bool:
+    """`examples/<app>`, `examples/<app>/<crate>`, or legacy bare `<app>`."""
+    if len(parts) == 1:
+        return parts[0] in REFERENCE_APPS
+    if len(parts) in (2, 3) and parts[0] == REFERENCE_APPS_DIR:
+        return parts[1] in REFERENCE_APPS
+    return False
 
 
 def load(path: Path):
@@ -119,7 +138,12 @@ def main() -> int:
                 errors.append(
                     f"{member}: testing/ allows exactly testing/<leaf>"
                 )
-        elif parts[0] not in REFERENCE_APPS:
+        elif is_reference_app(parts):
+            # examples/<app> or examples/<app>/<crate>; each app is its own
+            # cargo workspace, so a member here only appears if the root
+            # workspace deliberately pulls one in.
+            pass
+        else:
             errors.append(f"{member}: unexpected workspace member root '{parts[0]}'")
         if not (root / member / "Cargo.toml").is_file():
             errors.append(f"{member}: member directory has no Cargo.toml")

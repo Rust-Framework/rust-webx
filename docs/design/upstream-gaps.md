@@ -5,7 +5,8 @@
 > rust-dix 1.0.0。
 >
 > 本页是**处置结论**，不是手册：每项只保留判定、落点与边界；实现细节在代码、rustdoc 与
-> `docs/rust-webx/` 中维护。2.x 只做加性变更，落地项已同批交付实现、测试、手册与 CHANGELOG。
+> `docs/rust-webx/` 中维护。2.x 以加性变更为主（2.9.1 是已登记的破坏性补丁，见
+> [`compatibility.md`](compatibility.md) §1），落地项已同批交付实现、测试、手册与 CHANGELOG。
 
 ## 判定口径
 
@@ -41,11 +42,11 @@
 | 10 | 权限目录 / 策略管理 | **不做** | `IEndpointCatalog`（`Host::endpoints()`）导出端点与规则 | 角色种子/授予子集是应用领域模型；框架不建第二套权限库 |
 | 11 | 版本化迁移基线与历史 | **已覆盖** | rust-ef `ctx.migrate(dir)` + `MigrationStore` + `__ef_migrations_history`；`bootstrap`；`MigrationEngine::diff/apply_diff`；`has_drift` | 下游删 `sys_schema_migration`；readiness 用 `has_drift()` 接 `IHealthCheck` |
 | 12 | 分布式锁 / 配额原子性 | **已覆盖（2.7.0）** | `IAdvisoryLock`/`AdvisoryLease`（`try_acquire`/`release`/`renew`，冲突 `None`、过期可回收）；`InMemoryAdvisoryLock`；Redis `RedisAdvisoryLock` + `add_redis_advisory_lock`；`HostBuilder::use_advisory_lock` | 配额优先原子 SQL；多步读改写用租约；PG advisory lock 归 rust-ef 侧实现同一 trait |
-| 13 | 应用级 EF→webx 错误映射 | **已覆盖（2.7.0；2.9.1 补齐瞬态与 DI）** | `rust-webx-ef`（`crates/ef/webx`）：`map_ef_error` + `EfResultExt`；2.9.1 起 `EFError::Database` 的瞬态条件（`SQLSTATE` 08/40/57P0*、SQLite `busy`/`locked` 扩展码、MySQL 1205/1213）直接产出可重试 503，`From<RdiError>` 把运行期解析失败转成 `Error::Di` | core/umbrella 不链接 rust-ef；应用不写 `common_mapper.rs` 与 `map_di_error` |
-| 14 | 分布式限流策略层 | **已覆盖（2.7.0；2.8 统一转发头）** | `RateLimitPolicy`/`RateLimitRule`（exact > 最长 prefix > Any；Ip/User/Tenant/ApiKey + 匿名回退 IP）+ `use_rate_limit_policy`；`use_rate_limiter` 正式入口；`IRateLimiter` 端口与 429 契约不变；**2.8 起客户端地址统一取自 `ClientInfo` 解析结果（policy 与配置节行为一致，旧 `RateLimit.TrustProxy/TrustedProxies` 被忽略）** | 多实例把每条规则的 limiter 换成共享实现 |
+| 13 | 应用级 EF→webx 错误映射 | **已覆盖（2.7.0；2.9.1 补齐瞬态与 DI，删除 `webx_ef`）** | `rust-ef` 2.9.1 的 `From<EFError> for AppError`（`rust-webx-ef`/`webx_ef` 已在 2.9.1 删除，不需要任何框架侧适配 crate）：2.9.1 起 `EFError::Database` 的瞬态条件（`SQLSTATE` 08/40/57P0*、SQLite `busy`/`locked` 扩展码、MySQL 1205/1213）直接产出可重试 503，`From<RdiError>` 把运行期解析失败转成 `di(operator)`（500、隐藏 detail） | core/umbrella 不链接 rust-ef；应用不写 `common_mapper.rs` 与 `map_di_error` |
+| 14 | 分布式限流策略层 | **已覆盖（2.7.0；2.8 统一转发头）** | `RateLimitPolicy`/`RateLimitRule`（exact > 最长 prefix > Any；Ip/User/Tenant/ApiKey + 匿名回退 IP）+ `use_rate_limit_policy`；`use_rate_limiter` 正式入口；`IRateLimiter` 端口与 429 契约不变；**2.8 起客户端地址统一取自 `ClientInfo` 解析结果（policy 与配置节行为一致；`RateLimit.TrustProxy/TrustedProxies` 旧键已在 2.9.1 删除）** | 多实例把每条规则的 limiter 换成共享实现 |
 | 15 | 指标 / SLO 导出 | **已覆盖（2.7.0）** | `IMeter::snapshot()` + `MetricSample`/`MetricKind`；`MemoryMeter` 结构化存储 + 基数上限（`Metrics.MaxSeries`、`with_max_series`、`dropped_series`）；`/metrics` 渲染业务 counter/gauge/histogram（summary） | OTel 实现补 `snapshot()` 或继续自带 exporter；SLO 保留为 PromQL 配方 |
-| 16 | 请求级幂等 | **已覆盖（2.8.0 持久化 + 租约围栏）** | `IIdempotencyStore`（`begin`/`complete`/`release` + 默认实现的 `begin_lease`/`complete_lease`/`release_lease` 围栏令牌）+ `InMemoryIdempotencyStore` + `Idempotency-Key` 中间件（主体+方法+路径+键；并发 409；2xx 重放含可重放响应头 `headers`）；**多实例用 `rust-webx-ef::idempotency::EfIdempotencyStore`（rust-ef 表 + 唯一键 + CAS 租约 + TTL 清理）**；`Idempotency.Enabled` 时装配顺序「显式 `use_idempotency` > DI 注册的 `IIdempotencyStore` > 内存默认」；`Idempotency.Paths`/`SkipPaths` 限定幂等路径 | 请求体一致性校验仍归应用；跨实例无共享库时仍用内存实现（仅单实例正确） |
-| 17 | 事务性 outbox | **已覆盖（2.7.0）** | `rust-webx-outbox-ef`（`crates/outbox/ef`）：`OutboxMessage` + 同事务 `enqueue_outbox`、`IOutbox` 租约领取、`OutboxDispatcher`（`PeriodicBackgroundService` + `EventDispatcher`）指数退避/死信/保留期；`add_outbox` | 多实例共享 DB；跨进程投递仍走 `IEventPublisher` |
+| 16 | 请求级幂等 | **已覆盖（2.8.0 持久化 + 租约围栏）** | `IIdempotencyStore`（`begin`/`complete`/`release` + 默认实现的 `begin_lease`/`complete_lease`/`release_lease` 围栏令牌）+ `InMemoryIdempotencyStore` + `Idempotency-Key` 中间件（主体+方法+路径+键；并发 409；2xx 重放含可重放响应头 `headers`）；**多实例用共享 store：参考适配器 `examples/adapters/idempotency/ef`（非发布，可复制）或自实现端口**；`Idempotency.Enabled` 时装配顺序「显式 `use_idempotency` > DI 注册的 `IIdempotencyStore` > 内存默认」；`Idempotency.Paths`/`SkipPaths` 限定幂等路径 | 请求体一致性校验仍归应用；跨实例无共享库时仍用内存实现（仅单实例正确） |
+| 17 | 事务性 outbox | **已覆盖（2.7.0；框架端口与派发器在 `rust-webx-outbox`）** | 框架 crate `rust-webx-outbox`：`IOutbox`/`OutboxEntry`/`OutboxOptions`、`OutboxDispatcher`（`PeriodicBackgroundService` + `EventDispatcher`，指数退避/死信/保留期）、`InMemoryOutbox`、`add_outbox`；**同事务入队与数据库表是数据适配**，参考实现在 `examples/adapters/outbox/ef`（`enqueue_outbox` + `add_outbox_ef`，非发布） | 多实例共享 DB；跨进程投递仍走 `IEventPublisher` |
 | 18 | Handler 访问客户端信息 | **已覆盖（2.7.0）** | `#[fromclient] ClientInfo`（`peer_addr`/`client_ip`/`forwarded_for`）+ `ClientInfo` 配置节（`TrustForwardedHeaders`/`TrustedProxies`，最右侧非可信 hop）；host 中间件在鉴权/绑定前解析 | 登录 IP 维度限流直接读该字段 |
 | 19 | keyset / cursor 分页 | **已覆盖（2.7.0）** | `KeysetRequest`（cursor + page_size、`from_parts`/`decoded`）+ `Cursor` 编解码（4 KiB 上限、typed 400）+ `CursorPage<T>`（`from_rows` 多取一行精确 `has_more`）；与 offset 并存 | 排序键与租户作用域仍由 Handler 校验 |
 | 20 | 声明式校验 / OpenAPI | **已覆盖（2.7.0）** | `#[validate(length/range/email/custom)]` 编译期展开、绑定后执行并汇入同一 `400 errors`；`ParamMeta::constraints` 让 spec 带 `minLength`/`maxLength`/`minItems`/`maxItems`/`minimum`/`maximum`/`format` | 跨字段/查库校验留在 Handler |
@@ -60,8 +61,9 @@
 - **#9/#10 授权边界**：框架执行端点声明规则（静态 + 动态）；资源实例的归属判断依赖应用数据模型，
   只能留在 Handler。框架补 owner/tenant 校验 helper，但不提供 `IResourceAuthorizer` 与权限目录，
   避免第二套权限模型。
-- **#13/#17 新 crate**：`crates/ef/webx`（`ef` 组）与 `crates/outbox/ef`（`outbox` 组）都是
-  opt-in starter，core/umbrella 不链接 rust-ef。
+- **#13/#17 依赖分层**：框架只给端口 + 默认实现（如 `rust-webx-outbox` 的 `InMemoryOutbox` 与派发器），
+  core/umbrella 不链接 rust-ef；与 ORM/数据库耦合的持久化适配是下游的数据适配，
+  参考实现在 `examples/adapters/`（全部 `publish = false`，可复制不可依赖）。
 - **#11 已有能力**：下游清单写于 2.6.0 之前；2.6.0 的 `ctx.migrate` + 历史表 + 快照/diff 已覆盖
   "versioned migration runner + schema drift readiness"，无需新增 API。
 
@@ -107,10 +109,9 @@
 
 ## 2026-11 第二轮下游反馈（RXStudio）
 
-RXStudio 基于 2.9.0 上报的 38 条（`E:\GitCode\Apps\RXStudio\server\docs\upstream-feedback.md`）
-按"先加性修复、后 3.0 架构"分批判定。跨仓计划、逐条状态、对抗审查中的冲突与取舍见
-`E:\GitCode\RF\docs\upstream-feedback-plan.md`；本轮 webx 侧修复已并入未发布的 2.9.1
-（见 `CHANGELOG.md`），P1（`rust-core` 契约层）与 P2（分页/排序/API 收敛）的设计见
-`E:\GitCode\RF\docs\design\app-error-migration.md` 与
-`E:\GitCode\RF\docs\design\pagination-3.0-migration.md`。本页只保留第一轮（2.6→2.9）的
-处置结论，不重复第二轮内容。
+RXStudio 基于 2.9.0 上报的 38 条（下游仓 `docs/upstream-feedback.md`）按"先加性修复、
+后 2.9.1 架构"分批判定。跨仓计划、逐条状态、对抗审查中的冲突与取舍见跨仓文档
+`docs/upstream-feedback-plan.md`（不在本仓维护）；本轮 webx 侧修复已并入未发布的 2.9.1
+（见 `CHANGELOG.md`），P1（`rust-core` 契约层）与 P2（分页/排序/API 收敛）的设计见本仓
+[`app-error-migration.md`](app-error-migration.md) 与跨仓 `docs/design/pagination-3.0-migration.md`。
+本页只保留第一轮（2.6→2.9）的处置结论，不重复第二轮内容。

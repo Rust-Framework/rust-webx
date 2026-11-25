@@ -48,9 +48,11 @@
 把 JWKS 探针挂到 `/health/ready`：
 
 ```rust
+use webx::HealthCheckSpec;
+
 let resolver = Arc::new(JwksResolver::from_section(&options.jwt.jwks.clone().unwrap())?);
 Host::builder()
-    .add_health_check_async(JwksHealthCheck::new(resolver))
+    .add_health_check(HealthCheckSpec::async_check(JwksHealthCheck::new(resolver)))
     .build();
 ```
 

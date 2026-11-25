@@ -610,7 +610,7 @@ fn idempotency_key(candidate: Option<&str>, fallback: &str) -> Result<String, Pa
 pub trait AdyenHostBuilderExt: Sized {
     /// Register the Adyen adapter with runtime configuration.
     ///
-    /// Binds the `"Adyen"` configuration section through `add_options_monitor`,
+    /// Binds the `"Adyen"` configuration section through `add_options`,
     /// so appsettings/file reloads are picked up by the runtime cache (default
     /// 60s) or immediately after `Payments::invalidate`.
     fn add_adyen(self) -> Self;
@@ -621,7 +621,7 @@ pub trait AdyenHostBuilderExt: Sized {
 
 impl AdyenHostBuilderExt for HostBuilder {
     fn add_adyen(self) -> Self {
-        let builder = self.add_options_monitor::<AdyenOptions>("Adyen");
+        let builder = self.add_options::<AdyenOptions>("Adyen");
         builder.register(|services| {
             services
                 .add_payment_provider_factory_lazy(|resolver| {

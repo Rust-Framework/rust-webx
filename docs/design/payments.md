@@ -58,7 +58,7 @@
 | 只有一条出站 HTTP 栈 | [出站 HTTP](../rust-webx/13-extensibility/outbound-http.md) | 适配器基于 `rust-webx-client`，不引入 reqwest/hyper 0.14 |
 | 依赖库不得隐式注入路由 | 宪法 §4 | 回调路由由应用声明，crate 只提供请求类型与校验 |
 | 2.x 只做加性变更、MSRV 1.95、无 unsafe | 宪法 §5–§6 / 根 `Cargo.toml` | 新 crate 独立版本线随 workspace |
-| 唯一事件通道 `IEventPublisher` | [Starter 家族](starters.md) §1 | 支付事件不另起 pub/sub；需要持久化走 inbox/outbox |
+| 唯一事件通道 `IEventPublisher` | [端口与适配器归属](integrations.md) §6 | 支付事件不另起 pub/sub；需要持久化走 inbox/outbox |
 | 默认安全、失败关闭 | 宪法 P3 | 配置非法启动失败；验签失败拒绝；不吞异常 |
 
 新增 crate 还要同步：`scripts/check-crate-layout.py` 的 `GROUPS`、`Cargo.toml` 成员与
@@ -205,8 +205,9 @@ crates/payment/
 ├── wechatpay/   rust-webx-pay-wechatpay webx_pay_wechatpay
 ├── paypal/      rust-webx-pay-paypal webx_pay_paypal
 ├── adyen/       rust-webx-pay-adyen  webx_pay_adyen
-├── square/      rust-webx-pay-square webx_pay_square
-└── ef/          rust-webx-pay-ef     webx_pay_ef     回调 inbox（持久化去重/重试）
+└── square/      rust-webx-pay-square webx_pay_square
+
+examples/adapters/payment/ef/   rust-webx-pay-ef  webx_pay_ef  回调 inbox 参考实现（非发布，可复制）
 ```
 
 依赖方向：
@@ -407,9 +408,9 @@ Host::builder()
 - 启动校验不再阻塞进程：静态 provider 在构造时校验，运行时配置在首次解析/健康检查校验；
   配置源不可用返回 503（`PaymentError::Unavailable`），由 readiness 暴露。原因是运行时
   DB/KMS 在启动时可能不可用，fail-fast 会误伤可用性。
-- 配置：`add_*()` 自动 `add_options_monitor::<XxOptions>("Section")`，支持 appsettings 与
-  `APP__Stripe__SecretKey` 覆盖；`bind_config` 只按顶层 key 取子节点，因此每个供应商一个
-  顶层节。密钥字段的 `Debug` 已脱敏。
+- 配置：`add_*()` 自动 `add_options::<XxOptions>("Section")`（同时注册 `Arc<T>`、具体 monitor 与
+  monitor 端口），支持 appsettings 与 `APP__Stripe__SecretKey` 覆盖；`bind_config` 只按顶层 key
+  取子节点，因此每个供应商一个顶层节。密钥字段的 `Debug` 已脱敏。
 - 传输：默认由适配器创建 `HttpClient`（base_url、超时、`ssrf_protection` 保持开启）；
   测试/共享连接池通过各 provider 的 `with_client` 构造器完成。
 - 测试替身：`rust-webx-client::testing::MockUpstream` 录制/回放，适配器测试不触网。

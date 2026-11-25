@@ -54,7 +54,7 @@ graph LR
 
 - **新端点**：添加 Request + Handler 文件，不修改 `main.rs` 路由表
 - **新中间件**：`impl IMiddleware` + 注册，不修改管道源码
-- **新授权策略**：实现 `IDynamicAuthorizer`（路由级运行时策略）；自定义 `IAuthorizationPolicy` 用于旧式/特殊策略
+- **新授权策略**：实现 `IDynamicAuthorizer`（路由级运行时策略）；端点级固定角色/权限用 `#[authorize]`，资源实例归属留在 Handler
 
 ## 依赖倒置（DIP）
 
@@ -104,7 +104,7 @@ Rust 的 `Result<T, Error>` 贯穿全栈（端点动作返回 `ActionResult<T>`�
 ```rust
 async fn handle(&mut self, req: GetUserRequest) -> ActionResult<UserDto> {
     self.repo.find(&req.id)
-        .ok_or_else(|| Error::NotFound(format!("User {}", req.id)))
+        .ok_or_else(|| Error::not_found(format!("User {}", req.id)))
 }
 ```
 

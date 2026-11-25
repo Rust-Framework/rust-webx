@@ -74,7 +74,7 @@ async fn spawn_host() -> String {
     let host = Host::builder()
         .mode(AppMode::Development)
         .no_spa()
-        .configure(|app| app.useOptions(|options| options.app.max_body_size = 64))
+        .configure(|app| app.options(|options| options.app.max_body_size = 64))
         .build();
     tokio::spawn(async move { host.run_at(&addr).await });
     let client = reqwest::Client::new();

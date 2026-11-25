@@ -5,7 +5,7 @@
 Docbit 使用 `rust-ef` + SQLite：
 
 ```rust
-// host/src/startup/extensions/service_collection.rs
+// host/src/startup/services/service_collection.rs
 use std::sync::Arc;
 
 use rust_ef::db_context::{DbContext, DbContextOptionsBuilder};
@@ -59,38 +59,30 @@ struct DbInitService {
 
 async fn start(&self) -> Result<()> {
     let scope = self.services.create_scope();
-    let mut ctx: DbContext = scope
-        .get_owned()
-        .map_err(|e| Error::Internal(format!("DbContext resolution failed: {}", e)))?;
+    // `RdiError` / `EFError` 都实现了 `From<..> for webx::Error`，直接 `?`
+    let mut ctx: DbContext = scope.get_owned()?;
 
-    ctx.migrate("Migrations")
-        .await
-        .map_err(|e| Error::Internal(format!("migration failed: {}", e)))?;
+    ctx.migrate("Migrations").await?;
     // 之后可执行 seed
     Ok(())
 }
 ```
 
-## 持久化错误映射（rust-webx-ef）
+## 持久化错误映射（rust-ef 边界）
 
-`EFError` → `webx::Error` 的脱敏映射由 **`rust-webx-ef`** 提供；core 与 umbrella 不链接
-rust-ef，应用按需依赖：
-
-```toml
-rust-webx-ef = "2.9"
-```
+`EFError` → `webx::Error` 的脱敏映射由 **rust-ef** 自己实现
+（`impl From<EFError> for rust_core::AppError`），不需要任何框架侧适配 crate：
+`rust-webx-ef`（`webx_ef`）连同 `map_ef_error` / `EfResultExt` 已在 2.9.1 删除
+（见 [upgrade-to-2.9.1.md](../16-migration/upgrade-to-2.9.1.md)），
+Handler 里直接用 `?`：
 
 ```rust
-// handlers/src/db.rs
-pub use webx_ef::{map_ef_error, EfResultExt};
-
 // Handler
 let blog = ctx
     .set::<Blog>()
     .query()
     .first_or_default()
-    .await
-    .map_ef()?; // NotFound→404、Validation→400、Conflict→409、Connection/Transaction→可重试 503、其余→隐藏 500
+    .await?; // NotFound→404、Validation→400、Conflict→409、Connection/Transaction→可重试 503、其余→隐藏 500
 ```
 
 `Query`/`TypeConversion`（400）与 `UniqueViolation`（409）使用固定文案：SQL、列名、
@@ -212,10 +204,13 @@ let valid = slot.consume(&sha256_hex(&candidate)); // 原子 check-and-consume�
    `svc.singleton::<dyn Port>(...)`）；
 2. 业务代码只依赖 core 端口（trait），不依赖具体 crate/SDK；
 3. 初始化与升级走官方迁移 / 后台服务，不在请求路径里做全量 schema 操作；
-4. domain/application 层不直接依赖第三方 crate；适配器放宿主或独立 crate。
+4. domain/application 层不直接依赖第三方 crate；适配器放宿主或独立 crate；
+5. 持久化侧的框架端口（幂等 store、outbox、支付 inbox、会话/用量账本）由框架给**端口 + 默认实现**，
+   持久化适配是**下游的数据适配**：在业务 crate 实现端口，或复制 `examples/adapters/*` 的参考实现
+   （全部 `publish = false`，不随框架发布）——见 [端口与适配器（下游接入）](integrations.md)。
 
 ## 小结
 
 框架不限制技术选型，通过 DI 和分层与任何库集成。
 
-下一章：[最佳实践](../14-best-practices/INDEX.md)
+下一节：[端口与适配器（下游接入）](integrations.md)

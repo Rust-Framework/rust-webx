@@ -48,7 +48,7 @@
 - 外部 IdP：Duende（授权码+PKCE）、GitHub OAuth2、Google/Microsoft discovery/JWKS 已联网验证，
   其他厂商需 client 注册后复测；
 - WebAuthn 仅 ES256 + `none` attestation；物理认证器与更多 attestation 未纳入门禁；
-- Kafka starter 为单分区 follower，不做 consumer-group offset 提交，仅明文连接；
+- Kafka 集成 crate 为单分区 follower，不做 consumer-group offset 提交，仅明文连接；
 - DPoP 对象型 `cnf` 需自定义 issuer；mTLS 仅 WebPKI 链。
 
 ## 6. 升级步骤

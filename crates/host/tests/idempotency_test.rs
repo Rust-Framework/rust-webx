@@ -441,7 +441,7 @@ async fn enabled_config_uses_the_store_registered_in_di() {
         .mode(AppMode::Development)
         .no_spa()
         .configure(|builder| {
-            builder.useOptions(|options| {
+            builder.options(|options| {
                 options.idempotency.enabled = true;
             })
         })
@@ -491,7 +491,7 @@ async fn explicit_use_idempotency_wins_over_the_di_store() {
         .mode(AppMode::Development)
         .no_spa()
         .configure(|builder| {
-            builder.useOptions(|options| {
+            builder.options(|options| {
                 options.idempotency.enabled = true;
             })
         })
@@ -536,7 +536,7 @@ async fn production_enabled_idempotency_warns_but_still_works() {
         .mode(AppMode::Production)
         .no_spa()
         .configure(|builder| {
-            builder.useOptions(|options| {
+            builder.options(|options| {
                 options.idempotency.enabled = true;
                 // The risky scope that triggers the startup warning.
                 options.idempotency.allow_anonymous = true;

@@ -2,6 +2,13 @@
 //! environment variable overrides, JSON binding, and development merge.
 
 use serde::Deserialize;
+
+/// Serializes tests that mutate process-wide environment variables.
+///
+/// `cargo test` runs tests in parallel; two tests setting/removing `JWT_SECRET`
+/// at the same time observed each other's values (flaky assertion). The guard is
+/// poisoned only if a test panics while holding it, hence the `into_inner`.
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 use webx_core::config;
 use webx_core::mode::AppMode;
 
@@ -169,6 +176,9 @@ fn config_bind_empty_json_returns_default() {
 
 #[test]
 fn config_jwt_secret_env_override() {
+    let _env = ENV_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     // Integration test: only assert when no appsettings.json is discovered on disk.
     if config::load_appsettings(AppMode::Development).is_none() {
         std::env::set_var("JWT_SECRET", "env-jwt-secret-that-is-long-enough-32");
@@ -182,6 +192,9 @@ fn config_jwt_secret_env_override() {
 
 #[test]
 fn config_app_jwt_secret_overrides_jwt_secret_env() {
+    let _env = ENV_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     std::env::set_var("JWT_SECRET", "from-jwt-secret-env-var-32chars-min");
     std::env::set_var(
         "APP__Jwt__Secret",

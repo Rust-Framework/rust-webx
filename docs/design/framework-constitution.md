@@ -2,7 +2,7 @@
 
 > 面向维护者、核心贡献者与架构评审。本文回答**一个决策凭什么合格**，不记录版本沿革、
 > 历史缺陷或阶段计划；当前 API 以开发者手册与 rustdoc 为准，发布内容以 `CHANGELOG.md` 为准。
-> 基线：rust-webx 2.9.0。
+> 线线：rust-webx 2.9.0。
 
 ---
 
@@ -54,7 +54,7 @@
 |---|---|---|
 | 运行模型 | 保留 ASP.NET Core 式生命周期（DI/中间件/HostedService/Options/ProblemDetails），剥离运行期反射 | 显式依赖、无 ambient DI |
 | 性能 | 预算化：地板 + 框架税，CI 只对税设限 | `alloc-probe compare 500 13` |
-| 内置 vs 生态 | 端口 + starter crate；`core` 不含 ORM/缓存/消息/AI | 依赖方向门禁 |
+| 内置 vs 生态 | 框架只交付端口 + 默认实现；实体/表/数据适配归下游（参考实现 `examples/adapters/`，非发布）；`core` 不含 ORM/缓存/消息/AI | 依赖方向门禁 |
 | 路由注册 | 编译期 inventory + 启动期确定性排序；重复/冲突启动失败 | 路由冲突测试、trybuild |
 | 生命周期作用域 | 请求 scope + 连接 scope（实时）；root 不解析 Scoped | 严格作用域测试 |
 | 执行引擎 | 每 worker current-thread runtime + 全局准入；阻塞代码必须出 runtime | 准入/排空/过载测试 |
@@ -117,7 +117,7 @@
 
 ## 7. 文档纪律
 
-- 当前文档只写**当前基线**的正确做法；版本沿革、阶段编号、失效计划、评审快照一律不入库。
+- 当前文档只写**当前线线**的正确做法；版本沿革、阶段编号、失效计划、评审快照一律不入库。
 - 同一事实只有一个权威落点，其余位置用指针，禁止复制段落。
 - 面向上手者的内容放 `docs/rust-webx/`；面向维护者的取舍放 `docs/design/`。
 - 发布证据由 CI 与 `CHANGELOG.md` 承担，不另建"证据台账"。

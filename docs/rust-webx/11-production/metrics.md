@@ -231,13 +231,16 @@ let executor = GatewayExecutor::new(catalog, router)
 `HealthRegistry`（冷却）与 `CircuitBreaker`（开路）聚合成 host 健康检查：
 
 ```rust
+use webx::HealthCheckSpec;
+
 let health = Arc::new(
     GatewayHealth::new(router.health().clone())
         .with_catalog(handle.clone())          // 用目录全集判断“全部不可用”
         .with_circuit_breaker(circuit.clone()),
 );
+let check = health.check();
 Host::builder()
-    .add_health_check("gateway-upstreams", health.check())
+    .add_health_check(HealthCheckSpec::sync("gateway-upstreams", move || check()))
     .build();
 ```
 

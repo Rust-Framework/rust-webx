@@ -17,8 +17,8 @@
 //! two steps) guarantees `current()` and `subscribe().borrow()` can never
 //! diverge, even under concurrent reloads.
 //!
-//! The host wires this to `appsettings.json` with
-//! `HostBuilder::add_options_monitor` (startup snapshot) and
+//! The host wires this to `appsettings.json` with `HostBuilder::add_options`
+//! (startup snapshot; it also registers the monitor) and
 //! `HostBuilder::watch_options_file` (poll a JSON file and reload it in place).
 
 use std::fmt;

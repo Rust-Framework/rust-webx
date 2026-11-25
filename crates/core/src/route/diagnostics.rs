@@ -3,6 +3,7 @@
 use std::any::TypeId;
 use std::collections::HashSet;
 
+use crate::route::catalog::duplicate_endpoint_ids;
 use crate::route::scan::{HandlerCache, HandlerRegistration, RouteEntry};
 
 /// `RouteEntry::new` records this sentinel when the entry has no request type
@@ -168,7 +169,34 @@ pub fn format_route_diagnostics() -> String {
         }
     }
 
-    if orphan_route_rows.is_empty() && missing_routes.is_empty() && dupes.is_empty() {
+    // One `id` declared by two routes makes the permission key ambiguous; the
+    // same rule fails `EndpointCatalog::try_from_inventory` at startup.
+    let duplicate_ids = duplicate_endpoint_ids();
+    if !duplicate_ids.is_empty() {
+        let _ = writeln!(
+            out,
+            "\nDuplicate endpoint ids ({}); the permission catalog keys by id/guid:",
+            duplicate_ids.len()
+        );
+        let _ = writeln!(
+            out,
+            "  Fix: keep one route macro per request type, or give each hand-written fixture a distinct request_id"
+        );
+        for (id, declarations) in &duplicate_ids {
+            let declared_by = declarations
+                .iter()
+                .map(|(method, path)| format!("{method} {path}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let _ = writeln!(out, "  - {id} ({declared_by})");
+        }
+    }
+
+    if orphan_route_rows.is_empty()
+        && missing_routes.is_empty()
+        && dupes.is_empty()
+        && duplicate_ids.is_empty()
+    {
         let _ = writeln!(
             out,
             "\nRoute table OK — every route has a handler and every handler has a route."
@@ -176,7 +204,8 @@ pub fn format_route_diagnostics() -> String {
     } else {
         let _ = writeln!(
             out,
-            "\nStartup will panic on orphan routes/handlers. Run: cargo run -p <host-crate> -- --doctor"
+            "\nStartup will panic on orphan routes/handlers or duplicate endpoint ids. \
+             Run: cargo run -p <host-crate> -- --doctor"
         );
     }
 

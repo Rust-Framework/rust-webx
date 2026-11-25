@@ -38,7 +38,7 @@ graph LR
 
 | 用途 | 示例 |
 |------|------|
-| 数据库初始化 | `ctx.ensure_created()` 建表 |
+| 数据库初始化 | 生产：`ctx.migrate("Migrations")` / 新库 `ctx.bootstrap()`；示例与测试：`ctx.ensure_created()` |
 | 种子数据 | 默认管理员账户 |
 | 索引生成 | DocService 扫描 docs/ |
 | 连接池预热 | 预建立数据库连接 |
@@ -112,7 +112,7 @@ impl BackgroundService for CustomWorker {
 - 停机时框架先 `ct.cancel()` 再 join；忽略取消的 worker 在 `STOP_GRACE`（5s）后被 abort，不会在
   `provider.dispose()` 之后继续访问已释放的服务
 - `execute` 返回 `Err` 是 **typed 失败**：立即记 error 日志，并在 `stop()` 时再次上报；panic 被转成
-  `Error::Internal`，不会传播到 host 进程
+  `Error::internal`，不会传播到 host 进程
 - 需要每 tick 的 Scoped 依赖（DbContext）时，注入 `Arc<dyn ScopeFactory>` 并在 tick 内开 scope，
   不要把它存到 worker 字段里
 
@@ -137,9 +137,8 @@ impl IHostedService for DbInitService {
     async fn start(&self) -> Result<()> {
         // 显式 DI scope：释放 scope 即释放 Scoped 依赖（不落 root）
         let scope = self.services.create_scope();
-        let mut ctx: DbContext = scope
-            .get_owned()
-            .map_err(|e| Error::Internal(format!("DbContext resolution failed: {}", e)))?;
+        // rust-dix 的 `RdiError` 会经 `From` 转成 `webx::Error`（500、detail 不回显），直接 `?`
+        let mut ctx: DbContext = scope.get_owned()?;
 
         ensure_schema(&mut ctx).await?;             // 建表
         admin_user::ensure_admin_user(&mut ctx).await?;  // 种子数据
@@ -158,40 +157,60 @@ impl IHostedService for DbInitService {
 ## 注册
 
 ```rust
+use webx::rust_dix::IServiceResolverExt as _;
+use webx::{BackgroundServiceSpec, HostedServiceSpec};
+
+// `options` 是应用在构建前加载的配置快照（示例省略加载代码）
 Host::builder()
     .register(|svc| {
         svc
             // 1. 常规：要求 Default
-            .add_hosted_service::<CacheWarmupService>()
+            .add_hosted_service(HostedServiceSpec::new::<CacheWarmupService>())
             // 2. 工厂：不要求 Default，构造时从 DI 拿配置/依赖
-            .add_hosted_service_with(|resolver| {
-                let options = resolve::<CacheOptions>(resolver);
+            .add_hosted_service(HostedServiceSpec::with_factory(|resolver| {
+                let options = resolver
+                    .resolve_arc::<CacheOptions>()
+                    .expect("CacheOptions registered by add_options");
                 Arc::new(CacheWarmupService::new(options))
-            })
+            }))
             // 3. 顺序：数值小的先启动、后停止（相同值保持注册顺序）
-            .add_hosted_service_ordered::<SeedService>(-100)
-            .add_hosted_service_with_ordered(100, |resolver| {
-                Arc::new(QueueConsumer::new(resolve::<QueueOptions>(resolver)))
-            })
+            .add_hosted_service(HostedServiceSpec::new::<SeedService>().ordered(-100))
+            .add_hosted_service(
+                HostedServiceSpec::with_factory(|resolver| {
+                    let options = resolver
+                        .resolve_arc::<QueueOptions>()
+                        .expect("QueueOptions registered by add_options");
+                    Arc::new(QueueConsumer::new(options))
+                })
+                .ordered(100),
+            )
             // 4. 条件注册：配置开关关掉就完全不进容器
-            .add_hosted_service_if::<SeedService>(options.seed.enabled)
-            .add_hosted_service_with_if(options.outbox.enabled, |resolver| {
-                Arc::new(OutboxConsumer::new(resolve::<OutboxOptions>(resolver)))
-            })
+            .add_hosted_service(
+                HostedServiceSpec::new::<SeedService>().enabled(options.seed.enabled),
+            )
+            .add_hosted_service(
+                HostedServiceSpec::with_factory(|resolver| {
+                    let options = resolver
+                        .resolve_arc::<OutboxOptions>()
+                        .expect("OutboxOptions registered by add_options");
+                    Arc::new(OutboxConsumer::new(options))
+                })
+                .enabled(options.outbox.enabled),
+            )
             // 5. 后台 worker（execute 内自管循环）
-            .add_background_service_with(|resolver| {
-                Arc::new(OutboxWorker::new(resolver /* ... */))
-            })
-            .add_background_service_with_if(options.report.enabled, |resolver| {
-                Arc::new(ReportWorker::new(resolver))
-            })
+            .add_background_service(BackgroundServiceSpec::with_factory(|resolver| {
+                Arc::new(OutboxWorker::new(resolver))
+            }))
+            .add_background_service(
+                BackgroundServiceSpec::new::<ReportWorker>().enabled(options.report.enabled),
+            )
     })
 ```
 
-- `add_hosted_service`（旧 API）保持不变，要求 `Default`；
-- `add_hosted_service_with` 的工厂在 singleton 构造时调用一次，可以 `resolve::<T>(resolver)` 拿配置或依赖；
-- `*_if(enabled, ...)` 只是把条件判断移进框架：`enabled == false` 时服务不注册；
-- `BackgroundService` 也可用 `add_background_service::<W>()`（`Default` 构造）；
+- `add_hosted_service` 只接受 `HostedServiceSpec`：`new::<T>()` 要求 `Default`，构造参数或 DI 依赖用 `with_factory(..)`；
+- `with_factory` 的工厂在 singleton 构造时调用一次，可以 `resolver.resolve_arc::<T>()`（`IServiceResolverExt`）拿配置或依赖；
+- `.enabled(false)` 只是把条件判断移进框架：服务不注册，也不会进入启动列表；
+- `BackgroundService` 用 `BackgroundServiceSpec::new::<W>()`（`Default` 构造）或 `with_factory(..)`，同样支持 `.enabled(bool)`；
 - `#[inject] impl IHostedService` 仍然可用（rust-dix 注册为 `dyn IHostedService`，order 默认 0）。
 
 ## 多个 HostedService

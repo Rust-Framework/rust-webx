@@ -81,10 +81,9 @@ mod tests {
 
     #[test]
     fn trusted_proxies_are_parsed_and_invalid_entries_skipped() {
-        let config = ClientInfoSection {
-            trust_forwarded_headers: true,
-            trusted_proxies: vec!["10.0.0.0/8".into(), "not-a-cidr".into()],
-        };
+        let mut config = ClientInfoSection::default();
+        config.trust_forwarded_headers = true;
+        config.trusted_proxies = vec!["10.0.0.0/8".into(), "not-a-cidr".into()];
         let middleware = ClientInfoMiddleware::from_section(&config);
         assert_eq!(middleware.trusted_proxies.len(), 1);
         assert!(

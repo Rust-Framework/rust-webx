@@ -213,6 +213,11 @@ fn expand_endpoint(
         )
         .with_response_type_id(::std::any::TypeId::of::<#rsp_type>())
         .with_max_body_size(#max_body_size_tokens)
+        .with_request_id(::core::concat!(
+            ::core::module_path!(),
+            "::",
+            ::core::stringify!(#self_ty)
+        ))
     };
     let route_entry = if authorization_dynamic {
         quote! { #route_entry.with_dynamic_authorization() }

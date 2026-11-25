@@ -1,4 +1,4 @@
-﻿//! WEBX-02: forwarded-header parsing has a single source of truth.
+//! WEBX-02: forwarded-header parsing has a single source of truth.
 //!
 //! The `ClientInfo` middleware resolves the trusted client once; the rate limiter
 //! only reads [`IHttpContext::client_info`] and never parses headers a second
@@ -9,8 +9,7 @@
 //! b) a directly reachable client cannot spoof `X-Forwarded-For` into another
 //!    bucket — the peer address stays the key;
 //! c) the `RateLimitPolicy` path and the `RateLimit` configuration-section path
-//!    key the same resolved client and produce identical decisions; the legacy
-//!    `RateLimit.TrustProxy` keys only produce a migration warning;
+//!    key the same resolved client and produce identical decisions;
 //! d) without the `ClientInfo` middleware the limiter falls back to the peer.
 
 mod test_utils;
@@ -20,9 +19,6 @@ use std::ops::ControlFlow;
 use std::sync::{Arc, Mutex};
 
 use test_utils::TestHttpContext;
-use tracing::field::{Field, Visit};
-use tracing::{Event, Level, Subscriber};
-use tracing_subscriber::layer::{Context, Layer, SubscriberExt};
 use webx_core::config::{ClientInfoSection, RateLimitSection};
 use webx_core::http::IHttpContext;
 use webx_core::middleware::IMiddleware;
@@ -48,10 +44,10 @@ fn request(peer_ip: &str, forwarded_for: Option<&str>) -> TestHttpContext {
 }
 
 fn trusted_proxy_config() -> ClientInfoSection {
-    ClientInfoSection {
-        trust_forwarded_headers: true,
-        trusted_proxies: vec!["10.0.0.0/8".into()],
-    }
+    let mut config = ClientInfoSection::default();
+    config.trust_forwarded_headers = true;
+    config.trusted_proxies = vec!["10.0.0.0/8".into()];
+    config
 }
 
 fn ip_policy(requests_per_second: f64, burst_size: u32) -> RateLimitPolicy {
@@ -170,17 +166,15 @@ impl IRateLimiter for RecordingLimiter {
 
 #[tokio::test]
 async fn from_policy_and_from_config_use_the_same_resolved_client_key() {
-    // The legacy trust keys still bind for configuration compatibility, but
-    // neither construction path consults them: trust lives in `ClientInfo`.
+    // The `RateLimit` section carries only the budget; the client address comes
+    // from `ClientInfo`, so both construction paths key the same way.
     let config: RateLimitSection = serde_json::from_value(serde_json::json!({
         "Enabled": true,
         "RequestsPerSecond": 0.0,
         "BurstSize": 1,
         "MaxTrackedIps": 1000,
-        "TrustProxy": true,
-        "TrustedProxies": ["10.0.0.0/8"],
     }))
-    .expect("legacy trust keys still deserialize");
+    .expect("valid RateLimit section");
     let from_config = RateLimitMiddleware::from_config(&config);
 
     let recorded = Arc::new(Mutex::new(Vec::new()));
@@ -224,7 +218,7 @@ async fn from_policy_and_from_config_use_the_same_resolved_client_key() {
         vec!["ip:203.0.113.7", "ip:203.0.113.8", "ip:203.0.113.7"]
     );
 
-    // The legacy keys are ignored by `from_config` itself too: without the
+    // `from_config` itself never parses forwarded headers: without the
     // `ClientInfo` middleware the peer address is the only key, so a spoofed
     // header does not create a second bucket.
     let mut direct = request("203.0.113.30", Some("198.51.100.1"));
@@ -254,94 +248,4 @@ async fn without_client_info_middleware_the_limiter_uses_the_peer_address() {
     let mut anonymous = TestHttpContext::new("GET", PATH).with_header("x-forwarded-for", "1.1.1.1");
     assert_eq!(anonymous.client_info().client_ip, None);
     assert!(check(&limiter, &mut anonymous).await);
-}
-
-/// Captures WARN messages emitted while a host is assembled.
-#[derive(Clone, Default)]
-struct WarnCapture(Arc<Mutex<Vec<String>>>);
-
-impl WarnCapture {
-    fn messages(&self) -> Vec<String> {
-        self.0.lock().expect("warn capture poisoned").clone()
-    }
-}
-
-impl<S: Subscriber> Layer<S> for WarnCapture {
-    fn on_event(&self, event: &Event<'_>, _context: Context<'_, S>) {
-        if *event.metadata().level() != Level::WARN {
-            return;
-        }
-        struct MessageVisitor<'a>(&'a mut String);
-        impl Visit for MessageVisitor<'_> {
-            fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-                if field.name() == "message" {
-                    *self.0 = format!("{value:?}");
-                }
-            }
-            fn record_str(&mut self, field: &Field, value: &str) {
-                if field.name() == "message" {
-                    *self.0 = value.to_string();
-                }
-            }
-        }
-        let mut message = String::new();
-        event.record(&mut MessageVisitor(&mut message));
-        self.0.lock().expect("warn capture poisoned").push(message);
-    }
-}
-
-#[test]
-fn legacy_rate_limit_trust_keys_only_warn_during_assembly() {
-    let capture = WarnCapture::default();
-    let subscriber = tracing_subscriber::registry().with(capture.clone());
-    let host = tracing::subscriber::with_default(subscriber, || {
-        webx_host::server::Host::builder()
-            .mode(webx_core::mode::AppMode::Development)
-            .no_spa()
-            .configure(|app| {
-                app.use_options(|options| {
-                    // Legacy keys are accepted for configuration compatibility
-                    // but are not read: they only trigger the migration warning.
-                    options.rate_limit.trust_proxy = true;
-                    options.rate_limit.trusted_proxies = vec!["10.0.0.0/8".into()];
-                    // The warning must not turn rate limiting on by itself.
-                    options.rate_limit.enabled = false;
-                });
-            })
-            .build()
-    });
-    drop(host);
-
-    let warnings = capture.messages().join("\n");
-    assert!(
-        warnings.contains("RateLimit.TrustProxy") && warnings.contains("ClientInfo"),
-        "expected the legacy-trust migration warning pointing at ClientInfo, got: {warnings}"
-    );
-}
-
-#[test]
-fn legacy_rate_limit_trust_keys_fail_production_startup() {
-    // Silently ignoring the legacy keys in Production would limit every client
-    // by the reverse-proxy address (one global bucket an attacker can drain), so
-    // the host must fail closed and point at the replacement configuration.
-    let error = match webx_host::server::Host::builder()
-        .mode(webx_core::mode::AppMode::Production)
-        .no_spa()
-        .configure(|app| {
-            app.use_options(|options| {
-                options.rate_limit.trust_proxy = true;
-                options.rate_limit.trusted_proxies = vec!["10.0.0.0/8".into()];
-            });
-        })
-        .try_build()
-    {
-        Ok(_) => panic!("Production must reject the legacy RateLimit trust keys"),
-        Err(error) => error,
-    };
-    let message = error.to_string();
-    assert!(
-        message.contains("ClientInfo.TrustForwardedHeaders")
-            && message.contains("ClientInfo.TrustedProxies"),
-        "the startup error must name the replacement configuration, got: {message}"
-    );
 }

@@ -24,11 +24,11 @@
 
 ```rust
 // ✅ 面向用户
-Error::NotFound(format!("User '{}' not found", id))
-Error::Validation("Email is required".into())
+Error::not_found(format!("User '{}' not found", id))
+Error::validation("Email is required")
 
 // ❌ 暴露内部
-Error::Internal(format!("SQL error: {}", db_err))
+Error::internal(format!("SQL error: {}", db_err))
 ```
 
 ## DTO 设计

@@ -134,6 +134,15 @@ pub struct RouteEntry {
     /// Used to dispatch to the correct handler at runtime.
     pub handler_type: &'static str,
 
+    /// Stable, module-qualified identity of the request type
+    /// (`docbit_contracts::blog::CreateBlogRequest`).
+    ///
+    /// Written by the endpoint macro as `concat!(module_path!(), "::",
+    /// stringify!(Req))`; hand-written entries default it to
+    /// [`Self::handler_type`]. The endpoint catalog derives its `id` and
+    /// deterministic GUID from this string, so it survives route-pattern changes.
+    pub request_id: &'static str,
+
     /// OpenAPI response type name (e.g., `"UserModel"`, `"Vec<UserModel>"`, `"String"`).
     pub rsp_type: &'static str,
 
@@ -470,6 +479,7 @@ impl RouteEntry {
             path,
             req_type_id: std::any::TypeId::of::<()>(),
             handler_type,
+            request_id: handler_type,
             rsp_type,
             rsp_type_id: None,
             name,
@@ -504,6 +514,7 @@ impl RouteEntry {
             path,
             req_type_id,
             handler_type,
+            request_id: handler_type,
             rsp_type,
             rsp_type_id: None,
             name,
@@ -538,6 +549,19 @@ impl RouteEntry {
     /// Const so it stays usable in `inventory::submit!`.
     pub const fn with_dynamic_authorization(mut self) -> Self {
         self.authorization_dynamic = true;
+        self
+    }
+
+    /// Attach the module-qualified request identity used by the endpoint
+    /// catalog (`id` + deterministic GUID).
+    ///
+    /// The endpoint macros emit this as
+    /// `concat!(module_path!(), "::", stringify!(Req))`; hand-written fixtures
+    /// keep the `handler_type` default from [`Self::new`].
+    ///
+    /// Const so it stays usable in `inventory::submit!`.
+    pub const fn with_request_id(mut self, request_id: &'static str) -> Self {
+        self.request_id = request_id;
         self
     }
 }

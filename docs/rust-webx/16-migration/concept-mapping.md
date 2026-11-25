@@ -21,7 +21,7 @@
 | `[Authorize]` | `#[authorize]` | 授权（可多条规则，规则间 AND） |
 | `EndpointDataSource` | `IEndpointCatalog` | Host 构建、DI 注入的端点元数据 |
 | `IStringLocalizer<T>` | `IStringLocalizer` | 资源键查找，默认 culture 来自 `Culture.Default` |
-| `AddLocalization()` | `add_localization()` | 约定读取 `locales/<culture>.json` |
+| `AddLocalization()` | `use_localization(LocalizationOptions::new())` | 约定读取 `locales/<culture>.json` |
 | `[Display]` / XML docs | `#[display]` / `#[description]` / `#[category]` | 标题、描述、分组；回退到 `///` |
 | `[FromBody]` | `#[frombody]`（未标注字段在 POST/PUT/PATCH 上默认按 body 绑定） | Body 绑定 |
 | `[FromRoute]` | `#[frompath]`（字段名与 `{name}` 一致；未标注字段也优先匹配路径） | 路径参数 |
@@ -43,17 +43,17 @@
 | `appsettings.json` | `appsettings.json` | 配置文件 |
 | `IConfiguration` | `AppOptions` | 配置访问 |
 | `ProblemDetails` | `ProblemDetails` | RFC 7807 |
-| `UseMiddleware<T>()` | `use_middleware::<T>()` | 中间件注册 |
-| `UseAuthentication()` | `add_authentication()` | 认证 |
+| `UseMiddleware<T>()` | `use_middleware(MiddlewareSpec::new::<T>())` | 中间件注册（spec 化） |
+| `UseAuthentication()` | `use_authentication()` | 认证 |
 | `UseAuthorization()` | 自动（`#[authorize]` 规则组在 endpoint 执行） | 授权 |
 | `UseRequestLocalization()` | 未实现请求级协商；用全局 `Culture.Default` | 国际化 |
 | `UseCors()` | `use_cors()` | CORS |
 | `UseStaticFiles()` | `use_spa()` | 静态文件 |
 | `Controller` | 无（Request 即端点） | 路由处理 |
 | `ActionResult<T>` | `ActionResult<T>`（= `Result<T, Error>` 别名） | 返回类型 |
-| `NotFound()` | `Error::NotFound` | 404 |
-| `BadRequest()` | `Error::Validation` | 400 |
-| `IApplicationBuilder` | `HostBuilder`（`use_middleware` / `use_middleware_with`） | 应用配置 |
+| `NotFound()` | `Error::not_found(..)` | 404 |
+| `BadRequest()` | `Error::validation(..)` | 400 |
+| `IApplicationBuilder` | `HostBuilder`（`use_middleware(MiddlewareSpec)`） | 应用配置 |
 
 ## Axum ↔ rust-webx
 
@@ -69,7 +69,7 @@
 | `field.bytes().await` | `FormFile::read_bytes().await` | 读取上传内容 |
 | `ServeFile` / `ServeDir` | `FileResult::path()` / `use_spa()` | 文件与静态资源 |
 | `Body::from_stream` | `FileResult::stream()` | 流式响应体 |
-| `StatusCode` | `Error` 变体 | 状态码 |
+| `StatusCode` | `Error::status(code, ..)` 或专用构造器（`not_found`…） | 状态码 |
 | `AppState` | `ServiceCollection` | 应用状态 |
 | `axum::serve` | `Host::run()` | 启动服务 |
 | `tower::ServiceBuilder` | `MiddlewarePipeline` | 中间件链 |
@@ -95,4 +95,4 @@
 
 **恭喜读完 rust-webx 开发者手册！**
 
-回到 [目录](../INDEX.md) 查阅具体章节，或运行 `cargo run -p docbit-host` 开始实践。
+回到 [目录](../INDEX.md) 查阅具体章节，或运行 `cargo run --manifest-path examples/docbit/Cargo.toml -p docbit-host` 开始实践。

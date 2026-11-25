@@ -13,7 +13,7 @@
 - 返回 PagedResult<BlogPostDto>
 ```
 
-AI 生成的代码可直接放入 `contracts/blog.rs`（DTO + `IRequest`）+ `handlers/blog.rs`（Handler 通过 mediator 直接操作 `DbContext`）。博客模块不需要 Service 抽象；只有需要可替换实现时才定义 `I…Service`（如 `IDocumentService`），见 [可复用的模式提炼](../15-case-study/docbit-patterns.md)。
+AI 生成的代码可直接放入 `contracts/blog/list_blog_posts.rs`（DTO + `IRequest`）+ `handlers/blog/list_blog_posts.rs`（Handler 通过 mediator 直接操作 `DbContext`）——一个操作一个文件。博客模块不需要 Service 抽象；只有需要可替换实现时才定义 `I…Service`（如 `IDocumentService`），见 [可复用的模式提炼](../15-case-study/docbit-patterns.md)。
 
 **contracts 禁止引用 domain**；DTO 必须在 contracts 定义。
 
@@ -61,7 +61,7 @@ handlers/blog/
 - domain/：实体与 EF 配置、seed（可引用 contracts 枚举）
 - 使用 #[get]/#[post] 标注 impl IRequest<T>
 - Handler 需要数据库时用 #[inject(owned)] ctx: DbContext；需要服务时注入 Arc<dyn I…Service>，用 #[handler(inject)]
-- 错误使用 Error::NotFound / Error::Validation
+- 错误使用 Error::not_found / Error::validation
 - 返回 ActionResult<T>
 
 请实现：{你的需求描述}

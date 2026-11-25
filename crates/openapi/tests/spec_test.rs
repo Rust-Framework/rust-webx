@@ -3,6 +3,7 @@
 use std::any::TypeId;
 
 use webx_core::localization::{LocalizationOptions, StringLocalizer, TextRef};
+use webx_core::route::catalog::{EndpointGuid, IEndpointCatalog};
 use webx_core::route::scan::{AuthorizeRule, ParamMeta, RequestParamEntry, RouteEntry};
 use webx_core::routing::HttpMethod;
 use webx_openapi::generate_openapi_spec;
@@ -656,4 +657,99 @@ fn qualified_string_spelling_is_a_string_schema() {
 
     assert_eq!(schema["type"], "string");
     assert!(schema.get("$ref").is_none());
+}
+
+// ---------------------------------------------------------------------------
+// Endpoint identity extensions
+// ---------------------------------------------------------------------------
+
+/// Every operation (`path` × method) as `(path, method, operation)`.
+fn operations(spec: &serde_json::Value) -> Vec<(String, String, &serde_json::Value)> {
+    let mut out = Vec::new();
+    for (path, item) in spec["paths"].as_object().expect("paths object") {
+        for (method, operation) in item.as_object().expect("path item object") {
+            out.push((path.clone(), method.clone(), operation));
+        }
+    }
+    assert!(!out.is_empty(), "the spec should contain operations");
+    out
+}
+
+#[test]
+fn every_operation_carries_the_endpoint_identity_extensions() {
+    let spec = generate_openapi_spec("Test API", "1.0.0", &localizer("zh-CN"));
+
+    for (path, method, operation) in operations(&spec) {
+        let id = operation["x-webx-endpoint-id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{method} {path} has no x-webx-endpoint-id"));
+        assert!(!id.is_empty(), "{method} {path} has an empty endpoint id");
+
+        let guid = operation["x-webx-endpoint-guid"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{method} {path} has no x-webx-endpoint-guid"));
+        assert_eq!(
+            guid.len(),
+            36,
+            "{method} {path}: hyphenated UUID, got {guid}"
+        );
+        assert_eq!(
+            guid.as_bytes()[14],
+            b'5',
+            "{method} {path}: RFC 4122 version 5, got {guid}"
+        );
+        assert_eq!(
+            guid,
+            EndpointGuid::from_request_id(id).to_string().as_str(),
+            "{method} {path}: GUID must derive from the serialized id"
+        );
+    }
+
+    // Pin one full example end to end: `id` → RFC 4122 v5 GUID in the emitted
+    // document, so an accidental derivation change cannot slip through.
+    assert_eq!(
+        spec["paths"]["/api/search"]["get"]["x-webx-endpoint-guid"],
+        "5af35249-0454-5ae5-a636-4b9ba93715c0"
+    );
+    assert_eq!(
+        spec["paths"]["/api/search"]["get"]["x-webx-endpoint-id"],
+        "SearchRequest"
+    );
+}
+
+#[test]
+fn spec_identity_matches_the_endpoint_catalog() {
+    let catalog = webx_core::route::catalog::EndpointCatalog::try_from_inventory()
+        .expect("test route table has unique endpoint ids");
+    let spec = generate_openapi_spec("Test API", "1.0.0", &localizer("zh-CN"));
+
+    for (path, method, operation) in operations(&spec) {
+        let id = operation["x-webx-endpoint-id"].as_str().unwrap();
+        let descriptor = catalog
+            .get_by_id(id)
+            .unwrap_or_else(|| panic!("{method} {path}: id {id} is not in the catalog"));
+        assert_eq!(descriptor.method.to_lowercase(), method);
+        assert_eq!(descriptor.path, path.as_str());
+        assert_eq!(
+            operation["x-webx-endpoint-guid"],
+            serde_json::json!(descriptor.guid.to_string()),
+            "{method} {path}: spec GUID must match the catalog"
+        );
+    }
+}
+
+#[test]
+fn operation_id_stays_the_human_facing_request_name() {
+    let spec = generate_openapi_spec("Test API", "1.0.0", &localizer("zh-CN"));
+
+    // `RouteEntry::new` leaves `request_id` at its `handler_type` default.
+    let search = &spec["paths"]["/api/search"]["get"];
+    assert_eq!(search["operationId"], "search");
+    assert_eq!(search["x-webx-endpoint-id"], "SearchRequest");
+
+    // A route keeps the camelCase request-type name as `operationId`; the
+    // extension carries the identity the catalog (`request_id`) uses instead.
+    let create = &spec["paths"]["/api/blog"]["post"];
+    assert_eq!(create["operationId"], "createBlog");
+    assert_eq!(create["x-webx-endpoint-id"], "CreateBlogRequest");
 }

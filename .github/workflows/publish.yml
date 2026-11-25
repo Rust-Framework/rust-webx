@@ -27,6 +27,11 @@ jobs:
       # A red commit must never reach crates.io: publication is irreversible
       # (only yank is possible). The preflight mirrors the CI `lint`/`docs`
       # gates in addition to the full workspace test.
+      #
+      # Crates are published from the root workspace only. The `rust-ef`
+      # reference adapters under `examples/adapters/` are an unpublished
+      # workspace (`publish = false` on every member): they pin the same version
+      # for a shared local build, but nothing there is packaged or published.
       - name: Check formatting
         run: cargo fmt --all --check
 
@@ -40,14 +45,34 @@ jobs:
         run: python3 scripts/check-publish-order.py
 
       - name: Internal version pins
+        # The root workspace is released in lockstep. A skew, or a missing exact
+        # pin, would let a consumer resolve a mixed set (e.g. umbrella 2.9.1 +
+        # host 2.9.2) that was never built or tested.
+        #
+        # The unpublished `examples/adapters/` workspace is deliberately not
+        # gated: it is not published, so its pins cannot reach crates.io.
         run: |
+          set -euo pipefail
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
-          echo "workspace version: $version"
-          if grep 'path = "crates/' Cargo.toml | grep -qv "version = \"=$version\""; then
-            echo "internal crates must be pinned to =$version:"
-            grep 'path = "crates/' Cargo.toml | grep -v "version = \"=$version\"" || true
+          echo "root workspace version: ${version}"
+          if [ -z "${version}" ]; then
+            echo "::error::cannot read [workspace.package] version from Cargo.toml"
             exit 1
           fi
+          # Every internal `rust-webx*` path dependency must carry the exact
+          # release pin. Anchoring on the `rust-webx` name prefix keeps external
+          # requirements (`rust-dix`, `rust-core`, `rust-ef`) out of the gate.
+          check_pins() {
+            awk -v want="version = \"=$version\"" '
+              /^rust-webx[a-z0-9-]* = \{/ && /path = / && index($0, want) == 0 { print FILENAME ": " $0; bad = 1 }
+              END { if (bad) exit 1 }
+            ' "$1"
+          }
+          if ! check_pins Cargo.toml; then
+            echo "::error::Cargo.toml has a rust-webx path dependency without version = \"=$version\""
+            exit 1
+          fi
+          echo "internal crates are pinned to =$version"
 
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
@@ -78,15 +103,23 @@ jobs:
           . scripts/crates-index.sh
 
           # Publish order: dependencies must appear before their dependents.
-          CRATES="rust-webx-macros rust-webx-core rust-webx-engine rust-webx-client rust-webx-ef rust-webx-ai rust-webx-ai-ef rust-webx-build rust-webx-spa rust-webx-openapi rust-webx-host rust-webx-auth-ef rust-webx-mfa rust-webx-webauthn rust-webx rust-webx-outbox-ef rust-webx-oauth2 rust-webx-oidc rust-webx-redis rust-webx-nats rust-webx-rabbitmq rust-webx-kafka rust-webx-ai-gateway rust-webx-pay rust-webx-pay-stripe rust-webx-pay-alipay rust-webx-pay-wechatpay rust-webx-pay-paypal rust-webx-pay-adyen rust-webx-pay-square rust-webx-pay-ef rust-webx-h3"
-          metadata="$(cargo metadata --no-deps --format-version 1)"
+          CRATES="rust-webx-macros rust-webx-core rust-webx-engine rust-webx-client rust-webx-ai rust-webx-build rust-webx-spa rust-webx-openapi rust-webx-host rust-webx-outbox rust-webx-mfa rust-webx-webauthn rust-webx rust-webx-oauth2 rust-webx-oidc rust-webx-redis rust-webx-nats rust-webx-rabbitmq rust-webx-kafka rust-webx-ai-gateway rust-webx-pay rust-webx-pay-stripe rust-webx-pay-alipay rust-webx-pay-wechatpay rust-webx-pay-paypal rust-webx-pay-adyen rust-webx-pay-square rust-webx-h3"
 
-          # The tag must match every crate version. Skipping mismatches would
-          # leave the workflow green with nothing published (e.g. a mistyped
-          # tag), hiding a failed release behind a green run.
+          # `--no-deps` reports only the root workspace members and does not
+          # resolve the registry. The unpublished `examples/adapters/` workspace
+          # is not a publish source and is never queried here.
+          root_metadata="$(cargo metadata --no-deps --format-version 1 --manifest-path Cargo.toml)"
+
+          # The tag must match every published crate version. Skipping
+          # mismatches would leave the workflow green with nothing published
+          # (e.g. a mistyped tag), hiding a failed release behind a green run.
           for name in $CRATES; do
-            version="$(printf '%s' "$metadata" \
+            version="$(printf '%s\n' "$root_metadata" \
               | jq -r --arg n "$name" '.packages[] | select(.name==$n) | .version')"
+            if [ -z "$version" ] || [ "$version" = "null" ]; then
+              echo "::error::$name is not a member of the root workspace"
+              exit 1
+            fi
             if [ "$version" != "${TAG_VERSION}" ]; then
               echo "::error::$name has version ${version}, but the tag is v${TAG_VERSION}"
               exit 1
@@ -99,7 +132,7 @@ jobs:
             # Re-running the workflow for an existing version is a no-op, not a
             # failure: a partial publish can be resumed by re-running the job.
             if index_has "$name" "$version"; then
-              echo "::notice::$name $version is already published — skipping"
+              echo "::notice::$name $version is already published - skipping"
               continue
             fi
 

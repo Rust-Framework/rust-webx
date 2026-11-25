@@ -10,6 +10,11 @@ members = [
     "crates/spa",
     "crates/build",
     "crates/openapi",
+    # Transactional-outbox contract + dispatcher + in-memory store. The durable
+    # store and the producer-side enqueue helper live in the unpublished
+    # reference adapter (`examples/adapters/outbox/ef`), so this crate never
+    # links an ORM.
+    "crates/outbox",
     # Bounded domain groups: new adapters go under the existing group instead
     # of adding another top-level `crates/<vendor>` entry. Enforced by
     # scripts/check-crate-layout.sh.
@@ -42,7 +47,6 @@ members = [
     "testing/alloc-probe",
     "testing/contract-tests",
     "testing/load-probe",
-    "imbit",
 ]
 
 [workspace.lints.rust]
@@ -56,13 +60,13 @@ unsafe_code = "forbid"
 # 1. Config sections (`ServerSection`, `JwtSection`, `IdempotencySection`, …) are
 #    serde-bound DTOs: the documented construction path is `Default` +
 #    appsettings/`APP__` overrides, so adding a knob is additive for that usage.
-#    They become `#[non_exhaustive]` in the 3.0 breaking window, after which
+#    They become `#[non_exhaustive]` in the next breaking release window, after which
 #    this part of the exception can be removed.
 # 2. 2.8.0: `IdempotentResponse` gains `headers` (the replayable response headers
 #    of a cached response), which breaks struct-literal construction only.
 #    CHANGELOG `[2.8.0]` -> Breaking documents the migration for custom
 #    `IIdempotencyStore` implementations; the response-store path is the only
-#    documented constructor. Revisit with the same 3.0 window.
+#    documented constructor. Revisit with the same next-breaking-release window.
 # 3. 2.9.1: `EmailMessage` gains optional `from` / `reply_to` / `headers`
 #    (upstream feedback §7). The documented construction path is `new(..)` plus
 #    the `with_*` builders; only struct-literal construction breaks. CHANGELOG
@@ -72,7 +76,7 @@ unsafe_code = "forbid"
 # (`IdempotentResponse`, `IdempotencyLease`, `IdempotencyBegin`) so new state /
 # metadata can be added without another breaking release. That is flagged by
 # `struct_marked_non_exhaustive` / `enum_marked_non_exhaustive`; both are allowed
-# here for the same documented reason and reviewed with the 3.0 window. The
+# here for the same documented reason and reviewed with the next breaking release. The
 # migration is mechanical: construct `IdempotentResponse` with `::new(..)` +
 # `.with_headers(..)`, `IdempotencyLease` with `::new(..)`, and add a wildcard
 # arm to `match` on `IdempotencyBegin`.
@@ -85,7 +89,7 @@ struct_marked_non_exhaustive = "allow"
 enum_marked_non_exhaustive = "allow"
 
 [workspace.package]
-version = "3.0.0"
+version = "2.9.1"
 edition = "2021"
 rust-version = "1.95"
 license = "MIT"
@@ -95,56 +99,50 @@ repository = "https://github.com/Rust-Framework/rust-webx"
 documentation = "https://docs.rs/rust-webx"
 description = "rust-webx - A Rust WebApi framework inspired by ASP.NET Core, built on DI + Mediator pattern"
 
-[patch.crates-io]
-# 3.0 workspace: unify the registry 1.0 dependency pulled by the ef starters
-# with the local rust-dix 1.1 (From<RdiError>); remove once 1.1 is published.
-rust-dix = { path = "../rust-dix/crates/dix" }
-
 [workspace.dependencies]
 # Internal crates
-rust-webx-core = { version = "=3.0.0", path = "crates/core" }
-rust-webx-host = { version = "=3.0.0", path = "crates/host" }
-rust-webx-engine = { version = "=3.0.0", path = "crates/engine" }
-rust-webx-macros = { version = "=3.0.0", path = "crates/macros" }
-rust-webx = { version = "=3.0.0", path = "crates/webx" }
-rust-webx-spa = { version = "=3.0.0", path = "crates/spa" }
-rust-webx-build = { version = "=3.0.0", path = "crates/build" }
-rust-webx-openapi = { version = "=3.0.0", path = "crates/openapi" }
-rust-webx-ai = { version = "=3.0.0", path = "crates/ai/core" }
-rust-webx-oidc = { version = "=3.0.0", path = "crates/auth/oidc" }
-rust-webx-oauth2 = { version = "=3.0.0", path = "crates/auth/oauth2" }
-rust-webx-mfa = { version = "=3.0.0", path = "crates/auth/mfa" }
-rust-webx-webauthn = { version = "=3.0.0", path = "crates/auth/webauthn" }
-rust-webx-client = { version = "=3.0.0", path = "crates/client" }
-rust-webx-redis = { version = "=3.0.0", path = "crates/cache/redis" }
-rust-webx-nats = { version = "=3.0.0", path = "crates/queue/nats" }
-rust-webx-rabbitmq = { version = "=3.0.0", path = "crates/queue/rabbitmq" }
-rust-webx-kafka = { version = "=3.0.0", path = "crates/queue/kafka" }
-rust-webx-ai-gateway = { version = "=3.0.0", path = "crates/ai/gateway" }
+rust-webx-core = { version = "=2.9.1", path = "crates/core" }
+rust-webx-host = { version = "=2.9.1", path = "crates/host" }
+rust-webx-engine = { version = "=2.9.1", path = "crates/engine" }
+rust-webx-macros = { version = "=2.9.1", path = "crates/macros" }
+rust-webx = { version = "=2.9.1", path = "crates/webx" }
+rust-webx-spa = { version = "=2.9.1", path = "crates/spa" }
+rust-webx-build = { version = "=2.9.1", path = "crates/build" }
+rust-webx-openapi = { version = "=2.9.1", path = "crates/openapi" }
+rust-webx-outbox = { version = "=2.9.1", path = "crates/outbox" }
+rust-webx-ai = { version = "=2.9.1", path = "crates/ai/core" }
+rust-webx-oidc = { version = "=2.9.1", path = "crates/auth/oidc" }
+rust-webx-oauth2 = { version = "=2.9.1", path = "crates/auth/oauth2" }
+rust-webx-mfa = { version = "=2.9.1", path = "crates/auth/mfa" }
+rust-webx-webauthn = { version = "=2.9.1", path = "crates/auth/webauthn" }
+rust-webx-client = { version = "=2.9.1", path = "crates/client" }
+rust-webx-redis = { version = "=2.9.1", path = "crates/cache/redis" }
+rust-webx-nats = { version = "=2.9.1", path = "crates/queue/nats" }
+rust-webx-rabbitmq = { version = "=2.9.1", path = "crates/queue/rabbitmq" }
+rust-webx-kafka = { version = "=2.9.1", path = "crates/queue/kafka" }
+rust-webx-ai-gateway = { version = "=2.9.1", path = "crates/ai/gateway" }
 # Payment domain group (opt-in; the umbrella never links these).
-rust-webx-pay = { version = "=3.0.0", path = "crates/payment/core" }
-rust-webx-pay-stripe = { version = "=3.0.0", path = "crates/payment/stripe" }
-rust-webx-pay-alipay = { version = "=3.0.0", path = "crates/payment/alipay" }
-rust-webx-pay-wechatpay = { version = "=3.0.0", path = "crates/payment/wechatpay" }
-rust-webx-pay-paypal = { version = "=3.0.0", path = "crates/payment/paypal" }
-rust-webx-pay-adyen = { version = "=3.0.0", path = "crates/payment/adyen" }
-rust-webx-pay-square = { version = "=3.0.0", path = "crates/payment/square" }
+rust-webx-pay = { version = "=2.9.1", path = "crates/payment/core" }
+rust-webx-pay-stripe = { version = "=2.9.1", path = "crates/payment/stripe" }
+rust-webx-pay-alipay = { version = "=2.9.1", path = "crates/payment/alipay" }
+rust-webx-pay-wechatpay = { version = "=2.9.1", path = "crates/payment/wechatpay" }
+rust-webx-pay-paypal = { version = "=2.9.1", path = "crates/payment/paypal" }
+rust-webx-pay-adyen = { version = "=2.9.1", path = "crates/payment/adyen" }
+rust-webx-pay-square = { version = "=2.9.1", path = "crates/payment/square" }
 
 # ORM boundary (opt-in; core/umbrella never link rust-ef).
 # Transactional outbox starter (opt-in; own crate group).
 # Optional non-hyper listener backends (opt-in; core/umbrella never link quinn/h3).
-rust-webx-h3 = { version = "=3.0.0", path = "crates/transport/h3" }
+rust-webx-h3 = { version = "=2.9.1", path = "crates/transport/h3" }
 
 
 
 # DI framework (crates.io — no local path required)
-# Local sibling checkout for the 3.0 workspace (rust-dix 1.1 adds
-# From<RdiError> for AppError); published builds use the 1.0..2.0 range.
-rust-dix = { version = "1.0", path = "../rust-dix/crates/dix" }
+# rust-dix 1.1 adds `From<RdiError> for AppError`; the 1.0 range admits it.
+rust-dix = "1.0"
 # Shared contract layer (error carrier, pagination/cursor/OperationResult).
-# 3.0 re-exports these types; 2.9.x keeps its own historical definitions.
-# Publish rust-core first; the path serves the sibling RF checkout.
-rust-core = { version = "0.1", path = "../rust-dix/crates/core" }
+# 2.9.1 re-exports these types; the 2.9.x definitions were deleted.
+rust-core = "0.1"
 rust-dix-macros = "1.0"
 
 # rust-ef ORM (rust-ef 2.6+, paired/verified with rust-ef 2.9.0 in this release;
@@ -156,7 +154,7 @@ rust-dix-macros = "1.0"
 # applications map EFError at their boundary (reference apps: handlers/src/db.rs).
 rust-ef = "2.6"
 rust-ef-sqlite = "2.6"
-# Optional providers for rust-webx-ef's env-driven real-database idempotency
+# Optional providers for rust-webx-idempotency-ef's env-driven real-database idempotency
 # tests (`--features postgres,mysql`); never pulled into a default build.
 rust-ef-postgres = "2.6"
 rust-ef-mysql = "2.6"

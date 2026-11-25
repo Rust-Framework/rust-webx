@@ -861,7 +861,7 @@ pub trait WechatPayHostBuilderExt: Sized {
     /// Register the adapter with runtime configuration.
     ///
     /// Binds the `"WeChatPay"` configuration section through
-    /// `add_options_monitor`, so appsettings/file reloads are picked up by the
+    /// `add_options`, so appsettings/file reloads are picked up by the
     /// runtime cache (default 60s) or immediately after `Payments::invalidate`.
     fn add_wechat_pay(self) -> Self;
 
@@ -871,7 +871,7 @@ pub trait WechatPayHostBuilderExt: Sized {
 
 impl WechatPayHostBuilderExt for HostBuilder {
     fn add_wechat_pay(self) -> Self {
-        self.add_options_monitor::<WechatPayOptions>("WeChatPay")
+        self.add_options::<WechatPayOptions>("WeChatPay")
             .register(|services| {
                 services
                     .add_payment_provider_factory_lazy(|resolver| {

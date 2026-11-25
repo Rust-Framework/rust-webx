@@ -37,7 +37,7 @@ Rust 在系统编程领域已经证明了自身的价值，但在 Web 后端开�
 - 代码示例默认使用 `use webx::*;` 统一导入
 - `✅` 表示推荐做法，`❌` 表示常见错误
 - 路径参数写作 `{id}`，与路由宏一致
-- 示例项目 `docbit` 贯穿全书，可通过 `cargo run -p docbit-host` 本地体验
+- 示例项目 `docbit`（`examples/docbit/`）贯穿全书，可通过 `cargo run --manifest-path examples/docbit/Cargo.toml -p docbit-host` 本地体验
 
 ## 致谢
 

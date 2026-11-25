@@ -2,9 +2,10 @@
 # -----------------------------------------------------------------------------
 # Cross-repo pairing gate: rust-webx x local rust-ef checkout.
 #
-# Why: rust-ef is released first (2.9.0) and rust-webx 2.9.0 consumes it from
-# crates.io. This script proves that the webx workspace and the rust-webx-ef
-# adapter compile -- and that the adapter's SQLite tests pass -- against a *local*
+# Why: rust-ef is released first (2.9.1) and rust-webx 2.9.1 consumes it from
+# crates.io. This script proves that the webx workspace and the
+# rust-webx-idempotency-ef adapter compile -- and that the adapter's SQLite tests
+# pass -- against a *local*
 # rust-ef tree before that tree is published. It is intentionally not a
 # substitute for CI: it does not check rust-ef's semver gate or the published
 # crates.io artifacts, and it does not run Postgres/MySQL (see the real-database
@@ -18,8 +19,10 @@
 #   1. resolves the `rust-ef` / `rust-ef-sqlite` manifests from the checkout;
 #   2. writes a throwaway `[patch.crates-io]` config outside the repository and
 #      reconciles Cargo.lock so the local tree is actually used;
-#   3. runs `cargo check --workspace --locked` and
-#      `cargo test -p rust-webx-ef --locked`;
+#   3. runs `cargo check --workspace --locked` on the root workspace and
+#      `cargo test --manifest-path examples/adapters/Cargo.toml -p rust-webx-idempotency-ef`
+#      on the reference-adapter workspace (`rust-webx-idempotency-ef` lives
+#      there; the adapters are unpublished);
 #   4. always restores the original Cargo.lock on exit (trap), leaving the
 #      working tree byte-identical.
 #
@@ -68,6 +71,7 @@ done
 
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/rust-webx-pairing.XXXXXX")" || die "cannot create a temporary directory"
 LOCK_BACKUP=""
+ADAPTERS_LOCK_BACKUP=""
 cleanup() {
     if [ -n "$LOCK_BACKUP" ] && [ -f "$LOCK_BACKUP" ]; then
         cp "$LOCK_BACKUP" Cargo.lock
@@ -77,6 +81,10 @@ cleanup() {
         # reconciliation behind.
         rm -f Cargo.lock
     fi
+    if [ -n "$ADAPTERS_LOCK_BACKUP" ] && [ -f "$ADAPTERS_LOCK_BACKUP" ]; then
+        cp "$ADAPTERS_LOCK_BACKUP" examples/adapters/Cargo.lock
+        echo "check-pairing-rust-ef: restored the original examples/adapters/Cargo.lock"
+    fi
     rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
@@ -85,6 +93,12 @@ trap 'exit 130' INT TERM
 if [ -f Cargo.lock ]; then
     cp Cargo.lock "$TMP_DIR/Cargo.lock.original"
     LOCK_BACKUP="$TMP_DIR/Cargo.lock.original"
+fi
+# The reference adapters live in their own workspace (`examples/adapters/`), so
+# its lockfile must be restored too when the local patch re-resolves it.
+if [ -f examples/adapters/Cargo.lock ]; then
+    cp examples/adapters/Cargo.lock "$TMP_DIR/adapters.lock.original"
+    ADAPTERS_LOCK_BACKUP="$TMP_DIR/adapters.lock.original"
 fi
 
 WEBX_VERSION="$(sed -n -E 's/^version = "(.*)"/\1/p' Cargo.toml | head -1 | tr -d '\r')"
@@ -147,7 +161,7 @@ check-pairing-rust-ef: pairing rust-ef $EF_VERSION (local) with rust-webx $WEBX_
   patch config   : $PATCH_CONFIG (temporary; Cargo.lock is restored on exit)
 EOF
 if [ "$EF_VERSION" != "$WEBX_VERSION" ]; then
-    echo "check-pairing-rust-ef: note: version skew (rust-ef $EF_VERSION vs rust-webx $WEBX_VERSION); releases are paired 1:1 (rust-ef 2.9.0 -> rust-webx 2.9.0)."
+    echo "check-pairing-rust-ef: note: version skew (rust-ef $EF_VERSION vs rust-webx $WEBX_VERSION); releases are paired 1:1 (rust-ef 2.9.1 -> rust-webx 2.9.1)."
 fi
 
 # -- 3. Reconcile Cargo.lock, then require the patch to be in the graph ------
@@ -218,10 +232,13 @@ if ! run_locked cargo --config "$PATCH_CONFIG" check --workspace --locked; then
     die "cargo check --workspace --locked failed (see the cargo output above)"
 fi
 
-if ! run_locked cargo --config "$PATCH_CONFIG" tree -p rust-webx-ef --locked --depth 1 \
+# `rust-webx-idempotency-ef` lives in the reference-adapter workspace
+# (`examples/adapters/Cargo.toml`), not in the root one; resolve the patch there.
+if ! run_locked cargo --config "$PATCH_CONFIG" tree \
+    --manifest-path examples/adapters/Cargo.toml -p rust-webx-idempotency-ef --depth 1 \
     > "$TMP_DIR/tree.txt" 2> "$TMP_DIR/tree.err"; then
     cat "$TMP_DIR/tree.err" >&2
-    die "cargo tree failed for rust-webx-ef"
+    die "cargo tree failed for rust-webx-idempotency-ef"
 fi
 if grep -q "was not used in the crate graph" "$TMP_DIR/tree.err"; then
     cat "$TMP_DIR/tree.err" >&2
@@ -229,14 +246,14 @@ if grep -q "was not used in the crate graph" "$TMP_DIR/tree.err"; then
 fi
 if ! grep -Fq "rust-ef v$EF_VERSION (" "$TMP_DIR/tree.txt"; then
     cat "$TMP_DIR/tree.txt" >&2
-    die "rust-webx-ef does not resolve the local rust-ef@$EF_VERSION (patch not applied)"
+    die "rust-webx-idempotency-ef does not resolve the local rust-ef@$EF_VERSION (patch not applied)"
 fi
 
 # -- 4. Adapter tests against the patched ORM -------------------------------
-echo "check-pairing-rust-ef: [3/3] cargo test -p rust-webx-ef --locked"
-if ! run_locked cargo --config "$PATCH_CONFIG" test -p rust-webx-ef --locked; then
-    die "cargo test -p rust-webx-ef --locked failed (see the cargo output above)"
+echo "check-pairing-rust-ef: [3/3] cargo test --manifest-path examples/adapters/Cargo.toml -p rust-webx-idempotency-ef"
+if ! run_locked cargo --config "$PATCH_CONFIG" test --manifest-path examples/adapters/Cargo.toml -p rust-webx-idempotency-ef; then
+    die "cargo test --manifest-path examples/adapters/Cargo.toml -p rust-webx-idempotency-ef failed (see the cargo output above)"
 fi
 
-echo "check-pairing-rust-ef: pairing verified -- rust-webx $WEBX_VERSION compiles against rust-ef $EF_VERSION and rust-webx-ef tests pass."
+echo "check-pairing-rust-ef: pairing verified -- rust-webx $WEBX_VERSION compiles against rust-ef $EF_VERSION and rust-webx-idempotency-ef tests pass."
 echo "check-pairing-rust-ef: evidence boundary: local rust-ef source tree only; crates.io artifacts, rust-ef's semver gate and real Postgres/MySQL are covered by other CI jobs."

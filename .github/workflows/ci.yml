@@ -39,13 +39,18 @@ jobs:
             ~/.cargo/registry/
             ~/.cargo/git/
             target/
+            examples/adapters/target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Run tests
+        # `--locked` keeps the committed lockfile authoritative: a stale
+        # Cargo.lock fails here instead of being rewritten by the runner. The
+        # reference adapters are a separate (unpublished) workspace with their
+        # own lockfile, so they need their own invocation.
         run: |
-            cargo test --workspace --no-fail-fast
-            cargo test --workspace --manifest-path starters/Cargo.toml --no-fail-fast
+            cargo test --workspace --locked --no-fail-fast
+            cargo test --workspace --manifest-path examples/adapters/Cargo.toml --locked --no-fail-fast
 
   lint:
     name: Lint
@@ -65,6 +70,7 @@ jobs:
             ~/.cargo/registry/
             ~/.cargo/git/
             target/
+            examples/adapters/target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
@@ -100,7 +106,7 @@ jobs:
       - name: Run Clippy
         run: |
             cargo clippy --workspace --all-targets -- -D warnings
-            cargo clippy --workspace --manifest-path starters/Cargo.toml --all-targets -- -D warnings
+            cargo clippy --workspace --manifest-path examples/adapters/Cargo.toml --all-targets -- -D warnings
 
       # Internal crates are released in lockstep; exact pins keep a consumer
       # from resolving a mixed set (e.g. umbrella 2.0 + host 2.1).
@@ -138,10 +144,84 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
+        # Prebuilt release binary with checksum verification,
+        # `cargo install cargo-audit --locked` compiles the tool on every run.
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
 
-      - name: Run security audit
+      - name: Audit the root workspace lockfile
         run: cargo audit
+
+      # `examples/adapters/` is an independent (unpublished) workspace with its
+      # own Cargo.lock: the root audit never reads it, yet it resolves the ORM
+      # and database provider crates the framework itself must not depend on.
+      - name: Audit the examples/adapters lockfile
+        run: cargo audit --file examples/adapters/Cargo.lock
+
+  # Supply-chain ratchet for dependency forks. `cargo tree -d` shows every
+  # crate that resolves in more than one version; a new split doubles the audit
+  # surface and the semver contracts a consumer inherits. The current set is
+  # pinned in scripts/dependency-duplicates.baseline.txt: a new group fails the
+  # job, a group that collapses is reported so the baseline can be tightened.
+  # Only manifests are resolved (no compilation).
+  dedup:
+    name: Dependencies (duplicate versions)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/
+            ~/.cargo/git/
+          key: ${{ runner.os }}-cargo-dedup-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-dedup-
+
+      - name: Duplicate crates (informational)
+        # `cargo tree -d` also prints a package once per dependency kind it is
+        # reached through, so its line count is larger than the set of crates
+        # that genuinely resolve in two versions. The gate below uses that set.
+        run: cargo tree --workspace -d --locked
+
+      - name: Enforce the duplicate baseline
+        # Reads `cargo metadata --locked` (same package set as `cargo tree -d`,
+        # but host-independent, so one baseline works on every runner).
+        run: python3 scripts/check-dependency-dedup.py
+
+  # `cargo test --workspace` exercises each crate with its default features; a
+  # combination that only exists when every opt-in feature is enabled would
+  # stay uncompiled (and untested) until a consumer turns it on. This job runs
+  # the full workspace suite on linux with `--all-features`; the `test` matrix
+  # keeps the default-feature run on all three OSes, and the features that need
+  # external services run in `realdb` / `brokers`. That split is the documented
+  # policy in docs/design/compatibility.md §2.
+  features:
+    name: Features (workspace --all-features)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/
+            ~/.cargo/git/
+            target/
+          key: ${{ runner.os }}-cargo-features-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-features-
+
+      - name: Test every target with all features
+        run: cargo test --workspace --all-features --locked --no-fail-fast
 
   coverage:
     name: Coverage
@@ -271,13 +351,43 @@ jobs:
             ~/.cargo/registry/
             ~/.cargo/git/
             target/
+            examples/adapters/target/
           key: ${{ runner.os }}-cargo-realdb-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-realdb-
       - name: Idempotency store against PostgreSQL 16 / MySQL 8
         env:
           RUST_EF_PG_URL: postgres://test:test@127.0.0.1:5432/rust_webx_test
           RUST_EF_MYSQL_URL: mysql://root:test@127.0.0.1:3306/rust_webx_test
-        run: cargo test -p rust-webx-ef --features postgres,mysql --locked --tests -- --ignored
+        run: cargo test --manifest-path examples/adapters/Cargo.toml -p rust-webx-idempotency-ef --features postgres,mysql --locked --tests -- --ignored
+
+  # The adapter integration suites (Redis / NATS / RabbitMQ / Kafka) skip
+  # themselves when their `WEBX_*_URL` is unset, so the default `cargo test`
+  # matrix is green without a broker. A release must prove them against real
+  # brokers: `scripts/test-brokers.sh` starts docker-compose.brokers.yml on the
+  # runner, waits for the ports and runs the four adapter suites. The nightly
+  # copy in `.github/workflows/stability.yml` stays as the longer soak.
+  brokers:
+    name: Broker adapters (redis/nats/rabbitmq/kafka)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/
+            ~/.cargo/git/
+            target/
+          key: ${{ runner.os }}-cargo-brokers-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-brokers-
+
+      - name: Adapter integration against real brokers
+        run: bash scripts/test-brokers.sh
 
   # N-2 source-compatibility gate: the same smoke app is compiled against the
   # previous-but-one published release (for 2.9.0 that is rust-webx 2.7.0) and
@@ -332,7 +442,7 @@ jobs:
           test -f docs/rust-webx/INDEX.json || (echo "Missing docs/rust-webx/INDEX.json" && exit 1)
 
       - name: Build docbit-host
-        run: cargo build --manifest-path starters/Cargo.toml -p docbit-host
+        run: cargo build --manifest-path examples/docbit/Cargo.toml -p docbit-host
 
       # 2.2-7: reference apps must use the framework security ports, not
       # hand-rolled JWT/bcrypt (the EF `map_ef` adapter is allowed: rust-ef
@@ -341,10 +451,40 @@ jobs:
       - name: Reference apps use native auth ports
         run: |
           if grep -rnE '^\s*(use (jsonwebtoken|bcrypt)|jsonwebtoken\s*=|bcrypt\s*=)' \
-              starters/docbit starters/dmbit --include='*.rs' --include='Cargo.toml'; then
+              examples/docbit examples/dmbit --include='*.rs' --include='Cargo.toml'; then
             echo "reference apps must use ITokenIssuer/IPasswordHasher, not hand-written JWT/bcrypt"
             exit 1
           fi
+
+  # Every reference app under examples/ is its own cargo workspace, so the root
+  # `cargo test --workspace` and `examples/adapters/Cargo.toml` jobs never
+  # compile them. Test each app workspace on its own so a broken sample fails
+  # here. (`examples/adapters/` itself is covered by test/lint/realdb.)
+  examples:
+    name: Examples (${{ matrix.app }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [docbit, dmbit, imbit]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/
+            ~/.cargo/git/
+            examples/${{ matrix.app }}/target/
+          key: ${{ runner.os }}-cargo-examples-${{ matrix.app }}-${{ hashFiles('examples/**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-examples-${{ matrix.app }}-
+
+      - name: Test ${{ matrix.app }} workspace
+        run: cargo test --workspace --no-fail-fast --manifest-path examples/${{ matrix.app }}/Cargo.toml
 
   # Optional cross-repo pairing gate (release order: rust-ef 2.9.0 first, then
   # rust-webx 2.9.0). Hosted runners cannot see a developer's local checkout, so
@@ -391,6 +531,6 @@ jobs:
             echo "RUST_EF_PATH=$GITHUB_WORKSPACE/.pairing/rust-ef" >> "$GITHUB_ENV"
           fi
 
-      - name: Verify pairing (check --locked + rust-webx-ef tests)
+      - name: Verify pairing (check --locked + rust-webx-idempotency-ef tests)
         if: vars.RUST_EF_PATH != '' || vars.RUST_EF_REPO != '' || github.event.inputs.rust_ef_ref != ''
         run: bash scripts/check-pairing-rust-ef.sh

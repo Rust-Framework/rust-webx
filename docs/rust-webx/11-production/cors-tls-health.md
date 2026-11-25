@@ -37,7 +37,7 @@ WebSocket 握手也受同一份白名单约束：未显式调用 use_websocket_o
 rustls 的会话密钥写入该文件，供 Wireshark/`tcpdump` 解密：
 
 ```text
-APP_ENV=Development SSLKEYLOGFILE=/tmp/webx-keys.log cargo run -p docbit-host
+APP_ENV=Development SSLKEYLOGFILE=/tmp/webx-keys.log cargo run --manifest-path examples/docbit/Cargo.toml -p docbit-host
 ```
 
 - **Production 忽略该变量**（即使设置也只打一次 warning）：密钥日志是调试设施，生产开启等于
@@ -61,25 +61,27 @@ APP_ENV=Development SSLKEYLOGFILE=/tmp/webx-keys.log cargo run -p docbit-host
 可注册自定义检查：
 
 ```rust
+use webx::{HealthCheckSpec, HealthStatus};
+
 Host::builder()
-    .add_health_check("database", || {
+    .add_health_check(HealthCheckSpec::sync("database", || {
         if db_ping() {
             HealthStatus::pass()
         } else {
             HealthStatus::fail("db unreachable")
         }
-    })
+    }))
     .build();
 ```
 
 适用于 Kubernetes liveness/readiness 探针。
 
-### 异步依赖探测（1.4.0）
+### 异步依赖探测
 
 同步闭包跑在请求任务上且无法超时；数据库/HTTP/队列探测应实现 `IHealthCheck`：
 
 ```rust
-use webx::health::{IHealthCheck, HealthStatus, DEFAULT_HEALTH_CHECK_TIMEOUT};
+use webx::{HealthCheckSpec, IHealthCheck, HealthStatus, DEFAULT_HEALTH_CHECK_TIMEOUT};
 
 struct DatabaseProbe { pool: Arc<Pool> }
 
@@ -95,9 +97,11 @@ impl IHealthCheck for DatabaseProbe {
 }
 
 Host::builder()
-    .add_health_check_async(DatabaseProbe { pool })
+    .add_health_check(HealthCheckSpec::async_check(DatabaseProbe { pool }))
     // 或显式超时：
-    // .add_health_check_async_with_timeout(slow_probe, Duration::from_secs(1))
+    // .add_health_check(
+    //     HealthCheckSpec::async_check(slow_probe).timeout(Duration::from_secs(1)),
+    // )
     .build();
 ```
 

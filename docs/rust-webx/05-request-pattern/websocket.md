@@ -51,7 +51,7 @@ WebSocket 会话；优雅停机时引擎按排空预算等待会话结束。
 ## 消息抽象
 
 `IConnection::recv` 返回 `RealtimeMessage::{Text, Binary, Close}`，ping/pong 由帧层自动
-处理、不暴露给业务。`send_*` 在发送失败时返回 `Error::Internal`；背压与连接级限流
+处理、不暴露给业务。`send_*` 在发送失败时返回 `Error::internal`；背压与连接级限流
 （有界发送队列、msg/s、帧上限）属于 `WebSocketLimits`，业务侧应把发送视为可能等待的异步操作。
 
 ## 连接作用域
@@ -71,7 +71,7 @@ impl IWebSocketHandler for PresenceHandler {
             .expect("registered as scoped");
         let trace = connection.context().trace_id(); // 升级请求的 trace id
         let Some(user) = connection.context().identity() else {
-            return Err(Error::Unauthorized("login required".into()));
+            return Err(Error::unauthorized("login required"));
         };
         let _ = (state, trace, user);
         Ok(())
@@ -201,7 +201,7 @@ impl IWebSocketHandler for PresenceHandler {
 |---|---|---|---|
 | JSON 语法/EOF 错误 | `invalid_message` | 无 | `not-json` |
 | 字段类型/缺失等数据错误 | `validation_failed` | 类型错误时给出路径（`text`、`items[2].id`） | `{"text":123}` |
-| 业务错误（`Error::Validation` 等） | 同 HTTP `Error::code()` | 无 | Handler 返回 `Err` |
+| 业务错误（`Error::validation` 等） | 同 HTTP `Error::code()` | 无 | Handler 返回 `Err` |
 
 缺失字段（serde 在 struct 根报错）没有路径段，`message` 中会写明
 `missing field \`text\``；这两类错误都不会关闭连接。

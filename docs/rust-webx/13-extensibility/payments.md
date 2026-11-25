@@ -18,7 +18,7 @@
 | `rust-webx-pay-paypal` | `webx_pay_paypal` | Orders v2、OAuth2 令牌缓存、capture/void/refund、验签 API |
 | `rust-webx-pay-adyen` | `webx_pay_adyen` | Checkout `/payments`、capture/cancel/refund、HMAC 回调 |
 | `rust-webx-pay-square` | `webx_pay_square` | Payments/Refunds、Payment Links、HMAC 回调 |
-| `rust-webx-pay-ef` | `webx_pay_ef` | 基于 rust-ef 的回调 inbox（唯一去重、重试、死信） |
+| `rust-webx-pay-ef` | `webx_pay_ef` | 回调 inbox 的**参考适配器**：基于 rust-ef 的唯一去重、重试、死信。位于 `examples/adapters/payment/ef`，`publish = false`，复制进业务仓使用（不随框架发布） |
 
 ## 2. 快速开始（运行时配置）
 
@@ -337,16 +337,17 @@ Host::builder()
 | 回调去重 | 每个事件有稳定 `dedupe_key`；用唯一索引落库，缓存只能做快路径 |
 | 乱序 | 只允许状态单调推进；退款事件先到不会把订单回退 |
 | 查证 | 状态不确定时用 `payments.get(scope, order_id)` 拉权威状态 |
-| 持久化 | 生产环境用 `rust-webx-pay-ef` 的 inbox：先落库再 ACK，后台 worker 调业务处理器，失败退避/死信 |
+| 持久化 | 生产环境把 `examples/adapters/payment/ef` 的 inbox 复制进业务仓：先落库再 ACK，后台 worker 调业务处理器，失败退避/死信 |
 | 对账 | 用框架 `PeriodicBackgroundService` 对超时未终态订单调用 `get`，不要自己 spawn 轮询线程 |
 
 没有 inbox 时，回调 Handler 应在**同一事务**内完成验签后的订单状态写入；不要先 ACK 再异步做事。
 
-### 8.1 持久化 inbox（生产推荐）
+### 8.1 持久化 inbox（生产推荐，参考适配器）
 
-`rust-webx-pay-ef` 提供「先落库、再 ACK、后台处理」的通用 inbox：
+`examples/adapters/payment/ef` 提供「先落库、再 ACK、后台处理」的通用 inbox 参考实现
+（`publish = false`：复制进业务仓，改成自己的包名与实体）：
 唯一 `(provider, dedupe_key)`、租约领取、指数退避、死信；表结构由 rust-ef 官方迁移生成，
-运行期不建表。
+运行期不建表。下面代码里的 `webx_pay_ef` 是参考实现的导入名，复制后换成你自己的。
 
 ```rust
 use std::sync::Arc;
@@ -445,7 +446,7 @@ Ok(self.payments.ack(&req).await?)
 - `rust-webx-client` 的 `MockUpstream` 可回放供应商响应，不触网即可测请求签名与错误映射。
 - 真实环境：Stripe 测试模式、支付宝沙箱、PayPal sandbox、Adyen test、Square sandbox；
   微信支付 v3 没有公开沙箱（以官方说明为准），用官方验收用例 + 回放覆盖。
-- 回调幂等/乱序/重试用 inbox 的测试（`cargo test -p rust-webx-pay-ef`）覆盖。
+- 回调幂等/乱序/重试用 inbox 的测试覆盖（`cargo test --manifest-path examples/adapters/Cargo.toml`）。
 - 运行时缓存/单飞/失效/租户隔离的测试在 `rust-webx-pay` 的 `payments` 模块内。
 
 ## 13. 与第三方 SDK / 旧代码共存
@@ -492,7 +493,7 @@ Ok(self.payments.ack(&req).await?)
    默认工厂是部署级，多租户必须用自定义 `IPaymentServiceFactory` 并覆写
    `payment_options(tenant, currency)`；目录响应中不得含密钥。
 4. **回调**：`payment_webhook!` 声明路由；签名失败 400、配置源不可用 503、未知 provider 404；
-   生产建议“验签 → 落 `rust-webx-pay-ef` inbox → ACK”，业务 worker 再处理。
+   生产建议“验签 → 落 inbox（复制自 `examples/adapters/payment/ef`）→ ACK”，业务 worker 再处理。
 5. **身份与作用域**：`PaymentScope` 的 tenant 只来自 `IdentityUser`/`#[fromclaim]`；account 只来自
    业务或回调路径；不要信任 body/query 的 tenant/account。
 6. **运行时变更**：自定义工厂更新 DB 后调用 `payments.invalidate(scope)`；跨实例用短 TTL

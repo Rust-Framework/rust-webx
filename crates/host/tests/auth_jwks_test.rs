@@ -46,12 +46,11 @@ fn es256_token(private_pem: &str, kid: &str) -> String {
 }
 
 fn validation() -> JwtValidation {
+    let mut jwks = JwtJwksSection::default();
+    jwks.url = "https://id.example.com/.well-known/jwks.json".to_string();
     JwtValidation::builder()
         .algorithms([JwtAlgorithm::Es256])
-        .jwks(Some(JwtJwksSection {
-            url: "https://id.example.com/.well-known/jwks.json".to_string(),
-            ..JwtJwksSection::default()
-        }))
+        .jwks(Some(jwks))
         .build()
         .expect("validation")
 }
@@ -211,13 +210,12 @@ fn host_builds_with_jwks_only_and_no_shared_secret() {
         .mode(AppMode::Development)
         .no_spa()
         .configure(|app| {
-            app.useOptions(|options| {
+            app.options(|options| {
                 options.jwt.secret.clear();
                 options.jwt.algorithms = vec![JwtAlgorithm::Rs256];
-                options.jwt.jwks = Some(JwtJwksSection {
-                    url: "https://id.example.com/.well-known/jwks.json".to_string(),
-                    ..JwtJwksSection::default()
-                });
+                let mut jwks = JwtJwksSection::default();
+                jwks.url = "https://id.example.com/.well-known/jwks.json".to_string();
+                options.jwt.jwks = Some(jwks);
             });
         })
         .use_authentication()

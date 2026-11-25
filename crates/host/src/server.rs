@@ -23,8 +23,7 @@ use webx_core::security::{ISessionStore, ITokenIssuer};
 
 use crate::auth::{AuthenticationMiddleware, JwtScheme};
 use crate::auth_cookie::SESSION_COOKIE_SCHEME_NAME;
-#[allow(deprecated)]
-use crate::auth_jwt::{init_jwt_secret, JwtAuth, JwtSecret, JwtTokenIssuer, JwtValidation};
+use crate::auth_jwt::{JwtAuth, JwtSecret, JwtTokenIssuer, JwtValidation};
 use crate::cors::{CorsConfig, CorsMiddleware};
 use crate::csrf::{CsrfConfig, CsrfMiddleware};
 use crate::endpoint::{StaticHtmlEndpoint, StaticJsonEndpoint, StubEndpoint};
@@ -336,21 +335,54 @@ impl HostAppBuilder {
         }
     }
 
-    #[allow(non_snake_case)]
-    pub fn useOptions<F>(&mut self, f: F)
+    /// Set fields on this host's [`AppOptions`] (the app-options slot).
+    ///
+    /// The only way to reach this builder is [`HostBuilder::configure`]:
+    /// `.configure(|app| app.options(|o| ...))`. Closures run in chain order
+    /// when the host is built, so a later write overrides an earlier one.
+    ///
+    /// **Slot:** `configure` — `AppOptions` only; never DI registration.
+    pub fn options<F>(&mut self, f: F)
     where
         F: FnOnce(&mut AppOptions) + Send + 'static,
     {
         self.options_modifiers.push(Box::new(f));
     }
+}
 
-    /// Snake-case alias for [`HostAppBuilder::useOptions`].
-    pub fn use_options<F>(&mut self, f: F)
-    where
-        F: FnOnce(&mut AppOptions) + Send + 'static,
-    {
-        self.useOptions(f);
-    }
+/// Bind `section` once, apply `modify`, and register the three options instances.
+///
+/// This is the single registration path behind [`HostBuilder::add_options`],
+/// [`HostBuilder::add_options_with`] and [`HostBuilder::watch_options_file`].
+/// The monitor is returned so a watcher publishes into the exact instance that
+/// is registered: registering the snapshot and the monitor from two places
+/// would put a second, silently overriding monitor in the container while the
+/// poller updated the first one.
+fn register_options_instances<T, F>(
+    svc: ServiceCollection,
+    mode: AppMode,
+    section: &str,
+    modify: F,
+) -> (
+    ServiceCollection,
+    Arc<webx_core::options_monitor::OptionsMonitor<T>>,
+)
+where
+    T: for<'de> serde::Deserialize<'de> + Default + Send + Sync + 'static,
+    F: FnOnce(&mut T) + Send + 'static,
+{
+    let appsettings = config::load_appsettings(mode).unwrap_or_default();
+    let mut bound: T = config::bind_config(&appsettings, section);
+    modify(&mut bound);
+    let monitor = Arc::new(webx_core::options_monitor::OptionsMonitor::new(bound));
+    let port: Arc<dyn webx_core::options_monitor::IOptionsMonitor<T>> = monitor.clone();
+    let snapshot = monitor.current();
+    (
+        svc.instance(snapshot)
+            .instance(Arc::clone(&monitor))
+            .instance(port),
+        monitor,
+    )
 }
 
 impl HostBuilder {
@@ -421,8 +453,9 @@ impl HostBuilder {
     /// Like [`Self::register`], but the closure also receives the final
     /// [`AppOptions`].
     ///
-    /// `options` is the appsettings / environment / `useOptions` merge **after**
-    /// `Jwt.SecretFile` was resolved into `Jwt.Secret`. A custom
+    /// `options` is the appsettings / environment /
+    /// `configure(|app| app.options(..))` merge **after** `Jwt.SecretFile` was
+    /// resolved into `Jwt.Secret`. A custom
     /// [`ITokenIssuer`] can therefore be
     /// built from exactly the key the host's JWT middleware verifies with — no
     /// second read of the secret file, no empty-key signature in a
@@ -479,6 +512,21 @@ impl HostBuilder {
         self
     }
 
+    /// Configure this host's [`AppOptions`] (the app-options slot).
+    ///
+    /// The closure receives a [`HostAppBuilder`]; its only field-level entry is
+    /// [`HostAppBuilder::options`]:
+    ///
+    /// ```ignore
+    /// Host::builder()
+    ///     .configure(|app| app.options(|o| o.metrics.enabled = false))
+    ///     .build();
+    /// ```
+    ///
+    /// `configure` never touches DI — use [`Self::register`] for the object
+    /// graph. Successive calls run in chain order, so the last write wins.
+    ///
+    /// **Slot:** `configure` — `AppOptions` only.
     pub fn configure<F>(mut self, f: F) -> Self
     where
         F: FnOnce(&mut HostAppBuilder) + Send + 'static,
@@ -509,17 +557,34 @@ impl HostBuilder {
         self
     }
 
-    /// 自动绑定 appsettings 配置节到 `T`，并以 `Arc<T>` 注册到 DI 容器。
+    /// Bind a configuration section once and register all three injection forms.
     ///
-    /// 参考 ASP.NET Core 的 `services.Configure<T>(configuration.GetSection(...))`：
-    /// 框架在 `build()` 时读取已合并的 appsettings（含 `{Mode}` overlay 与 env override），
-    /// 取 `section` 子节点反序列化为 `T`，注册为单例供 handler 通过 `Arc<T>` 注入。
+    /// The section is read from the merged appsettings (base file + `{Mode}`
+    /// overlay + `APP__` environment overrides) when the host is built, bound to
+    /// `T` once, and then registered for every injection style:
+    ///
+    /// * `Arc<T>` — the frozen startup snapshot, for code that never reloads;
+    /// * `Arc<OptionsMonitor<T>>` — the concrete holder; calling
+    ///   [`OptionsMonitor::set`](webx_core::options_monitor::OptionsMonitor::set)
+    ///   or `replace` on it publishes a new snapshot;
+    /// * `Arc<dyn IOptionsMonitor<T>>` — the port, for handlers/services.
+    ///
+    /// All three start from the same bound value. Without a publisher
+    /// ([`HostBuilder::watch_options_file`] or a custom
+    /// `PeriodicBackgroundService`) the snapshot never changes: `Arc<T>` is
+    /// immutable by construction, and the monitor only changes when something
+    /// calls `set` / `replace` on it.
+    ///
+    /// Use [`Self::add_options_with`] when the deployment needs a code-level
+    /// override applied after binding.
     ///
     /// ```ignore
     /// Host::builder()
     ///     .add_options::<SiteConfig>("Site")
     ///     .build()
     /// ```
+    ///
+    /// **Slot:** `add_options*` — one configuration section bound to one `T`.
     pub fn add_options<T>(self, section: &str) -> Self
     where
         T: for<'de> serde::Deserialize<'de> + Default + Send + Sync + 'static,
@@ -527,51 +592,51 @@ impl HostBuilder {
         let mode = self.mode;
         let section = section.to_string();
         self.register(move |svc| {
-            let appsettings = config::load_appsettings(mode).unwrap_or_default();
-            let bound: T = config::bind_config(&appsettings, &section);
             tracing::info!(
                 "[Host] add_options<{}>(\"{}\") registered",
                 std::any::type_name::<T>(),
                 section
             );
-            svc.instance(Arc::new(bound))
+            register_options_instances::<T, _>(svc, mode, &section, |_| {}).0
         })
     }
 
-    /// Bind a configuration section once and expose it through a hot-reloadable
-    /// [`OptionsMonitor`](webx_core::options_monitor::OptionsMonitor).
+    /// Bind `section`, apply a code-level override, and register all three
+    /// injection forms.
     ///
-    /// The monitor is registered twice, for both injection styles:
+    /// Same contract as [`Self::add_options`], plus `f`, which runs on the bound
+    /// value **before** the snapshot, monitor and port are created — so the
+    /// override is visible through every form (`Arc<T>`,
+    /// `Arc<OptionsMonitor<T>>`, `Arc<dyn IOptionsMonitor<T>>`).
     ///
-    /// * `Arc<OptionsMonitor<T>>` — concrete, with
-    ///   [`OptionsMonitor::set`](webx_core::options_monitor::OptionsMonitor::set);
-    /// * `Arc<dyn IOptionsMonitor<T>>` — the port, for handlers/services.
-    ///
-    /// Pair it with [`HostBuilder::watch_options_file`] (or a custom
-    /// `PeriodicBackgroundService`) to publish new snapshots without a restart.
+    /// Use this only for environment differences (a CI endpoint, a local
+    /// toggle) that are awkward to express as `appsettings.json` / `APP__`
+    /// overrides. It is not a way around deployment validation: a weak JWT
+    /// secret or a wildcard CORS origin in [`AppOptions`] is still rejected
+    /// fail-closed at startup.
     ///
     /// ```ignore
     /// Host::builder()
-    ///     .add_options_monitor::<GatewayConfig>("Gateway")
-    ///     .build();
+    ///     .add_options_with::<SiteConfig>("Site", |site| {
+    ///         site.public_url = std::env::var("SITE_URL").unwrap_or_default();
+    ///     })
+    ///     .build()
     /// ```
-    pub fn add_options_monitor<T>(self, section: &str) -> Self
+    ///
+    /// **Slot:** `add_options*` — one configuration section bound to one `T`.
+    pub fn add_options_with<T>(self, section: &str, f: impl FnOnce(&mut T) + Send + 'static) -> Self
     where
         T: for<'de> serde::Deserialize<'de> + Default + Send + Sync + 'static,
     {
         let mode = self.mode;
         let section = section.to_string();
         self.register(move |svc| {
-            let appsettings = config::load_appsettings(mode).unwrap_or_default();
-            let bound: T = config::bind_config(&appsettings, &section);
             tracing::info!(
-                "[Host] add_options_monitor<{}>(\"{}\") registered",
+                "[Host] add_options_with<{}>(\"{}\") registered",
                 std::any::type_name::<T>(),
                 section
             );
-            let monitor = Arc::new(webx_core::options_monitor::OptionsMonitor::new(bound));
-            let port: Arc<dyn webx_core::options_monitor::IOptionsMonitor<T>> = monitor.clone();
-            svc.instance(monitor).instance(port)
+            register_options_instances::<T, _>(svc, mode, &section, f).0
         })
     }
 
@@ -580,7 +645,9 @@ impl HostBuilder {
     /// The file is read on the worker interval; unchanged bytes are ignored and
     /// a malformed file leaves the current snapshot active (see
     /// [`OptionsFileWatcher`](crate::options_watch::OptionsFileWatcher)).
-    /// The monitor is registered like [`HostBuilder::add_options_monitor`].
+    /// Registers the same three instances as [`HostBuilder::add_options`] and
+    /// publishes reloads into that very monitor, so the port and the concrete
+    /// monitor consumers inject always see the same snapshot.
     ///
     /// ```ignore
     /// Host::builder()
@@ -591,6 +658,9 @@ impl HostBuilder {
     ///     )
     ///     .build();
     /// ```
+    ///
+    /// **Slot:** `watch_options_file` — hot reload for an already registered
+    /// options section.
     pub fn watch_options_file<T>(
         self,
         section: &str,
@@ -606,25 +676,22 @@ impl HostBuilder {
         let section = section.to_string();
         let path = path.into();
         self.register(move |svc| {
-            let appsettings = config::load_appsettings(mode).unwrap_or_default();
-            let bound: T = config::bind_config(&appsettings, &section);
             tracing::info!(
                 "[Host] watch_options_file<{}>(\"{}\", {}) registered",
                 std::any::type_name::<T>(),
                 section,
                 path.display()
             );
-            let monitor = Arc::new(webx_core::options_monitor::OptionsMonitor::new(bound));
-            let port: Arc<dyn webx_core::options_monitor::IOptionsMonitor<T>> = monitor.clone();
+            let (svc, monitor) = register_options_instances::<T, _>(svc, mode, &section, |_| {});
             let watcher = crate::options_watch::OptionsFileWatcher::new(
                 Arc::clone(&monitor),
                 section,
                 path,
                 interval,
             );
-            svc.instance(monitor).instance(port).add_background_service(
-                BackgroundServiceSpec::with_factory(move |_| Arc::new(watcher.clone())),
-            )
+            svc.add_background_service(BackgroundServiceSpec::with_factory(move |_| {
+                Arc::new(watcher.clone())
+            }))
         })
     }
 
@@ -786,14 +853,16 @@ impl HostBuilder {
 
     /// Replace the process-local connection registry (tests, shared registry,
     /// adapter-backed presence).
+    ///
+    /// `use_*` means "replace the single port": a later call wins, and this call
+    /// also wins over the process-local default [`Self::use_websocket`] queues
+    /// (`instance` appends; rust-dix resolves the last registration).
     pub fn use_connection_registry(
         mut self,
         registry: Arc<dyn webx_core::realtime::IConnectionRegistry>,
     ) -> Self {
         self.service_configs.push(Box::new(move |svc, _options| {
-            svc.try_add_singleton::<dyn webx_core::realtime::IConnectionRegistry>(move |_| {
-                Arc::clone(&registry)
-            })
+            svc.instance::<dyn webx_core::realtime::IConnectionRegistry>(registry)
         }));
         self
     }
@@ -1162,9 +1231,11 @@ impl HostBuilder {
     ///     .build()
     /// ```
     pub fn use_session_store(mut self, store: Arc<dyn ISessionStore>) -> Self {
+        // `use_*` = replace: the last call wins (`instance` appends; rust-dix
+        // resolves the last registration), unlike the build-time defaults which
+        // use `try_add_*` and only fill in when the application registered none.
         self.service_configs.push(Box::new(move |svc, _options| {
-            let store = Arc::clone(&store);
-            svc.try_add_singleton::<dyn ISessionStore>(move |_| Arc::clone(&store))
+            svc.instance::<dyn ISessionStore>(store)
         }));
         self
     }
@@ -1182,9 +1253,10 @@ impl HostBuilder {
     ///     .build();
     /// ```
     pub fn use_meter(mut self, meter: Arc<dyn IMeter>) -> Self {
+        // `use_*` = replace: the last call wins. The build-time default meter
+        // (metrics enabled) uses `try_add_singleton`, so it never overrides this.
         self.service_configs.push(Box::new(move |svc, _options| {
-            let meter = Arc::clone(&meter);
-            svc.try_add_singleton::<dyn IMeter>(move |_| Arc::clone(&meter))
+            svc.instance::<dyn IMeter>(meter)
         }));
         self
     }
@@ -1208,11 +1280,11 @@ impl HostBuilder {
         mut self,
         hasher: Arc<dyn webx_core::security::IPasswordHasher>,
     ) -> Self {
+        // `use_*` = replace: the last call wins. The build-time default
+        // `Argon2PasswordHasher` uses `try_add_singleton`, so it never overrides
+        // an application hasher regardless of call order.
         self.service_configs.push(Box::new(move |svc, _options| {
-            let hasher = Arc::clone(&hasher);
-            svc.try_add_singleton::<dyn webx_core::security::IPasswordHasher>(move |_| {
-                Arc::clone(&hasher)
-            })
+            svc.instance::<dyn webx_core::security::IPasswordHasher>(hasher)
         }));
         self
     }
@@ -1486,7 +1558,7 @@ impl HostBuilder {
         // configuration violations and return one `Error::di` listing them in a
         // deterministic order instead of stopping at the first `?`. The rules
         // are the existing startup guards (TLS client auth, bounded engine
-        // server, Production secret/CORS/legacy-RateLimit guards, JWT and TURN
+        // server, Production secret/CORS guards, JWT and TURN
         // sections); only the reporting changed.
         let violations = self.config_violations(&options);
         if !violations.is_empty() {
@@ -1525,7 +1597,11 @@ impl HostBuilder {
             StringLocalizer::new(default_culture, &localization)
                 .map_err(|error| Error::di(format!("Invalid localization resources: {error}")))?,
         );
-        let endpoints: Arc<dyn IEndpointCatalog> = Arc::new(EndpointCatalog::from_inventory());
+        // Endpoint identity must be unambiguous before the catalog is exposed
+        // through DI: a duplicate `id` makes the permission key ambiguous, so
+        // this fails startup as `Error::di` instead of building a catalog whose
+        // `(method, path)` entries collide.
+        let endpoints: Arc<dyn IEndpointCatalog> = Arc::new(EndpointCatalog::try_from_inventory()?);
 
         let mut svc = ServiceCollection::from_injected();
         // WEBX-01: expose the resolved signing secret to application service
@@ -1903,27 +1979,6 @@ impl HostBuilder {
             pipeline.add_middleware(Arc::new(CorsMiddleware::new(cors)));
         }
 
-        // WEBX-02: forwarded-header trust is resolved once by the `ClientInfo`
-        // middleware (installed above) and the rate limiter only reads the
-        // resolved value. Warn when the legacy `RateLimit` trust keys are still
-        // configured, pointing at their replacement.
-        let legacy_rate_limit_proxy_config =
-            options.rate_limit.trust_proxy || !options.rate_limit.trusted_proxies.is_empty();
-        if legacy_rate_limit_proxy_config {
-            if let Some(violation) =
-                crate::config_validation::legacy_rate_limit_trust_keys_violation(self.mode)
-            {
-                // Fail closed: silently ignoring the keys would limit every
-                // client by the reverse-proxy address (one global bucket an
-                // attacker can drain). Force the one-line migration instead.
-                return Err(Error::di(violation.message));
-            }
-            tracing::warn!(
-                "RateLimit.TrustProxy / RateLimit.TrustedProxies are ignored (legacy since 2.8.0); \
-                 configure ClientInfo.TrustForwardedHeaders / ClientInfo.TrustedProxies instead"
-            );
-        }
-
         if let Some(limiter) = self.rate_limit_limiter.take() {
             tracing::info!("[Host] RateLimit uses an explicitly registered IRateLimiter");
             pipeline.add_middleware(Arc::new(RateLimitMiddleware::with_limiter(limiter)));
@@ -2017,8 +2072,10 @@ impl HostBuilder {
                 );
                 // WEBX-2: when the application registered an `ISessionStore`,
                 // verified tokens are additionally checked for revocation.
-                // Without one this stays the 1.1 verify-only behaviour.
-                let session_store = provider.get_all::<dyn ISessionStore>().into_iter().next();
+                // Without one this stays the 1.1 verify-only behaviour. The
+                // *last* registration wins, exactly like `get` and the `use_*`
+                // contract (`use_session_store` replaces, never stacks).
+                let session_store = provider.get_all::<dyn ISessionStore>().into_iter().last();
                 match &session_store {
                     Some(_) => tracing::debug!(
                         "[Host] JWT revocation enabled (a dyn ISessionStore is registered)"
@@ -2029,10 +2086,6 @@ impl HostBuilder {
                     ),
                 }
                 auth_schemes.push(Arc::new(JwtScheme::new(jwt_auth, session_store)));
-                if !secret.is_empty() {
-                    #[allow(deprecated)]
-                    init_jwt_secret(&secret);
-                }
             } else {
                 tracing::warn!(
                     "add_authentication() enabled but neither Jwt.Secret nor Jwt.Jwks is configured. Set Jwt.Secret/JWT_SECRET or Jwt.Jwks.Url."
@@ -2043,7 +2096,9 @@ impl HostBuilder {
         if !auth_schemes.is_empty() {
             let mut middleware = AuthenticationMiddleware::new(auth_schemes)
                 .with_route_policies(self.auth_route_policies.clone());
-            if let Some(meter) = provider.get_all::<dyn IMeter>().into_iter().next() {
+            // Like `get`, the last `IMeter` registration is the effective one
+            // (`use_meter` replaces; the default fallback is `try_add_*`).
+            if let Some(meter) = provider.get_all::<dyn IMeter>().into_iter().last() {
                 middleware = middleware.with_metrics(meter.as_ref());
             }
             tracing::info!(
@@ -2485,7 +2540,7 @@ impl HostBuilder {
                 if let Some(registry) = provider
                     .get_all::<dyn webx_core::realtime::IConnectionRegistry>()
                     .into_iter()
-                    .next()
+                    .last()
                 {
                     metrics_endpoint = metrics_endpoint.with_realtime(realtime_metrics, registry);
                 }

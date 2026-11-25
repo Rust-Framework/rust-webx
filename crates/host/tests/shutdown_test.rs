@@ -62,7 +62,7 @@ async fn integration_payload_too_large_returns_413_problem_json() {
         .mode(webx_core::mode::AppMode::Development)
         .no_spa()
         .configure(|app| {
-            app.useOptions(|o| o.app.max_body_size = 64);
+            app.options(|o| o.app.max_body_size = 64);
         })
         .build();
     let handle = host.server_handle();

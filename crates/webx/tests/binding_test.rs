@@ -529,7 +529,7 @@ async fn spawn_host() -> String {
         .no_spa()
         .use_authentication()
         .configure(|b| {
-            b.useOptions(|o| {
+            b.options(|o| {
                 o.jwt.secret = String::from_utf8_lossy(TEST_SECRET).to_string();
             });
         })

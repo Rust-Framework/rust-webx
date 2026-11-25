@@ -11,7 +11,7 @@ Host::builder().use_authentication().build().run().await?;
 2. 注册 JWT scheme（由 `AuthenticationMiddleware` 统一调度）
 3. 注册默认 `ITokenIssuer`（HS256，登录端点注入即可签发）
 
-`add_authentication()` 只负责 JWT 认证；`#[authorize]` 规则由端点自己执行，未满足时返回 401/403（见 [authorize 宏](authorize-macro.md)）。需要与 `sk-` API Key 共存时见 [API Key 认证](api-key-auth.md)。
+`use_authentication()` 只负责 JWT 认证；`#[authorize]` 规则由端点自己执行，未满足时返回 401/403（见 [authorize 宏](authorize-macro.md)）。需要与 `sk-` API Key 共存时见 [API Key 认证](api-key-auth.md)。
 
 ## 配置
 
@@ -160,9 +160,13 @@ let issued = self.tokens.issue(
 
 ## 小结
 
-> 兼容 shim：`init_jwt_secret` / `jwt_secret()` 仅为 N-2 兼容保留（`.use_authentication()` 仍会填充全局），**下一 major 删除**。新代码必须注入 `Arc<dyn ITokenIssuer>` 并调用 `issue(TokenClaims)`；不要读取/保存全局 secret。
+> 2.5 的全局签名密钥 shim（`init_jwt_secret` / `jwt_secret()`）已在 2.9.1 删除，没有替代的
+> 全局入口。密钥只存在于配置与 DI：`Jwt.SecretFile`（解析顺序 env > `Jwt.Secret` > 文件，启动期
+> 解析为 `webx::JwtSecret`）；自定义 issuer 用 `HostBuilder::register_with_options(|svc, options| …)`
+> 读 `options.jwt.secret`。业务代码注入 `Arc<dyn ITokenIssuer>` 并调用 `issue(TokenClaims)`，
+> 不要读取或保存密钥本身。迁移细节见 [upgrade-to-2.9.1](../16-migration/upgrade-to-2.9.1.md)。
 
-`add_authentication()` + `Jwt` 配置即可启用 JWT 认证；当前 `iss`/`aud`/算法/时钟偏移/令牌上限/严格模式全部可配且 fail-closed。业务代码优先通过 Request 的 `IdentityUser` 字段拿身份，登录/登出通过 `ITokenIssuer`/`ISessionStore` 端口。
+`use_authentication()` + `Jwt` 配置即可启用 JWT 认证；当前 `iss`/`aud`/算法/时钟偏移/令牌上限/严格模式全部可配且 fail-closed。业务代码优先通过 Request 的 `IdentityUser` 字段拿身份，登录/登出通过 `ITokenIssuer`/`ISessionStore` 端口。
 
 ### 按路径限定 scheme（可选）
 
@@ -180,4 +184,4 @@ Host::builder()
 - 没有允许凭证时按匿名继续，受保护端点仍由 `#[authorize]`/身份绑定返回 401；
 - 用于 `per-route scheme`，不要用它替代授权。
 
-下一节：[基于资源的授权](resource-authorization.md)
+下一节：[资源授权与实例级归属](resource-authorization.md)

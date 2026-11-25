@@ -3,19 +3,33 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
-## [3.0.0] — unreleased — 契约类型与统一错误载体（3.0 前两批）
+## [2.9.1] — 2026-11-25 — 破坏性补丁版（semver 例外）：契约迁移 + 下游反馈修复
 
-> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-2.9.1.md](docs/rust-webx/16-migration/upgrade-to-2.9.1.md)
 
-The pagination, cursor and business-envelope contracts now come from the shared
-**`rust-core`** crate instead of `rust-webx-core`. The 2.9.x definitions are deleted; the
-historical `webx_core::pagination` / `::keyset` / `::operation` module paths keep working as
-re-exports. The same 3.0 batch also replaces the error enum with the shared
-`pub type Error = rust_core::AppError` (see below). The API-convergence batches remain separate.
+### English
 
-#### English
+**Breaking patch release (semver exception).** The whole planned 3.0 contract migration ships in
+this 2.9.1 patch; there is no separate 3.0 release. Pagination, cursor and business-envelope
+contracts now come from the shared `rust-core` crate instead of `rust-webx-core`, `Error` becomes
+`rust_core::AppError`, and the root workspace drops `rust-ef`. The framework publishes **contracts
+and behavior only**: the EF-backed adapters are unpublished reference implementations under
+`examples/adapters/`, `webx_ef` is deleted, and the outbox is split into a framework crate
+(`rust-webx-outbox`) plus an EF store adapter. The same release carries the API-convergence batches,
+the composition-root verb convergence, the removal of the 2.x compatibility layers, the E2
+nested-request work, and the downstream-feedback fixes and hardening reported by RXStudio against
+2.9.0 (downstream repository
+`docs/design/upstream-framework-gaps.md`), plus the notification-port
+rename from the earlier 2.9.1 draft. The downstream blockers are fixed here too: authorizers can
+finally read `RequestContext::identity()` on the HTTP path, refresh-token reuse reports the family
+that must be revoked, MFA recovery codes return the matched hash for a database CAS, secret
+resolution maps to typed errors, and the rate limiter can express a `(tenant, user)` budget on a
+templated route. A patch version cannot express these removals, so this entry
+is the semver-exception record; the migration guide lists the source changes per contract.
 
-##### Error = `AppError` (second batch)
+#### Breaking — contract migration
+
+##### Error = `rust_core::AppError` (second batch)
 
 `webx_core::Error` is now `pub type Error = rust_core::AppError`; the 2.9 enum is deleted. The
 `ProblemDetails ↔ AppError` bridge preserves the pre-built problem wire shape, and the default
@@ -37,26 +51,41 @@ writer renders every error through it.
 - **`x-webx-*` extensions are reserved**: custom `IErrorResponseWriter` implementations must use
   `webx_core::problem::extensions_for_wire`; the default writer writes `Retry-After` from
   `retry_after_of`.
-- **Verification**: `cargo test --workspace` (255 test result blocks after E2) and
-  `cargo clippy --workspace --all-targets -- -D warnings` pass on this branch.
+- **Verification**: the full workspace test suite (`cargo test --workspace`) and
+  `cargo clippy --workspace --all-targets -- -D warnings` pass in this release.
 
-##### Structure
+##### `ProblemDetails ↔ AppError` bridge
 
-- **`webx_ef` no longer maps errors.** `map_ef_error`, `EfResultExt` and the `DETAIL_*`
-  sanitization constants are removed; `rust-ef` 2.9.1 implements `From<EFError> for AppError`, so
-  handlers use `?` (the workspace `.map_ef()?` call sites were removed). `webx_ef` remains a
-  compatibility re-export for this release.
-- **`EfIdempotencyStore` moved to `rust-webx-idempotency-ef`** (new workspace member
-  `crates/idempotency/ef`). It owns the durable key store, fencing-token rows and
-  `IdempotencyHousekeeping`; its test suite moved with it (25 tests). `webx_ef` re-exports the
-  same items (including the historical `webx_ef::idempotency::*` path) for one release and is
-  scheduled for removal in 3.0.
-- **Root workspace is now ef-free**: the `*-ef` starters, the idempotency/outbox starters and the
-  docbit/dmbit reference apps moved to `starters/Cargo.toml` (a separate workspace with its own
-  lock file and local `[patch.crates-io]`). Root `cargo tree --workspace | rg rust-ef` is empty;
-  CI runs both `cargo test --workspace` and
-  `cargo test --workspace --manifest-path starters/Cargo.toml`. Acceptance: `rust-ef` only appears
-  in the starter tree.
+- **`ProblemDetails ↔ AppError` bridge** — `impl From<ProblemDetails> for rust_core::AppError` turns a
+  pre-built problem into the shared carrier while storing `title`/`type`/`instance` in the reserved
+  `x-webx-title` / `x-webx-type` / `x-webx-instance` extensions (verbatim mode);
+  `ProblemDetails::from_app_error(&AppError, path, trace_id)` renders it back byte-for-byte
+  (including an absent `type` and an unsanitized pre-built 5xx detail), or derives the title/type
+  and sanitizes 5xx in the normal mode. `extensions_for_wire` filters the reserved keys and
+  `retry_after_of` reads a typed 429 value; five wire-equivalence tests cover validation, 418, 500,
+  derived 500 and 429. This is the prerequisite for the `Error = AppError` alias.
+
+##### Pagination, keyset and business-envelope contracts
+
+The pagination, cursor and business-envelope contracts now come from the shared **`rust-core`**
+crate instead of `rust-webx-core`. The 2.9.x definitions are deleted; the historical
+`webx_core::pagination` / `::keyset` / `::operation` module paths keep working as re-exports.
+
+- **`PagedRequest` is the plain request contract**: fields `page` / `page_size` only; `new`,
+  `from_parts`, `clamped`, `Default` and serde field defaults are gone. Defaults and range
+  validation move to the binding layer (migration: use `#[serde(default = "..")]` +
+  `#[validate(range(..))]`; out-of-range is `400`, not a silent clamp). `offset()` now returns
+  `u64`; `limit()` returns `page_size`.
+- **`PagedResult<T>` is the flat operation envelope**
+  `{success,status,message,items,total}` (composed from `OperationResult<()>`; Rust has no
+  inheritance). `PagedResult::new(items, total)` takes two arguments; `from_request` and the
+  `page`/`page_size`/`total_pages` echo are removed. The page part still has no request echo;
+  clients compute `total_pages = ceil(total / page_size)`.
+- **`KeysetRequest` / `Cursor` / `CursorPage` / `CursorError` and `OperationResult<T>`** are
+  re-exports from `rust-core`; their shapes are unchanged in this release (the keyset constructors
+  and the `OperationResult` method convergence are the A batch below).
+- **New dependency**: `rust-core` (0.1) must be published before `rust-webx` 2.9.1. `rust-webx`
+  runtime crates still do not depend on `rust-ef`.
 
 ##### API convergence (A)
 
@@ -77,7 +106,7 @@ writer renders every error through it.
   replaced by `add_memory_cache(CacheOptions)` (`CacheOptions::default()` or
   `CacheOptions::default().max_entries(n)`). `max_entries(0)` is rejected at registration.
 
-##### API convergence (B: health checks)
+##### API convergence (B: registration specs)
 
 - **`HealthCheckSpec` is the single health-check registration value**: `add_health_check(spec)` takes
   `HealthCheckSpec::sync(name, closure)` or `HealthCheckSpec::async_check(probe)` with an optional
@@ -96,7 +125,9 @@ writer renders every error through it.
   `add_background_service(BackgroundServiceSpec::new::<B>())` for a `Default` worker, or
   `BackgroundServiceSpec::with_factory(|resolver| Arc::new(B::new(..))).enabled(flag)` for
   constructor/DI and conditional registration. `add_background_service_with` and
-  `_with_if` are removed; adapters/starters migrated.
+  `_with_if` are removed; adapters/starters migrated. `BackgroundServiceSpec` and
+  `HostedServiceSpec` are also re-exported at the umbrella root (`webx::`), so a registration needs
+  no module path.
 - **`HostedServiceSpec` is the single hosted-service registration value**:
   `add_hosted_service(HostedServiceSpec::new::<T>())`, or
   `HostedServiceSpec::with_factory(..).ordered(n).enabled(flag)` for factory construction,
@@ -105,6 +136,11 @@ writer renders every error through it.
 - **Authentication enablement uses `use_authentication()`** (was `add_authentication()`): enabling
   JWT is a `use_*` action, while `add_authentication_scheme` still stacks an explicit scheme.
   `use_auth_scheme_for` keeps its per-prefix selection role. All workspace/docs call sites renamed.
+- **`add_options` is the single options registration entry**: it registers `Arc<T>`,
+  `Arc<OptionsMonitor<T>>` and `Arc<dyn IOptionsMonitor<T>>` from the same bound section;
+  `add_options_monitor` is removed (the concrete monitor is already registered, and
+  `watch_options_file` publishes reloads into it). `use_options(value)` stays the entry for a
+  pre-constructed instance.
 - **Binding spelling stays one mechanism**: field-level `#[fromquery]` is the default query binding;
   `#[request(queryall)]` is only a struct-level switch that makes unmarked fields bind from the query
   string on write methods. It does not create a second binding model.
@@ -124,193 +160,47 @@ writer renders every error through it.
 - **E2 acceptance**: `binding_test` 27 passed (nested bind/defaults/out-of-range/unparsable + OpenAPI
   meta splice); OpenAPI `spec_test` 13 passed.
 
-##### Added
+##### Downstream-feedback removals and breaking additions
 
-- **`ProblemDetails ↔ AppError` bridge** — `impl From<ProblemDetails> for rust_core::AppError` turns a
-  pre-built problem into the shared carrier while storing `title`/`type`/`instance` in the reserved
-  `x-webx-title` / `x-webx-type` / `x-webx-instance` extensions (verbatim mode);
-  `ProblemDetails::from_app_error(&AppError, path, trace_id)` renders it back byte-for-byte
-  (including an absent `type` and an unsanitized pre-built 5xx detail), or derives the title/type
-  and sanitizes 5xx in the normal mode. `extensions_for_wire` filters the reserved keys and
-  `retry_after_of` reads a typed 429 value; five wire-equivalence tests cover validation, 418, 500,
-  derived 500 and 429. This is the prerequisite for the `Error = AppError` alias (next step).
+- **`use_email_sender` / `use_sms_sender` are removed.** Rename the call site to `use_email` /
+  `use_sms`; there is no forwarding shim and no `#[deprecated]` marker. `cargo-semver-checks`
+  reports the removal through the documented `rust-webx-host` exception in
+  [compatibility.md](docs/design/compatibility.md) §3, and the rename is recorded in
+  [deprecations.md](docs/design/deprecations.md).
+- **`EmailMessage` gains three public fields** (`from`, `reply_to`, `headers`): only
+  struct-literal construction breaks. Build with `EmailMessage::new(..)` plus the `with_*`
+  builders, as documented in [compatibility.md](docs/design/compatibility.md) §3.
+- **Typed `429`/`409` on the shared carrier**: `Error::too_many_requests(retry_after_secs, detail)`
+  and `Error::conflict_retryable(detail)` are part of `Error` (= `rust_core::AppError`), whose
+  `ErrorKind` is `#[non_exhaustive]`; a downstream `match` needs a wildcard arm and the 2.9 enum
+  arms are replaced by the accessors above. `Error::status(429, ..)` and `Error::status(409, ..)`
+  keep their previous status/code/retryable behavior; the semver exception is scoped to
+  `rust-webx-core` in its `Cargo.toml` and registered in
+  [compatibility.md](docs/design/compatibility.md) §3.
+- **`RateLimitRoute` gains `Pattern(String)` and `RateLimitSubject` gains
+  `Composite(&'static [RateLimitSubject])`**: exhaustive matches need a wildcard arm. Existing
+  `Exact`/`Prefix`/`Any` and `Ip`/`User`/`Tenant`/`ApiKey` behavior is unchanged; the same
+  `rust-webx-core` semver exception and compatibility entry cover these additions.
 
-##### Breaking
+##### Migration (2.9.x → 2.9.1)
 
-- **`PagedRequest` is the plain request contract**: fields `page` / `page_size` only; `new`,
-  `from_parts`, `clamped`, `Default` and serde field defaults are gone. Defaults and range
-  validation move to the binding layer (migration: use `#[serde(default = "..")]` +
-  `#[validate(range(..))]`; out-of-range is `400`, not a silent clamp). `offset()` now returns
-  `u64`; `limit()` returns `page_size`.
-- **`PagedResult<T>` is the flat operation envelope**
-  `{success,status,message,items,total}` (composed from `OperationResult<()>`; Rust has no
-  inheritance). `PagedResult::new(items, total)` takes two arguments; `from_request` and the
-  `page`/`page_size`/`total_pages` echo are removed. The page part still has no request echo;
-  clients compute `total_pages = ceil(total / page_size)`.
-- **`KeysetRequest` / `Cursor` / `CursorPage` / `CursorError` and `OperationResult<T>`** are
-  re-exports from `rust-core`; their shapes are unchanged in this release (the keyset constructors
-  and the `OperationResult` method convergence are later steps).
-- **New dependency**: `rust-core` (0.1) must be published before `rust-webx` 3.0. `rust-webx`
-  runtime crates still do not depend on `rust-ef`.
-
-##### Migration
-
-| 2.9.x | 3.0 |
+| 2.9.x | 2.9.1 |
 |---|---|
 | `PagedRequest::from_parts(page, size)` | `PagedRequest { page, page_size }` with binding defaults/validation |
 | `PagedResult::from_request(items, total, &req)` | `PagedResult::new(items, total)` (or `to_page` in rust-ef) |
 | `result.page` / `result.page_size` / `result.total_pages` | request fields / `ceil(total / page_size)` on the client |
 | `#[serde(default)]` requires `Deserialize` | `serde` is a `WebxRequestMeta` helper attribute (2.9.1+) |
+| `HostBuilder::use_email_sender` / `use_sms_sender` | `HostBuilder::use_email` / `use_sms` |
+| `HostBuilder::add_options_monitor::<T>("Section")` | `HostBuilder::add_options::<T>("Section")` (already registers the monitor) |
 
-#### 简体中文
-
-##### Error = `AppError`（第二批）
-
-`webx_core::Error` 现在是 `pub type Error = rust_core::AppError`，2.9 的 enum 已删除；
-`ProblemDetails ↔ AppError` 桥保证预构造 problem 的 wire 形状不变，默认 writer 统一走该桥。
-
-- **构造器改为 snake_case**：`Validation` → `validation`、`Internal` → `internal`、`Status` →
-  `status`、`Http` → `bad_request`、`Routing` → `route_not_found`、`Serialization` →
-  `invalid_json`、`ResponseSerialization` → `response_serialization`、`TooManyRequests { .. }` →
-  `too_many_requests(secs, detail)`、`ConflictRetryable` → `conflict_retryable`、`Message` →
-  `internal`。
-- **模式匹配改为访问器**：`err.kind()`、`err.code()`、`err.status_code()`、`err.public_detail()`、
-  `err.operator()`、`err.fields()`、`err.extensions()`；旧的 `Error::Problem(problem)` 构造改为
-  `problem.into()`。
-- **`Display` 变化**：依次打印 operator detail、客户端 detail、code；不再有 `"HTTP error: "` /
-  `"DI error: "` 前缀。客户端输出继续用 `public_detail()`/状态 title，绝不能用 `Display`。
-- **`Result` / `ActionResult`** 仍是 `rust_core::Result` 别名；`RdiError`/`EFError` 在各自 crate
-  的边界转换（rust-dix 1.1 / rust-ef 2.9.1 的 `From`）。
-- **`x-webx-*` 是保留扩展键**：自定义 `IErrorResponseWriter` 必须用
-  `webx_core::problem::extensions_for_wire`；默认 writer 用 `retry_after_of` 写 `Retry-After`。
-- **验证**：本分支 `cargo test --workspace`（253 个 test binary）与
-  `cargo clippy --workspace --all-targets -- -D warnings` 全过。
-
-##### 结构
-
-- **`webx_ef` 不再做错误映射**：删除 `map_ef_error`、`EfResultExt` 与 `DETAIL_*` 脱敏常量；
-  rust-ef 2.9.1 已实现 `From<EFError> for AppError`，handler 只用 `?`（workspace 内
-  `.map_ef()?` 已移除）。`webx_ef` 本版仅保留兼容重导出。
-- **`EfIdempotencyStore` 迁到 `rust-webx-idempotency-ef`**（新 workspace member
-  `crates/idempotency/ef`），负责 durable key 表、fencing token 与 `IdempotencyHousekeeping`；
-  测试随迁（25 条）。`webx_ef` 重导出同名项（含历史 `webx_ef::idempotency::*` 路径）一个版本，
-  3.0 删除。
-- **根 workspace 已去 ef**：`*-ef` starters、idempotency/outbox starters 与 docbit/dmbit 参考应用
-  移到独立的 `starters/Cargo.toml` workspace（自带 lock 与本地 `[patch.crates-io]`）。根
-  `cargo tree --workspace | rg rust-ef` 为空；CI 同时跑
-  `cargo test --workspace` 与 `cargo test --workspace --manifest-path starters/Cargo.toml`。
-  验收：`rust-ef` 只出现在 starter tree。
-
-##### API 收敛（A）
-
-- **`OperationResult` 构造器收敛**：删除 `ok`、`ok_with_status`、`success_with_status`。带载荷用
-  `OperationResult::success("created").with_status(7).with_result(value)`；无载荷用
-  `OperationResult::success("deleted")`；`failed(status, message)` 不变。被删的只是 `with_*`
-  的别名；`operation_contract` 6 条与 `operation_result_test` 3 条测试覆盖替代写法。
-- **删除 `use_session_store_cached`**：显式用
-  `use_session_store(Arc::new(CachedSessionStore::new(store, ttl)))` 装饰；缓存仍是公开装饰器，
-  注册入口只保留一个。
-- **删除 `use_h3_alt_svc`**：唯一入口是 `use_alt_svc("h3=\":443\"; ma=86400")`（原始值也覆盖
-  非 H3 的 alt service）；手工组装 pipeline 时仍可用 `AltSvcMiddleware::h3(port)`。
-- **localization 与 memory cache 各一个入口**：`add_localization()` / `_with(options)` 改为
-  `use_localization(LocalizationOptions)`；`add_memory_cache()` / `_with(max_entries)` 改为
-  `add_memory_cache(CacheOptions)`（`CacheOptions::default()` 或
-  `CacheOptions::default().max_entries(n)`）；`max_entries(0)` 在注册期拒绝。
-
-##### API 收敛（B：健康检查）
-
-- **`HealthCheckSpec` 成为健康检查的唯一注册值**：`add_health_check(spec)` 接受
-  `HealthCheckSpec::sync(name, closure)` 或 `HealthCheckSpec::async_check(probe)`，可链式
-  `.timeout(d)`。删除 `add_health_check(name, closure)`、`add_health_check_async` 与
-  `add_health_check_async_with_timeout`；异步默认超时仍是 `DEFAULT_HEALTH_CHECK_TIMEOUT`。
-  cache/queue/payment 适配器已迁移。
-- registry 的 `register`/`register_async` 保留为底层原语；宿主注册统一走 spec。
-- **`MiddlewareSpec` 公开，`use_middleware(spec)` 成为唯一中间件入口**：
-  `MiddlewareSpec::new::<M>()` 用 `M::default()` 放在 `AfterAuth`；
-  `MiddlewareSpec::factory(|| Arc::new(M::new(..)) as Arc<dyn IMiddleware>).at(slot)` 覆盖构造参数
-  与显式槽位。删除 `use_middleware::<M>()`、`use_middleware_at`、`use_middleware_with`、
-  `use_middleware_with_at`；workspace 调用点已迁移。
-- **`BackgroundServiceSpec` 成为后台 worker 的唯一注册值**：
-  `add_background_service(BackgroundServiceSpec::new::<B>())` 用于 `Default` worker；
-  `BackgroundServiceSpec::with_factory(|resolver| Arc::new(B::new(..))).enabled(flag)` 覆盖构造参数、
-  DI 与条件注册。删除 `add_background_service_with` 与 `_with_if`；adapter/starter 已迁移。
-- **`HostedServiceSpec` 成为 hosted service 的唯一注册值**：
-  `add_hosted_service(HostedServiceSpec::new::<T>())`，或
-  `HostedServiceSpec::with_factory(..).ordered(n).enabled(flag)` 覆盖工厂构造、启动/停止顺序与
-  条件注册。删除 `add_hosted_service_with`、`_ordered`、`_with_ordered`、`_if`、`_with_if`；
-  测试已迁移。
-- **认证启用改为 `use_authentication()`**（原 `add_authentication()`）：启用 JWT 属 `use_*` 动作；
-  `add_authentication_scheme` 仍用于叠加显式 scheme，`use_auth_scheme_for` 保留按前缀选择职责。
-  workspace/文档调用点已全部改名。
-- **绑定写法只有一套**：字段级 `#[fromquery]` 是默认查询绑定；`#[request(queryall)]` 只是结构级开关，
-  让写方法上未标记字段从 query 绑定，不构成第二套绑定模型。
-
-##### 嵌套请求模型（E2）
-
-- **`#[fromquery(nested)] field: RequestModel`** 通过该模型自己的 `RequestModel::bind_inline`
-  绑定；`Option<Nested>`、集合与 body 嵌套在编译期拒绝，校验写在嵌套模型自身。
-- **`impl RequestModel for PagedRequest`** 放在 webx-core（trait 所在 crate）：缺省
-  `page`/`page_size` 用共享默认值，`page < 1` / `page_size` 超出 `1..=100` 为 400 字段错误，
-  `page`/`page_size` 会进入 OpenAPI。
-- **嵌套错误聚合**：`Binder::nested` 把嵌套 400 合并进同一个 `errors` 映射；401/403/5xx 作为
-  fatal error 保留，消费 binder 时优先返回。`RequestParamEntry::params` 改为
-  `fn() -> &'static [ParamMeta]`，derive 用 `OnceLock` 懒拼接嵌套元数据（OpenAPI A2），手写
-  fixture 改用闭包。
-- **E2 验收**：`binding_test` 27 passed（嵌套绑定/默认值/越界/非法值 + OpenAPI 元数据拼接）；
-  OpenAPI `spec_test` 13 passed。
-
-##### 新增
-
-- **`ProblemDetails ↔ AppError` 桥**：`impl From<ProblemDetails> for rust_core::AppError` 把预构造
-  problem 转成共享载体，`title`/`type`/`instance` 存入保留扩展键 `x-webx-title` /
-  `x-webx-type` / `x-webx-instance`（verbatim 模式）；
-  `ProblemDetails::from_app_error(&AppError, path, trace_id)` 原样还原（包括"没有 type"与预构造
-  5xx 的 detail 不脱敏），普通模式派生 title/type 并对 5xx 脱敏。`extensions_for_wire` 过滤保留键，
-  `retry_after_of` 读取 typed 429 值；5 条 wire 等价测试覆盖 validation/418/500/派生 500/429。
-  这是 `Error = AppError` 别名化的前置。
-
-##### 破坏性变更
-
-- **`PagedRequest` 变成纯请求契约**：只剩 `page` / `page_size` 字段，删除 `new`、`from_parts`、
-  `clamped`、`Default` 与 serde 字段默认值；默认值与范围校验移到 binding 层（迁移：用
-  `#[serde(default = "..")]` + `#[validate(range(..))]`；越界是 400，不再静默夹紧）。`offset()`
-  改返回 `u64`；`limit()` 返回 `page_size`。
-- **`PagedResult<T>` 变成扁平业务信封** `{success,status,message,items,total}`（组合
-  `OperationResult<()>`，Rust 无继承）。`PagedResult::new(items, total)` 两个参数；删除
-  `from_request` 与 `page`/`page_size`/`total_pages` 回声。页面部分仍无请求回声；客户端按
-  `ceil(total / page_size)` 计算总页数。
-- **`KeysetRequest` / `Cursor` / `CursorPage` / `CursorError` 与 `OperationResult<T>`** 改为从
-  `rust-core` 重导出；本版形状不变（keyset 构造器与 `OperationResult` 方法收敛是后续步骤）。
-- **新依赖**：`rust-webx` 3.0 依赖 `rust-core` 0.1，必须先发布 core；runtime crates 仍不依赖
-  `rust-ef`。
-
-##### 迁移
-
-| 2.9.x | 3.0 |
-|---|---|
-| `PagedRequest::from_parts(page, size)` | `PagedRequest { page, page_size }` + binding 默认/校验 |
-| `PagedResult::from_request(items, total, &req)` | `PagedResult::new(items, total)`（或 rust-ef `to_page`） |
-| `result.page` / `result.page_size` / `result.total_pages` | 请求字段 / 客户端 `ceil(total / page_size)` |
-| `#[serde(default)]` 需 `Deserialize` | 2.9.1 起 `serde` 是 `WebxRequestMeta` helper attribute |
-
-## [2.9.1] — 2026-11-24
-
-> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
-
-### English
+#### Added — downstream feedback
 
 Downstream-feedback release: the fixes and additive APIs reported by RXStudio against 2.9.0
-(`upstream-feedback.md`), plus the notification-port rename from the earlier 2.9.1 draft.
-Dynamic authorizers can finally read `RequestContext::identity()` on the HTTP path, refresh-token
-reuse reports the family that must be revoked, MFA recovery codes return the matched hash for a
-database CAS, secret resolution maps to typed errors, and the rate limiter can express a
-`(tenant, user)` budget on a templated route. The old notification names are deleted, not
-deprecated, by maintainer decision (see Breaking).
+(downstream repository `docs/design/upstream-framework-gaps.md`).
 
-#### Added
-
-- **`webx_ef` classifies transient driver errors as a retryable `503`.** `rust-webx-ef` maps
-  `EFError::Database` by its structured diagnostics: `SQLSTATE` class `08`/`40`/`57P0*`, SQLite
+- **Transient driver errors are classified as a retryable `503`.** The `From<EFError> for AppError`
+  boundary (rust-ef 2.9.1; `webx_ef` no longer maps errors) classifies `EFError::Database` by its
+  structured diagnostics: `SQLSTATE` class `08`/`40`/`57P0*`, SQLite
   `busy`/`locked` (extended result codes `5`/`6`, including `261`/`517`/`262`) and MySQL
   `1205`/`1213` now produce the same `503` + fixed retryable detail as `EFError::Connection`.
   Providers report these conditions as `Database` (only unique violations are promoted), so before
@@ -351,7 +241,7 @@ deprecated, by maintainer decision (see Breaking).
   characters in header names and values (header-injection defense).
 - **Typed `429`/`409` constructors** — `Error::too_many_requests(retry_after_secs, detail)` and
   `Error::conflict_retryable(detail)`. The engine's default problem writer emits `Retry-After`
-  for the typed 429 exactly once; a bare `Error::Status(429, ..)` keeps its previous behavior.
+  for the typed 429 exactly once; a bare `Error::status(429, ..)` keeps its previous behavior.
 - **`impl From<SecretError> for Error`** — `NotFound` becomes a hidden 500 (a missing secret is a
   deployment defect; the name goes to the operator log only) and `Unavailable` a retryable 503;
   handlers can use `?` instead of a local `map_protector_error`. `AesGcmSecretProtector::from_env_names`
@@ -369,7 +259,7 @@ deprecated, by maintainer decision (see Breaking).
   (`getrandom`, 160 bits) instead of two UUIDs.
 - **`serde` is a `WebxRequestMeta` helper attribute** — a request struct no longer needs a separate
   `#[derive(Deserialize)]` just to use `#[serde(default)]` / `rename` / `alias`; the query binder
-  honors the default when every source is absent. This is the binding prerequisite for the 3.0
+  honors the default when every source is absent. This is the binding prerequisite for the 2.9.1
   `PagedRequest` defaults (the `from_parts` normalization can then move into binding: absent
   `page_size` → default, out-of-range → `400`).
 - **`webx_auth_ef::register_refresh_token_model(ctx)`** — explicit, idempotent registration of the
@@ -408,36 +298,223 @@ deprecated, by maintainer decision (see Breaking).
 - **Build**: router/pipeline benches moved to `rust-webx-engine` (the host bencher measured the 1.5
   compatibility embedder), and the `testing/load-probe` harness is registered.
 
-#### Breaking
+#### Structure
 
-- **`use_email_sender` / `use_sms_sender` are removed.** Rename the call site to `use_email` /
-  `use_sms`; there is no forwarding shim and no `#[deprecated]` marker. `cargo-semver-checks`
-  reports the removal through the documented `rust-webx-host` exception in
-  [compatibility.md](docs/design/compatibility.md) §3, and the rename is recorded in
-  [deprecations.md](docs/design/deprecations.md).
-- **`EmailMessage` gains three public fields** (`from`, `reply_to`, `headers`): only
-  struct-literal construction breaks. Build with `EmailMessage::new(..)` plus the `with_*`
-  builders, as documented in [compatibility.md](docs/design/compatibility.md) §3.
-- **`Error` gains `TooManyRequests { retry_after_secs, detail }` and `ConflictRetryable(String)`**:
-  a downstream exhaustive `match` needs a wildcard arm. `Error::Status(429, ..)` and
-  `Error::Conflict(..)` keep their previous status/code/retryable behavior; the semver exception is
-  scoped to `rust-webx-core` in its `Cargo.toml` and registered in
-  [compatibility.md](docs/design/compatibility.md) §3.
-- **`RateLimitRoute` gains `Pattern(String)` and `RateLimitSubject` gains
-  `Composite(&'static [RateLimitSubject])`**: exhaustive matches need a wildcard arm. Existing
-  `Exact`/`Prefix`/`Any` and `Ip`/`User`/`Tenant`/`ApiKey` behavior is unchanged; the same
-  `rust-webx-core` semver exception and compatibility entry cover these additions.
+- **No integration layer, no BOM.** The framework publishes **contracts and behavior only**. The
+  EF-backed adapters (`*-ef`) are **unpublished reference implementations** under
+  `examples/adapters/` (`publish = false`): copy one into your own crate, or implement the port
+  yourself and run the port contract suite. There is no `rust-webx-stack`, no `integrations/`
+  workspace and no version lockstep between the framework and any storage adapter.
+- **`webx_ef` is deleted.** `map_ef_error`/`EfResultExt`/`DETAIL_*` are gone; persistence errors
+  convert at the `rust-ef` boundary (`From<EFError> for AppError`), handlers use `?`. The durable
+  idempotency store now lives in the unpublished `examples/adapters/idempotency/ef`
+  (`rust-webx-idempotency-ef`) and is wired by implementing `IIdempotencyStore`.
+- **Outbox split into framework + adapter.** New `rust-webx-outbox` framework crate (port
+  `IOutbox`, `OutboxEntry`, `OutboxOptions`, `OutboxDispatcher`, `InMemoryOutbox`, `add_outbox` /
+  `add_outbox_with`, and the reusable `IOutbox` contract suite) links **no** ORM. The rust-ef store
+  (`register_outbox_model`, `OutboxDbContextExt::enqueue_outbox`, `add_outbox_ef`) is the
+  unpublished adapter at `examples/adapters/outbox/ef`.
+- **Root workspace is ef-free**: `cargo tree --workspace | rg rust-ef` is empty; `examples/adapters/`
+  is a separate, unpublished workspace with its own lockfile and local `[patch.crates-io]`.
+- **Composition root verbs converged.** `HostBuilder` keeps exactly the documented slots:
+  `register` / `register_with_options` (DI graph), `configure(|app| app.options(..))` (`AppOptions`),
+  `add_*` (stacking, order/slot sensitive), `use_*` (replace/enable one port; last call wins),
+  `add_options` / `add_options_with` (typed config binding, the latter with a code-level override),
+  `watch_options_file` (hot reload). `HostAppBuilder::use_options` renamed to `options`; the
+  camelCase `useOptions` is deleted. The verb table lives in `docs/design/api-convergence.md`.
+- **2.x compatibility layers removed**: `DeclaredRules` / `IDynamicAuthorizer::authorize_with_rules`,
+  `ResourceAuthorization` / `IAuthorizationPolicy` / `resource_auth_middleware`, the legacy
+  `RateLimit.TrustProxy` / `RateLimit.TrustedProxies` keys and `RateLimiter::with_trust_proxy`, and the
+  `init_jwt_secret` / `jwt_secret()` globals. Use `authorize_with_declared_rules`,
+  `#[authorize]`, `ClientInfo`, and `Jwt.SecretFile` / `register_with_options` respectively.
+- **Endpoint catalog carries a stable identifier, a deterministic GUID and authorization flags.**
+  The endpoint macro now records `request_id = concat!(module_path!(), "::", stringify!(Req))` with no
+  extra developer attribute; `EndpointDescriptor` / `EndpointInfo` expose `id`, `guid`
+  (RFC 4122 v5, SHA-1 over a fixed namespace + `id`), `dynamic`, `requires_auth` and
+  `response_type`, plus `get_by_id` / `get_by_guid`. Use `guid` as a permission-table primary key;
+  keep `(method, path)` as the natural/change-detection key.
+- **Endpoint identity is validated at startup and mirrored into OpenAPI.**
+  `EndpointCatalog::try_from_inventory()` (with `from_inventory()` kept as the historic alias) is now
+  fallible: two routes that declare the same `request_id` return `Error::di` naming every duplicate
+  `id` and its conflicting `METHOD /path` declarations — `HostBuilder::try_build()` reports it and
+  `--doctor` lists it, with no panic and no ambiguous permission key. Every generated OpenAPI
+  operation carries the additive extensions `x-webx-endpoint-id` (= `RouteEntry.request_id`) and
+  `x-webx-endpoint-guid` (= the same v5 GUID as the catalog); `operationId` stays the human-facing
+  camelCase request name, and `EndpointInfo` keeps serializing both `id` and `guid`
+  (guid = external permission primary key, id = readable debugging key).
+- **Struct-literal escape hatches closed**: the 13 public config sections are `#[non_exhaustive]`
+  (build them through `Default` + config binding / `configure(|app| app.options(..))`), and
+  `engine::Pipeline::stages` is private (assemble through `Pipeline::new`). Both prevent bypassing
+  the validation and continuation-mode detection that the constructors perform.
+- **Reference apps moved and rebuilt**: `examples/{docbit,dmbit,imbit}`, each an independent
+  four-layer workspace (contracts → domain → handlers → host) with one operation per file, per-context
+  mappers, identity only from `#[fromclaim]`, and framework-native pagination/errors/registration.
+- **Publish surface**: 28 framework crates. `examples/adapters/*` are never published.
 
 ### 简体中文
 
-命名收敛 + 下游反馈修复版本：在 `upstream-feedback.md` 对 2.9.0 的实测结论上，修复动态授权器
-拿不到身份、refresh 重用不回报 family、恢复码无法做 DB CAS、秘密错误无映射、限流无法表达
-`(tenant, user)` 等阻塞项；同时保留 2.9.1 草稿里的通知端口改名（旧名直接删除，见"破坏性变更"）。
+**破坏性补丁版（semver 例外）**：原计划的 3.0 契约迁移整体并入本 2.9.1 补丁，不再有独立的 3.0。
+分页/游标/业务信封契约改为来自共享 `rust-core` crate（2.9 定义已删除，历史模块路径保留为
+re-export），`Error` 改为 `rust_core::AppError`，根 workspace 去 `rust-ef`。框架只发布**契约与行为**：
+EF 落库适配改为 `examples/adapters/` 下的非发布参考实现，`webx_ef` 删除，outbox 拆为框架 crate
+（`rust-webx-outbox`）+ EF 存储适配器。同一版本还包含 API 收敛批次、组合根动词收敛、删除 2.x 兼容层、
+E2 嵌套请求模型，以及依据下游仓 `docs/design/upstream-framework-gaps.md` 对 2.9.0 的实测修复与硬化，
+以及 2.9.1 草稿里的通知端口改名。
+补丁版本无法表达这些移除，因此本条目即 semver 例外登记，迁移指南按契约逐项列出源码改动。
+下游阻塞项在本版一并修复：动态授权器在 HTTP 路径上能读到 `RequestContext::identity()`、refresh
+重用回报需撤销的 family、恢复码返回命中 hash 以支持 DB CAS、秘密错误映射为 typed error、限流可在
+模板路由上表达 `(tenant, user)` 预算。
 
-#### 新增
+#### 破坏性变更 — 契约迁移
 
-- **`webx_ef` 把驱动层的瞬态错误归为可重试 `503`。** `rust-webx-ef` 按结构化诊断分类
-  `EFError::Database`：`SQLSTATE` 类 `08`/`40`/`57P0*`、SQLite `busy`/`locked`（扩展码
+##### Error = `AppError`（第二批）
+
+`webx_core::Error` 现在是 `pub type Error = rust_core::AppError`，2.9 的 enum 已删除；
+`ProblemDetails ↔ AppError` 桥保证预构造 problem 的 wire 形状不变，默认 writer 统一走该桥。
+
+- **构造器改为 snake_case**：`Validation` → `validation`、`Internal` → `internal`、
+  `Status` → `status`、`Http` → `bad_request`、`Routing` → `route_not_found`、
+  `Serialization` → `invalid_json`、`ResponseSerialization` → `response_serialization`、
+  `TooManyRequests { .. }` → `too_many_requests(secs, detail)`、`ConflictRetryable` →
+  `conflict_retryable`、`Message` → `internal`。
+- **模式匹配改为访问器**：`err.kind()`、`err.code()`、`err.status_code()`、`err.public_detail()`、
+  `err.operator()`、`err.fields()`、`err.extensions()`；旧的 `Error::Problem(problem)` 构造改为
+  `problem.into()`。
+- **`Display` 变化**：依次打印 operator detail、客户端 detail、code；不再有 `"HTTP error: "` /
+  `"DI error: "` 前缀。客户端输出继续用 `public_detail()`/状态 title，绝不能用 `Display`。
+- **`Result` / `ActionResult`** 仍是 `rust_core::Result` 别名；`RdiError`/`EFError` 在各自 crate
+  的边界转换（rust-dix 1.1 / rust-ef 2.9.1 的 `From`）。
+- **`x-webx-*` 是保留扩展键**：自定义 `IErrorResponseWriter` 必须用
+  `webx_core::problem::extensions_for_wire`；默认 writer 用 `retry_after_of` 写 `Retry-After`。
+- **验证**：本分支 full workspace test suite（`cargo test --workspace`）与
+  `cargo clippy --workspace --all-targets -- -D warnings` 全过。
+
+##### `ProblemDetails ↔ AppError` 桥
+
+- **`ProblemDetails ↔ AppError` 桥**：`impl From<ProblemDetails> for rust_core::AppError` 把预构造
+  problem 转成共享载体，`title`/`type`/`instance` 存入保留扩展键 `x-webx-title` /
+  `x-webx-type` / `x-webx-instance`（verbatim 模式）；
+  `ProblemDetails::from_app_error(&AppError, path, trace_id)` 原样还原（包括“没有 type”与预构造
+  5xx 的 detail 不脱敏），普通模式派生 title/type 并对 5xx 脱敏。`extensions_for_wire` 过滤保留键，
+  `retry_after_of` 读取 typed 429 值；5 条 wire 等价测试覆盖 validation/418/500/派生 500/429。
+  这是 `Error = AppError` 别名化的前置。
+
+##### 分页、游标与业务信封契约
+
+分页/游标/业务信封契约改为来自共享 **`rust-core`** crate；2.9.x 定义已删除，历史
+`webx_core::pagination` / `::keyset` / `::operation` 模块路径保留为 re-export。
+
+- **`PagedRequest` 变成纯请求契约**：只剩 `page` / `page_size` 字段，删除 `new`、`from_parts`、
+  `clamped`、`Default` 与 serde 字段默认值；默认值与范围校验移到 binding 层（迁移：用
+  `#[serde(default = "..")]` + `#[validate(range(..))]`；越界是 400，不再静默夹紧）。`offset()`
+  改返回 `u64`；`limit()` 返回 `page_size`。
+- **`PagedResult<T>` 变成扁平业务信封** `{success,status,message,items,total}`（组合
+  `OperationResult<()>`，Rust 无继承）。`PagedResult::new(items, total)` 两个参数；删除
+  `from_request` 与 `page`/`page_size`/`total_pages` 回声。页面部分仍无请求回声；客户端按
+  `ceil(total / page_size)` 计算总页数。
+- **`KeysetRequest` / `Cursor` / `CursorPage` / `CursorError` 与 `OperationResult<T>`** 改为从
+  `rust-core` 重导出；本版形状不变（keyset 构造器与 `OperationResult` 方法收敛见下方 A 批）。
+- **新依赖**：`rust-webx` 2.9.1 依赖 `rust-core` 0.1，必须先发布 core；runtime crates 仍不依赖
+  `rust-ef`。
+
+##### API 收敛（A）
+
+- **`OperationResult` 构造器收敛**：删除 `ok`、`ok_with_status`、`success_with_status`。带载荷用
+  `OperationResult::success("created").with_status(7).with_result(value)`；无载荷用
+  `OperationResult::success("deleted")`；`failed(status, message)` 不变。被删的只是 `with_*`
+  的别名；`operation_contract` 6 条与 `operation_result_test` 3 条测试覆盖替代写法。
+- **删除 `use_session_store_cached`**：显式用
+  `use_session_store(Arc::new(CachedSessionStore::new(store, ttl)))` 装饰；缓存仍是公开装饰器，
+  注册入口只保留一个。
+- **删除 `use_h3_alt_svc`**：唯一入口是 `use_alt_svc("h3=\":443\"; ma=86400")`（原始值也覆盖
+  非 H3 的 alt service）；手工组装 pipeline 时仍可用 `AltSvcMiddleware::h3(port)`。
+- **localization 与 memory cache 各一个入口**：`add_localization()` / `_with(options)` 改为
+  `use_localization(LocalizationOptions)`；`add_memory_cache()` / `_with(max_entries)` 改为
+  `add_memory_cache(CacheOptions)`（`CacheOptions::default()` 或
+  `CacheOptions::default().max_entries(n)`）；`max_entries(0)` 在注册期拒绝。
+
+##### API 收敛（B：健康检查与注册 spec）
+
+- **`HealthCheckSpec` 成为健康检查的唯一注册值**：`add_health_check(spec)` 接受
+  `HealthCheckSpec::sync(name, closure)` 或 `HealthCheckSpec::async_check(probe)`，可链式
+  `.timeout(d)`。删除 `add_health_check(name, closure)`、`add_health_check_async` 与
+  `add_health_check_async_with_timeout`；异步默认超时仍是 `DEFAULT_HEALTH_CHECK_TIMEOUT`。
+  cache/queue/payment 适配器已迁移。
+- registry 的 `register`/`register_async` 保留为底层原语；宿主注册统一走 spec。
+- **`MiddlewareSpec` 公开，`use_middleware(spec)` 成为唯一中间件入口**：
+  `MiddlewareSpec::new::<M>()` 用 `M::default()` 放在 `AfterAuth`；
+  `MiddlewareSpec::factory(|| Arc::new(M::new(..)) as Arc<dyn IMiddleware>).at(slot)` 覆盖构造参数
+  与显式槽位。删除 `use_middleware::<M>()`、`use_middleware_at`、`use_middleware_with`、
+  `use_middleware_with_at`；workspace 调用点已迁移。
+- **`BackgroundServiceSpec` 成为后台 worker 的唯一注册值**：
+  `add_background_service(BackgroundServiceSpec::new::<B>())` 用于 `Default` worker；
+  `BackgroundServiceSpec::with_factory(|resolver| Arc::new(B::new(..))).enabled(flag)` 覆盖构造参数、
+  DI 与条件注册。删除 `add_background_service_with` 与 `_with_if`；adapter/starter 已迁移。
+  `BackgroundServiceSpec` / `HostedServiceSpec` 同时在伞 crate 根重导出（`webx::`），注册处不需要模块路径。
+- **`HostedServiceSpec` 成为 hosted service 的唯一注册值**：
+  `add_hosted_service(HostedServiceSpec::new::<T>())`，或
+  `HostedServiceSpec::with_factory(..).ordered(n).enabled(flag)` 覆盖工厂构造、启动/停止顺序与
+  条件注册。删除 `add_hosted_service_with`、`_ordered`、`_with_ordered`、`_if`、`_with_if`；
+  测试已迁移。
+- **认证启用改为 `use_authentication()`**（原 `add_authentication()`）：启用 JWT 属 `use_*` 动作；
+  `add_authentication_scheme` 仍用于叠加显式 scheme，`use_auth_scheme_for` 保留按前缀选择职责。
+  workspace/文档调用点已全部改名。
+- **`add_options` 成为 options 的唯一注册入口**：一次注册 `Arc<T>`、`Arc<OptionsMonitor<T>>` 与
+  `Arc<dyn IOptionsMonitor<T>>`；`add_options_monitor` 已删除（具体 monitor 本来就会注册，
+  `watch_options_file` 直接向它发布新快照）。`use_options(value)` 仍用于预构造实例。
+- **绑定写法只有一套**：字段级 `#[fromquery]` 是默认查询绑定；`#[request(queryall)]` 只是结构级开关，
+  让写方法上未标记字段从 query 绑定，不构成第二套绑定模型。
+
+##### 嵌套请求模型（E2）
+
+- **`#[fromquery(nested)] field: RequestModel`** 通过该模型自己的 `RequestModel::bind_inline`
+  绑定；`Option<Nested>`、集合与 body 嵌套在编译期拒绝，校验写在嵌套模型自身。
+- **`impl RequestModel for PagedRequest`** 放在 webx-core（trait 所在 crate）：缺省
+  `page`/`page_size` 用共享默认值，`page < 1` / `page_size` 超出 `1..=100` 为 400 字段错误，
+  `page`/`page_size` 会进入 OpenAPI。
+- **嵌套错误聚合**：`Binder::nested` 把嵌套 400 合并进同一个 `errors` 映射；401/403/5xx 作为
+  fatal error 保留，消费 binder 时优先返回。`RequestParamEntry::params` 改为
+  `fn() -> &'static [ParamMeta]`，derive 用 `OnceLock` 懒拼接嵌套元数据（OpenAPI A2），手写
+  fixture 改用闭包。
+- **E2 验收**：`binding_test` 27 passed（嵌套绑定/默认值/越界/非法值 + OpenAPI 元数据拼接）；
+  OpenAPI `spec_test` 13 passed。
+
+##### 下游反馈的移除与破坏性新增
+
+- **`use_email_sender` / `use_sms_sender` 已删除。** 调用点改成 `use_email` / `use_sms`；没有转发
+  别名，也没有 `#[deprecated]` 标记。`cargo-semver-checks` 的移除报告按
+  [compatibility.md](docs/design/compatibility.md) §3 的已登记例外处理，改名同时登记在
+  [deprecations.md](docs/design/deprecations.md)。
+- **`EmailMessage` 新增三个公开字段**（`from` / `reply_to` / `headers`）：只破坏结构体字面量构造。
+  用 `EmailMessage::new(..)` + `with_*` 构建器，迁移见
+  [compatibility.md](docs/design/compatibility.md) §3。
+- **共享载体上的 typed `429`/`409`**：`Error::too_many_requests(retry_after_secs, detail)` 与
+  `Error::conflict_retryable(detail)` 属于 `Error`（= `rust_core::AppError`），其 `ErrorKind` 是
+  `#[non_exhaustive]`；下游 `match` 需补通配分支，原 2.9 enum 分支改上面列出的访问器。
+  `Error::status(429, ..)` 与 `Error::status(409, ..)` 的状态码/code/retryable 行为不变；semver
+  例外只限定在 `rust-webx-core` 的 `Cargo.toml`，并登记在
+  [compatibility.md](docs/design/compatibility.md) §3。
+- **`RateLimitRoute` 新增 `Pattern(String)`、`RateLimitSubject` 新增
+  `Composite(&'static [RateLimitSubject])`**：下游穷举 `match` 需补通配分支。既有
+  `Exact`/`Prefix`/`Any` 与 `Ip`/`User`/`Tenant`/`ApiKey` 的匹配/键派生不变；同一份
+  `rust-webx-core` semver 例外与 compatibility 登记覆盖这两个新增。
+
+##### 迁移（2.9.x → 2.9.1）
+
+| 2.9.x | 2.9.1 |
+|---|---|
+| `PagedRequest::from_parts(page, size)` | `PagedRequest { page, page_size }` + binding 默认/校验 |
+| `PagedResult::from_request(items, total, &req)` | `PagedResult::new(items, total)`（或 rust-ef `to_page`） |
+| `result.page` / `result.page_size` / `result.total_pages` | 请求字段 / 客户端 `ceil(total / page_size)` |
+| `#[serde(default)]` 需 `Deserialize` | 2.9.1 起 `serde` 是 `WebxRequestMeta` helper attribute |
+| `HostBuilder::use_email_sender` / `use_sms_sender` | `HostBuilder::use_email` / `use_sms` |
+| `HostBuilder::add_options_monitor::<T>("Section")` | `HostBuilder::add_options::<T>("Section")`（已同时注册 monitor） |
+
+#### 新增（下游反馈）
+
+- **驱动层的瞬态错误归为可重试 `503`。** `From<EFError> for AppError` 边界（rust-ef 2.9.1；
+  `webx_ef` 已不再映射错误）按结构化诊断分类 `EFError::Database`：`SQLSTATE` 类
+  `08`/`40`/`57P0*`、SQLite `busy`/`locked`（扩展码
   `5`/`6`，含 `261`/`517`/`262`）、MySQL `1205`/`1213` 现在与 `EFError::Connection` 一样输出
   `503` + 固定可重试文案。provider 只把唯一约束提升为 `UniqueViolation`，其余驱动错误都以
   `Database` 上报，因此本次之前 SQLite busy / PostgreSQL 死锁会以不可重试的 `500` 到达客户端；
@@ -468,7 +545,7 @@ deprecated, by maintainer decision (see Breaking).
   `validate()` 校验全部地址并拒绝头名/头值中的 CRLF/控制字符（防头注入）。
 - **typed `429`/`409` 构造器**：`Error::too_many_requests(retry_after_secs, detail)` 与
   `Error::conflict_retryable(detail)`。引擎默认 problem writer 只为 typed 429 写一次
-  `Retry-After`；裸 `Error::Status(429, ..)` 行为不变。
+  `Retry-After`；裸 `Error::status(429, ..)` 行为不变。
 - **`impl From<SecretError> for Error`**：`NotFound` → 隐藏 500（部署缺密钥，名称只进运维日志），
   `Unavailable` → 可重试 503；Handler 直接 `?`，不再需要 `map_protector_error`。
   `AesGcmSecretProtector::from_env_names` 用于同步 `build_host(config)` 组合根；async/KMS 仍走
@@ -483,7 +560,7 @@ deprecated, by maintainer decision (see Breaking).
   改用 OS CSPRNG（`getrandom`，160 位），不再用两个 UUID。
 - **`serde` 成为 `WebxRequestMeta` 的 helper attribute**：请求结构体不必为了 `#[serde(default)]` /
   `rename` / `alias` 额外 `#[derive(Deserialize)]`；所有来源都缺失时查询绑定使用默认值。这是
-  3.0 `PagedRequest` 默认值（`from_parts` 归一逻辑下沉到 binding：缺省 `page_size` → 默认值，
+  2.9.1 `PagedRequest` 默认值（`from_parts` 归一逻辑下沉到 binding：缺省 `page_size` → 默认值，
   越界 → 400）的前置能力。
 - **`webx_auth_ef::register_refresh_token_model(ctx)`**：显式、幂等的 refresh token 实体注册入口，
   与 `register_idempotency_model` 同形。真正需要它的是 **keyed context**（keyed 模型只发现
@@ -515,27 +592,55 @@ deprecated, by maintainer decision (see Breaking).
 - **构建**：router/pipeline bench 移到 `rust-webx-engine`（host bencher 测的是 1.5 兼容嵌入器），
   新增 `testing/load-probe` 压测 harness。
 
-#### 破坏性变更
+#### 结构
 
-- **`use_email_sender` / `use_sms_sender` 已删除。** 调用点改成 `use_email` / `use_sms`；没有转发
-  别名，也没有 `#[deprecated]` 标记。`cargo-semver-checks` 的移除报告按
-  [compatibility.md](docs/design/compatibility.md) §3 的已登记例外处理，改名同时登记在
-  [deprecations.md](docs/design/deprecations.md)。
-- **`EmailMessage` 新增三个公开字段**（`from` / `reply_to` / `headers`）：只破坏结构体字面量构造。
-  用 `EmailMessage::new(..)` + `with_*` 构建器，迁移见
-  [compatibility.md](docs/design/compatibility.md) §3。
-- **`Error` 新增 `TooManyRequests { retry_after_secs, detail }` 与 `ConflictRetryable(String)`**：
-  下游穷举 `match` 需补通配分支。`Error::Status(429, ..)` 与 `Error::Conflict(..)` 的状态码/code/
-  retryable 行为不变；semver 例外只限定在 `rust-webx-core` 的 `Cargo.toml`，并登记在
-  [compatibility.md](docs/design/compatibility.md) §3。
-- **`RateLimitRoute` 新增 `Pattern(String)`、`RateLimitSubject` 新增
-  `Composite(&'static [RateLimitSubject])`**：下游穷举 `match` 需补通配分支。既有
-  `Exact`/`Prefix`/`Any` 与 `Ip`/`User`/`Tenant`/`ApiKey` 的匹配/键派生不变；同一份
-  `rust-webx-core` semver 例外与 compatibility 登记覆盖这两个新增。
+- **不再有集成层，也不再有 BOM**：框架只发布**契约与行为**；EF 落库适配（`*-ef`）改为
+  `examples/adapters/` 下的**非发布参考实现**（`publish = false`）——下游复制一份改成自己的 crate，
+  或按端口自己实现并跑端口契约测试。不存在 `rust-webx-stack`、不存在 `integrations/` workspace、
+  框架与存储适配器之间也没有版本锁步。
+- **`webx_ef` 已删除**：`map_ef_error`/`EfResultExt`/`DETAIL_*` 全部移除；持久层错误在 rust-ef 边界
+  完成 `From<EFError> for AppError`，handler 直接 `?`。持久化幂等 store 位于非发布的
+  `examples/adapters/idempotency/ef`（`rust-webx-idempotency-ef`），接入方式是实现 `IIdempotencyStore`。
+- **outbox 拆为"框架 + 适配器"**：新增框架 crate `rust-webx-outbox`（端口 `IOutbox`、`OutboxEntry`、
+  `OutboxOptions`、`OutboxDispatcher`、`InMemoryOutbox`、`add_outbox`/`add_outbox_with` 以及可复用
+  的 `IOutbox` 契约测试），**不链接任何 ORM**；rust-ef 存储（`register_outbox_model`、
+  `OutboxDbContextExt::enqueue_outbox`、`add_outbox_ef`）是非发布的
+  `examples/adapters/outbox/ef`。
+- **根 workspace 保持 ef-free**：`cargo tree --workspace | rg rust-ef` 为空；`examples/adapters/`
+  是独立、非发布 workspace（自带 lock 与本地 `[patch.crates-io]`）。
+- **组合根动词收敛**：`register`/`register_with_options`（DI 图）、
+  `configure(|app| app.options(..))`（`AppOptions`）、`add_*`（叠加，顺序/槽位敏感）、
+  `use_*`（替换/启用单端口，后设置胜）、`add_options`/`add_options_with`（配置节绑定，后者带代码覆盖）、
+  `watch_options_file`（热更新）。`HostAppBuilder::use_options` 改名 `options`，驼峰 `useOptions` 删除；
+  动词表落在 `docs/design/api-convergence.md`。
+- **删除 2.x 兼容层**：`DeclaredRules` / `IDynamicAuthorizer::authorize_with_rules`、
+  `ResourceAuthorization` / `IAuthorizationPolicy` / `resource_auth_middleware`、限流旧键
+  `RateLimit.TrustProxy` / `RateLimit.TrustedProxies` 与 `RateLimiter::with_trust_proxy`、
+  `init_jwt_secret` / `jwt_secret()` 全局。替代：`authorize_with_declared_rules`、`#[authorize]`、
+  `ClientInfo`、`Jwt.SecretFile` / `register_with_options`。
+- **端点目录带上稳定标识、确定性 GUID 与授权标志**：端点宏自动记录
+  `request_id = concat!(module_path!(), "::", stringify!(Req))`（不需要任何新属性）；
+  `EndpointDescriptor` / `EndpointInfo` 暴露 `id`、`guid`（RFC 4122 v5，固定命名空间 + `id` 的
+  SHA-1）、`dynamic`、`requires_auth`、`response_type`，并提供 `get_by_id` / `get_by_guid`。
+  权限表用 `guid` 作主键，`(method, path)` 作自然键/变更检测键。
+- **端点身份在启动期校验并同步到 OpenAPI**：`EndpointCatalog::try_from_inventory()`
+  （`from_inventory()` 保留为历史别名）改为返回 `Result`：两个路由声明同一 `request_id` 时返回
+  `Error::di`，列出每个重复 `id` 及其冲突的 `METHOD /path`；`HostBuilder::try_build()` 原样上报、
+  `--doctor` 也会列出，**不 panic**、也不会生成权限键有歧义的目录。生成的 OpenAPI operation 增加
+  additive 扩展键 `x-webx-endpoint-id`（= `RouteEntry.request_id`）与 `x-webx-endpoint-guid`
+  （与 catalog 同一 v5 派生算法）；`operationId` 仍是面向人的 camelCase 请求名，`EndpointInfo`
+  继续同时序列化 `id` 与 `guid`（guid = 外部权限主键，id = 可读调试键）。
+- **关闭结构体字面量逃生舱**：13 个公开配置 section 加 `#[non_exhaustive]`（只能经 `Default` +
+  配置绑定 / `configure(|app| app.options(..))` 构造）；`engine::Pipeline::stages` 私有化
+  （只能经 `Pipeline::new` 组装），避免绕过构造器里的校验与 continuation 模式探测。
+- **参考应用迁入并重建**：`examples/{docbit,dmbit,imbit}`，各自独立四层 workspace
+  （contracts → domain → handlers → host），一操作一文件、按上下文拆分 mappers、身份只来自
+  `#[fromclaim]`、分页/错误/注册全走框架原生。
+- **发布面**：28 个框架 crate；`examples/adapters/*` 永不发布。
 
 ## [2.9.0] — 2026-11-24
 
-> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-2.9.1.md](docs/rust-webx/16-migration/upgrade-to-2.9.1.md)
 
 ### English
 
@@ -778,7 +883,7 @@ existing `webx` API; there are **no application-facing breaking changes**.
 > This iteration was never tagged or published to crates.io; its changes ship in **2.9.0**.
 > Kept here as the provenance of the 2.8 iteration.
 
-> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-2.9.1.md](docs/rust-webx/16-migration/upgrade-to-2.9.1.md)
 
 ### English
 
@@ -1388,7 +1493,7 @@ allowlist and `docs/design/compatibility.md`); all items are mechanical to migra
 
 ## [2.7.0] — 2026-11-22
 
-> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-2.9.1.md](docs/rust-webx/16-migration/upgrade-to-2.9.1.md)
 
 ### English
 
@@ -1629,7 +1734,7 @@ umbrella 均不链接支付适配器；不引入服务商 SDK，也不引入第�
 
 ## [2.6.0] — 2026-11-21
 
-> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-2.9.1.md](docs/rust-webx/16-migration/upgrade-to-2.9.1.md)
 
 ### English
 
@@ -1827,7 +1932,7 @@ implement the full sanitized contract.
 Production-stability pass over the 2.0 engine. No feature expansion; the focus
 is admission, lifecycle, error semantics and wire-level verification.
 
-> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-2.9.1.md](docs/rust-webx/16-migration/upgrade-to-2.9.1.md)
 
 ### English
 
@@ -1902,7 +2007,7 @@ The execution engine is rewritten from first principles on the new
 `IRequest`/`IRequestHandler`, `IMiddleware`, results, auth/config/DI) is kept;
 the old single-runtime hyper loop is gone.
 
-> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-2.9.1.md](docs/rust-webx/16-migration/upgrade-to-2.9.1.md)
 
 ### English
 
@@ -2001,7 +2106,7 @@ Security/correctness hardening plus the 1.5 capability line (SSE, outbound clien
 API-key auth, secrets, metrics, options hot reload, request-body streaming,
 error writers, HTTP/2, AI gateway crates).
 
-> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-2.9.1.md](docs/rust-webx/16-migration/upgrade-to-2.9.1.md)
 
 ### English
 
@@ -2112,7 +2217,7 @@ Additive release on the 1.3 line: every existing API keeps working (`register`, 
 the synchronous health registry view, the default `ITokenIssuer`). It fixes the two upstream defects
 found by the Travel production verification.
 
-> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-2.9.1.md](docs/rust-webx/16-migration/upgrade-to-2.9.1.md)
 
 ### English
 
@@ -3048,7 +3153,7 @@ for the step-by-step migration.
 
 ## [0.4.0] — 2026-09-16 — 文件上传与下载基础设施
 
-> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-2.9.1.md](docs/rust-webx/16-migration/upgrade-to-2.9.1.md)
 
 ### English
 
@@ -3250,7 +3355,7 @@ for the step-by-step migration.
 
 ## [0.3.7] — 2026-09-01 — rust-ef 1.8.3 + docbit DbContext
 
-> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-2.9.1.md](docs/rust-webx/16-migration/upgrade-to-2.9.1.md)
 
 ### English
 
@@ -3268,7 +3373,7 @@ for the step-by-step migration.
 
 ## [0.3.6] — 2026-09-01 — rust-dix 0.7 / rust-ef 1.8.2
 
-> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-2.9.1.md](docs/rust-webx/16-migration/upgrade-to-2.9.1.md)
 
 ### English
 
@@ -3284,7 +3389,7 @@ for the step-by-step migration.
 
 ## [0.3.5] — 2026-08-31 — Cors appsettings bind + docbit Production
 
-> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-2.9.1.md](docs/rust-webx/16-migration/upgrade-to-2.9.1.md)
 
 ### English
 
@@ -3304,7 +3409,7 @@ for the step-by-step migration.
 
 ## [0.3.4] — 2026-08-31 — Docbit SQLite-only and rustls
 
-> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-2.9.1.md](docs/rust-webx/16-migration/upgrade-to-2.9.1.md)
 
 ### English
 
@@ -3327,7 +3432,7 @@ Maintenance release focused on simpler docbit production packaging and OpenSSL-f
 - **Docbit 发布**：`publish.ps1 -Linux` 支持交叉编译。
 ## [0.3.3] — 2026-08-31 — Docbit cross-compile and docs
 
-> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-2.9.1.md](docs/rust-webx/16-migration/upgrade-to-2.9.1.md)
 
 ### English
 
@@ -3349,7 +3454,7 @@ Maintenance release: docbit-host cross-compile tooling, ecosystem docs publishin
 - **Docbit 发布脚本**与**文档 INDEX/展览**更新。
 ## [0.3.2] — 2026-08-31 — Architecture remediation Phases 1–4
 
-> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-2.9.1.md](docs/rust-webx/16-migration/upgrade-to-2.9.1.md)
 
 ### English
 
@@ -3401,7 +3506,7 @@ Breaking and behavioral changes from the architecture remediation (Phases 1–4)
 
 ## [0.3.1] — 2026-08-16 — crates.io 再发布对齐 · Re-release alignment
 
-> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-3.0.md](docs/rust-webx/16-migration/upgrade-to-3.0.md)
+> **English** · **简体中文** · 迁移指南：[docs/rust-webx/16-migration/upgrade-to-2.9.1.md](docs/rust-webx/16-migration/upgrade-to-2.9.1.md)
 
 ### English
 

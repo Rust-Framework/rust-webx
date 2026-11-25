@@ -1,13 +1,16 @@
 # IM 参考应用（imbit）
 
-`imbit/` 是实时执行模型的端到端验收应用：**只用框架公开能力**实现一个可运行的
+`examples/imbit/` 是实时执行模型的端到端验收应用：**只用框架公开能力**实现一个可运行的
 即时通讯服务，证明 HTTP + WebSocket 两种生命周期在同一容器内协调工作。
 
 ## 运行
 
+四层结构与 docbit/dmbit 一致（`contracts` / `domain` / `handlers` / `host`），宿主的包名是
+`imbit-host`（bin 名仍是 `imbit`）：
+
 ```text
-cargo run -p imbit            # 默认 127.0.0.1:8090
-IMBIT_ADDR=0.0.0.0:9000 cargo run -p imbit
+cargo run --manifest-path examples/imbit/Cargo.toml -p imbit-host       # 默认 127.0.0.1:8090
+IMBIT_ADDR=0.0.0.0:9000 cargo run --manifest-path examples/imbit/Cargo.toml -p imbit-host
 ```
 
 开发模式使用内置 JWT 密钥（`DEV_JWT_SECRET`）；生产用 `JWT_SECRET` 或 `Jwt.SecretFile`。
@@ -58,7 +61,7 @@ WebSocket `/ws/im`（JSON 帧，`type` 标记）——请求/响应与事件共�
 错误帧：`{"error":{"code","message","retryable"[,"field"]}}`（与 HTTP Error 同一契约）。
 信令与 TURN 的完整控制面契约见 [media-contract.md](media-contract.md)。
 
-## 验收测试（`imbit/tests/e2e_im_test.rs`）
+## 验收测试（`examples/imbit/host/tests/e2e_im_test.rs`）
 
 真实 HTTP + 真实 WebSocket 客户端端到端跑通：
 
@@ -71,7 +74,8 @@ WebSocket `/ws/im`（JSON 帧，`type` 标记）——请求/响应与事件共�
 7. 未认证 WS `join` → `{"error":{"code":"unauthorized"}}`（结构化错误帧，不断连接语义）。
 
 ```text
-cargo test -p imbit --test e2e_im_test
+cargo test --manifest-path examples/imbit/Cargo.toml
+cargo test --manifest-path examples/imbit/Cargo.toml -p imbit-host --test e2e_im_test
 ```
 
 ## 与生产形态的差距（明确边界）

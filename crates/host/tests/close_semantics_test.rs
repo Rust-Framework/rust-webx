@@ -303,7 +303,7 @@ async fn token_expiry_is_recorded_as_token_expired() {
         .no_spa()
         .use_authentication()
         .configure(|builder| {
-            builder.use_options(|options| {
+            builder.options(|options| {
                 options.jwt.secret = TEST_SECRET.to_string();
             });
         })

@@ -52,7 +52,7 @@ async fn metrics_report_active_connections_and_capacity() {
         .mode(AppMode::Development)
         .no_spa()
         .configure(|app| {
-            app.useOptions(|options| {
+            app.options(|options| {
                 options.metrics.enabled = true;
                 options.app.max_connections = 8;
             })

@@ -75,7 +75,8 @@ Host::builder()
 `/api/orders-archive`；条目末尾的 `/` 忽略，`"/"` 等价于全部路径。`SkipPaths` 优先于 `Paths`。
 不在范围内的请求在读取/校验 `Idempotency-Key` **之前**直接放行，不产生存储往返。
 
-多实例部署用数据库持久化实现（`rust-webx-ef`），见「数据库持久化（多实例）」一节。
+多实例部署必须换共享存储：框架给端口（`IIdempotencyStore`），持久化实现属于下游的数据适配，
+参考实现在 `examples/adapters/idempotency/ef`。见「数据库持久化（多实例）」一节。
 
 存储键由「租户 + 主体 + 方法 + 路径 + 查询串 + 请求头」组成
 （查询串按 key/value 排序后入键，`POST /items?mode=a` 与 `?mode=b` 不会互相重放）：
@@ -200,24 +201,31 @@ impl IIdempotencyStore for MyRedisStore {
 
 ## 数据库持久化（多实例）
 
-内存存储只在单进程内可见：多实例部署下重试落到另一节点会再执行一次 Handler。
-`rust-webx-ef` 提供 `IIdempotencyStore` 的 rust-ef 实现 `EfIdempotencyStore`，把预约与
-响应存进数据库表 `webx_idempotency`（主键 = 幂等键），所有实例共享同一份状态。
+内存存储只在单进程内可见：多实例部署下重试落到另一节点会再执行一次 Handler。多实例必须换**共享存储**：
+框架只有端口（`IIdempotencyStore`），持久化实现属于下游的数据适配。
 
-真库验证：`crates/ef/webx/tests/idempotency_realdb_test.rs` 提供由
+参考实现是 `examples/adapters/idempotency/ef`（`publish = false`，不随框架发布）：它用 rust-ef 把预约与
+响应存进数据库表 `webx_idempotency`（主键 = 幂等键），所有实例共享同一份状态。用法是**复制进业务仓**
+（`cp -r examples/adapters/idempotency/ef crates/my-service-idempotency`），改包名/实体后按下一节装配；
+也可以在业务 crate 里自己实现 `IIdempotencyStore`。三种接入方式的取舍见
+[端口与适配器（下游接入）](../13-extensibility/integrations.md)。
+
+> 下文的 `rust_webx_idempotency_ef` 是参考实现的导入名，复制进业务仓后换成你自己的包名。
+
+真库验证：参考实现的 `tests/idempotency_realdb_test.rs` 提供由
 `RUST_EF_PG_URL` / `RUST_EF_MYSQL_URL` 驱动的 `#[ignore]` 测试（覆盖唯一键 INSERT 竞争回落、
 条件 UPDATE/DELETE、Unix 秒 TTL 列与二进制 body）；本地或 CI 用
-`cargo test -p rust-webx-ef --features postgres,mysql --tests -- --ignored` 运行，CI 的 `realdb`
-job 用 `postgres:16` + `mysql:8` service 容器执行。默认构建不引入这两个 provider。
+`cargo test --manifest-path examples/adapters/Cargo.toml -p rust-webx-idempotency-ef --features postgres,mysql --tests -- --ignored`
+运行，CI 的 `realdb` job 用 `postgres:16` + `mysql:8` service 容器执行。默认构建不引入这两个 provider。
 
 ### 建表与迁移
 
-表结构由实体（`webx_ef::idempotency::IdempotencyRecord`）声明，DDL 交给官方 rust-ef
+表结构由参考实现的实体（`IdempotencyRecord`）声明，DDL 交给官方 rust-ef
 迁移工具生成，不要手写 `CREATE TABLE` / `ALTER TABLE`：
 
 ```rust
 use rust_ef::db_context::{DbContext, DbContextOptionsBuilder};
-use webx_ef::idempotency::register_idempotency_model;
+use rust_webx_idempotency_ef::register_idempotency_model;
 
 let mut db = DbContextOptionsBuilder::new();
 db.use_postgres(&database_url); // 或 use_mysql / use_sqlite
@@ -261,7 +269,7 @@ options，provider/连接池/模型缓存共享：
 use std::sync::Arc;
 use std::time::Duration;
 use webx::*;
-use webx_ef::idempotency::{EfIdempotencyStore, IdempotencyHousekeeping};
+use rust_webx_idempotency_ef::{EfIdempotencyStore, IdempotencyHousekeeping};
 
 let store = Arc::new(EfIdempotencyStore::new(Arc::clone(&options)));
 let housekeeping = IdempotencyHousekeeping::new(Arc::clone(&store));
@@ -279,7 +287,8 @@ Host::builder()
     // 由 host 自动发现 DI 里的 IIdempotencyStore（2.8）。
     .use_idempotency(Arc::clone(&store), Duration::from_secs(24 * 3600))
     .register(move |svc| {
-        svc.add_background_service_with(move |_| Arc::new(housekeeping.clone()))
+        svc.add_background_service(BackgroundServiceSpec::with_factory(
+            move |_| Arc::new(housekeeping.clone())))
     })
     .build();
 ```
@@ -364,8 +373,8 @@ claim（`expires_at` 变成未来），它不再匹配，于是新预约不会�
   零外部依赖。达到 `MaxTrackedKeys` 时按优先级淘汰：先已完成条目（Handler 已执行过），
   其次过期条目，最后才淘汰进行中的预约（让客户端重试重新执行）。进程内状态只对本进程可见，
   多实例必须换共享存储。
-- **多实例**：重试可能落到另一节点，必须用共享存储——数据库持久化实现见上一节
-  （`rust-webx-ef::EfIdempotencyStore`，推荐），或用 Redis `SET NX` + token CAS + 响应值
+- **多实例**：重试可能落到另一节点，必须用共享存储——数据库参考实现（`examples/adapters/idempotency/ef`，
+  复制进业务仓；`EfIdempotencyStore`，推荐），或用 Redis `SET NX` + token CAS + 响应值
   自建 `IIdempotencyStore`；只在一台机器上装内存存储等于没装。
 - **容器**：预约带 TTL，实例被杀后下一次重试可重新执行；不会留下本地状态。
 - **性能**：每个带键的写请求多两次存储往返；响应 body 以字节缓存，受 `MaxBodyBytes` 与

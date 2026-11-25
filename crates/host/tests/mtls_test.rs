@@ -74,7 +74,7 @@ fn half_configured_mtls_fails_at_build() {
         .mode(AppMode::Development)
         .no_spa()
         .configure(|app| {
-            app.useOptions(|options| {
+            app.options(|options| {
                 options.tls.client_auth = TlsClientAuth::Required;
             });
         })
@@ -93,7 +93,7 @@ fn half_configured_mtls_fails_at_build() {
         .no_spa()
         .configure(move |app| {
             let ca_path = ca_path.clone();
-            app.useOptions(move |options| {
+            app.options(move |options| {
                 options.tls.client_auth = TlsClientAuth::Required;
                 options.tls.client_ca_path = ca_path;
                 options.app.urls = vec!["http://127.0.0.1:0".to_string()];
@@ -110,7 +110,7 @@ fn half_configured_mtls_fails_at_build() {
         .no_spa()
         .configure(move |app| {
             let ca_path = ca_path.clone();
-            app.useOptions(move |options| {
+            app.options(move |options| {
                 options.tls.client_ca_path = ca_path;
             });
         })

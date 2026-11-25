@@ -267,7 +267,7 @@ mediator
 ```
 
 这样只有一条跨进程传输通道（`IEventPublisher`）、一套 wire（`event_name` + JSON）和一次
-适配器实现（Redis/NATS starter 已实现事件传输）。语义/取舍见
+适配器实现（Redis/NATS 适配器 crate 已实现事件传输）。语义/取舍见
 [架构 ADR](../../design/mediator-handler-architecture.md)。
 
 ## 与直接调用 / send 的选择

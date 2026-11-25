@@ -86,6 +86,9 @@ pub use problem::*;
 pub use request_context::*;
 pub use route::*;
 pub use routing::*;
+/// Incremental-update contract owned by `rust-core`; re-exported so business
+/// crates depend on one crate name (`webx_core::IPatchable`).
+pub use rust_core::IPatchable;
 pub use secrets::*;
 pub use security::*;
 pub use stream::*;

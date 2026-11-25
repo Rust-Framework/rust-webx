@@ -51,7 +51,7 @@ fn metrics_enabled_builder() -> HostBuilder {
         .mode(AppMode::Development)
         .no_spa()
         .configure(|app| {
-            app.useOptions(|options| {
+            app.options(|options| {
                 options.metrics.enabled = true;
             });
         })

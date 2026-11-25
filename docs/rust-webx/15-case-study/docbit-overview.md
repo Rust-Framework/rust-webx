@@ -28,7 +28,7 @@ Docbit 是基于 rust-webx 构建的**开发者作品集全栈站点**，展示�
 | Tracking | `/api/tracking` | 访问统计 |
 | Cache | `/api/cache/stats` | 缓存演示 |
 
-> 完整路由定义见 `docbit/contracts/src/*.rs`。
+> 完整路由定义见 `examples/docbit/contracts/src/<context>/<operation>.rs`。
 
 ## 技术栈
 

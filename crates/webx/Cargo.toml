@@ -23,6 +23,7 @@ rust-webx-client.workspace = true
 rust-webx-macros.workspace = true
 rust-webx-spa.workspace = true
 rust-webx-openapi.workspace = true
+rust-webx-outbox.workspace = true
 rust-dix.workspace = true
 rust-dix-macros.workspace = true
 async-trait.workspace = true

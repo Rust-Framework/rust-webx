@@ -126,7 +126,7 @@ async fn healthy_metrics_scrape_reports_no_invariant_violations() {
         .mode(AppMode::Development)
         .no_spa()
         .configure(|app| {
-            app.useOptions(|options| {
+            app.options(|options| {
                 options.metrics.enabled = true;
                 options.app.max_connections = 8;
             })

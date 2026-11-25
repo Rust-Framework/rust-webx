@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Optional: stage ecosystem docs under rust-webx/docs/ for local preview.
-# Production publish copies directly from source repos — see starters/docbit/publish.sh.
+# Production publish copies directly from source repos — see examples/docbit/publish.sh.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -11,4 +11,4 @@ DOCS_DEST="${DOCS_DEST:-$WEBX_ROOT/docs}"
 source "$SCRIPT_DIR/copy-ecosystem-docs.sh"
 
 copy_ecosystem_docs "$WEBX_ROOT" "$DOCS_DEST" "${RUST_FRAMEWORK_ROOT:-}"
-echo "Done. Run: cargo run -p docbit-host"
+echo "Done. Run: cargo run --manifest-path examples/docbit/Cargo.toml -p docbit-host"

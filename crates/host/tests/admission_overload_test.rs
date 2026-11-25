@@ -22,7 +22,7 @@ async fn saturated_admission_answers_503_with_retry_after() {
         .mode(AppMode::Development)
         .no_spa()
         .configure(|app| {
-            app.useOptions(|options| {
+            app.options(|options| {
                 options.app.max_connections = 1;
                 options.server.admission_timeout_ms = 100;
                 options.metrics.enabled = true;

@@ -1,0 +1,12 @@
+[lints]
+workspace = true
+
+[package]
+name = "imbit-domain"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+imbit-contracts.workspace = true
+rust-webx-core.workspace = true

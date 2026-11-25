@@ -234,7 +234,7 @@ let logo: Option<&'static [u8]> = webx::assets::read("images/logo.png");
 
 ### 发布脚本
 
-`docbit/publish.ps1` 的 `-NoWwwroot` 跳过 `wwwroot/` 同步，产出「exe + 配置」的干净目录：
+`examples/docbit/publish.ps1` 的 `-NoWwwroot` 跳过 `wwwroot/` 同步，产出「exe + 配置」的干净目录：
 
 ```powershell
 .\publish.ps1 -Destination D:\deploy\docbit -Production -NoWwwroot

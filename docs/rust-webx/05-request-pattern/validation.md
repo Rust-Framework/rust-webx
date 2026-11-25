@@ -80,7 +80,7 @@ fn validate_slug(value: &String) -> std::result::Result<(), String> {
 ## 不要放进声明式校验的
 
 - **跨字段规则**（`password_confirm == password`、`end > start`）：字段级规则看不到其它字段
-  的最终值，放在 Handler 第一段（或领域用例）里，用 `OperationResult::failed`/`Error::Validation`
+  的最终值，放在 Handler 第一段（或领域用例）里，用 `OperationResult::failed`/`Error::validation`
   返回同样的 400 信封。
 - **依赖数据库/外部服务的唯一性**：声明式校验是纯函数；唯一性在事务内由唯一索引兜底并映射
   409。

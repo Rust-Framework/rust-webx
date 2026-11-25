@@ -7,7 +7,7 @@ mod test_utils;
 use std::collections::HashMap;
 use std::sync::Arc;
 use webx_core::action::{JsonResult, Response};
-use webx_core::auth::{DeclaredRules, IClaims, IDynamicAuthorizer};
+use webx_core::auth::{IClaims, IDynamicAuthorizer};
 use webx_core::error::{Error, Result as LrwfResult};
 use webx_core::http::{IClaimsExt, IHttpContext};
 use webx_core::route::scan::AuthorizeRule;
@@ -486,33 +486,36 @@ async fn roles_list_is_any_of() {
 
 /// One `#[authorize]` rule as seen by the authorizer: (any-of roles, any-of
 /// permissions). The list keeps the AND structure between rules.
-type DeclaredRuleSummary = (Vec<String>, Vec<String>);
+type RuleSummary = (Vec<String>, Vec<String>);
 
-/// Records the `DeclaredRules` it receives, so a test can assert the endpoint's
-/// `#[authorize]` declaration (permission/role literals) reached the backend.
+/// Records the endpoint's declared `#[authorize]` rules, so a test can assert
+/// the declaration (permission/role literals) reached the backend.
 #[derive(Default)]
 struct RecordingAuthorizer {
-    seen: std::sync::Mutex<Vec<DeclaredRuleSummary>>,
+    seen: std::sync::Mutex<Vec<RuleSummary>>,
 }
 
 impl RecordingAuthorizer {
-    fn declarations(&self) -> Vec<DeclaredRuleSummary> {
+    fn declarations(&self) -> Vec<RuleSummary> {
         self.seen.lock().unwrap().clone()
     }
 }
 
-/// Flatten `DeclaredRules` into one `(roles, permissions)` summary per rule.
-fn summarize(declared: &DeclaredRules<'_>) -> Vec<DeclaredRuleSummary> {
-    let roles: Vec<Vec<String>> = declared
-        .roles()
-        .map(|codes| codes.iter().map(|code| code.to_string()).collect())
-        .collect();
-    let permissions: Vec<Vec<String>> = declared
-        .permissions()
-        .map(|codes| codes.iter().map(|code| code.to_string()).collect())
-        .collect();
-
-    roles.into_iter().zip(permissions).collect()
+/// Flatten the declared `AuthorizeRule` slice into one `(roles, permissions)`
+/// summary per rule.
+fn summarize(declared: &'static [AuthorizeRule]) -> Vec<RuleSummary> {
+    declared
+        .iter()
+        .map(|rule| {
+            (
+                rule.roles.iter().map(|code| code.to_string()).collect(),
+                rule.permissions
+                    .iter()
+                    .map(|code| code.to_string())
+                    .collect(),
+            )
+        })
+        .collect()
 }
 
 #[async_trait::async_trait]
@@ -524,15 +527,15 @@ impl IDynamicAuthorizer for RecordingAuthorizer {
         _method: &str,
     ) -> LrwfResult<()> {
         // Must not run: this authorizer overrides the rules-aware method.
-        panic!("authorize() must not be used when authorize_with_rules is overridden");
+        panic!("authorize() must not be used when authorize_with_declared_rules is overridden");
     }
 
-    async fn authorize_with_rules(
+    async fn authorize_with_declared_rules(
         &self,
         _claims: &dyn IClaims,
         _route_pattern: &str,
         _method: &str,
-        declared: &DeclaredRules<'_>,
+        declared: &'static [AuthorizeRule],
     ) -> LrwfResult<()> {
         self.seen.lock().unwrap().extend(summarize(declared));
         Ok(())
@@ -896,10 +899,10 @@ async fn dynamic_flag_without_rules_still_requires_authentication() {
 }
 
 #[tokio::test]
-async fn dynamic_endpoint_reaches_legacy_authorize_only_implementation() {
-    // WEBX-19: the default `authorize_with_declared_rules` forwards through
-    // `authorize_with_rules` to `authorize`, so a 1.1-style authorizer (only
-    // `authorize`) still works on a dynamic endpoint without code changes.
+async fn dynamic_endpoint_reaches_authorize_only_implementation() {
+    // The default `authorize_with_declared_rules` forwards to `authorize`, so an
+    // authorizer that only implements the rule-less entry still works on a
+    // dynamic endpoint without code changes.
     let endpoint = dynamic_endpoint(
         Arc::new(AuthorizerSet::new(vec![Arc::new(AllowAllAuthorizer)])),
         SETTINGS_WRITE_RULE,
@@ -912,7 +915,7 @@ async fn dynamic_endpoint_reaches_legacy_authorize_only_implementation() {
     endpoint
         .handle(&mut ctx)
         .await
-        .expect("legacy authorize() implementation keeps working through the default");
+        .expect("an `authorize`-only implementation keeps working through the default");
     let (status, _, _) = ctx.into_response_parts();
     assert_eq!(status, 200);
 }

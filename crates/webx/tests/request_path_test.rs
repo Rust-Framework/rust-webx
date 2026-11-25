@@ -39,7 +39,7 @@ async fn spawn_host() -> u16 {
             .mode(AppMode::Development)
             .no_spa()
             .configure(|b| {
-                b.useOptions(|o| {
+                b.options(|o| {
                     o.app.max_body_size = 100;
                 });
             })

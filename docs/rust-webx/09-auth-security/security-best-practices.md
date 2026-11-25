@@ -11,7 +11,7 @@
 
 ### 签发令牌：用 `ITokenIssuer`
 
-`jwt_secret()` 进程级 shim 仅保留兼容，**当前弃用**。登录 Handler 注入 `Arc<dyn ITokenIssuer>`，由 host 用最终解析的密钥（env / `Jwt.Secret` / `Jwt.SecretFile`）以及配置的 `iss`/`aud` 签发：
+登录 Handler 注入 `Arc<dyn ITokenIssuer>`，由 host 用最终解析的密钥（env / `Jwt.Secret` / `Jwt.SecretFile`）以及配置的 `iss`/`aud` 签发：
 
 ```rust
 let issued = tokens
@@ -20,7 +20,7 @@ let issued = tokens
 issued.token // 返回给客户端；issued.jti 存吊销表
 ```
 
-- **不要**在 Handler 里读 `jwt_secret()`、自己 `jsonwebtoken::encode` 或硬编码密钥。
+- **不要**在 Handler 里自己 `jsonwebtoken::encode` 或硬编码密钥；密钥只经 `Jwt.SecretFile` / `Jwt.Secret`（或 DI 里的 `JwtSecret`）注入。
 - 自定义 issuer 用 `register_with_options` 读 `options.jwt.secret`（已解析最终值）或 DI 里的 `JwtSecret`。
 
 ### 从文件加载 JWT 密钥（1.3.0 起）
@@ -98,7 +98,7 @@ if !setup.consume(candidate) {
 | `revoke()` | 主动作废当前未消费密钥 |
 
 - 值由调用方生成：框架不引入 RNG 依赖，请用应用已有的 `uuid::Uuid::new_v4()`、`getrandom`
-  等生成高熵值后 `issue`；空值会被拒绝（`Error::Validation`）。
+  等生成高熵值后 `issue`；空值会被拒绝（`Error::validation`）。
 - 只存哈希：`issue` 存「已哈希值」、`consume` 传「候选值的哈希」即可，比较仍是常量时间，
   明文不进入内存存储（框架不带哈希实现，用应用已有的 SHA-256）。
 - 进程内存储：进程重启后未消费密钥即失效；多副本部署要用共享存储（数据库/缓存）自行实现

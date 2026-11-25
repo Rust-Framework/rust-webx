@@ -49,7 +49,7 @@ async fn spawn_host(port: u16, store: Arc<InMemorySessionStore>) {
         .use_authentication()
         .use_session_store(store)
         .configure(|b| {
-            b.useOptions(|o| {
+            b.options(|o| {
                 o.jwt.secret = test_secret().to_string();
             });
         });

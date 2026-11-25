@@ -98,8 +98,9 @@ pub struct SearchRequest {
 body 字段类型错误、`null` 赋给非 `Option` 字段都按该字段返回 400，不会被当作“缺失”回退到 query。
 
 `serde` 已注册为 `WebxRequestMeta` 的 helper attribute：请求结构体**不需要**为了默认值额外
-`#[derive(Deserialize)]`，只 derive `WebxRequestMeta` 就能让查询绑定使用默认值（3.0 的
-`PagedRequest` 依赖这一点把 `from_parts` 的缺省值下沉到 binding）：
+`#[derive(Deserialize)]`，只 derive `WebxRequestMeta` 就能让查询绑定使用默认值（2.9.1 的
+`PagedRequest` 已删除 `from_parts`，见 [upgrade-to-2.9.1.md](../16-migration/upgrade-to-2.9.1.md)：
+缺省值与范围校验由 binding 层的 `RequestModel` 实现负责）：
 
 ```rust
 fn twenty() -> u32 { 20 }

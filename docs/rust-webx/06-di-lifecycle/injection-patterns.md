@@ -59,7 +59,7 @@ pub struct ListEndpointsHandler {
 Handler 和 `IHostedService` **只依赖 trait**，不依赖具体实现类型。
 
 ```rust
-// contracts/docs.rs — 接口与 DTO（仅依赖框架）
+// contracts/docs/service.rs — 接口与 DTO（仅依赖框架）
 pub trait IDocumentService: Send + Sync {
     fn list_works(&self) -> Result<Vec<String>, String>;
     fn content(&self, work: &str, path: &str) -> Result<DocContent, String>;
@@ -72,7 +72,7 @@ pub struct DocService;
 #[inject]
 impl IDocumentService for DocService { ... }
 
-// handlers/docs.rs — Handler 消费接口
+// handlers/docs/get_doc_content.rs — Handler 消费接口
 #[derive(Inject)]
 pub struct GetDocContentHandler {
     #[inject]
@@ -94,24 +94,20 @@ pub struct GetDocContentHandler {
 ## 组合根：只注册基础设施
 
 `main.rs` 用 `HostBuilder` 注册 rust-dix 无法自行构造的基础设施。扩展方法写在
-`host/src/startup/extensions/`：
+`host/src/startup/services/`：
 
 ```rust
 Host::builder()
-    .register(|svc| svc.add_docbit_db())   // SQLite DbContext
+    .register(move |svc| svc.add_docbit_db(db))   // SQLite DbContext（共享 Arc<DbContextOptions>）
     .use_spa("wwwroot")
     .use_authentication()
     .build();
 ```
 
 ```rust
-// host/src/startup/extensions/service_collection.rs
+// host/src/startup/services/service_collection.rs
 impl ServiceCollectionExt for ServiceCollection {
-    fn add_docbit_db(self) -> Self {
-        let path = app_base().join("app.db");
-        let mut db = DbContextOptionsBuilder::new();
-        db.use_sqlite(&path.to_string_lossy());
-        let options = Arc::new(db.build());
+    fn add_docbit_db(self, options: Arc<DbContextOptions>) -> Self {
         self.scoped(move |_| Arc::new(DbContext::from_options(&options).unwrap()))
     }
 }
@@ -140,15 +136,17 @@ struct DbInitService {
 
 async fn start(&self) -> Result<()> {
     let scope = self.services.create_scope();
-    let mut ctx: DbContext = scope
-        .get_owned()
-        .map_err(|e| Error::Internal(format!("DbContext resolution failed: {}", e)))?;
+    // `RdiError` → `webx::Error` 的 `From` 已提供，直接 `?`
+    let mut ctx: DbContext = scope.get_owned()?;
     // ...
     Ok(())
 }
 ```
 
-实体与领域逻辑在 `domain/`；建表由 `ctx.ensure_created()` 在启动时完成，框架不提供版本化迁移。
+实体与领域逻辑在 `domain/`。建表分两种：生产库走 rust-ef 的**版本化迁移**
+（`ctx.migrate("Migrations")` 或新库 `ctx.bootstrap()`，配套 `MigrationStore`、
+`MigrationEngine::diff/apply_diff`、`has_drift()` 接 readiness）；参考应用与测试在启动时用
+`ctx.ensure_created()` 直接按模型建表（仅演示/测试用途）。
 
 ## 服务间依赖链
 

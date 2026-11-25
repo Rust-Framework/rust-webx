@@ -15,7 +15,8 @@ Docbit 是 rust-webx 的**官方参考实现**。读完本章，你应能将其�
 ## 运行
 
 ```bash
-cargo run -p docbit-host
+# 参考应用位于 examples/docbit/，是独立 workspace
+cargo run --manifest-path examples/docbit/Cargo.toml -p docbit-host
 # 访问 http://localhost:5000
 ```
 

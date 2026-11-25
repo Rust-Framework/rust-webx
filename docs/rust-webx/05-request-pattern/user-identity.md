@@ -29,10 +29,10 @@ pub struct CreateOrderRequest {
 impl IRequestHandler<CreateOrderRequest, OrderView> for CreateOrderHandler {
     async fn handle(&mut self, req: CreateOrderRequest) -> ActionResult<OrderView> {
         if req.user_id.is_empty() {
-            return Err(Error::Unauthorized("login required".into()));
+            return Err(Error::unauthorized("login required"));
         }
         if req.tenant_id.is_empty() {
-            return Err(Error::Forbidden("tenant missing".into()));
+            return Err(Error::forbidden("tenant missing"));
         }
         let is_admin = req.roles.iter().any(|role| role == "admin");
         // ……真正开始写业务
@@ -303,7 +303,7 @@ let order = handler.handle(req).await?;
 | 编译错误提示 `IdentityUser` 必须标记来源 | 忘记 `#[fromclaim]` | 加 `#[fromclaim]` |
 | 编译错误提示 `anonymous access must be declared explicitly` | 可选身份只写了 `#[fromclaim]` | 改成 `#[fromclaim(optional)]` |
 | 编译错误提示 `only one identity field` | 请求里同时有 `user` 与 `viewer` | 只保留一个身份字段 |
-| 身份字段始终为空 | 路由没启用认证 / 令牌没有对应 claim | 检查 `add_authentication()` 与令牌内容 |
+| 身份字段始终为空 | 路由没启用认证 / 令牌没有对应 claim | 检查 `use_authentication()` 与令牌内容 |
 | 客户端能读到别的租户数据 | 租户取自请求参数 | 一律取 `user.tenant()` / `req.tenant_id()` |
 | 匿名接口返回 401 | 用了 `IdentityUser` 而不是 `Option<IdentityUser>` | 按场景选择类型（可选身份需 `#[fromclaim(optional)]`） |
 

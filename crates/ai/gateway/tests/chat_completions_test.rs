@@ -124,7 +124,7 @@ async fn spawn_host() -> String {
         .no_spa()
         .use_authentication()
         .configure(|app| {
-            app.useOptions(|options| {
+            app.options(|options| {
                 options.jwt.secret = JWT_SECRET.to_string();
             });
         })

@@ -217,7 +217,7 @@ async fn oversized_body_still_gets_cors_headers() {
             ..Default::default()
         })
         .configure(|app| {
-            app.useOptions(|o| o.app.max_body_size = 64);
+            app.options(|o| o.app.max_body_size = 64);
         })
         .build();
     let handle = host.server_handle();

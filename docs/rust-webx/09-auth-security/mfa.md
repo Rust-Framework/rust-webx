@@ -98,7 +98,7 @@ use webx_mfa::{MfaAssurance, TotpConfig, AMR_PASSWORD};
 
 // 1) 密码步：验证密码后看账号是否启用 MFA
 if !hasher.verify(&password, &account.password_hash)? {
-    return Err(Error::Unauthorized("invalid credentials".to_string()));
+    return Err(Error::unauthorized("invalid credentials".to_string()));
 }
 if account.mfa_enabled {
     // 受限 token：只有 amr=pwd、没有 acr、短 TTL；或返回 mfa_required + OneTimeSecret challenge
@@ -121,7 +121,7 @@ session_store.revoke(&limited_jti).await?; // 撤销第 1 步的受限会话
 
 // 4) step-up 端点：敏感操作要求第二次验证
 if !MfaAssurance::satisfies_step_up(claims.extra.get("acr").map(String::as_str)) {
-    return Err(Error::Forbidden("mfa step-up required".to_string()));
+    return Err(Error::forbidden("mfa step-up required".to_string()));
 }
 ```
 

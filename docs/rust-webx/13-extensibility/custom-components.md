@@ -21,9 +21,9 @@ impl TenantBuilderExt for HostBuilder {
             // 普通组件仍走 DI 注册
             .register(move |svc| svc.singleton::<TenantResolver>(move |_| Arc::clone(&for_di)))
             // 中间件必须通过 HostBuilder 扩展方法注册（不能在 register 闭包内直接添加）
-            .use_middleware_with(move || {
+            .use_middleware(MiddlewareSpec::factory(move || {
                 Arc::new(TenantMiddleware::new(Arc::clone(&for_mw))) as Arc<dyn IMiddleware>
-            })
+            }))
     }
 }
 ```
@@ -34,7 +34,7 @@ impl TenantBuilderExt for HostBuilder {
 Host::builder().use_multi_tenant(config).build()
 ```
 
-`use_middleware::<T>()` 注册无参中间件；需要构造参数时用 `use_middleware_with`。
+`MiddlewareSpec::new::<T>()` 注册 `Default` 中间件；需要构造参数时用 `MiddlewareSpec::factory(..)`。
 
 ## 封装服务组件
 

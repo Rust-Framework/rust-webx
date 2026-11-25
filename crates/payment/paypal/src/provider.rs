@@ -579,7 +579,7 @@ pub trait PayPalHostBuilderExt: Sized {
     /// Register the adapter with runtime configuration.
     ///
     /// Binds the `"PayPal"` configuration section through
-    /// `add_options_monitor`, so appsettings/file reloads are picked up by the
+    /// `add_options`, so appsettings/file reloads are picked up by the
     /// runtime cache (default 60s) or immediately after
     /// `Payments::invalidate`.
     fn add_paypal(self) -> Self;
@@ -590,7 +590,7 @@ pub trait PayPalHostBuilderExt: Sized {
 
 impl PayPalHostBuilderExt for HostBuilder {
     fn add_paypal(self) -> Self {
-        let builder = self.add_options_monitor::<PayPalOptions>("PayPal");
+        let builder = self.add_options::<PayPalOptions>("PayPal");
         builder.register(|services| {
             services
                 .add_payment_provider_factory_lazy(|resolver| {

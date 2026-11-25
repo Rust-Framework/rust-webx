@@ -427,7 +427,7 @@ async fn integration_metrics_endpoint_when_enabled() {
     let port = find_free_port();
     spawn_test_host_with(port, |b| {
         b.configure(|app| {
-            app.useOptions(|o| o.metrics.enabled = true);
+            app.options(|o| o.metrics.enabled = true);
         })
     })
     .await;

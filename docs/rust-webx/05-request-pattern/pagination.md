@@ -158,6 +158,27 @@ impl IRequestHandler<ListMessagesRequest, CursorPage<MessageDto>> for ListMessag
 - **编码器用框架的**：`Cursor::encode` / `Cursor::decode` 负责不透明编码；业务只决定排序键组成。
 - 第一页传 `cursor=None`；响应 `cursor=None` 表示结束。
 
+## 为什么保留两套（不是重复设计）
+
+两套契约服务的是不同的查询模式，不能用一个类型的“可选字段”同时表达：
+
+| | offset（`PagedRequest` / `PagedResult`） | keyset（`KeysetRequest` / `CursorPage`） |
+|---|---|---|
+| 能做什么 | 任意跳页、返回 `total`、后台管理/小列表 | 只取“游标之后 N 行”，无 `total`、无跳页 |
+| 深页成本 | `OFFSET` 随页数线性变慢 | 按稳定排序键 seek，深页成本稳定 |
+| 并发写入 | 翻页可能重复/漏行（除非排序唯一且业务接受） | 以游标为界，不受已读区插入/删除影响 |
+| 响应形状 | 扁平业务页 `{success,status,message,items,total}` | 纯游标页 `{items,cursor?,has_more}`，不含业务状态字段 |
+| 归一化 | 默认值/`1..=100` 校验在绑定层（越界 400） | `KeysetRequest::from_parts` 负责默认值/夹紧（历史契约） |
+
+把两者合成为一个带 `total: Option<...>`、`cursor: Option<...>` 的“万能页”，会让互斥字段
+同时存在、wire 形状依赖运行期取值，客户端也必须理解“什么时候该看哪个字段”。显式两套类型
+让不可能状态在类型层不出现；代价是应用要按场景选一套，而不是两套混用。
+
+现状边界（2.x 保持兼容）：offset 与 keyset 的归一化位置不同（前者在绑定层 fail-closed，
+后者仍是 `from_parts` 夹紧）；`CursorPage` 也没有 `PagedResult` 的 `success/status/message`
+业务信封字段。不要在同一个端点里混用，也不要为某个端点再造第三种分页结构；若未来 major
+统一两套契约，按兼容政策单独出迁移指南，不在 2.x 补丁里改。
+
 ## 反例
 
 ```rust

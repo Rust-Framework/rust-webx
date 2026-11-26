@@ -144,7 +144,7 @@ pub trait IDynamicAuthorizer: Send + Sync {
 
 只覆写 `authorize` 即可获得无规则兜底：`authorize_with_declared_rules` 的默认实现转调它。
 需要端点声明的角色/权限（`#[authorize]` 的字面量）时实现 `authorize_with_declared_rules`；
-框架调用的就是后者，没有第二套声明视图（`DeclaredRules` / `authorize_with_rules` 已在 2.9.1 删除）。
+框架调用的就是后者，没有第二套声明视图（`DeclaredRules` / `authorize_with_rules` 已在 2.9.1 删除）。 <!-- docs:allow-stale-api -->
 
 - `route_pattern` 与 `IEndpointCatalog` 的 `path`、运行时 `route_pattern()` 是同一个字符串；
   它**不是**具体请求路径，参数变化不会改变键，适合做授权资源键。

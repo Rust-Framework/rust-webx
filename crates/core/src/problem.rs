@@ -1,4 +1,4 @@
-//! RFC 7807 / RFC 9457 Problem Details for HTTP APIs.
+//! RFC 9457 Problem Details for HTTP APIs (supersedes RFC 7807).
 //!
 //! Standard error response format for machine-readable errors.
 //!

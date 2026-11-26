@@ -14,7 +14,7 @@
 |---|---|---|
 | `x-request-id` / `x-trace-id` / `RequestContext::trace_id()` | RequestId、RequestTracing 中间件 | 这是**哪一次**请求（关联键） |
 | span 树（本文） | engine pipeline、host 端点、认证中间件、engine context | 请求**在每一层花了多久、落在哪条路由、失败在哪一阶段** |
-| RED 指标（`http.requests` 等） | MetricsMiddleware / `HttpMetrics` | 聚合成功率、延迟分布、inflight、连接 gauge |
+| RED 指标（`http_requests_total` 等） | MetricsMiddleware / `HttpMetrics` | 聚合成功率、延迟分布、inflight、连接 gauge |
 
 原则：
 
@@ -181,7 +181,7 @@ token 过期等）时读 session 层信号（`IConnection::close_reason()`、`Ss
 | `RequestTracing`（`x-trace-id`、日志、`traceparent`） | trace id 分配 + 每请求访问日志 | 根 span 读同一个 trace id；日志保留，不重复 |
 | `problem+json.traceId` | 错误响应的关联键 | 与根 span / 响应头同值 |
 | `TimingMiddleware` / `RequestTracing::after` | 每请求耗时与结果日志 | 短期保留；span 提供分层分解，不替代日志 |
-| RED 指标（`http.requests` 等） | 聚合成功率/延迟/inflight/连接 gauge | span 是单请求因果视图；采样后指标仍是全量，见 [metrics.md](../rust-webx/11-production/metrics.md) |
+| RED 指标（`http_requests_total` 等） | 聚合成功率/延迟/inflight/连接 gauge | span 是单请求因果视图；采样后指标仍是全量，见 [metrics.md](../rust-webx/11-production/metrics.md) |
 | WS/SSE 连接指标与 `on_close` 钩子 | 连接计数、业务收尾 | `connection.*` 事件只做生命周期轨迹，二者互补 |
 
 设计准则（不可观测系数、故障必须可解释）见

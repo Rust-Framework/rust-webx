@@ -1,7 +1,7 @@
 //! Health check registry tests.
 //!
 //! Tests the HealthCheckRegistry API: snapshot, overall_status, and
-//! the build_health_response helper for RFC 8407 compliance.
+//! the build_health_response helper for IETF API Health Check compliance.
 
 use std::sync::Arc;
 use webx_host::health::{HealthCheckRegistry, HealthStatus};

@@ -1,4 +1,4 @@
-//! RFC 7807 Problem Details helpers for consistent HTTP error responses.
+//! RFC 9457 Problem Details helpers for consistent HTTP error responses.
 
 use std::collections::HashMap;
 use webx_core::http::IHttpContext;

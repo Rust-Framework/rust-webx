@@ -94,7 +94,7 @@ rust-webx is opinionated on purpose: it does not try to be the smallest router. 
 - **Transactional outbox** — `rust-webx-outbox` ships the port, the lease-based `OutboxDispatcher` (through `EventDispatcher`: backoff, dead-letter, retention) and an `InMemoryOutbox` default, registered with `add_outbox`. Same-transaction enqueue is data adaptation: a non-published EF reference lives in `examples/adapters/outbox/ef` (`add_outbox_ef`).
 - **Realtime at IM scale** — one event model with two delivery classes (`EventDelivery::Competing` vs `Broadcast`): `RealtimeFanoutEvent` / `RealtimeUserFanoutEvent` fan out across nodes through the same `IEventPublisher` (Redis Pub/Sub, a NATS broadcast subject, a RabbitMQ fanout exchange), `RedisRealtimeEventStore` shares the replay log, `IOnlinePresence` (+ Redis implementation and a host heartbeat bridge) shares online state, and `WebSocketLimits::with_session_revalidation` closes a live socket when its JWT/cookie session is revoked (close `1008`). See the [multi-instance realtime guide](docs/rust-webx/11-production/realtime-cluster.md).
 - **Mobile push** — `IPushSender` with a three-way outcome (`Accepted`/`TokenInvalid`/`Retryable`) so dead device tokens are not mistaken for server errors; `HostBuilder::use_push` wires APNs (`rust-webx-apns`) or FCM (`rust-webx-fcm`), and `InMemoryPushSender` captures pushes in tests. See the [push guide](docs/rust-webx/13-extensibility/push-notifications.md).
-- **Ports, not starters** — every infrastructure capability is a port (`IIdempotencyStore`, `IOutbox`, `ISessionStore`, `IObjectStore`, `IMeter`, `IAdvisoryLock`, `IEmailSender`, …) that either ships a zero-config in-memory default (`IIdempotencyStore`, `IOutbox`, `IObjectStore`, `IMeter`, `IAdvisoryLock`) or deliberately has no default implementation (the notification and push senders), so a missing adapter fails at startup as a DI error instead of silently no-op'ing. Entities, tables and the data/logic adaptation belong to the downstream service: implement the port in your crate, or copy a non-published reference adapter from `examples/adapters/` and run the port contracts in `testing/contract-tests`. See the [ports & adapters guide](docs/rust-webx/13-extensibility/integrations.md).
+- **Ports, not starters** — every infrastructure capability is a port (`IIdempotencyStore`, `IOutbox`, `ISessionStore`, `IObjectStore`, `IMeter`, `IAdvisoryLock`, `IEmailSender`, …) that either has an in-memory implementation you register explicitly (`IIdempotencyStore`, `IOutbox`, `IObjectStore`, `IAdvisoryLock`, `IMeter`) or deliberately has no default (the notification and push senders); a missing adapter fails at startup as a DI error instead of silently no-op'ing. Entities, tables and the data/logic adaptation belong to the downstream service: implement the port in your crate, or copy a non-published reference adapter from `examples/adapters/` and run the port contracts in `testing/contract-tests`. See the [ports & adapters guide](docs/rust-webx/13-extensibility/integrations.md).
 - **Endpoint metadata service** — `IEndpointCatalog` exposes every endpoint at runtime (`all()` / `localized()`), so permission sync, admin navigation and OpenAPI share one source.
 - **Localization** — `#[display]` / `#[description]` / `#[category]` store resource keys; a host-wide `Culture.Default` selects the language, with `.json` resources or `include_str!` embedding.
 - **Production capabilities out of the box** — graceful shutdown, live health checks, security headers, request IDs, CORS, TLS, rate limiting, compression, OpenAPI + SPA hosting.
@@ -119,7 +119,7 @@ rust-webx is opinionated on purpose: it does not try to be the smallest router. 
 | **Performance without giving up correctness** | Allocation counts, wire-level correctness and stability suites are release gates. See the [allocation budget](docs/design/alloc-budget.md) and [stability gates](docs/design/stability-gates.md). |
 | **Production admission and lifecycle** | One global connection governor across all listeners, first-request deadline, HTTP/2 keepalive, graceful/immediate shutdown guards, Host single-use state, and per-worker SSE drain. |
 | **Errors that downstream systems can trust** | Error responses are written before reverse `after` hooks, so metrics/tracing/compression see the real status; representation headers from a failed success path are stripped and `problem+json` is consistent. |
-| **Native-first integrations** | `rust-dix` 1.0 DI scopes, `rust-ef` 2.6+ ORM (verified paired with rust-ef 2.9.1), JWT/session/password ports, and `rust-webx-client` are framework capabilities rather than ad-hoc app glue. |
+| **Native-first integrations** | `rust-dix` 1.1 DI scopes, `rust-ef` 2.6+ ORM (verified paired with rust-ef 2.9.1), JWT/session/password ports, and `rust-webx-client` are framework capabilities rather than ad-hoc app glue. |
 | **Explicit HTTP vs in-process capabilities** | `#[handler]` without a route is mediator-only; a route adds the response encoder. No `#[handler(in_process)]`-style mode flag and no hidden HTTP endpoint for a command handler. |
 
 The numbers above are a local same-window comparison, not a capacity guarantee.
@@ -129,109 +129,34 @@ regression signals; the full method and budget live in the
 
 ## Architecture
 
-The framework is split into a small set of focused crates, re-exported through the `rust-webx` umbrella crate:
+`rust-webx` is a thin umbrella over a small runtime core; optional domain groups are
+separate crates so projects do not pay for capabilities they do not use:
 
-```
-┌──────────────────────────────────────────────────────────┐
-│              rust-webx  (umbrella crate)                  │
-│  re-exports core / host / macros / spa / openapi + rust_dix│
-├──────────┬──────────┬──────────┬─────────────────────────┤
-│rust-webx-│rust-webx-│rust-webx-│ rust-webx-macros         │
-│host      │core      │engine    │ #[get] #[post] #[handler]│
-│Host +    │traits +  │worker    │ #[authorize] #[fromclaim]│
-│pipeline  │config    │pool +    │                          │
-│          │          │dispatch  │                          │
-├──────────┴──────────┴──────────┴─────────────────────────┤
-│                    rust-webx-core                        │
-│  IHost / IHttpContext / IMiddleware / IRequestHandler    │
-│  IMediator / AppOptions / Error / AppMode                │
-└──────────────────────┬───────────────────────────────────┘
-                       │
-          ┌────────────┼────────────┐
-          ▼            ▼            ▼
-   ┌──────────┐ ┌──────────┐ ┌──────────┐
-   │ rust-dix │ │  hyper   │ │inventory │
-   │ (DI)     │ │ (HTTP)   │ │ (route   │
-   └──────────┘ └──────────┘ └────╌─────┘
-                                   collection
+```text
+rust-webx (umbrella)
+├── core       contract traits + shared rust-core re-exports
+├── engine     HTTP execution: workers, router, pipeline, transports
+├── host       assembly: auth, middleware, health, WebSocket, presence, DI
+├── macros     #[get]/#[handler]/#[authorize]/#[derive(WebxRequestMeta)]
+├── spa / openapi / client / outbox
+└── optional: ai, auth, cache(redis), queue(nats/rabbitmq/kafka),
+              payment, push(apns/fcm), transport(h3)
 ```
 
-### Crate layout
+The authoritative generated crate list (30 published crates, package/import names,
+publish status) is in [crate-layout.md](docs/rust-webx/04-architecture/crate-layout.md).
 
-```
-rust-webx/
-├── Cargo.toml                 # workspace root — published runtime crates
-├── crates/
-│   ├── core/                  # rust-webx-core  — traits, configuration, rust-core re-exports
-│   ├── engine/                # rust-webx-engine — worker pool, direct dispatch
-│   │                          #   zero-copy context, pipeline, TLS/HTTP2
-│   ├── host/                  # rust-webx-host  — Host builder, middleware
-│   │                          #   routing/health/SPA adapters over the engine
-│   ├── macros/                # rust-webx-macros — procedural macros
-│   ├── spa/                   # rust-webx-spa   — static-file / SPA middleware
-│   ├── openapi/               # rust-webx-openapi — OpenAPI spec generation + UI
-│   ├── client/                # rust-webx-client — outbound HTTP: pool, streaming, SSE
-│   ├── webx/                  # rust-webx       — umbrella crate (re-exports)
-│   ├── ai/                    # AI domain group
-│   │   ├── core/              #   rust-webx-ai         — gateway domain kit
-│   │   └── gateway/           #   rust-webx-ai-gateway — OpenAI-compatible /v1
-│   ├── auth/                  # authentication domain group
-│   │   ├── oidc/              #   rust-webx-oidc
-│   │   ├── oauth2/            #   rust-webx-oauth2
-│   │   ├── mfa/               #   rust-webx-mfa
-│   │   └── webauthn/          #   rust-webx-webauthn
-│   ├── cache/                 # third-party cache adapters
-│   │   └── redis/             #   rust-webx-redis — IDistributedCache + event transport
-│   ├── queue/                 # third-party message-queue adapters
-│   │   ├── nats/              #   rust-webx-nats
-│   │   ├── rabbitmq/          #   rust-webx-rabbitmq
-│   │   └── kafka/             #   rust-webx-kafka
-│   ├── push/                  # push provider adapters
-│   │   ├── apns/              #   rust-webx-apns — APNs (HTTP/2 token auth)
-│   │   └── fcm/               #   rust-webx-fcm — Firebase Cloud Messaging HTTP v1
-│   ├── transport/             # optional non-hyper listener backends
-│   │   └── h3/                #   rust-webx-h3 — HTTP/3 (QUIC + rustls + h3)
-│   ├── payment/               # payment domain group (opt-in)
-│   │   ├── core/              #   rust-webx-pay — ports, models, Payments runtime
-│   │   ├── stripe/            #   rust-webx-pay-stripe
-│   │   ├── alipay/            #   rust-webx-pay-alipay
-│   │   ├── wechatpay/         #   rust-webx-pay-wechatpay
-│   │   ├── paypal/            #   rust-webx-pay-paypal
-│   │   ├── adyen/             #   rust-webx-pay-adyen
-│   │   └── square/            #   rust-webx-pay-square
-│   └── outbox/                #   rust-webx-outbox — outbox port, dispatcher, InMemoryOutbox
-├── examples/                  # reference apps & adapters (one cargo workspace each, own lockfile)
-│   ├── docbit/                #   portfolio + blog + RBAC + docs site
-│   ├── dmbit/                 #   device & inventory management
-│   ├── imbit/                 #   real-time IM (WS + signaling)
-│   └── adapters/              #   non-published reference adapters (publish = false)
-│       └── ai|auth|idempotency|outbox|payment/ef/   # ports implemented on rust-ef (copy, never depend)
-├── testing/                   # non-published test harnesses (publish = false)
-│                              #   alloc-probe / contract-tests / upgrade-smoke / load-probe
-└── fuzz/                      # standalone cargo-fuzz workspace (nightly CI)
-```
+### Crate layout and imports
 
-> **Package vs import name**: the dependency is `rust-webx`, the code is
-> `use webx::*;`. Same for the sub-crates — `rust-webx-core` → `webx_core`,
-> `rust-webx-engine` → `webx_engine`, `rust-webx-host` → `webx_host`,
-> `rust-webx-macros` → `webx_macros`,
-> `rust-webx-spa` → `webx_spa`, `rust-webx-openapi` → `webx_openapi`,
-> `rust-webx-ai` → `webx_ai`, `rust-webx-client` → `webx_client`,
-> `rust-webx-ai-gateway` → `webx_ai_gateway`,
-> `rust-webx-oidc` → `webx_oidc`,
-> `rust-webx-oauth2` → `webx_oauth2`, `rust-webx-mfa` → `webx_mfa`,
-> `rust-webx-webauthn` → `webx_webauthn`, `rust-webx-redis` → `webx_redis`,
-> `rust-webx-nats` → `webx_nats`, `rust-webx-rabbitmq` → `webx_rabbitmq`,
-> `rust-webx-kafka` → `webx_kafka`, `rust-webx-outbox` → `webx_outbox`,
-> `rust-webx-pay` → `webx_pay`,
-> `rust-webx-pay-stripe` → `webx_pay_stripe`, `rust-webx-pay-alipay` → `webx_pay_alipay`,
-> `rust-webx-pay-wechatpay` → `webx_pay_wechatpay`, `rust-webx-pay-paypal` → `webx_pay_paypal`,
-> `rust-webx-pay-adyen` → `webx_pay_adyen`, `rust-webx-pay-square` → `webx_pay_square`,
-> `rust-webx-h3` → `webx_h3`.
-> `rust-webx-apns` → `webx_apns`, `rust-webx-fcm` → `webx_fcm`.
->
-> The `*-ef` reference adapters under `examples/adapters/` are **not dependencies**:
-> they are `publish = false`, so they have no crates.io package and no import name to rely on.
+The authoritative, generated list of published crates (package name, import name, publish
+status, grouping and responsibility) lives in
+[docs/rust-webx/04-architecture/crate-layout.md](docs/rust-webx/04-architecture/crate-layout.md).
+It is produced from `cargo metadata`, so this README intentionally keeps no second copy;
+only the categories you usually depend on are mentioned above.
+
+> **Package vs import name**: the dependency is `rust-webx`, the code is `use webx::*;`.
+> Sub-crate package/import pairs are listed in the generated crate table; the rule is
+> `rust-webx-<name>` → `webx_<name>` (with `rust-webx` → `webx`).
 
 ## Request-as-Endpoint: Hello World
 
@@ -488,33 +413,19 @@ See the configuration chapter under `docs/rust-webx/` for the full variable refe
 
 `webx::Error` is `rust_core::AppError` (2.9.1: a kind + private fields, built through constructors,
 read through accessors — the 2.9 enum is gone). `kind` decides the default status/code/retryable;
-constructors can tighten it:
+constructors can tighten it. The stable constructor → `code`/status/retryable mapping, fallback
+rules and the `ERROR_CODES` registry are documented once in
+[error-codes.md](docs/design/error-codes.md); don't duplicate that table in application code.
 
-| Constructor | HTTP status | `code` | Retryable | Meaning |
-|-------------|-------------|--------|-----------|---------|
-| `Error::validation(msg)` | 400 | `validation_failed` | no | Validation failure (with `with_field`) |
-| `Error::bad_request(msg)` | 400 | `bad_request` | no | Invalid input |
-| `Error::invalid_json(err)` | 400 | `invalid_json` | no | Request (de)serialization error |
-| `Error::unauthorized(msg)` | 401 | `unauthorized` | no | Authentication failed / missing token |
-| `Error::forbidden(msg)` | 403 | `forbidden` | no | Insufficient permissions |
-| `Error::not_found(msg)` | 404 | `not_found` | no | Resource not found |
-| `Error::route_not_found(msg)` | 404 | `not_found` | no | Routing miss |
-| `Error::conflict(msg)` | 409 | `conflict` | no | Optimistic concurrency / state conflict |
-| `Error::conflict_retryable(msg)` | 409 | `conflict` | yes | Conflict that resolves by retrying |
-| `Error::payload_too_large(msg)` | 413 | `payload_too_large` | no | Request body or uploaded file too large |
-| `Error::unsupported_media_type(msg)` | 415 | `unsupported_media_type` | no | Unsupported request content type |
-| `Error::too_many_requests(secs, msg)` | 429 | `too_many_requests` | yes | Rate limited (`Retry-After`) |
-| `Error::unavailable(msg)` | 503 | `service_unavailable` | yes | Upstream unavailable / timeout |
-| `Error::internal(operator)` / `Error::state(operator)` | 500 | `internal_error` | no | Server-side defect; `public_detail() = None` |
-| `Error::di(operator)` | 500 | `dependency_injection` | no | DI container / composition-root defect |
-| `Error::response_serialization(err)` | 500 | `internal_error` | no | Response encoding failed (server-side DTO defect) |
-| `Error::status(code, msg)` | `code` | derived from status | derived | Explicit status override |
-| `ProblemDetails::validation(..).to_error()` | 400 | `validation_failed` | no | Field-level binding/validation problem carrying `errors` |
+Common examples:
+
+- `Error::validation(msg)` → `400 validation_failed`
+- `Error::not_found(msg)` → `404 not_found`
+- `Error::internal(operator)` → `500 internal_error` (operator is log-only)
 
 Boundary errors need no adapter: `EFError` and `RdiError` implement `From` in their own crates, so
 handlers just use `?`. The classification authority is
-[`app-error-migration.md`](docs/design/app-error-migration.md); the code registry is
-`rust_core::error_codes::ERROR_CODES`.
+[app-error-migration.md](docs/design/app-error-migration.md).
 
 ## Documentation
 

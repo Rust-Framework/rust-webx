@@ -42,7 +42,7 @@
 | `Content(...)` / `Text(...)` | `ContentResult` | 文本/字节响应 |
 | `appsettings.json` | `appsettings.json` | 配置文件 |
 | `IConfiguration` | `AppOptions` | 配置访问 |
-| `ProblemDetails` | `ProblemDetails` | RFC 7807 |
+| `ProblemDetails` | `ProblemDetails` | RFC 9457 |
 | `UseMiddleware<T>()` | `use_middleware(MiddlewareSpec::new::<T>())` | 中间件注册（spec 化） |
 | `UseAuthentication()` | `use_authentication()` | 认证 |
 | `UseAuthorization()` | 自动（`#[authorize]` 规则组在 endpoint 执行） | 授权 |

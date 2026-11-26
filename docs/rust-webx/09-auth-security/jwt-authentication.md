@@ -160,7 +160,7 @@ let issued = self.tokens.issue(
 
 ## 小结
 
-> 2.5 的全局签名密钥 shim（`init_jwt_secret` / `jwt_secret()`）已在 2.9.1 删除，没有替代的
+> 2.5 的全局签名密钥 shim（`init_jwt_secret` / `jwt_secret()`）已在 2.9.1 删除，没有替代的 <!-- docs:allow-stale-api -->
 > 全局入口。密钥只存在于配置与 DI：`Jwt.SecretFile`（解析顺序 env > `Jwt.Secret` > 文件，启动期
 > 解析为 `webx::JwtSecret`）；自定义 issuer 用 `HostBuilder::register_with_options(|svc, options| …)`
 > 读 `options.jwt.secret`。业务代码注入 `Arc<dyn ITokenIssuer>` 并调用 `issue(TokenClaims)`，

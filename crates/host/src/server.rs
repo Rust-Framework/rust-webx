@@ -1277,7 +1277,7 @@ impl HostBuilder {
 
     /// Register an error-response writer.
     ///
-    /// Writers are tried in registration order before the default RFC 7807
+    /// Writers are tried in registration order before the default RFC 9457
     /// `problem+json` path. This is how an OpenAI-compatible `/v1/` surface can
     /// answer with `{"error": {...}}` while the rest of the host keeps
     /// `problem+json`:
@@ -1493,7 +1493,7 @@ impl HostBuilder {
     /// Register a health check through [`HealthCheckSpec`].
     ///
     /// Health checks are exposed via `/health` and `/health/ready` endpoints
-    /// following RFC 8407 (`application/health+json`). The spec carries the
+    /// following the IETF API Health Check draft (`application/health+json`). The spec carries the
     /// name, the sync/async probe and its timeout, so there is one registration
     /// entry:
     ///
@@ -2622,7 +2622,7 @@ impl HostBuilder {
             )?;
         }
 
-        // Health check endpoints (RFC 8407 application/health+json)
+        // Health check endpoints (IETF API Health Check application/health+json)
         // Probes are evaluated on each request (not baked at build time).
         let health_registry = Arc::clone(&self.health_registry);
         let health_endpoint: Arc<dyn IEndpoint> =

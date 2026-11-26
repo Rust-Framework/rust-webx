@@ -46,33 +46,33 @@ RFC 9457 problem 响应的扩展成员（不是“另一种信封”，客户端
 
 | `code` | `status` | `retryable` | 含义 | 产生路径 |
 |---|---|---|---|---|
-| `bad_request` | 400 | false | 通用客户端请求错误 | `Error::Http`；`Status(400)` |
-| `invalid_json` | 400 | false | 请求 JSON 无法解析 | `Error::Serialization` |
-| `validation_failed` | 400 | false | 字段/跨字段校验失败 | `Error::Validation`；`ProblemDetails::validation` |
-| `unauthorized` | 401 | false | 未认证或凭证无效 | `Error::Unauthorized` |
-| `forbidden` | 403 | false | 已认证但无权限 | `Error::Forbidden` |
-| `not_found` | 404 | false | 业务资源不存在 | `Error::NotFound`；`ProblemDetails::not_found` |
-| `route_not_found` | 404 | false | 没有匹配的路由 | `Error::Routing` |
-| `method_not_allowed` | 405 | false | 路径存在但方法不允许 | `Status(405)` 兜底 |
-| `conflict` | 409 | false | 并发/状态冲突（永久冲突） | `Error::Conflict` |
-| `conflict_retryable` | 409 | **true** | 可等待的冲突：冲突方完成后重试可能成功 | `Error::conflict_retryable` |
-| `payload_too_large` | 413 | false | 请求体或单个上传文件超限 | `Error::PayloadTooLarge` |
-| `unsupported_media_type` | 415 | false | 端点不支持该 content-type | `Error::UnsupportedMediaType` |
-| `unprocessable_entity` | 422 | false | 语义不可处理 | `Status(422)` 兜底 |
-| `too_many_requests` | 429 | **true** | 被限流，可退避重试；typed 变体同时写 `Retry-After` | `Error::too_many_requests`；`Status(429)` 兜底 |
-| `dependency_injection` | 500 | false | DI 解析/装配失败（服务端缺陷） | `Error::Di` |
-| `internal_error` | 500 | false | 未分类服务端错误 | `Error::Internal`；`Error::Message`；`Status(500)` |
-| `invalid_state` | 500 | false | 状态机/编程错误（如响应已写出） | `Error::State` |
-| `response_serialization` | 500 | false | 响应 DTO 序列化失败（服务端缺陷） | `Error::ResponseSerialization` |
-| `not_implemented` | 501 | false | 功能未实现 | `Status(501)` 兜底 |
-| `bad_gateway` | 502 | **true** | 上游返回非法响应 | `Status(502)` 兜底 |
-| `service_unavailable` | 503 | **true** | 依赖不可用/过载，可重试 | `Status(503)` 兜底 |
-| `gateway_timeout` | 504 | **true** | 上游超时 | `Status(504)` 兜底 |
-| `error` | `FALLBACK_STATUS` | false | 通用兜底：无专用码的状态 | 任意未登记状态的 `Error::Status` / `ProblemDetails` |
+| `bad_request` | 400 | false | 通用客户端请求错误 |  `Error::bad_request`；`Error::status(400, ...)`  |
+| `invalid_json` | 400 | false | 请求 JSON 无法解析 |  `Error::invalid_json`；`From<serde_json::Error>`  |
+| `validation_failed` | 400 | false | 字段/跨字段校验失败 |  `Error::validation`；`ProblemDetails::validation(..).to_error()`  |
+| `unauthorized` | 401 | false | 未认证或凭证无效 |  `Error::unauthorized`  |
+| `forbidden` | 403 | false | 已认证但无权限 |  `Error::forbidden`  |
+| `not_found` | 404 | false | 业务资源不存在 |  `Error::not_found`  |
+| `route_not_found` | 404 | false | 没有匹配的路由 |  `Error::route_not_found`  |
+| `method_not_allowed` | 405 | false | 路径存在但方法不允许 |  `Error::status(405, ...)`  |
+| `conflict` | 409 | false | 并发/状态冲突（永久冲突） |  `Error::conflict`  |
+| `conflict_retryable` | 409 | **true** | 可等待的冲突：冲突方完成后重试可能成功 |  `Error::conflict_retryable`  |
+| `payload_too_large` | 413 | false | 请求体或单个上传文件超限 |  `Error::payload_too_large`  |
+| `unsupported_media_type` | 415 | false | 端点不支持该 content-type |  `Error::unsupported_media_type`  |
+| `unprocessable_entity` | 422 | false | 语义不可处理 |  `Error::status(422, ...)`  |
+| `too_many_requests` | 429 | **true** | 被限流，可退避重试；typed 变体同时写 `Retry-After` |  `Error::too_many_requests`  |
+| `dependency_injection` | 500 | false | DI 解析/装配失败（服务端缺陷） |  `Error::di`  |
+| `internal_error` | 500 | false | 未分类服务端错误 |  `Error::internal`；`Error::status(500, ...)`  |
+| `invalid_state` | 500 | false | 状态机/编程错误（如响应已写出） |  `Error::state`  |
+| `response_serialization` | 500 | false | 响应 DTO 序列化失败（服务端缺陷） |  `Error::response_serialization`  |
+| `not_implemented` | 501 | false | 功能未实现 |  `Error::status(501, ...)`  |
+| `bad_gateway` | 502 | **true** | 上游返回非法响应 |  `Error::status(502, ...)`  |
+| `service_unavailable` | 503 | **true** | 依赖不可用/过载，可重试 |  `Error::unavailable`；`Error::status(503, ...)`  |
+| `gateway_timeout` | 504 | **true** | 上游超时 |  `Error::status(504, ...)`  |
+| `error` | `FALLBACK_STATUS` | false | 通用兜底：无专用码的状态 |  `Error::status(..)` 的未登记状态兜底；`ProblemDetails`  |
 
 不变量（由 `crates/core/tests/error_codes_test.rs` 断言）：
 
-1. 每个 `Error` 变体的 `code()` 都在表中且 `status`/`retryable` 与
+1. 每个 `AppError` 构造器/kind 映射的 `code()` 都在表中且 `status`/`retryable` 与
    `status_code()`/`retryable()` 一致；
 2. `default_code_for_status` 的每个专用状态都在表中且与
    `status_is_retryable` 一致；
@@ -89,7 +89,7 @@ RFC 9457 problem 响应的扩展成员（不是“另一种信封”，客户端
 
 ## 4. 覆盖范围与边界
 
-- **覆盖**：`Error` 的每个变体、`default_code_for_status` 的全部稳定输出。
+- **覆盖**：`AppError` 的每个构造器/kind 映射、`default_code_for_status` 的全部稳定输出。
   这些是框架自身会写出的码。
 - **不覆盖**：应用自定义码。应用可以通过
   `ProblemDetails::with_code("...")` 定义自己的 `code`（例如
@@ -107,15 +107,15 @@ RFC 9457 problem 响应的扩展成员（不是“另一种信封”，客户端
 
 同一批必须完成（缺一项 CI 或评审即拒绝）：
 
-1. `crates/core/src/error.rs`：新增变体或状态映射，码字符串确定后**永不变更**；
-2. `crates/core/src/error_codes.rs`：在 `ERROR_CODES` 登记（`code`/`status`/
-   `retryable`），保持按状态排序；
-3. `crates/core/tests/error_codes_test.rs`：把新变体加入 `representative_errors`
-   （对其 `Error` 变体的穷举 match 会先把编译挡住），新状态加入
-   `DEFAULT_STATUSES`；
-4. 本文表格追加一行；若同时引入新的关闭原因，还要更新
+1. **rust-core（权威）**：在 `rust_core::error_codes::ERROR_CODES` 登记 `code`/`status`/`retryable`，
+   并在 `AppError` 构造器或 kind→code 映射里使用它；`code` 一经发布**永不更改**；
+2. **webx 镜像**：同步 `crates/core/src/error_codes.rs`（本地镜像，测试与文档使用；权威仍在
+   rust-core），保持按状态排序；
+3. **契约测试**：更新 `crates/core/tests/error_codes_test.rs`，断言镜像、运行时可达码与
+   `status_is_retryable` 一致；
+4. **文档**：本文 §3 表追加一行；若同时引入新的关闭原因，还要更新
    [close-codes.md](close-codes.md)；
-5. 发布流程追加 `CHANGELOG.md`（由发布负责人维护）。
+5. **发布**：`CHANGELOG.md` 记录（由发布负责人维护）。
 
 2.x 只做加性变更：不重命名、不删除、不复用已发布码；语义变更等同于新码。
 

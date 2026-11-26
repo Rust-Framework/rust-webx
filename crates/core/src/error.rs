@@ -31,7 +31,7 @@ pub type ActionResult<T = ()> = rust_core::Result<T>;
 
 /// Rewrites framework-generated error responses for a surface.
 ///
-/// The default host writes RFC 7807 `problem+json`. An API that must speak a
+/// The default host writes RFC 9457 `problem+json`. An API that must speak a
 /// different envelope (for example the OpenAI `{"error":{...}}` shape under
 /// `/v1/`) registers a writer; the first matching writer handles the error.
 ///

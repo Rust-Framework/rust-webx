@@ -237,7 +237,7 @@ presence 的完整边界（身份、容量、分页、秒级 TTL、心跳并发�
   续传 / outbox，跨节点吊销只有复查窗口（C2-03 / C3-06）。
 - 实现边界：Redis 续传物理保留只按条数、`max_age` 只是逻辑回放窗口、无 PG 实现
   （C1-01 / C2-01）；presence `count` 是成员数、`members()` 全量、TTL 整数秒
-  （C3-04 / C3-05）；API Key 凭据本版不做运行期复查（C3-06）。
+  （C3-04 / C3-05）；API Key 凭据本版不做运行期复查（C3-10）。
 - Redis 共享实现是单节点客户端：Cluster/Sentinel 需独立适配器（presence 双 key Lua 在
   Cluster 下还需 hash tag，C2-02）。
 - 升级窗口：`≤2.9.1` 与 `≥2.9.2` 混跑时广播类跨节点扇出不完整（C4-01）；presence 旧数据

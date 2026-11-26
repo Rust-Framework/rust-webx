@@ -9,7 +9,7 @@
 |---|---|---|
 | `Jwt.Secret` + HS256 | 继续工作（默认算法不变） | 无 |
 | `Jwt.Issuer`/`Audience` | 继续校验；新配置可省略 | 无 |
-| `init_jwt_secret()` / `jwt_secret()` | 2.5 可用（文档标注 deprecated），**2.9.1 已删除**（无别名） | 迁移到 `ITokenIssuer`；密钥来自 `Jwt.SecretFile` |
+| `init_jwt_secret()` / `jwt_secret()` | 2.5 可用（文档标注 deprecated），**2.9.1 已删除**（无别名） | 迁移到 `ITokenIssuer`；密钥来自 `Jwt.SecretFile` <!-- docs:allow-stale-api --> |
 | 手写 `jsonwebtoken` 签发 | 继续编译 | 改为注入 `Arc<dyn ITokenIssuer>` |
 | bcrypt 密码哈希 | Argon2 hasher 不识别 bcrypt | 见 §3 |
 | 默认匿名请求 | 不变 | 无 |

@@ -1,6 +1,6 @@
 # 错误响应写入器
 
-框架默认把错误写成 RFC 7807 `application/problem+json`。当某个 API 表面必须使用别的信封时
+框架默认把错误写成 RFC 9457 `application/problem+json`。当某个 API 表面必须使用别的信封时
 （典型是 OpenAI 兼容的 `/v1/*` 要 `{"error":{...}}`），注册一个 `IErrorResponseWriter`，
 不要把错误格式塞进每个 Handler。
 

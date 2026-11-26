@@ -69,7 +69,7 @@ examples/adapters/
 
 - 业务代码里**不出现** `webx_*_ef` / `rust_webx_*_ef` 的导入名；出现即说明把参考实现当依赖了；
 - 复制进下游仓库后它**是下游自己的 crate**，可以改名、可以裁剪，也需要自己维护迁移；
-- 框架侧不为它们保留兼容壳：`rust-webx-ef`（`webx_ef`）兼容壳已在 2.9.1 删除，
+- 框架侧不为它们保留兼容壳：`rust-webx-ef`（`webx_ef`）兼容壳已在 2.9.1 删除， <!-- docs:allow-stale-api -->
   持久层错误映射不需要任何框架 crate（`rust-ef` 提供 `From<EFError>`，handler 直接 `?`）。
 
 ## 4. 分类法：`crates/` 与 `examples/` 的边界

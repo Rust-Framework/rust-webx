@@ -299,7 +299,7 @@ Host::builder()
     })
 ```
 
-`options` 是 `AppOptions` 的**唯一**入口（2.9.1 由 `HostAppBuilder::use_options` 改名，驼峰别名
+`options` 是 `AppOptions` 的**唯一**入口（2.9.1 由 `HostAppBuilder::use_options` 改名，驼峰别名 <!-- docs:allow-stale-api -->
 `useOptions` 删除），只能通过 `configure` 触达。
 
 自定义配置节（`add_options::<T>("Section")`）需要**绑定后再覆盖**时，用一行

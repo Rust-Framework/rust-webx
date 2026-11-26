@@ -959,7 +959,7 @@ pub(crate) mod connection {
         }
     }
 
-    /// Minimal RFC 7807 writer used when the host registered no writer.
+    /// Minimal RFC 9457 writer used when the host registered no writer.
     ///
     /// 5xx details are logged and replaced with a stable message; 401 carries
     /// the `Bearer` challenge every framework 401 must have.

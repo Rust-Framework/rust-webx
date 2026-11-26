@@ -1,5 +1,7 @@
 # Crate 分层结构
 
+> 文档维护规则与事实权威映射见 [doc-authority.md](../../design/doc-authority.md)；本页的 crate 清单由 `cargo metadata` 生成，不要手写。
+
 ## 依赖方向规则
 
 **单向依赖，不可逆向**：
@@ -16,37 +18,20 @@
 
 Cargo **包名**带连字符，Rust **导入名**用下划线库名。两者不是一回事：
 
-| 包名（`Cargo.toml`） | 导入名（`use`） | 职责 |
-|----------------------|-----------------|------|
-| `rust-webx` | `webx` | 伞 crate，统一 re-export |
-| `rust-webx-core` | `webx_core` | 契约与配置 |
-| `rust-webx-host` | `webx_host` | Host / 路由 / 中间件装配 |
-| `rust-webx-engine` | `webx_engine` | 执行引擎（worker/路由/管道/传输端口） |
-| `rust-webx-macros` | `webx_macros` | 过程宏（`#[get]`、`#[handler]`…） |
-| `rust-webx-spa` | `webx_spa` | 静态文件 / SPA |
-| `rust-webx-openapi` | `webx_openapi` | OpenAPI 生成 + UI |
-| `rust-webx-ai` | `webx_ai` | AI 网关领域包（用量/记账/端口；不进入伞 crate） |
-| `rust-webx-ai-gateway` | `webx_ai_gateway` | OpenAI 兼容 `/v1` HTTP 表面（依赖 webx + webx-ai） |
-| `rust-webx-client` | `webx_client` | 出站 HTTP（连接池/流式/SSE；伞 crate 只重导出传输类型） |
-| `rust-webx-outbox` | `webx_outbox` | 事务性 outbox 的端口（`IOutbox`/`OutboxEntry`）、派发器、`OutboxOptions` 与内存实现（不链接 rust-ef） |
-| `rust-webx-mfa` | `webx_mfa` | TOTP / 恢复码 MFA（可选，见 auth 节） |
-| `rust-webx-oauth2` | `webx_oauth2` | OAuth 2.0 社交登录客户端（可选） |
-| `rust-webx-oidc` | `webx_oidc` | OIDC 客户端（discovery/PKCE/id_token，可选） |
-| `rust-webx-webauthn` | `webx_webauthn` | WebAuthn / Passkey relying-party 校验（可选） |
-| `rust-webx-redis` | `webx_redis` | 分布式缓存 + 事件传输 + 共享续传/在线态（可选） |
-| `rust-webx-nats` / `rust-webx-rabbitmq` / `rust-webx-kafka` | `webx_nats` / `webx_rabbitmq` / `webx_kafka` | 事件传输适配器（可选；Kafka 仅竞争投递） |
-| `rust-webx-pay` + 六个 provider crate | `webx_pay*` | 支付领域组（可选，见 payment 节） |
-| `rust-webx-apns` / `rust-webx-fcm` | `webx_apns` / `webx_fcm` | 移动推送适配器（可选，见 push 节） |
-| `rust-webx-h3` | `webx_h3` | 可选 HTTP/3 监听传输（QUIC + rustls + h3；不进伞 crate，默认构建不链接） |
-| `rust-webx-build` | `webx` | 构建期（`build-dependencies`） |
+已发布 crate 的清单由 `cargo metadata` 生成，禁止手写（`crate-inventory.inc` 由
+`scripts/gen-crate-inventory.py` 生成，CI 校验无 diff）：
+
+{{#include crate-inventory.inc}}
 
 > 共享契约 crate `rust-core`（`rust_core`）不在 `crates/` 下：`AppError`/`Result`、
 > `PagedRequest`/`PagedResult`、`KeysetRequest`/`CursorPage`、`OperationResult`、`IPatchable`
-> 等由它定义；`webx_core::error` / `::pagination` / `::keyset` / `::operation` / `::persistence`
-> 只是**历史模块路径的重导出**（自 2.9.1 起），不要在 webx 侧找第二份定义。
+> 等由它定义；`webx_core::error` / `::pagination` / `::keyset` / `::operation` 只是
+> **历史模块路径的重导出**（自 2.9.1 起），不要在 webx 侧找第二份定义。`IPatchable` 在
+> `webx_core` **根级**重导出（没有 `webx_core::persistence` 模块）；`webx_core::error_codes`
+> 则是本地镜像（测试/文档用），权威注册表在 `rust_core::error_codes`。
 
 > 与 ORM/数据库耦合的持久化参考适配器（`examples/adapters/{ai,auth,idempotency,outbox,payment}/ef`）
-> **不在上表**：它们 `publish = false`，不是可依赖的包，只供复制。
+> **不在清单中**：它们 `publish = false`，不是可依赖的包，只供复制。
 
 `crates/` 只包含**可发布** crate（`publish = false` 会被布局门禁拒绝）；非发布的测试工具在
 `testing/`（`alloc-probe`、`contract-tests`、`load-probe`、`upgrade-smoke`），`fuzz/` 是独立的 cargo-fuzz
@@ -57,8 +42,9 @@ workspace。应用代码只依赖 `crates/` 下的包。
 ## core — 契约层
 
 `rust-webx-core` 定义框架公开 trait 与绑定/运行时辅助类型，**不依赖** hyper、tokio 或任何
-HTTP 实现；其中 `error` / `error_codes` / `pagination` / `keyset` / `operation` /
-`persistence` 是 `rust-core` 共享契约的重导出（定义在 `rust-core`，不是本 crate）。
+HTTP 实现；其中 `error` / `pagination` / `keyset` / `operation` 是 `rust-core` 共享契约的
+重导出（定义在 `rust-core`），`IPatchable` 在根级重导出；`error_codes` 是本地镜像，权威表在
+`rust_core::error_codes`，修改时必须两边同步并由 `crates/core/tests/error_codes_test.rs` 兜底。
 
 设计意图：
 - 第三方可基于 core trait 编写可插拔组件
@@ -73,7 +59,7 @@ HTTP 实现；其中 `error` / `error_codes` / `pagination` / `keyset` / `operat
 | 认证/安全 | `auth`, `security`, `idempotency`, `locking`, `secrets` | `IClaims`, `IAuthenticationScheme`, `IDynamicAuthorizer`, `IdentityUser` / `RequestUser`, `ISessionStore`, `IPasswordHasher`, `IIdempotencyStore`, `IAdvisoryLock` |
 | 实时/通知 | `realtime`, `push`, `notifications`, `stream` | `IRealtimeEventStore`, `IOnlinePresence`, `IConnectionRegistry`, `WebSocketLimits`, `IPushSender`, `IEmailSender` / `ISmsSender`, `SseResult` |
 | 配置/可观测 | `config`, `options_monitor`, `metrics`, `localization`, `time`, `error` | `AppOptions`, `IOptionsMonitor`, `IMeter`, `IStringLocalizer`, `IClock`, `Error` |
-| 数据/分页 | `cache`（端口） + `rust_core::{pagination, keyset, operation, persistence}` 的重导出 | `IDistributedCache`；`PagedRequest`/`PagedResult`、`KeysetRequest`/`CursorPage`、`OperationResult`/`IPatchable` 定义在 **rust-core**，`webx_core` 重导出历史路径 |
+| 数据/分页 | `cache`（端口） + `rust_core::{pagination, keyset, operation}` 的重导出 + 根级 `IPatchable` | `IDistributedCache`；`PagedRequest`/`PagedResult`、`KeysetRequest`/`CursorPage`、`OperationResult`/`IPatchable` 定义在 **rust-core**，`webx_core` 重导出历史路径/根级 |
 
 ## host — 运行时层
 

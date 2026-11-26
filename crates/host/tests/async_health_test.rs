@@ -191,7 +191,7 @@ async fn readiness_endpoint_returns_503_for_async_fail() {
         headers
             .iter()
             .any(|(name, value)| name == "content-type" && value == "application/health+json"),
-        "RFC 8407 content type: {headers:?}"
+        "IETF API Health Check content type: {headers:?}"
     );
     let json: serde_json::Value =
         serde_json::from_slice(&body.expect("the endpoint writes a body")).unwrap();

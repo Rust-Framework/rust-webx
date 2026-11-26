@@ -155,8 +155,8 @@ HTTP/1.1 与真实 TLS ALPN 三条路径。
 | 门禁 | 触发 | 内容 |
 |---|---|---|
 | tests / clippy / fmt / MSRV / docs / coverage | PR | 正确性与可维护性 |
-| semver（vs v2.7.0） | PR | 公开 API 加性演进（4 包） |
-| upgrade（N-2） | PR | rust-webx 2.7.0 与当前 workspace 同源码编译（`testing/upgrade-smoke`） |
+| semver（vs v2.9.2） | PR | 公开 API 加性演进（4 包） |
+| upgrade（N-2） | PR | rust-webx 2.9.1 与当前 workspace 同源码编译（`testing/upgrade-smoke`） |
 | alloc | PR | 框架税 ≤12 |
 | stability：soak / chaos / wire-perf / auth-budget / auth-interop / conformance | nightly | 长跑、性能预算与 HTTP 互操作 |
 | fuzz：cargo-fuzz（`fuzz.yml`） | nightly | 公开解析入口的覆盖引导 fuzz |

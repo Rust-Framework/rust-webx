@@ -4,7 +4,7 @@
 
 | 中间件 | 启用方式 | 职责 |
 |--------|---------|------|
-| 错误处理 | 自动（host 请求循环） | Error → RFC 7807 响应 |
+| 错误处理 | 自动（host 请求循环） | Error → RFC 9457 响应 |
 | RequestId | 自动 | 生成 X-Request-Id |
 | SecurityHeaders | 自动 | X-Frame-Options 等 |
 | CORS | `use_cors(config)` | 跨域 |

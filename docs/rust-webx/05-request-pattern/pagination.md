@@ -99,7 +99,7 @@ Ok(PagedResult::new(items, total).map_items(UserDto::from))
   翻页会重复/漏行；用主键或其它唯一列兜底。
 - 强类型排序用 `order_by_field(User::created_at)` / `then_by_field_desc(User::id)`，
   字段类型必须实现 `Sortable`；只有列名来自运行期白名单映射时才用显式 raw 入口
-  `order_by_raw` / `order_by_desc_raw`（2.9.1 起 `order_by(&str)` / `order_by_desc(&str)`
+  `order_by_raw` / `order_by_desc_raw`（2.9.1 起 `order_by(&str)` / `order_by_desc(&str)` <!-- docs:allow-stale-api -->
   已删除且无别名，见 [upgrade-to-2.9.1.md](../16-migration/upgrade-to-2.9.1.md) §3）。
 - 深分页（`page` 很大）仍是 `OFFSET` 扫描：持续追加、需要翻到很深的数据改用下面的
   Keyset 分页；导出/批量场景用独立端点。

@@ -1,7 +1,7 @@
 //! Enhanced health check endpoints for Kubernetes.
 //!
 //! Provides HealthCheckRegistry and typed HealthStatus.
-//! Endpoints follow RFC 8407 (`application/health+json` content type).
+//! Endpoints follow the IETF API Health Check draft (`application/health+json`).
 //!
 //! Two registration styles coexist:
 //!
@@ -327,7 +327,7 @@ impl HealthCheckRegistry {
     }
 }
 
-/// Build an RFC 8407 `application/health+json` body from the registry
+/// Build an IETF API Health Check `application/health+json` body from the registry
 /// (synchronous view; async checks count as `warn`).
 ///
 /// When the registry has no checks, returns `{"status":"pass"}`.

@@ -143,20 +143,20 @@ rust-webx-fcm = { version = "=2.9.3", path = "crates/push/fcm" }
 
 
 # DI framework (crates.io — no local path required)
-# rust-dix 1.1 adds `From<RdiError> for AppError`; the 1.0 range admits it.
+# Baseline is rust-dix 1.1 (`From<RdiError> for AppError`); the 1.0 range admits it.
 rust-dix = "1.0"
 # Shared contract layer (error carrier, pagination/cursor/OperationResult).
 # 2.9.1 re-exports these types; the 2.9.x definitions were deleted.
 rust-core = "0.1"
 rust-dix-macros = "1.0"
 
-# rust-ef ORM (rust-ef 2.6+, paired/verified with rust-ef 2.9.0 in this release;
-# rust-dix 1.0 integration via add_dbcontext + owned resolution).
+# rust-ef ORM (rust-ef 2.6+, paired/verified with rust-ef 2.9.1 in this release;
+# rust-dix 1.1 integration via add_dbcontext + owned resolution).
 # Keep the `"2.6"` semver range: it admits 2.9.x, and the release order is
-# rust-ef 2.9.0 first, then rust-webx 2.9.x. Do not tighten it to `=2.9`, which
+# rust-ef 2.9.1 first, then rust-webx 2.9.x. Do not tighten it to `=2.9`, which
 # would make the lockfile unresolvable before the ORM release is on crates.io.
 # rust-ef is Web-agnostic (no `webx` feature and no dependency on rust-webx);
-# applications map EFError at their boundary (reference apps: handlers/src/db.rs).
+# applications map EFError at their boundary (reference adapters: examples/adapters/*/ef).
 rust-ef = "2.6"
 rust-ef-sqlite = "2.6"
 # Optional providers for rust-webx-idempotency-ef's env-driven real-database idempotency

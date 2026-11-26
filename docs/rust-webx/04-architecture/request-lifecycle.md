@@ -87,7 +87,7 @@ sequenceDiagram
 }
 ```
 
-响应头为 `content-type: application/problem+json`（RFC 7807）。
+响应头为 `content-type: application/problem+json`（RFC 9457）。
 
 ### 6. 响应发送
 

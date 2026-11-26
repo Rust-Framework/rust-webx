@@ -359,7 +359,7 @@ impl ControllerEndpoint {
 /// Endpoint that serves a static JSON payload.
 ///
 /// Used for built-in endpoints like `/openapi.json` and `/health`.
-/// The `content_type` field allows RFC 8407 `application/health+json`
+/// The `content_type` field allows IETF API Health Check `application/health+json`
 /// for health endpoints while defaulting to `application/json`.
 pub struct StaticJsonEndpoint {
     pub body: Vec<u8>,

@@ -125,7 +125,7 @@ async fn integration_openapi_json_available() {
 }
 
 // ---------------------------------------------------------------------------
-// Health endpoints (RFC 8407)
+// Health endpoints (IETF API Health Check application/health+json)
 // ---------------------------------------------------------------------------
 
 #[tokio::test]

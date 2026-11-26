@@ -72,7 +72,7 @@ async fn start(&self) -> Result<()> {
 
 `EFError` → `webx::Error` 的脱敏映射由 **rust-ef** 自己实现
 （`impl From<EFError> for rust_core::AppError`），不需要任何框架侧适配 crate：
-`rust-webx-ef`（`webx_ef`）连同 `map_ef_error` / `EfResultExt` 已在 2.9.1 删除
+`rust-webx-ef`（`webx_ef`）连同 `map_ef_error` / `EfResultExt` 已在 2.9.1 删除 <!-- docs:allow-stale-api -->
 （见 [upgrade-to-2.9.1.md](../16-migration/upgrade-to-2.9.1.md)），
 Handler 里直接用 `?`：
 

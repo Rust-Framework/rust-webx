@@ -245,7 +245,7 @@ let order = linq!(self.ctx.set::<Order>(), |o: Order| o.tenant_id == tenant && o
   `DbContext` 就是工作单元，查询直接用 `ctx.set::<T>()`。
 - 不把映射堆进单文件：按业务上下文拆到 `domain/src/mappers/<context>_mapper.rs`，
   由 `mappers/mod.rs` 汇总。
-- 不用已删除的旧入口：`PagedRequest::from_parts`、`OperationResult::ok/ok_with_status`
+- 不用已删除的旧入口：`PagedRequest::from_parts`、`OperationResult::ok/ok_with_status` <!-- docs:allow-stale-api -->
   在 2.9.1 已移除，见[升级到 2.9.1](../16-migration/upgrade-to-2.9.1.md)。
 - 不让 DTO 反向依赖实体：contracts 不 `use domain::...`；转换实现放 domain 或 handlers。
 - 不把 `id`、`tenant_id`、审计列放进请求 DTO，也不在 Handler 里用 body 覆盖它们。

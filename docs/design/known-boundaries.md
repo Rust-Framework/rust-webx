@@ -58,6 +58,8 @@
 | C3-07 | InMemory 事件传输在没有本地 `#[handler]` 注册时，`publish`/`broadcast` 返回 `di` 错误（**fail-closed，不是 no-op**）；只有事件名存在本地 inventory 注册（含框架 fanout 的 routing 注册）时才入队。 | [`event.rs`](../../crates/core/src/mediator/event.rs)（`InMemoryEventPublisher`） | 忘记写 `#[handler]` 会在 publish 处立刻暴露；框架保留事件有 core routing 注册，不受影响 | 接受 | 补 `#[handler]` 或换成真实 broker；把 `di` 错误当装配缺陷处理 |
 | C3-08 | presence 心跳是"尽力续期"：单轮部分成员 touch 失败只记日志并在下一轮重试，不保证一轮内全部成功；节点长期不可达时成员按 TTL 过期（这是期望行为）。 | [`presence.rs`](../../crates/host/src/presence.rs)（`heartbeat`）、[realtime-cluster.md](../rust-webx/11-production/realtime-cluster.md) §6 | 瞬时网络抖动不会误删在线成员，但也不会立即恢复已过期成员 | 接受 | 监控心跳失败与成员数骤降；不要依赖 presence 做计费/写权限判断 |
 | C3-09 | Redis `RedisOnlinePresence::members()` 是**两步快照**：先一次 Lua 完成过期清理 + `ZRANGE`，再用单独 `HMGET` 取载荷；两次调用之间发生并发 `join`/`leave` 时结果可能瞬时不完整（新成员不在列表，或离开成员因无载荷被跳过），异常态随下次读取收敛。 | [`presence.rs`](../../crates/cache/redis/src/presence.rs)（`MEMBERS_SCRIPT`/`decode_members`/`member_payloads`） | 用于展示/诊断可接受，不能当强一致成员清单 | 接受 | 计数/容量/写权限判断用 `count` 或业务数据；需要强一致成员列表时由业务存储提供 |
+| C3-10 | **API Key 凭据不做运行期复查**：WebSocket 的会话吊销/复查只覆盖 JWT `jti` 与 Cookie 会话；API Key 在凭据自身生命周期内有效，停用/轮换由应用在连接建立或后续请求处理，框架不会跨节点主动断开 API Key 连接。 | [`realtime.rs`](../../crates/core/src/realtime.rs)（`WebSocketLimits::with_session_revalidation`）、[`websocket.rs`](../../crates/host/src/websocket.rs) | API Key 泄露后的即时踢线需要应用自己广播控制事件并关闭连接 | 接受 | 短期凭据 + 应用侧广播 `close_user_connections`；不要把 API Key 当可运行期吊销的会话凭据 |
+
 
 ## C4 部署/运营约束
 

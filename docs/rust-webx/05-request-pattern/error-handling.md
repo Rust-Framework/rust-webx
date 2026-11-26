@@ -167,7 +167,7 @@ return Err(ProblemDetails::validation(vec![
 
 `rust-ef` 是 Web 无关的 ORM（2.9.1 起没有 `webx` feature），并且自己实现了
 `From<EFError> for rust_core::AppError` 的脱敏映射。**不需要任何框架侧适配 crate**：
-`rust-webx-ef`（`webx_ef`）连同 `map_ef_error` / `EfResultExt` 已在 2.9.1 删除
+`rust-webx-ef`（`webx_ef`）连同 `map_ef_error` / `EfResultExt` 已在 2.9.1 删除 <!-- docs:allow-stale-api -->
 （见 [upgrade-to-2.9.1.md](../16-migration/upgrade-to-2.9.1.md)），应用在 Handler 里直接用 `?`：
 
 ```rust

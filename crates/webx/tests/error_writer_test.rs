@@ -1,7 +1,7 @@
 //! End-to-end test for the pluggable error-response writer.
 //!
 //! A custom writer takes over a path prefix while every other path keeps the
-//! framework's RFC 7807 `problem+json` response.
+//! framework's RFC 9457 `problem+json` response.
 
 use std::net::TcpListener;
 use std::sync::Arc;

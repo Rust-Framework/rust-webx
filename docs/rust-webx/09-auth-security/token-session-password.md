@@ -294,7 +294,7 @@ async fn authorize_with_declared_rules(
 - 只实现 `authorize`（无规则兜底）仍然可用：`authorize_with_declared_rules` 的默认实现
   转调它，但拿不到声明；需要声明时实现 `authorize_with_declared_rules`。
 - 拿到的是端点 `RouteEntry.authorization` 切片本身（进程内借用，零分配）；
-  `DeclaredRules` / `authorize_with_rules` 已随 2.9.1 删除，没有第二套声明视图。
+  `DeclaredRules` / `authorize_with_rules` 已随 2.9.1 删除，没有第二套声明视图。 <!-- docs:allow-stale-api -->
 
 ## 7. 统一入口速查（避免同一件事两个入口）
 

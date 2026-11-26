@@ -149,3 +149,7 @@ print(
     f"{len(indexed)} indexed handbook sections, version {version})"
 )
 PY
+
+# Generated inventory and semantic drift checks.
+"$PY" "$PWD/scripts/gen-crate-inventory.py" --check
+"$PY" "$PWD/scripts/check-docs-drift.py"

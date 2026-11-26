@@ -29,7 +29,7 @@ rust-webx 不是简单移植，而是**提取设计精髓并用 Rust 类型系�
 | `IHostedService` | `IHostedService` | start/stop 生命周期 |
 | `appsettings.json` | `appsettings.json` | 相同文件名与节结构 |
 | `UseMiddleware<T>()` | `svc.add_middleware::<T>()` | 注册方式类似 |
-| `ProblemDetails` | `ProblemDetails` | RFC 7807 兼容 |
+| `ProblemDetails` | `ProblemDetails` | RFC 9457 兼容 |
 
 ## 借鉴了什么
 

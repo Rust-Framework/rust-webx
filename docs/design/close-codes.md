@@ -19,13 +19,13 @@
 
 `CloseReason` 是**非 exhaustive** 的：2.x 新增原因不会破坏下游 `match`。
 `code()` 返回 `Option<u16>`，为将来只存在于进程内、不写关闭帧的原因保留加性空间；
-当前每个原因都有 wire code。
+当前除对端已关闭的 `ClientClosed`（不回写 close frame）外，每个原因都有服务端写出的 wire code；`code()` 对 `ClientClosed` 返回 `1000` 仅用于分类/指标。
 
 ## 2. WebSocket 关闭原因与 wire code
 
 | 原因 | 触发条件 | 服务端 wire code | 客户端可观察信号 | SSE 对应 `StreamEnd` |
 |---|---|---|---|---|
-| `ClientClosed` | 对端发 close frame / 对端断开 / 读端 EOF | 回显对端握手（无码时为空 close frame） | close frame 或 EOF | `ClientDisconnected` |
+| `ClientClosed` | 对端发 close frame / 对端断开 / 读端 EOF | 无（对端已关闭；不写回 close frame；`code()` 返回 `1000` 仅用于分类） | close frame 或 EOF | `ClientDisconnected` |
 | `ServerShutdown` | 主机开始优雅停机（`ShutdownToken` 被取消） | `1001`（going away） | close frame `1001` | `ServerShutdown`（先写 `event:server_shutdown`） |
 | `SessionCompleted` | 应用 Handler 正常返回 | `1000` | close frame `1000` | `Completed` |
 | `IdleTimeout` | `WebSocketLimits::idle_timeout` 内无入站帧 | `1001` | close frame `1001` | —（SSE 用 `keep_alive`） |
@@ -90,7 +90,7 @@
 | `is_draining()`（进入 draining 状态） | [`ShutdownToken::is_draining()`](../../crates/core/src/hosted.rs) | 主机级而非单连接级；所有长连接共享同一事件 |
 | `WireErrorCode`（线上错误码） | `CloseReason::code()` / RFC 6455 close code | WebSocket 标准码空间（1000–4999） |
 | `ApplicationClose`（应用自选关闭） | `IConnection::close(code, reason)` | `close_reason()` 不记录，wire code 为权威 |
-| transport error | 读端 `Err` → Handler 收到 `Error::Internal` | 没有独立 wire code，靠错误帧/日志诊断 |
+| transport error | 读端 `Err` → Handler 收到通用 `Error`（`internal` 分类） | 没有独立 wire code，靠错误帧/日志诊断 |
 
 ## 5. 稳定性承诺
 

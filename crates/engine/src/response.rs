@@ -746,7 +746,7 @@ fn multipart_stream(
 // File errors
 // ---------------------------------------------------------------------------
 
-/// Build an RFC 7807 `application/problem+json` response for a file error.
+/// Build an RFC 9457 `application/problem+json` response for a file error.
 ///
 /// Only reached for filesystem/range failures; normal handler errors are written
 /// by the host's error middleware.

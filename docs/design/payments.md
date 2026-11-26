@@ -403,7 +403,7 @@ Host::builder()
 - `IPaymentServiceFactory` 是普通 DI 单例：应用用 `services.singleton::<dyn
   IPaymentServiceFactory>(…)`/`instance` 注册；框架默认工厂用 `try_add_singleton`，
   dix 后注册覆盖先注册，因此 `add_*` 前后注册均可，没有支付专用覆盖 API。
-- `Payments` 通过 rust-dix 1.0 的 `GetServices<T>` 语义聚合工厂（`get_all_any` + downcast；
+- `Payments` 通过 rust-dix 1.1 的 `GetServices<T>` 语义聚合工厂（`get_all_any` + downcast；
   rust-dix 对 `&dyn` 没有对象安全的 `get_all`，需要一行 helper）。
 - 启动校验不再阻塞进程：静态 provider 在构造时校验，运行时配置在首次解析/健康检查校验；
   配置源不可用返回 503（`PaymentError::Unavailable`），由 readiness 暴露。原因是运行时

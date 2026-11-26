@@ -8,7 +8,7 @@
 ## 1. 问题与决策
 
 2.9 及以前，`webx_core::Error` 是一个 19 变体的 enum，`rust-dix` 有 `RdiError`、`rust-ef` 有
-`EFError`。三个框架各自定义"失败"，于是每个应用都要写一层映射（`map_ef_error`、
+`EFError`。三个框架各自定义"失败"，于是每个应用都要写一层映射（`map_ef_error`、 <!-- docs:allow-stale-api -->
 `map_di_error`、`map_protector_error`），而且映射漏掉的状态会把可重试的基础设施故障
 误报成不可重试的客户端错误（典型：SQLite `busy` 经 `EFError::Query` 变成 400）。
 
@@ -41,8 +41,9 @@
 | fields | `fields() -> &[FieldProblem]` | 绑定/校验的逐字段问题 |
 | extensions | `extensions() -> &Map` | 附加成员；渲染层拥有 wire 格式，本 crate 只承载 |
 
-`public_detail()` = 4xx 的 `detail`，5xx 恒为 `None`（服务端缺陷不回显）；`Display` 依次打印
-operator / detail / code，**禁止**把它当客户端文案（用 `public_detail()` 或状态标题）。
+`public_detail()` 返回构造器给出的 `detail`（`internal`/`state`/`di`/`response_serialization` 等
+operator-only 构造器为 `None`）；渲染层是否向 5xx 客户端透出由响应 writer/脱敏策略决定，**不能**
+用状态码推断。`Display` 依次打印 operator / detail / code，**禁止**把它当客户端文案。
 
 构造器一览：`validation`、`bad_request`、`unauthorized`、`forbidden`、`not_found`、
 `route_not_found`、`conflict`、`conflict_retryable`、`payload_too_large`、
@@ -110,5 +111,5 @@ operator / detail / code，**禁止**把它当客户端文案（用 `public_deta
 1. 代码里不再有 `Error::Variant(..)` 构造与 match（迁移表见 `upgrade-to-2.9.1.md` §1）；
 2. 每个公开构造器的 `kind/code/status/retryable` 与 §3 一致（`crates/core` 契约测试）；
 3. `ERROR_CODES` 与 `default_code_for_status`/`status_is_retryable` 无分歧（文档测试）；
-4. 5xx 的 `public_detail() == None`；`operator` 不出现在响应体；
+4. 默认渲染只输出 `public_detail()`；`operator` 不出现在响应体；5xx 是否带 detail 由构造器与 writer 决定，不能假设恒为 `None`；
 5. `x-webx-*` 不出现在响应体（`problem_details_test` 的 wire 等价用例）。

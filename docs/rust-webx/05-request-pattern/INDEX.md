@@ -17,7 +17,7 @@
 | [流式响应（SSE）](streaming-sse.md) | SseResult、逐帧推送、断连回调与长流停机 |
 | [WebSocket 会话](websocket.md) | 升级、`IConnection` 与消息即请求；广播投递、Cookie/CSRF/Origin 接入、吊销与重连 |
 | [请求体流式读取](request-body-streaming.md) | body_stream、413 上限与裸流场景 |
-| [错误处理与 ProblemDetails](error-handling.md) | Error 变体与 RFC 7807 |
+| [错误处理与 ProblemDetails](error-handling.md) | Error 构造器与 RFC 9457 |
 
 ## 下一步
 

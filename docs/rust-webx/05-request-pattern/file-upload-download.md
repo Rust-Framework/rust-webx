@@ -326,7 +326,7 @@ FileBody::path(p)
 | `Range`（`206`/`416`，含 `multipart/byteranges`） | ✅ | ❌ |
 | `If-Range` / `If-None-Match` / `If-Modified-Since`（`304`） | ✅ | 有校验器时 |
 | `HEAD` | ✅ GET 路由自动响应，头部一致、无响应体 | ✅ |
-| 文件不存在 | `404`（RFC 7807 problem+json） | — |
+| 文件不存在 | `404`（RFC 9457 problem+json） | — |
 
 区间请求按 RFC 7233 完整实现，而不只是「遇到 `Range` 就切一段」：
 

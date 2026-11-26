@@ -97,7 +97,7 @@
 | 测试 | `ci.yml` test | `cargo test --workspace --no-fail-fast`（三平台） |
 | MSRV | `ci.yml` msrv | `cargo +1.95.0 check --workspace --locked` |
 | 安全 | `ci.yml` audit | `cargo audit`（0 漏洞） |
-| 兼容 | `ci.yml` semver/upgrade | 公开 API 对 `v2.7.0`；N-2（rust-webx 2.7.0）源码同编译 |
+| 兼容 | `ci.yml` semver/upgrade | 公开 API 对 `v2.9.2`；N-2（rust-webx 2.9.1）源码同编译 |
 | 分配 | `ci.yml` alloc | `alloc-probe compare 500 13` |
 | 稳定性 | `stability.yml` | soak / chaos / wire p99 / broker-integration / conformance（HTTP 互操作矩阵） |
 | Fuzz | `fuzz.yml` | 独立 `fuzz/` workspace 的 nightly cargo-fuzz（6 个解析 target）+ 稳定工具链不变量测试 |

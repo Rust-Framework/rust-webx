@@ -56,7 +56,7 @@ APP_ENV=Development SSLKEYLOGFILE=/tmp/webx-keys.log cargo run --manifest-path e
 | `GET /health/live` | 存活探针，进程存活即 pass |
 | `GET /healthz` | `/health` 别名 |
 
-响应格式遵循 RFC 8407 `application/health+json`。
+响应格式使用 IETF API Health Check draft 的 `application/health+json`。
 
 可注册自定义检查：
 

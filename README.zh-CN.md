@@ -93,7 +93,7 @@ rust-webx 是刻意「有主见」的：它不追求做最小的路由库。如�
 - **事务性 outbox** — `rust-webx-outbox` 提供端口、基于租约的 `OutboxDispatcher`（经 `EventDispatcher`：退避/死信/保留期）与 `InMemoryOutbox` 默认实现，`add_outbox` 注册。同事务入队属于数据适配：EF 参考实现在 `examples/adapters/outbox/ef`（`add_outbox_ef`，非发布）。
 - **面向 IM 规模的实时能力** — 一套事件模型、两种投递类（`EventDelivery::Competing` / `Broadcast`）：`RealtimeFanoutEvent` / `RealtimeUserFanoutEvent` 通过同一 `IEventPublisher` 跨节点扇出（Redis Pub/Sub、NATS 广播 subject、RabbitMQ fanout exchange），`RedisRealtimeEventStore` 共享续传日志，`IOnlinePresence`（含 Redis 实现与宿主心跳桥接）共享在线态，`WebSocketLimits::with_session_revalidation` 在 JWT/Cookie 会话被撤销后关闭实时连接（close `1008`）。见[多实例实时部署](docs/rust-webx/11-production/realtime-cluster.md)。
 - **移动推送** — `IPushSender` 三态裁决（`Accepted`/`TokenInvalid`/`Retryable`），死亡 token 不会被当成服务器错误；`HostBuilder::use_push` 接入 APNs（`rust-webx-apns`）或 FCM（`rust-webx-fcm`），`InMemoryPushSender` 供测试捕获。见[推送指南](docs/rust-webx/13-extensibility/push-notifications.md)。
-- **端口而非 starters** — 每个基础设施能力都是一个端口（`IIdempotencyStore`、`IOutbox`、`ISessionStore`、`IObjectStore`、`IMeter`、`IAdvisoryLock`、`IEmailSender` …）：要么自带零配置内存默认实现（`IIdempotencyStore`、`IOutbox`、`IObjectStore`、`IMeter`、`IAdvisoryLock`），要么**刻意没有默认实现**（通知与推送发送器）——缺适配器会在启动期以 DI 错误失败，而不是静默 no-op。实体、表和数据/逻辑适配归下游服务：在业务 crate 实现端口，或复制 `examples/adapters/` 里的非发布参考实现，并跑 `testing/contract-tests` 的端口契约。见 [端口与适配器](docs/rust-webx/13-extensibility/integrations.md)。
+- **端口而非 starters** — 每个基础设施能力都是一个端口（`IIdempotencyStore`、`IOutbox`、`ISessionStore`、`IObjectStore`、`IMeter`、`IAdvisoryLock`、`IEmailSender` …）：要么提供需显式装配的内存实现（`IIdempotencyStore`、`IOutbox`、`IObjectStore`、`IAdvisoryLock`、`IMeter`），要么**刻意没有默认实现**（通知与推送发送器）——缺适配器会在启动期以 DI 错误失败，而不是静默 no-op。实体、表和数据/逻辑适配归下游服务：在业务 crate 实现端口，或复制 `examples/adapters/` 里的非发布参考实现，并跑 `testing/contract-tests` 的端口契约。见 [端口与适配器](docs/rust-webx/13-extensibility/integrations.md)。
 - **端点元数据服务** — `IEndpointCatalog` 在运行时暴露全部端点（`all()` / `localized()`），权限同步、管理导航与 OpenAPI 共用一份元数据。
 - **本地化** — `#[display]` / `#[description]` / `#[category]` 存资源键，全局 `Culture.Default` 决定语言；支持 JSON 资源文件或 `include_str!` 嵌入。
 - **开箱即用的生产能力** — 优雅关闭、动态健康检查、安全响应头、请求 ID、CORS、TLS、速率限制、压缩、OpenAPI + SPA 托管。
@@ -122,114 +122,37 @@ rust-webx 是刻意「有主见」的：它不追求做最小的路由库。如�
 | **性能不以正确性为代价** | allocation 计数、wire-level 正确性和稳定性套件都是发布门禁。见[分配预算](docs/design/alloc-budget.md)与[稳定性门禁](docs/design/stability-gates.md)。 |
 | **生产级准入与生命周期** | 所有 listener 共享一个全局连接 governor、首请求超时、HTTP/2 keepalive、优雅/立即关闭 guard、Host 单次运行状态、per-worker SSE drain。 |
 | **错误语义可信** | 错误响应在逆序 after hooks 之前写入，metrics/tracing/compression 看到真实状态；失败的成功路径不会残留 `cache-control`/`etag`/`content-encoding` 等表示头。 |
-| **原生优先的集成** | `rust-dix` 1.0 DI scope、`rust-ef` 2.6+ ORM（已按 2.9.1 配对验证）、JWT/session/password 端口、`rust-webx-client` 都是框架能力，而非应用层临时胶水。 |
+| **原生优先的集成** | `rust-dix` 1.1 DI scope、`rust-ef` 2.6+ ORM（已按 2.9.1 配对验证）、JWT/session/password 端口、`rust-webx-client` 都是框架能力，而非应用层临时胶水。 |
 | **HTTP 与进程内能力边界清晰** | 无路由的 `#[handler]` 自动是 mediator-only；有路由才增加响应 encoder。没有 `#[handler(in_process)]` 模式开关，也不会把 command handler 意外暴露成 HTTP 端点。 |
 
 以上性能数字是同一台主机同窗口的本地对比，不构成绝对容量承诺；allocation 计数和 wire-level 正确性测试才是发布回归信号。方法与预算见[分配预算](docs/design/alloc-budget.md)。
 
 ## 架构
 
-框架被拆分为一组职责聚焦的 crate，通过 `rust-webx` 伞 crate 统一重新导出：
+`rust-webx` 是薄伞：运行时核心很小，领域/适配能力拆成独立 crate，按需引入：
 
-```
-┌──────────────────────────────────────────────────────────┐
-│              rust-webx  (umbrella crate)                   │
-│  re-exports core / host / macros / spa / openapi + rust_dix │
-├──────────┬──────────┬──────────┬─────────────────────────┤
-│rust-webx-│rust-webx-│rust-webx-│ rust-webx-macros          │
-│host      │core      │engine    │ #[get] #[post] #[handler] │
-│Host +    │traits +  │worker    │ #[authorize] #[fromclaim] │
-│pipeline  │config    │pool +    │                           │
-│          │          │dispatch  │                           │
-├──────────┴──────────┴──────────┴─────────────────────────┤
-│                    rust-webx-core                        │
-│  IHost / IHttpContext / IMiddleware / IRequestHandler    │
-│  IMediator / AppOptions / Error / AppMode                │
-└──────────────────────┬───────────────────────────────────┘
-                       │
-          ┌────────────┼────────────┐
-          ▼            ▼            ▼
-   ┌──────────┐ ┌──────────┐ ┌──────────┐
-   │ rust-dix │ │  hyper   │ │inventory │
-   │ (DI)     │ │ (HTTP)   │ │ (route   │
-   └──────────┘ └──────────┘ └────╌─────┘
-                                   collection
+```text
+rust-webx（伞）
+├── core       契约 trait + rust-core 共享契约重导出
+├── engine     HTTP 执行：worker/路由/管道/传输
+├── host       装配：认证/中间件/健康检查/WebSocket/presence/DI
+├── macros     #[get]/#[handler]/#[authorize]/#[derive(WebxRequestMeta)]
+├── spa / openapi / client / outbox
+└── 可选：ai、auth、cache(redis)、queue(nats/rabbitmq/kafka)、
+         payment、push(apns/fcm)、transport(h3)
 ```
 
-### Crate 结构
+已发布 crate 的权威生成清单（30 个、包名/导入名/publish 状态）见
+[crate-layout.md](docs/rust-webx/04-architecture/crate-layout.md)。
 
-```
-rust-webx/
-├── Cargo.toml                 # workspace 根 — 只含已发布的运行时 crate
-├── crates/
-│   ├── core/                  # rust-webx-core  — trait 与配置，重导出 rust-core 契约
-│   ├── engine/                # rust-webx-engine — 执行引擎：worker 池、直接分发
-│   ├── host/                  # rust-webx-host  — Host 构建器、中间件管道
-│   │                          #   Trie 路由器、hyper 集成
-│   ├── macros/                # rust-webx-macros — 过程宏
-│   ├── spa/                   # rust-webx-spa   — 静态文件 / SPA 中间件
-│   ├── openapi/               # rust-webx-openapi — OpenAPI 规范生成 + UI
-│   ├── client/                # rust-webx-client — 出站 HTTP：连接池、流式、SSE
-│   ├── webx/                  # rust-webx       — 伞 crate（重新导出）
-│   ├── ai/                    # AI 领域组
-│   │   ├── core/              #   rust-webx-ai         — AI 网关领域包
-│   │   └── gateway/           #   rust-webx-ai-gateway — OpenAI 兼容 /v1 表面
-│   ├── auth/                  # 认证领域组
-│   │   ├── oidc/              #   rust-webx-oidc
-│   │   ├── oauth2/            #   rust-webx-oauth2
-│   │   ├── mfa/               #   rust-webx-mfa
-│   │   └── webauthn/          #   rust-webx-webauthn
-│   ├── cache/                 # 第三方缓存适配器
-│   │   └── redis/             #   rust-webx-redis — IDistributedCache + 事件传输
-│   ├── queue/                 # 第三方消息队列适配器
-│   │   ├── nats/              #   rust-webx-nats
-│   │   ├── rabbitmq/          #   rust-webx-rabbitmq
-│   │   └── kafka/             #   rust-webx-kafka
-│   ├── push/                  # push provider adapters
-│   │   ├── apns/              #   rust-webx-apns — APNs (HTTP/2 token auth)
-│   │   └── fcm/               #   rust-webx-fcm — Firebase Cloud Messaging HTTP v1
-│   ├── transport/             # 可选的非 hyper 监听后端
-│   │   └── h3/                #   rust-webx-h3 — HTTP/3（QUIC + rustls + h3）
-│   ├── payment/               # 支付领域组（按需引入）
-│   │   ├── core/              #   rust-webx-pay — 统一模型/端口/Payments 运行时
-│   │   ├── stripe/            #   rust-webx-pay-stripe
-│   │   ├── alipay/            #   rust-webx-pay-alipay
-│   │   ├── wechatpay/         #   rust-webx-pay-wechatpay
-│   │   ├── paypal/            #   rust-webx-pay-paypal
-│   │   ├── adyen/             #   rust-webx-pay-adyen
-│   │   └── square/            #   rust-webx-pay-square
-│   └── outbox/                #   rust-webx-outbox — outbox 端口/派发器/InMemoryOutbox
-├── examples/                  # 参考应用与参考适配器（各自独立 workspace + lockfile）
-│   ├── docbit/                #   作品集 + 博客 + RBAC + 文档站
-│   ├── dmbit/                 #   设备与库存管理
-│   ├── imbit/                 #   实时 IM（WS + 信令）
-│   └── adapters/              #   非发布参考适配器（publish = false）
-│       └── ai|auth|idempotency|outbox|payment/ef/   # 端口落 rust-ef 的参考实现（可复制、不可依赖）
-├── testing/                   # 不发布的测试工具（publish = false）
-│                              #   alloc-probe / contract-tests / upgrade-smoke / load-probe
-└── fuzz/                      # 独立的 cargo-fuzz workspace（nightly CI）
-```
+### Crate 结构与导入名
 
-> **包名 vs 导入名**：依赖写 `rust-webx`，代码写 `use webx::*;`。子 crate 同理：
-> `rust-webx-core` → `webx_core`、`rust-webx-host` → `webx_host`、
-> `rust-webx-macros` → `webx_macros`、`rust-webx-spa` → `webx_spa`、
-> `rust-webx-openapi` → `webx_openapi`、`rust-webx-ai` → `webx_ai`、
-> `rust-webx-client` → `webx_client`、
-> `rust-webx-ai-gateway` → `webx_ai_gateway`、
-> `rust-webx-oidc` → `webx_oidc`、`rust-webx-oauth2` → `webx_oauth2`、
-> `rust-webx-mfa` → `webx_mfa`、`rust-webx-webauthn` → `webx_webauthn`、
-> `rust-webx-redis` → `webx_redis`、`rust-webx-nats` → `webx_nats`、
-> `rust-webx-rabbitmq` → `webx_rabbitmq`、`rust-webx-kafka` → `webx_kafka`、
-> `rust-webx-outbox` → `webx_outbox`、
-> `rust-webx-pay` → `webx_pay`、`rust-webx-pay-stripe` → `webx_pay_stripe`、
-> `rust-webx-pay-alipay` → `webx_pay_alipay`、`rust-webx-pay-wechatpay` → `webx_pay_wechatpay`、
-> `rust-webx-pay-paypal` → `webx_pay_paypal`、`rust-webx-pay-adyen` → `webx_pay_adyen`、
-> `rust-webx-pay-square` → `webx_pay_square`、
-> `rust-webx-h3` → `webx_h3`。
-> `rust-webx-apns` → `webx_apns`, `rust-webx-fcm` → `webx_fcm`.
->
-> `examples/adapters/` 下的 `*-ef` 参考适配器**不是依赖**：它们 `publish = false`，
-> crates.io 上没有制品，也没有可供业务代码使用的导入名。
+已发布 crate 的权威清单（包名、导入名、publish 状态、分组与职责）由 `cargo metadata`
+生成，见 [docs/rust-webx/04-architecture/crate-layout.md](docs/rust-webx/04-architecture/crate-layout.md)。
+README 不再维护第二份全量清单；上面只列常用依赖类别。
+
+> **包名 vs 导入名**：依赖写 `rust-webx`，代码写 `use webx::*;`。子 crate 规则是
+> `rust-webx-<name>` → `webx_<name>`（`rust-webx` → `webx`），完整对照见生成清单。
 
 ## 请求即端点：Hello World
 
@@ -323,7 +246,7 @@ IEndpoint::handle(ctx)                 ← 调用 handler，序列化响应
     ▼
 HttpResponse → hyper::Response         ← 出错时，内置异常中间件映射状态码
     ▼
-JSON: RFC 7807 application/problem+json (4xx / 5xx)
+JSON: RFC 9457 application/problem+json (4xx / 5xx)
 ```
 
 ## 消息与缓存适配器
@@ -476,32 +399,18 @@ $env:CARGO_PROFILE_DEV_INCREMENTAL = 'true'    # 重新开启增量编译
 ## 异常映射
 
 `webx::Error` 就是 `rust_core::AppError`（2.9.1 起：kind + 私有字段，构造走构造器、读取走访问器，
-2.9 的 enum 已删除）。`kind` 决定默认 status/code/retryable，构造器可以收紧：
+2.9 的 enum 已删除）。`kind` 决定默认 status/code/retryable，构造器可以收紧。稳定的
+构造器 → `code`/状态/可重试映射、兜底规则与 `ERROR_CODES` 注册表只在
+[error-codes.md](docs/design/error-codes.md) 维护；业务代码不要复制整张表。
 
-| 构造器 | HTTP 状态码 | `code` | 可重试 | 说明 |
-|--------|------------|--------|--------|------|
-| `Error::validation(msg)` | 400 | `validation_failed` | 否 | 校验失败（配 `with_field`） |
-| `Error::bad_request(msg)` | 400 | `bad_request` | 否 | 输入非法 |
-| `Error::invalid_json(err)` | 400 | `invalid_json` | 否 | 请求（反）序列化错误 |
-| `Error::unauthorized(msg)` | 401 | `unauthorized` | 否 | 认证失败 / 缺少令牌 |
-| `Error::forbidden(msg)` | 403 | `forbidden` | 否 | 权限不足 |
-| `Error::not_found(msg)` | 404 | `not_found` | 否 | 资源未找到 |
-| `Error::route_not_found(msg)` | 404 | `not_found` | 否 | 路由未命中 |
-| `Error::conflict(msg)` | 409 | `conflict` | 否 | 乐观并发 / 状态冲突 |
-| `Error::conflict_retryable(msg)` | 409 | `conflict` | 是 | 重试可解决的冲突 |
-| `Error::payload_too_large(msg)` | 413 | `payload_too_large` | 否 | 请求体或上传文件超限 |
-| `Error::unsupported_media_type(msg)` | 415 | `unsupported_media_type` | 否 | 请求内容类型不受支持 |
-| `Error::too_many_requests(secs, msg)` | 429 | `too_many_requests` | 是 | 限流（带 `Retry-After`） |
-| `Error::unavailable(msg)` | 503 | `service_unavailable` | 是 | 上游不可用 / 超时 |
-| `Error::internal(operator)` / `Error::state(operator)` | 500 | `internal_error` | 否 | 服务端缺陷；`public_detail() = None` |
-| `Error::di(operator)` | 500 | `dependency_injection` | 否 | DI 容器 / 组合根缺陷 |
-| `Error::response_serialization(err)` | 500 | `internal_error` | 否 | 响应编码失败（服务端 DTO 缺陷） |
-| `Error::status(code, msg)` | `code` | 按状态派生 | 按状态 | 显式状态覆盖 |
-| `ProblemDetails::validation(..).to_error()` | 400 | `validation_failed` | 否 | 字段级绑定/校验问题，携带 `errors` |
+常用示例：
+
+- `Error::validation(msg)` → `400 validation_failed`
+- `Error::not_found(msg)` → `404 not_found`
+- `Error::internal(operator)` → `500 internal_error`（operator 只进日志）
 
 边界错误不需要适配层：`EFError` / `RdiError` 在各自 crate 实现 `From`，Handler 直接用 `?`。
-分类权威见 [`app-error-migration.md`](docs/design/app-error-migration.md)，机器码表是
-`rust_core::error_codes::ERROR_CODES`。
+分类权威见 [app-error-migration.md](docs/design/app-error-migration.md)。
 
 ## 文档
 

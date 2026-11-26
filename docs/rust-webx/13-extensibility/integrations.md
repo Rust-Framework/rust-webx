@@ -34,7 +34,7 @@
 | `IPushSender` | 无默认注册；`InMemoryPushSender` 供测试 | 否（`use_push`） | 已发布适配器 `rust-webx-apns` / `rust-webx-fcm`（`crates/push/`）；WebPush 适配器待办 |
 | `ISecretProtector` / `ISecretStore` | 无默认 protector；`AesGcmSecretProtector` + `EnvSecretStore` / `FileSecretStore` / `ChainSecretStore` 可直接装配 | 否（`use_secret_protector`） | 无；KMS/信封加密在宿主实现 |
 | `IObjectStore` | `InMemoryObjectStore` | 否 | 无；S3/OSS 等由下游实现并跑契约 |
-| `IMeter` | `NoopMeter`；`Metrics.Enabled` 时换成 `MemoryMeter` 并接 `/metrics` | 是（仅内存指标桥） | 无；OTLP exporter 在宿主实现 |
+| `IMeter` | 无默认注册；`Metrics.Enabled` 时宿主 `try_add` 一个 `MemoryMeter` 并接 `/metrics`，测试可显式用 `NoopMeter` | 是（仅内存指标桥） | 无；OTLP exporter 在宿主实现 |
 | `IAdvisoryLock` | 无默认注册；`InMemoryAdvisoryLock` 供单节点/测试 | 否（`use_advisory_lock`） | 无；`rust-webx-redis` 的 `RedisAdvisoryLock` 是已发布实现 |
 | `IRateLimiter` | `InMemoryRateLimiter` | `RateLimit` 配置节启用时 | 无；共享限流（Redis）在宿主实现 |
 | `IEventPublisher` | 进程内内存队列 | `add_mediator()` 装配；`use_event_publisher` 替换 | 已发布的 broker 适配器 `rust-webx-redis` / `nats` / `rabbitmq` / `kafka`（`crates/`）；广播投递类需适配器实现 `broadcast` |
@@ -161,7 +161,7 @@ outbox 是"两层边界"的最好例子：**派发语义归框架，存储归下
 - 依赖它们等于把"参考实现"当 SDK：实现细节（表名、实体、租约列）随时可能为了示例清晰而修改。
 
 正确姿势只有两条：**在业务 crate 实现端口**，或**复制参考实现并归自己维护**（§3.2）。
-`rust-webx-ef`（`webx_ef`）兼容壳已在 2.9.1 删除，持久层错误映射不需要任何框架侧 crate——
+`rust-webx-ef`（`webx_ef`）兼容壳已在 2.9.1 删除，持久层错误映射不需要任何框架侧 crate—— <!-- docs:allow-stale-api -->
 `rust-ef` 的 `From<EFError>` 让 handler 直接 `?` 即可（见 [兼容性政策](../../design/compatibility.md)）。
 
 ## 6. 接入自检

@@ -2,7 +2,7 @@
 //!
 //! Every framework-generated problem carries a machine-readable `code`
 //! extension member (an RFC 9457 extension) in addition to the HTTP status:
-//! [`Error::code`](crate::error::Error::code) derives it from the error variant,
+//! [`Error::code`](crate::error::Error::code) derives it from the `AppError` kind/constructor,
 //! [`default_code_for_status`](crate::error::default_code_for_status) supplies
 //! the fallback for a bare status, and an application may override it with
 //! [`ProblemDetails::with_code`](crate::problem::ProblemDetails::with_code).

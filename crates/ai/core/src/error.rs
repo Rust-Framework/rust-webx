@@ -1,7 +1,7 @@
 //! OpenAI-compatible error envelope and host error writer.
 //!
 //! OpenAI SDKs expect failures as `{"error":{"message","type","param","code"}}`
-//! rather than RFC 7807 `problem+json`. [`OpenAiErrorWriter`] is registered with
+//! rather than RFC 9457 `problem+json`. [`OpenAiErrorWriter`] is registered with
 //! `HostBuilder::add_error_writer` and takes over for `/v1/` paths (including
 //! 404s, where no route pattern exists); every other path keeps the framework's
 //! `problem+json` response.

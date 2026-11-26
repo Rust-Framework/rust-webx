@@ -619,14 +619,22 @@ mod tests {
         let (options, path) = test_options();
         prepare(&options).await;
         let sink = EfUsageSink::from_options(Arc::clone(&options));
-        sink.record(event()).await.expect("first");
+        // Pin the events to a fixed window instead of relying on "now" being in
+        // the same minute as the later rollup call: a real-clock test that
+        // crosses a minute boundary between record() and rollup_window() is
+        // otherwise flaky (seen on Windows CI).
+        let window_start = (now_unix_secs() / 60) * 60;
+        sink.record(event().with_timestamp(window_start + 1))
+            .await
+            .expect("first");
 
         let mut second = event();
         second.request_id = "req-2".into();
         second.usage = Usage::new(4, 6);
-        sink.record(second).await.expect("second");
+        sink.record(second.with_timestamp(window_start + 2))
+            .await
+            .expect("second");
 
-        let window_start = (now_unix_secs() / 60) * 60;
         let rollup = EfUsageRollup::from_options(Arc::clone(&options));
         let inserted = rollup
             .rollup_window(window_start, 60)

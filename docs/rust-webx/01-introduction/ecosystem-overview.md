@@ -1,190 +1,140 @@
 # 生态与 Crate 全景
 
+> 本页是**生态地图与选型入口**：说明有哪些 crate、什么时候需要它们，以及依赖方向。
+> 每个 crate 的包名、导入名、职责与公开能力以
+> [Crate 分层结构](../04-architecture/crate-layout.md) 为唯一权威；本页不再重复逐 crate 的
+> API 清单，避免版本演进时出现第二套描述。
+
 ## Workspace 总览
 
-rust-webx 以 Cargo Workspace 组织，各 Crate 职责单一、依赖方向清晰：
+rust-webx 以 Cargo workspace 组织。`crates/` 下是 **30 个可发布 crate**：
 
-```
-rust-webx/                    # Workspace 根
-├── crates/                   # 已发布的运行时 crate
-│   ├── core/                   # rust-webx-core — 核心 trait（零实现依赖）
-│   ├── host/                   # rust-webx-host — Host、管道、路由、认证实现
-│   ├── macros/                 # rust-webx-macros — 过程宏
-│   ├── spa/                    # rust-webx-spa — SPA 静态托管
-│   ├── openapi/                # rust-webx-openapi — OpenAPI 生成
-│   ├── ai/                     # rust-webx-ai — AI 网关领域包（可选，版本跟随 workspace）
-│   ├── client/                 # rust-webx-client — 出站 HTTP（连接池/流式/SSE）
-│   ├── gateway/                # rust-webx-ai-gateway — OpenAI 兼容 /v1 表面
-│   ├── outbox/                 # rust-webx-outbox — 事务性 outbox 端口/派发器/内存实现
-│   └── webx/                   # rust-webx — 伞 Crate，统一导出
-├── examples/                   # 参考应用与参考适配器（各自独立 workspace + lockfile）
-│   ├── docbit/                 # 示例：作品集全栈应用
-│   ├── dmbit/                  # 示例：设备与库存管理
-│   ├── imbit/                  # 示例：实时 IM（WebSocket + 信令）
-│   └── adapters/               # 非发布参考适配器：ai|auth|idempotency|outbox|payment 的 ef/
-├── testing/                    # 非发布测试工具：端口契约套件、alloc/upgrade/load 探针
-└── docs/rust-webx/             # 本书文档（仓库根目录）
+```text
+rust-webx/
+├── crates/
+│   ├── core/  host/  engine/  macros/  spa/  openapi/
+│   ├── client/  outbox/  build/  webx/
+│   ├── ai/{core,gateway}
+│   ├── auth/{mfa,oauth2,oidc,webauthn}
+│   ├── cache/redis
+│   ├── queue/{nats,rabbitmq,kafka}
+│   ├── payment/{core,stripe,alipay,wechatpay,paypal,adyen,square}
+│   ├── transport/h3
+│   └── push/{apns,fcm}
+├── examples/{docbit,dmbit,imbit,adapters}   # 参考应用 + 非发布参考适配器
+├── testing/{contract-tests,alloc-probe,load-probe,upgrade-smoke}
+├── fuzz/                                     # cargo-fuzz 独立 workspace
+└── docs/rust-webx/                           # 手册源（mdBook）；book/ 为构建产物
 ```
 
-### 包名与导入名
+包名 / 导入名对照与各层职责见
+[Crate 分层结构 §包名与导入名](../04-architecture/crate-layout.md#包名与导入名)。
+`examples/adapters/` 与 `testing/` 均**不发布**，不进入 crates.io 发布序列。
 
-各 Crate 的包名、导入名与职责对照表见 [Crate 分层结构](../04-architecture/crate-layout.md#包名与导入名)。
-
-## 依赖关系图
+## 依赖方向
 
 ```mermaid
 graph BT
-    Webapp[rust-webx 伞 Crate]
+    App[应用代码]
+    Webx[rust-webx 伞 crate]
     Core[rust-webx-core]
     Host[rust-webx-host]
+    Engine[rust-webx-engine]
     Macros[rust-webx-macros]
     SPA[rust-webx-spa]
     OpenAPI[rust-webx-openapi]
+    Client[rust-webx-client]
+    Outbox[rust-webx-outbox]
 
-    Webapp --> Core
-    Webapp --> Host
-    Webapp --> Macros
-    Webapp --> SPA
-    Webapp --> OpenAPI
+    App --> Webx
+    Webx --> Core
+    Webx --> Host
+    Webx --> Macros
+    Webx --> SPA
+    Webx --> OpenAPI
+    Webx --> Client
+    Webx --> Outbox
     Host --> Core
-    Host --> OpenAPI
+    Host --> Engine
+    Host --> Client
     Host --> SPA
+    Host --> OpenAPI
+    Engine --> Core
 ```
 
-**关键原则**：`core` 只定义 trait，不依赖任何实现 Crate。这保证了：
+**关键原则**：
 
-- 自定义中间件只需依赖 `core`
-- 测试可 Mock 所有抽象接口
-- 可替换 HTTP 实现而不影响业务代码
+- `core` 只定义契约（trait / 值类型 / 配置），不链接 HTTP 引擎；因此可替换引擎、
+  可用纯契约库编写中间件，也便于单元测试 Mock。
+- 领域/适配器 crate（AI、认证、缓存、事件传输、支付、推送、HTTP/3）**不进入伞 crate**：
+  按需显式依赖，不需要的能力不会进入构建图。
+- 所有 `rust-webx*` crate 版本跟随 workspace（同一次发布统一版本号），不单独维护 0.x 线。
 
-## 各 Crate 职责
+## 按场景选 Crate
 
-### rust-webx-core
+| 场景 | 需要的 crate | 说明与入口 |
+|---|---|---|
+| 常规 HTTP/JSON 服务 | `rust-webx`（伞） | 含 core/host/engine/macros/spa/openapi/client/outbox 的常用面；见 [快速上手](../02-quickstart/INDEX.md) |
+| 只写独立中间件/契约库 | `rust-webx-core` | 契约层，见 [中间件](../07-middleware/INDEX.md) |
+| 静态资源 / SPA 托管 | 伞内 `spa`（无需额外依赖） | `SpaMiddleware` + History fallback；见 [OpenAPI 与 SPA](../11-production/openapi-spa.md) |
+| 出站 HTTP（调用第三方 API） | 伞已重导出传输类型；独立库可依赖 `rust-webx-client` | 命名客户端、连接池、流式/SSE；见 [出站 HTTP](../13-extensibility/integrations.md) |
+| 事务性 outbox | 伞内 `outbox`；落库参考实现另复制 `examples/adapters/outbox/ef` | 端口/派发器/内存实现；见 [事务性 outbox](../13-extensibility/outbox.md) |
+| 多实例实时（WebSocket 续传/在线态/广播） | `rust-webx-redis` + 支持广播的事件传输 | 续传、`IOnlinePresence`、Redis 缓存/事件传输；见 [多实例实时部署](../11-production/realtime-cluster.md)、[已知边界](../../design/known-boundaries.md) |
+| 事件传输 | `rust-webx-nats` / `rust-webx-rabbitmq` / `rust-webx-kafka` | 投递语义与广播支持差异见 [broker 能力矩阵](../../design/broker-capability-matrix.md) |
+| 登录/MFA/通行密钥 | `rust-webx-mfa` / `rust-webx-oauth2` / `rust-webx-oidc` / `rust-webx-webauthn` | 认证端口与 scheme 装配见 [认证与安全](../09-auth-security/INDEX.md) |
+| 移动推送 | `rust-webx-apns` / `rust-webx-fcm` | `IPushSender` 适配器；WebPush 仅端口，见 [推送](../13-extensibility/push-notifications.md) |
+| 支付 | `rust-webx-pay` + 所需 provider crate | 统一模型/端口/回调验签；见 [支付](../13-extensibility/payments.md) |
+| HTTP/3 | `rust-webx-h3` | 可选监听传输，默认构建不链接 QUIC；见 [传输端口](../../design/transport-port.md) |
+| AI 网关 | `rust-webx-ai` + `rust-webx-ai-gateway` | 领域包与 OpenAI 兼容表面分离；不进入伞 crate |
+| 构建期内嵌静态资源 | `rust-webx-build`（`build-dependencies`） | 编译期生成资源表；见 [crate 布局 §build](../04-architecture/crate-layout.md) |
 
-定义框架的**语言**——所有公开 trait 与类型：
-
-| 模块 | 核心类型 |
-|------|---------|
-| `mediator` | `IRequest<T>`, `IEventRequest`, `IMediator` |
-| `handler` | `IRequestHandler<T,R>`, `IEventHandler<T>`, `IHostedService` |
-| `http` | `IHttpContext`, `IHttpRequest`, `IHttpResponse`, `IClaimsExt` |
-| `middleware` | `IMiddleware` |
-| `routing` | `IRouter`, `IEndpoint`, `RouteMeta`, `HttpMethod` |
-| `auth` | `IClaims`, `IAuthenticationHandler`, `IAuthenticationScheme`, `IDynamicAuthorizer`, `IdentityUser` / `RequestUser` |
-| `error` | `Error`, `Result`, `ActionResult` |
-| `action` | `IActionResult`, `Response`, `JsonResult`, `ContentResult`, `FileResult`, `NoContentResult`, `StatusCodeResult` |
-| `config` | `AppOptions`, `appsettings` 加载 |
-| `cache` | `IDistributedCache` |
-| `problem` | `ProblemDetails`, `FieldError` |
-| `pagination` | `PagedRequest`, `PagedResult` |
-| `operation` | `OperationResult`（含 `OperationResult<T>`） |
-
-### rust-webx-host
-
-框架的**运行时**：
-
-- `Host` / `HostBuilder` — 应用宿主与构建器
-- `Router` — 基于 Trie 的路由匹配（生产实现是 `webx_engine::Router`；`webx_host::router::Router` 为 1.5 兼容嵌入器）
-- `MiddlewarePipeline` — 中间件顺序执行（生产实现是 `webx_engine::Pipeline`）
-- `EngineContext` — 当前引擎的 HTTP 上下文具体实现（应用只依赖 `IHttpContext`）
-- `JwtAuth` / `AuthenticationMiddleware` + `IDynamicAuthorizer` 注册 — 认证授权实现
-- `MemoryCache`, `RateLimiter`, `CorsMiddleware` 等内置中间件
-
-### rust-webx-macros
-
-编译时魔法：
-
-| 宏 | 作用 |
-|----|------|
-| `#[get("/path")]` 等 | 路由注册 + HTTP 方法 |
-| `#[handler]` | Handler 编译时注册（提交 `HandlerRegistration` 到 `inventory`） |
-| `#[authorize]` | 声明式授权元数据 |
-| `#[derive(WebxRequestMeta)]` + `#[fromquery]` / `#[frompath]` / `#[frombody]` / `#[fromform]` / `#[fromfile]` / `#[fromheader]` / `#[fromclaim]` | 请求字段来源声明：编译期生成绑定代码与 OpenAPI 参数元数据（字段级属性，非独立宏） |
-
-### rust-webx-spa
-
-`SpaMiddleware`：托管静态文件（磁盘 + 编译内嵌资源），支持前端 History 路由。
-`index.html` 回退在**路由未命中之后**执行，且只对显式请求 HTML 的 GET/HEAD 生效：
-`/api/*`、请求数据（`Accept: application/json` / `*/*`）的客户端得到真正的 404，而不是 200 HTML。
-
-### rust-webx-openapi
-
-从编译时收集的路由元数据生成 OpenAPI 3.0 规范，并内置自定义 API 文档 UI（`/api/openapi.html`）。
-
-### rust-webx-ai
-
-AI 聚合网关的领域包：统一请求/流 IR、`ChatProvider` 端口、OpenAI 兼容适配器、模型目录与路由、
-`CatalogHandle` 热替换、数据面执行器、精确响应缓存与单飞、成本计算、韧性原语（重试/熔断/舱壁）、用量计量与账本端口、tokenizer 兜底、
-API key 解析/HMAC 与存储端口、配额预扣-结算、OpenAI 错误信封。它**不进入伞 crate**、不依赖 HTTP 实现，版本跟随 workspace
-（`version.workspace = true`，与 `rust-webx` 同版本）。不需要 AI 能力的项目不引入。
-
-### 持久化参考适配器（`examples/adapters/`，非发布）
-
-与 ORM/数据库耦合的持久化适配器不属于发布序列：它们在独立 workspace `examples/adapters/`，
-全部 `publish = false`，只作为**参考实现**供复制（`ai/ef`、`auth/ef`、`idempotency/ef`、
-`outbox/ef`、`payment/ef`）。例如 `ai/ef` 是 `rust-webx-ai` 的 `IUsageSink` 的 rust-ef 参考实现：
-`EfUsageSink` + `ai_usage_events` 实体，按 `request_id` 幂等写入，每次写使用独立 `DbContext`。
-
-框架侧只保留端口与默认实现；接入方式（用默认、复制参考实现、自己实现端口 + 契约测试）见
-[端口与适配器（下游接入）](../13-extensibility/integrations.md)。
-
-### rust-webx-ai-gateway
-OpenAI 兼容的 HTTP 表面：`POST /v1/chat/completions` 的请求 DTO、IR 转换、JSON/SSE 响应与
-OpenAI 错误信封。它只做传输适配，路由/provider/配额/用量仍在 `rust-webx-ai`。应用注册
-`Arc<GatewayExecutor>`、鉴权 scheme 与 `OpenAiErrorWriter` 后即可暴露兼容端点。
-
-### rust-webx-client
-
-出站 HTTP 客户端：命名客户端、连接池、rustls TLS、流式响应体与上游 SSE 解码。服务端代码需要
-调用第三方 API（AI provider、支付、消息队列等）时用它，而不是在业务里另起一套 HTTP 栈。
-同样**不进入伞 crate**，版本跟随 workspace。
-
-### rust-webx（伞 Crate）
-
-应用开发者只需：
-
-```toml
-[dependencies]
-rust-webx = "2.9"
-```
-
-```rust
-use webx::*;  // 一次导入全部公开 API
-```
+各 crate 的公开类型、依赖方向与导入名统一见
+[Crate 分层结构](../04-architecture/crate-layout.md)；不要从本页复制 API 细节到业务代码。
 
 ## 外部依赖
 
+框架直接依赖的“底座”很少，其余能力以端口 + 可选适配器的形式引入：
+
 | 依赖 | 用途 |
-|------|------|
-| `rust-dix` | DI 容器（ServiceCollection / ServiceProvider） |
-| `hyper` + `tokio` | HTTP 服务器与异步运行时 |
-| `inventory` | 编译时路由与 Handler 元数据收集 |
-| `serde` / `serde_json` | JSON 序列化 |
+|---|---|
+| `rust-core` | `AppError`、分页/结果契约等共享值类型 |
+| `rust-dix` | DI 容器、作用域与注入宏 |
+| `hyper` + `tokio` | HTTP 监听与异步运行时 |
+| `inventory` | 编译期路由/Handler/事件元数据收集 |
+| `serde` / `serde_json` | 配置与 JSON |
 | `jsonwebtoken` | JWT 编解码 |
-| `async-trait` | async trait 支持 |
+| `async-trait` | 异步 trait 支持 |
+| `rustls` / `hyper-util` 等 | TLS 与监听栈（随 host/engine 引入） |
+
+可选能力各自引入依赖：`redis`、NATS/RabbitMQ/Kafka 客户端、`rust-ef`（仅参考适配器）、
+`p256`/`aes-gcm` 等（WebAuthn/推送适配器）。精确依赖与特性以各 crate 的 `Cargo.toml` 为准。
 
 ## 应用开发者视角
 
-作为框架使用者，你**通常只需依赖 `rust-webx` 伞 Crate**。仅在以下情况直接接触子 Crate：
+通常只需要依赖 `rust-webx` 伞 crate；仅在以下情况直接依赖子 crate：
 
-- 编写独立中间件库 → 依赖 `rust-webx-core`
-- 需要事务性 outbox → 加 `rust-webx-outbox`（端口/派发器/内存实现；EF 存储参考实现在 `examples/adapters/outbox/ef`）
-- 贡献框架本身 → 修改对应子 Crate
+- 独立中间件/契约库 → `rust-webx-core`
+- 多实例实时、事件传输、缓存 → `rust-webx-redis` 或对应 broker crate
+- 登录/MFA/通行密钥 → `rust-webx-mfa` / `oauth2` / `oidc` / `webauthn`
+- 推送 → `rust-webx-apns` / `rust-webx-fcm`
+- 支付 → `rust-webx-pay` + provider crate
+- AI 网关 → `rust-webx-ai` / `rust-webx-ai-gateway`
+- HTTP/3 → `rust-webx-h3`
+- 贡献框架本身 → 修改对应子 crate
 
-## 示例项目 Docbit
+## 示例项目
 
-`docbit` 是框架的**官方参考实现**，展示：
-
-- 全栈单体（API + SPA + 文档系统）
-- `IHostedService` 数据初始化
-- JWT 认证与 `#[authorize]`
-- `#[inject]` 依赖注入
-- 多模块 handlers（auth、blog、docs、works 等）
-
-运行：`cargo run --manifest-path examples/docbit/Cargo.toml -p docbit-host`
+- `docbit`：全栈单体（API + SPA + 文档系统），展示 `#[handler]`、DI、JWT 与 `#[authorize]`；
+  运行：`cargo run --manifest-path examples/docbit/Cargo.toml -p docbit-host`
+- `dmbit`：设备与库存管理，展示数据层与后台任务。
+- `imbit`：实时 IM（WebSocket + 信令 + 浏览器 Cookie 会话/断线续传参考）。
+- `examples/adapters/`：与 ORM 耦合的持久化参考适配器（`ai/auth/idempotency/outbox/payment/ef`），
+  可复制不可依赖。
 
 ## 小结
 
-rust-webx 的 Crate 分层体现了**接口与实现分离**的设计：core 定义契约，host 提供运行时，macros 提供编译时便利，伞 Crate 统一开发者体验。
+核心分层是 **core（契约）→ engine（执行）→ host（装配）→ webx（统一开发体验）**，
+能力扩展以独立 crate/端口按需引入。想查“某个 crate 到底提供什么、导入名是什么”，
+以 [Crate 分层结构](../04-architecture/crate-layout.md) 和对应 rustdoc 为准。
 
 下一章：[快速上手](../02-quickstart/INDEX.md)

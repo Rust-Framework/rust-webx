@@ -20,7 +20,8 @@ Cargo **包名**带连字符，Rust **导入名**用下划线库名。两者不�
 |----------------------|-----------------|------|
 | `rust-webx` | `webx` | 伞 crate，统一 re-export |
 | `rust-webx-core` | `webx_core` | 契约与配置 |
-| `rust-webx-host` | `webx_host` | Host / 路由 / 中间件 |
+| `rust-webx-host` | `webx_host` | Host / 路由 / 中间件装配 |
+| `rust-webx-engine` | `webx_engine` | 执行引擎（worker/路由/管道/传输端口） |
 | `rust-webx-macros` | `webx_macros` | 过程宏（`#[get]`、`#[handler]`…） |
 | `rust-webx-spa` | `webx_spa` | 静态文件 / SPA |
 | `rust-webx-openapi` | `webx_openapi` | OpenAPI 生成 + UI |
@@ -28,6 +29,14 @@ Cargo **包名**带连字符，Rust **导入名**用下划线库名。两者不�
 | `rust-webx-ai-gateway` | `webx_ai_gateway` | OpenAI 兼容 `/v1` HTTP 表面（依赖 webx + webx-ai） |
 | `rust-webx-client` | `webx_client` | 出站 HTTP（连接池/流式/SSE；伞 crate 只重导出传输类型） |
 | `rust-webx-outbox` | `webx_outbox` | 事务性 outbox 的端口（`IOutbox`/`OutboxEntry`）、派发器、`OutboxOptions` 与内存实现（不链接 rust-ef） |
+| `rust-webx-mfa` | `webx_mfa` | TOTP / 恢复码 MFA（可选，见 auth 节） |
+| `rust-webx-oauth2` | `webx_oauth2` | OAuth 2.0 社交登录客户端（可选） |
+| `rust-webx-oidc` | `webx_oidc` | OIDC 客户端（discovery/PKCE/id_token，可选） |
+| `rust-webx-webauthn` | `webx_webauthn` | WebAuthn / Passkey relying-party 校验（可选） |
+| `rust-webx-redis` | `webx_redis` | 分布式缓存 + 事件传输 + 共享续传/在线态（可选） |
+| `rust-webx-nats` / `rust-webx-rabbitmq` / `rust-webx-kafka` | `webx_nats` / `webx_rabbitmq` / `webx_kafka` | 事件传输适配器（可选；Kafka 仅竞争投递） |
+| `rust-webx-pay` + 六个 provider crate | `webx_pay*` | 支付领域组（可选，见 payment 节） |
+| `rust-webx-apns` / `rust-webx-fcm` | `webx_apns` / `webx_fcm` | 移动推送适配器（可选，见 push 节） |
 | `rust-webx-h3` | `webx_h3` | 可选 HTTP/3 监听传输（QUIC + rustls + h3；不进伞 crate，默认构建不链接） |
 | `rust-webx-build` | `webx` | 构建期（`build-dependencies`） |
 
@@ -35,7 +44,7 @@ Cargo **包名**带连字符，Rust **导入名**用下划线库名。两者不�
 > **不在上表**：它们 `publish = false`，不是可依赖的包，只供复制。
 
 `crates/` 只包含**可发布** crate（`publish = false` 会被布局门禁拒绝）；非发布的测试工具在
-`testing/`（`alloc-probe`、`contract-tests`、`upgrade-smoke`），`fuzz/` 是独立的 cargo-fuzz
+`testing/`（`alloc-probe`、`contract-tests`、`load-probe`、`upgrade-smoke`），`fuzz/` 是独立的 cargo-fuzz
 workspace。应用代码只依赖 `crates/` 下的包。
 
 对照 `rust-dix` / `rust-ef`：包名与导入名同样分别是 `rust-dix`→`rust_dix`、`rust-ef`→`rust_ef`。
@@ -49,22 +58,15 @@ workspace。应用代码只依赖 `crates/` 下的包。
 - 单元测试可 Mock 全部接口
 - 可替换 HTTP 引擎（如从 hyper 迁移）
 
-核心模块：
+契约域与代表模块（模块全集以 `crates/core/src/lib.rs` 的 `pub use` 与 rustdoc 为准）：
 
-| 模块 | 职责 |
-|------|------|
-| `app` | `IHost` |
-| `mediator` | `IRequest`, `IEventRequest`, `IMediator` trait + `Mediator` 实现 |
-| `handler` | `IRequestHandler`, `IEventHandler`, `IHostedService` |
-| `http` | `IHttpContext`, `IHttpRequest`, `IHttpResponse` |
-| `middleware` | `IMiddleware` |
-| `routing` | `IRouter`, `IEndpoint`, `RouteMeta` |
-| `auth` | `IClaims`, `IAuthenticationHandler`, `IAuthenticationScheme`, `IDynamicAuthorizer`, `IdentityUser` / `RequestUser` |
-| `route` | 扫描类型、`HandlerCache`、`RouteEntry`、`IEndpointCatalog` / `EndpointCatalog` |
-| `localization` | `TextRef`, `IStringLocalizer`, `StringLocalizer`, `LocalizationOptions` |
-| `stream` | `SseEvent`, `SseResult`, `StreamEnd`（`text/event-stream` 响应） |
-| `options_monitor` | `IOptionsMonitor`, `OptionsMonitor`（热更新快照 + 变更通知） |
-| `metrics` | `IMeter`, `Counter`, `Histogram`, `Gauge`（`NoopMeter`/`MemoryMeter`） |
+| 契约域 | 代表模块 | 代表类型 |
+|---|---|---|
+| 请求/处理 | `mediator`, `handler`, `route`, `http`, `middleware`, `action`, `pipeline` | `IRequest`, `IEventRequest`, `IRequestHandler`, `IEventHandler`, `IHostedService`, `IHttpContext`, `IActionResult` |
+| 认证/安全 | `auth`, `security`, `idempotency`, `locking`, `secrets` | `IClaims`, `IAuthenticationScheme`, `IDynamicAuthorizer`, `IdentityUser` / `RequestUser`, `ISessionStore`, `IPasswordHasher`, `IIdempotencyStore`, `IAdvisoryLock` |
+| 实时/通知 | `realtime`, `push`, `notifications`, `stream` | `IRealtimeEventStore`, `IOnlinePresence`, `IConnectionRegistry`, `WebSocketLimits`, `IPushSender`, `IEmailSender` / `ISmsSender`, `SseResult` |
+| 配置/可观测 | `config`, `options_monitor`, `metrics`, `localization`, `time`, `error` | `AppOptions`, `IOptionsMonitor`, `IMeter`, `IStringLocalizer`, `IClock`, `Error` |
+| 数据/分页 | `cache`, `pagination`, `keyset`, `operation`, `form`, `validation`, `storage`, `media` | `IDistributedCache`, `PagedRequest` / `PagedResult`, `KeysetRequest` / `CursorPage`, `OperationResult`, 表单/校验/存储/媒体端口 |
 
 ## host — 运行时层
 
@@ -80,6 +82,13 @@ workspace。应用代码只依赖 `crates/` 下的包。
 | 授权 | 端点执行 `#[authorize]` 静态规则；`#[authorize(dynamic)]` 把声明交给 `IDynamicAuthorizer::authorize_with_declared_rules`；实例归属在 Handler |
 | 端点 | `StubEndpoint`（路由宏端点）, `RequestEndpoint`, `ControllerEndpoint`, `StaticJsonEndpoint`, `StaticHtmlEndpoint` |
 | 宿主 | `Host`, `HostBuilder`, `Server` |
+
+## engine — 执行引擎
+
+`rust-webx-engine` 是 HTTP **执行层**：acceptor + N 个 worker runtime、零拷贝上下文
+（`EngineContext`）、matchit 路由（`Router`）、onion 中间件管道（`Pipeline`）、TLS/监听与
+传输端口（`IHttpTransport` / `TransportRuntime` / `TransportRequest` / `TransportResponse`）。
+`host` 通过 engine 的生产路径服务请求；应用侧只依赖 `core` 契约，不直接绑定 engine 类型。
 
 ## macros — 编译时层
 
@@ -178,6 +187,40 @@ HTTP 数据面端点、非 OpenAI 适配器与租户级路由后续加入。
 - **不发布**：不在 crates.io，不参与 semver 检查，也不在发布顺序里；
 - **接入方式**（用默认 / 复制参考适配器 / 自己实现端口 + 契约测试）见
   [端口与适配器（下游接入）](../13-extensibility/integrations.md)。
+
+## auth — 可选认证组
+
+`crates/auth/` 下的 crate 不进伞 crate，按需显式依赖；认证 scheme/端口装配仍在 host：
+
+| crate | 导入名 | 职责 |
+|---|---|---|
+| `rust-webx-mfa` | `webx_mfa` | TOTP 与恢复码多因素认证 |
+| `rust-webx-oauth2` | `webx_oauth2` | OAuth 2.0 社交登录客户端（GitHub/Google/Microsoft/GitLab/Gitee/DingTalk/Feishu 预设） |
+| `rust-webx-oidc` | `webx_oidc` | OIDC 客户端：discovery、PKCE、id_token 校验与会话桥接 |
+| `rust-webx-webauthn` | `webx_webauthn` | WebAuthn / Passkey relying-party 校验 |
+
+## cache — 可选缓存与实时共享
+
+`rust-webx-redis`（导入名 `webx_redis`）同时提供 `IDistributedCache`、事件传输
+（Streams 竞争 + Pub/Sub 广播）、`IRealtimeEventStore`（共享续传）与 `IOnlinePresence`
+（跨节点在线态）。装配入口仍是 `add_redis` + 宿主已有的 `use_realtime_event_store` /
+`use_online_presence`，没有额外注册动词；单节点客户端，Cluster/Sentinel 与
+`max_age` 物理保留等边界见 [known-boundaries.md](../../design/known-boundaries.md)。
+
+## queue — 可选事件传输
+
+`rust-webx-nats` / `rust-webx-rabbitmq` / `rust-webx-kafka` 分别提供 NATS、RabbitMQ、
+Kafka 的 `IEventPublisher` / 消费者实现；投递语义（竞争/广播、at-least-once/at-most-once、
+死信、Kafka 广播不支持）以
+[broker 能力矩阵](../../design/broker-capability-matrix.md) 为唯一权威。装配入口：
+`add_nats` / `add_rabbitmq` / `add_kafka`。
+
+## push — 可选移动推送
+
+`rust-webx-apns` / `rust-webx-fcm` 实现 `IPushSender` 端口，分别对接 APNs token auth 与
+FCM HTTP v1；宿主用 `HostBuilder::use_push` 装配，端口只做三态结果映射、不做自动重试。
+`PushPlatform::WebPush` 目前**只有端口、没有适配器**（C2，见
+[known-boundaries.md](../../design/known-boundaries.md)）。
 
 ## transport — 可选监听传输组
 

@@ -1,8 +1,8 @@
 # 下游能力缺口处置结论
 
 > 来源：下游 RXStudio 的 `docs/design/upstream-framework-gaps.md`（基于 rust-webx 2.6.0 /
-> rust-ef 2.6.0 / rust-dix 1.0.0 的落地反馈）。处置基线：rust-webx 2.9.0 / rust-ef 2.9.0 /
-> rust-dix 1.0.0。
+> rust-ef 2.6.0 / rust-dix 1.0.0 的落地反馈）。处置基线：rust-webx 2.9.2 / rust-ef 2.9.1 /
+> rust-dix 1.1.0；运行期边界台账见 [known-boundaries.md](known-boundaries.md)，本页不重复其细节。
 >
 > 本页是**处置结论**，不是手册：每项只保留判定、落点与边界；实现细节在代码、rustdoc 与
 > `docs/rust-webx/` 中维护。2.x 以加性变更为主（2.9.1 是已登记的破坏性补丁，见
@@ -60,8 +60,8 @@
 | # | 2.9.1 缺口 | 判定 | 落点 | 边界 |
 |---|---|---|---|---|
 | R1 | 跨节点房间广播默认走竞争消费（实际只到一个节点）；无用户定向投递 | **已覆盖（2.9.2）** | `EventDelivery::{Competing, Broadcast}` + `IEventRequest::delivery()` + `IEventPublisher::broadcast`（默认 fail-closed）+ `RealtimeUserFanoutEvent`；Redis Pub/Sub、NATS 广播 subject、RabbitMQ fanout 适配；Kafka 明确登记不支持 | 广播是 at-most-once、不保证跨节点顺序；可靠投递仍需持久化 + 续传 / outbox；不新增第二套 pub/sub 端口（沿用 #1 架构决策） |
-| R2 | `IRealtimeEventStore` 只有进程内实现；presence 只有进程内注册表 | **已覆盖（2.9.2）** | `RedisRealtimeEventStore`（Redis Streams，全局单调游标）、`IOnlinePresence` 端口 + `InMemoryOnlinePresence` / `RedisOnlinePresence`、`HostBuilder::use_online_presence`（presence 桥接 + 心跳）、`use_realtime_event_store` | Redis 续传只支持条数保留（`max_age` 启动即拒绝）；`room:` scope 由业务显式维护，框架不自动跟踪房间成员；Redis Cluster/Sentinel 需独立适配器 |
-| R3 | 通知端口只有 email/sms；无移动推送，离线消息无法触达 | **部分覆盖（2.9.2）** | `IPushSender` 端口 + `PushMessage`/`PushOutcome` 三态 + `HostBuilder::use_push` + `InMemoryPushSender`；发布面新增 `rust-webx-apns` / `rust-webx-fcm` | WebPush 仅端口支持、适配器待办；设备令牌表、重试编排与「必达」的 outbox 属应用；端口不做自动重试 |
+| R2 | `IRealtimeEventStore` 只有进程内实现；presence 只有进程内注册表 | **已覆盖（2.9.2）** | `RedisRealtimeEventStore`（Redis Streams，全局单调游标）、`IOnlinePresence` 端口 + `InMemoryOnlinePresence` / `RedisOnlinePresence`、`HostBuilder::use_online_presence`（presence 桥接 + 心跳）、`use_realtime_event_store` | Redis 续传物理保留是**条数**（`XTRIM MAXLEN ~`）；`max_age` 是 `RedisRealtimeEventStore::with_max_age` 的**逻辑回放窗口**（不是启动拒绝），框架不提供 PG 实现；`room:` scope 由业务显式维护；Redis Cluster/Sentinel 需独立适配器。见 [known-boundaries.md](known-boundaries.md) C1-01 / C2-01 / C2-02 |
+| R3 | 通知端口只有 email/sms；无移动推送，离线消息无法触达 | **部分覆盖（2.9.2）** | `IPushSender` 端口 + `PushMessage`/`PushOutcome` 三态 + `HostBuilder::use_push` + `InMemoryPushSender`；发布面新增 `rust-webx-apns` / `rust-webx-fcm` | WebPush 仅端口、适配器未交付（**C2**，见 [known-boundaries.md](known-boundaries.md) C2-06）；设备令牌表、重试编排与「必达」的 outbox 属应用；端口不做自动重试 |
 | R4 | `ISessionStore` 吊销不会关闭 WS 长连接 | **已覆盖（2.9.2）** | `WebSocketLimits::with_session_revalidation`（宿主内部按 JWT `jti` / Cookie 会话复查）、`CloseReason::SessionRevoked`（close `1008`）、`close_user_connections`（同节点立即） | 跨节点在复查周期内生效（推荐 10–30s），不是秒级；API Key 凭据本版不复查；瞬时存储错误只重试、不误杀连接 |
 | R5 | 浏览器接入配方缺失（只有 Bearer 演示，无 Cookie/CSRF/Origin 端到端） | **已覆盖（2.9.2，配方而非新 API）** | `SessionCookieScheme` + `use_csrf` + `use_websocket_origins` + 会话交换端点模式；WebSocket 手册新增浏览器接入与吊销/重连章节；imbit e2e 覆盖 Cookie 升级、错误 Origin 403、登出后 close `1008` | 大部分能力 2.9 已存在，本版补端到端配方与验收；Origin 是精确白名单（不做通配）；API Key 会话的复查边界同 R4 |
 

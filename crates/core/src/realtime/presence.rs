@@ -78,6 +78,7 @@ impl PresenceScope {
                 "a presence scope must be `<namespace>:<id>` with both parts non-empty",
             ));
         }
+        validate_scope_key(&self.0)?;
         Ok(())
     }
 }
@@ -125,9 +126,22 @@ impl PresenceMember {
         self
     }
 
-    /// Stable identity of this member (`user|connection|node`).
+    /// Stable identity of this member (`user_id`, `connection_id`, `node_id`).
+    ///
+    /// The rendered form is **length-prefixed**, not a bare delimiter join: a
+    /// `|` (or any other separator) inside an id can never make two different
+    /// triples collide. It is an internal identity key, not a display format;
+    /// the field order is the only stable part.
     pub fn key(&self) -> String {
-        format!("{}|{}|{}", self.user_id, self.connection_id, self.node_id)
+        format!(
+            "{}:{}:{}:{}:{}:{}",
+            self.user_id.len(),
+            self.user_id,
+            self.connection_id.len(),
+            self.connection_id,
+            self.node_id.len(),
+            self.node_id
+        )
     }
 
     fn validate(&self) -> Result<()> {
@@ -137,8 +151,36 @@ impl PresenceMember {
         if self.connection_id.trim().is_empty() {
             return Err(Error::validation("a presence member needs a connection id"));
         }
+        validate_component("member.user_id", &self.user_id)?;
+        validate_component("member.connection_id", &self.connection_id)?;
+        // The node stamp is optional (a member may be created before it is
+        // stamped by the host bridge), but when present it must be safe to use
+        // as part of a shared key/identity.
+        if !self.node_id.is_empty() {
+            validate_component("member.node_id", &self.node_id)?;
+        }
         Ok(())
     }
+}
+
+/// A rendered presence key component must stay bounded and printable: both the
+/// in-memory and Redis adapters embed it in a shared key/identity.
+fn validate_component(name: &str, value: &str) -> Result<()> {
+    if value.len() > 512 {
+        return Err(Error::validation(format!(
+            "{name} must be at most 512 bytes"
+        )));
+    }
+    if value.chars().any(char::is_control) {
+        return Err(Error::validation(format!(
+            "{name} must not contain control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_scope_key(scope: &str) -> Result<()> {
+    validate_component("presence scope", scope)
 }
 
 /// Bounds for [`InMemoryOnlinePresence`].
@@ -364,6 +406,41 @@ impl IOnlinePresence for InMemoryOnlinePresence {
 mod tests {
     use super::*;
     use crate::time::TestClock;
+
+    #[test]
+    fn member_identity_encoding_cannot_be_ambiguous() {
+        // A delimiter inside an id must not let two different triples collide.
+        let first = PresenceMember::new("a|b", "c");
+        let second = PresenceMember::new("a", "b|c");
+        assert_ne!(first.key(), second.key());
+        // The join stamp is diagnostics, not identity.
+        assert_eq!(
+            PresenceMember::new("u1", "c1")
+                .with_node_id("n1")
+                .with_joined_at_unix_secs(1)
+                .key(),
+            PresenceMember::new("u1", "c1")
+                .with_node_id("n1")
+                .with_joined_at_unix_secs(99)
+                .key()
+        );
+    }
+
+    #[test]
+    fn oversized_or_control_key_components_are_rejected() {
+        let long = "x".repeat(513);
+        assert!(PresenceScope::user(long.clone()).validate().is_err());
+        assert!(PresenceMember::new(long, "c1").validate().is_err());
+        assert!(PresenceMember::new("u1\n", "c1").validate().is_err());
+        assert!(PresenceMember::new("u1", "c1")
+            .with_node_id("node\u{1}")
+            .validate()
+            .is_err());
+        assert!(PresenceMember::new("u1", "c1")
+            .with_node_id("node-a")
+            .validate()
+            .is_ok());
+    }
 
     fn store(clock: Arc<TestClock>) -> InMemoryOnlinePresence {
         InMemoryOnlinePresence::with_clock(OnlinePresenceLimits::default(), clock)

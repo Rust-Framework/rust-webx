@@ -39,8 +39,8 @@
 | `IRateLimiter` | `InMemoryRateLimiter` | `RateLimit` 配置节启用时 | 无；共享限流（Redis）在宿主实现 |
 | `IEventPublisher` | 进程内内存队列 | `add_mediator()` 装配；`use_event_publisher` 替换 | 已发布的 broker 适配器 `rust-webx-redis` / `nats` / `rabbitmq` / `kafka`（`crates/`）；广播投递类需适配器实现 `broadcast` |
 | `IHealthCheck` | 无默认 | 否（`add_health_check(HealthCheckSpec::sync / async_check / async_arc)`，异步探针各自超时） | 无；DB/HTTP 探针在宿主实现 |
-| `IRealtimeEventStore` | `InMemoryRealtimeEventStore` | 宿主存在 WebSocket 路由时 | 已发布 `rust-webx-redis` 的 `RedisRealtimeEventStore`（Redis Streams 共享续传）；PG 表实现由下游提供 |
-| `IOnlinePresence` | `InMemoryOnlinePresence` | 否（`use_online_presence`；宿主同时装配 presence 桥接与心跳） | 已发布 `rust-webx-redis` 的 `RedisOnlinePresence`（ZSET + TTL） |
+| `IRealtimeEventStore` | `InMemoryRealtimeEventStore` | 宿主存在 WebSocket 路由时（root singleton） | 已发布 `rust-webx-redis` 的 `RedisRealtimeEventStore`（Redis Streams 共享续传；物理保留按条数 + 逻辑 `max_age`）；**框架不内置 PG 实现**，持久/时间保留需实现端口 |
+| `IOnlinePresence` | `InMemoryOnlinePresence` | 否（`use_online_presence`；宿主同时装配 presence 桥接与心跳） | 已发布 `rust-webx-redis` 的 `RedisOnlinePresence`（ZSET 身份 + HASH 载荷 + 原子 Lua） |
 
 两点约定：
 
@@ -50,6 +50,8 @@
   `IApiKeyStore`、`rust-webx-auth` 的协议端口 …）由该 crate 提供；它们的持久化参考实现同样只在
   `examples/adapters/{payment,ai,auth}/ef`。支付回调 inbox 的 `IPaymentEventHandler` 属于参考适配器
   自带端口，不是框架端口。
+- 端口相关的运行期边界（续传保留语义、presence 计数口径、broker 适配范围等）见
+  [known-boundaries.md](../../design/known-boundaries.md)。
 
 ## 3. 三种接入方式
 

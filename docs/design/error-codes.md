@@ -2,7 +2,7 @@
 
 > rust-webx 的 `application/problem+json` 中 `code` 扩展成员的权威契约：
 > 有哪些稳定码、HTTP 状态与 `retryable` 的对应关系、problem `type` URI 的约定，
-> 以及新增码必须同步哪些位置。前前基线 2.9.0；长连接关闭码见
+> 以及新增码必须同步哪些位置。N-2 基线 2.9.0，当前基线 2.9.2；长连接关闭码见
 > [close-codes.md](close-codes.md)。
 
 ---
@@ -81,7 +81,7 @@ RFC 9457 problem 响应的扩展成员（不是“另一种信封”，客户端
 4. 表的码集合**恰好**等于运行时可达码集合（不允许陈旧条目）；
 5. 未登记状态回落到 `error`，且 `error` 永远不可重试。
 
-`conflict_retryable` 是唯一的“按条件可重试”条码：它保留 409（请求与前前状态冲突），
+`conflict_retryable` 是唯一的“按条件可重试”条码：它保留 409（请求与当前状态冲突），
 但框架知道该冲突是瞬时的（另一请求正在处理同一幂等键/同一计划变更），因此
 `retryable: true`。它不是“自动重试”指令：客户端应等待冲突方完成、重读状态或重放
 同一幂等键；永久冲突仍用 `conflict`（`retryable: false`）。typed 429 的
@@ -100,6 +100,8 @@ RFC 9457 problem 响应的扩展成员（不是“另一种信封”，客户端
   HTTP problem；关闭原因与 wire code 见 [close-codes.md](close-codes.md)。
 - 审计/日志侧：`code` 与 `traceId` 一起足以在 5 分钟内定位一次失败的因果链，
   无需解析 `detail`。
+- 运行期（非 HTTP）边界 —— 事件传输投递语义、续传保留、presence 计数口径、broker 适配范围 ——
+  见 [known-boundaries.md](known-boundaries.md)；本文只覆盖 HTTP `problem+json`。
 
 ## 5. 新增一个稳定码
 

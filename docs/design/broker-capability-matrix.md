@@ -37,8 +37,8 @@
 
 | 适配器 | 投递类 | 竞争投递 / 传输模型 | 广播实现机制 | 广播语义 | 失败模式 / 不支持项 |
 |---|---|---|---|---|---|
-| InMemory（core 默认） | 竞争 + 广播 | 有界 mpsc 队列 + 单 worker | 同一有界队列（单进程 = 全节点） | at-most-once | 队列满返回可重试 503；无本地 handler 的广播事件是记录性 no-op |
-| Redis | 竞争 + 广播 | Streams consumer group（现状） | Pub/Sub 频道 `broadcast_channel`（默认 `<stream>:broadcast`） | at-most-once（Pub/Sub 无 PEL、不重投） | 订阅端断连期间的广播事件丢失；需要持久化扇出时用 Streams + 应用侧多 consumer group |
+| InMemory（core 默认） | 竞争 + 广播 | 有界 mpsc 队列 + 单 worker | 同一有界队列（单进程 = 全节点） | at-most-once | 队列满返回可重试 503；无本地 `#[handler]` 注册时 `publish`/`broadcast` 返回 `di` 错误（fail-closed，**不是** no-op） |
+| Redis | 竞争 + 广播 | Streams consumer group（现状；阻塞读使用消费者独有的独立连接，`block_ms` 不受 `command_timeout` 影响） | Pub/Sub 频道 `broadcast_channel`（默认 `<stream>:broadcast`） | at-most-once（Pub/Sub 无 PEL、不重投） | 订阅端断连期间的广播事件丢失；需要持久化扇出时用 Streams + 应用侧多 consumer group；死信 replay 用 DI resolve `Arc<RedisEventConsumer>` |
 | NATS | 竞争 + 广播 | `subject`；是否分摊由 `queue_group` 决定（现状） | 独立 `broadcast_subject`（默认 `<subject>.broadcast`），**不设 queue group** | at-most-once（core NATS，无 ack/持久化） | 无订阅者时消息直接丢弃；广播订阅失败只记日志并保留竞争消费；JetStream 持久广播不支持 |
 | RabbitMQ | 竞争 + 广播 | 持久 topic exchange + quorum queue（`x-delivery-limit` 有界重试，现状；`publish` 在队列不可路由（如部署初期拓扑未就绪）时返回可重试 503，应用按退避重试） | `broadcast_exchange` fanout（默认 `<exchange>.broadcast`）；每进程声明**独占 auto-delete** 队列并绑定 | at-most-once（handler 失败只记录、不重投） | 节点离线期间的广播事件丢失；广播不写 DLX、不做重投；连接断开时排他队列被 broker 删除 |
 | Kafka | **仅竞争** | 单分区 follower（不提交 offset） | **不支持** | — | 单分区 follower 没有 consumer group，也没有“每个消费者各收一份”的原语，无法在不伪造语义的前提下实现广播；`IEventPublisher::broadcast` 保持 trait 默认 **fail-closed**（显式错误），不会静默降级为单节点竞争投递 |
@@ -48,9 +48,11 @@ Kafka 要支持广播需要独立适配器（组协调/rebalance 客户端，如
 
 ## 3. 明确不支持（当前基线）
 
+逐项的替代路径与验收口径见 [known-boundaries.md](known-boundaries.md)（C2 适配器缺口 / C3 设计内接受）。
+
 | 能力 | 现状 | 原因 / 边界 |
 |---|---|---|
-| Redis Cluster / Sentinel | 不支持 | 当前用单节点 `redis::Client`；Cluster 需要 `ClusterClient` 与 MOVED/ASK 处理，Sentinel 需要拓扑发现；应作为独立适配器，端口契约不变 |
+| Redis Cluster / Sentinel | 不支持 | 当前用单节点 `redis::Client`；Cluster 需要 `ClusterClient` 与 MOVED/ASK 处理，Sentinel 需要拓扑发现；应作为独立适配器，端口契约不变。另：实时 presence 的 Lua 脚本跨 ZSET + HASH 两个 key，Cluster 下不同 slot 会 `CROSSSLOT`，需要 hash tag 或专用适配器 |
 | Redis Pub/Sub 作为竞争通道 | 不支持 | 竞争投递仍用 Streams（at-least-once + PEL）；Pub/Sub 无持久化，仅用于广播（at-most-once） |
 | NATS JetStream | 不支持 | 当前是 core NATS，语义 at-most-once；JetStream 需要 stream/consumer/ack，应为独立 crate |
 | NATS 广播持久化 | 不支持 | core NATS 广播无 ack/重投；节点离线期间的广播事件丢失，持久广播需要 JetStream |

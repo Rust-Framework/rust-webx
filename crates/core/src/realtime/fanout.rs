@@ -24,8 +24,8 @@ use serde::{Deserialize, Serialize};
 use rust_dix::ScopeFactory;
 
 use crate::mediator::{
-    dispatch_event_handlers, event::EventDelivery, BoxedEventDispatch, EventRegistration,
-    IEventRequest,
+    dispatch_event_handlers, event::EventDelivery, BoxedEventDispatch, EventHandlerRegistration,
+    EventRegistration, IEventRequest,
 };
 
 /// Stable wire name of [`RealtimeFanoutEvent`].
@@ -172,10 +172,45 @@ inventory::submit! {
     }
 }
 
+/// Fail closed when an application `#[handler]` claims one of the
+/// framework-reserved realtime fan-out events.
+///
+/// The host registers `RealtimeFanoutHandler` / `RealtimeUserFanoutHandler` in DI
+/// as the single subscriber of these events. Adding an application
+/// `#[handler] impl IEventHandler<RealtimeFanoutEvent>` emits an inventory
+/// registration for the same event name; [`dispatch_event_handlers`] prefers
+/// inventory handlers over DI, so the framework bridge would be silently
+/// replaced and cross-node fan-out would stop. Host construction calls this
+/// before building the provider and reports a typed, actionable error.
+///
+/// Applications that need their own cross-node event use a distinct
+/// `IEventRequest` type; they must not subscribe to the reserved wire names.
+pub fn validate_reserved_event_handlers() -> crate::error::Result<()> {
+    for registration in inventory::iter::<EventHandlerRegistration> {
+        let event_name = (registration.event_name)();
+        if event_name == REALTIME_FANOUT_EVENT_NAME || event_name == REALTIME_USER_FANOUT_EVENT_NAME
+        {
+            return Err(crate::error::Error::di(format!(
+                "event '{event_name}' is framework-reserved for realtime fan-out: remove the \
+                 #[handler] from its IEventHandler impl (handler '{}'); the host's fan-out bridge \
+                 must stay the only subscriber. Use a distinct event type for application payloads",
+                registration.handler_name
+            )));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::mediator::EventMessage;
+
+    #[test]
+    fn no_application_handler_claims_the_reserved_fanout_events() {
+        validate_reserved_event_handlers()
+            .expect("the framework core has no reserved-event handler");
+    }
 
     #[test]
     fn fanout_event_round_trips_through_the_wire_format() {

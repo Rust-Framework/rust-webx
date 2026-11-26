@@ -89,16 +89,24 @@ impl PresenceBridge {
 
     /// Refresh every member this node owns; failed scopes are logged and retried
     /// on the next heartbeat instead of aborting the loop.
+    ///
+    /// Touches are issued in bounded-concurrent chunks: a node with thousands of
+    /// members would otherwise spend one round-trip per member sequentially and
+    /// risk missing the TTL deadline before the round completes.
     pub(crate) async fn heartbeat(&self) {
+        const CONCURRENCY: usize = 32;
         let entries: Vec<(PresenceScope, PresenceMember)> = self.lock().iter().cloned().collect();
-        for (scope, member) in entries {
-            if let Err(error) = self.store.touch(&scope, &member, self.ttl).await {
-                tracing::warn!(
-                    scope = %scope,
-                    error = %error,
-                    "presence heartbeat failed; retrying on the next round"
-                );
-            }
+        for chunk in entries.chunks(CONCURRENCY) {
+            let touches = chunk.iter().map(|(scope, member)| async move {
+                if let Err(error) = self.store.touch(scope, member, self.ttl).await {
+                    tracing::warn!(
+                        scope = %scope,
+                        error = %error,
+                        "presence heartbeat failed; retrying on the next round"
+                    );
+                }
+            });
+            futures_util::future::join_all(touches).await;
         }
     }
 }

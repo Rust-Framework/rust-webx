@@ -6,6 +6,7 @@ APNs/FCM 适配器在独立 crate 里，用 `HostBuilder::use_push` 注入。离
 重试编排属于业务数据模型。
 
 > 设计权威：[IM 实时硬化](../../design/im-hardening.md)（D3 移动推送）。
+> 运行期边界台账：[known-boundaries.md](../../design/known-boundaries.md)（C2-06 WebPush）。
 
 ## 1. 端口与三态
 
@@ -102,7 +103,8 @@ match self.push.send(message).await? {
   或 `with_notification(PushNotification::new(..).with_badge(..).with_sound(..))`；
 - `collapse_key` 让新消息替换未送达的旧消息（聊天列表常用）；`ttl` 是供应商保留上界，
   省略即用供应商默认；
-- `WebPush` 平台本版**只有端口支持**（`PushPlatform::WebPush`），参考适配器未交付——不要假装可用。
+- `WebPush` 平台**仅端口支持**（`PushPlatform::WebPush`）；适配器未交付（**C2**，见
+  [known-boundaries.md](../../design/known-boundaries.md) C2-06）——不要假装可用。
 
 ## 3. APNs / FCM 适配器
 

@@ -150,7 +150,7 @@ rust-webx-kafka = "2.9"       # Kafka 单分区事件（参考/起步适配器�
 
 | 适配器 | 传输 | 投递语义 | 消费模型 |
 |--------|------|----------|----------|
-| `rust-webx-redis` | Redis Streams（`XADD` / `XREADGROUP`） | **at-least-once**：处理器返回后才 `XACK`；消费者崩溃留下的 pending 由 `XAUTOCLAIM` 认领；失败超过 `max_deliveries` 后进 `dead_letter_stream` 或丢弃，`XAUTOCLAIM` 的 deleted ids 自动 `XACK` | consumer group 内多实例分摊；stream 用 `MAXLEN ~` 封顶；组首次创建时 `start_id` 默认 `$`（只看新消息），设 `0` 可重放保留期内的历史 |
+| `rust-webx-redis` | Redis Streams（`XADD` / `XREADGROUP`） | **at-least-once**：处理器返回后才 `XACK`；消费者崩溃留下的 pending 由 `XAUTOCLAIM` 认领；失败超过 `max_deliveries` 后进 `dead_letter_stream` 或丢弃，`XAUTOCLAIM` 的 deleted ids 自动 `XACK` | consumer group 内多实例分摊；stream 用 `MAXLEN ~` 封顶；组首次创建时 `start_id` 默认 `"0"`（重放 stream 内保留历史，handlers 需幂等），`"$"` 为显式 opt-in（只看新消息） |
 | `rust-webx-nats` | core NATS | **at-most-once**：断连或没有订阅者即丢 | 默认每个订阅者都收到；`with_queue_group` 后组内负载均衡 |
 | `rust-webx-rabbitmq` | AMQP topic exchange + **quorum queue** | **at-least-once**：publisher confirm + 手动 ack，处理器失败 requeue；broker 的 `x-delivery-limit`（默认 5）到顶后死信（配置了 DLX）或丢弃，不会无限重投 | 同队列竞争消费（需要每个服务各收一份时用不同队列名）；`prefetch` 控制未确认上限；需 RabbitMQ 3.8+，需幂等 |
 | `rust-webx-kafka` | Kafka（纯 Rust `rskafka`） | 单分区 follower；分区内有序；**不做 consumer-group offset 提交**，重启从 `start_offset` 重新开始 | 一个适配器消费一个分区（`with_partition`）；参考/起步实现 |
@@ -174,24 +174,32 @@ Host::builder()
     .build();
 ```
 
-消费组首次创建时默认从 `$` 开始；要重放保留期内的历史事件，设置
-`RedisEventsOptions { start_id: "0".into(), .. }`。失败事件默认重投 5 次
-（`max_deliveries`，按 `XPENDING` 的 delivery count 精确计数），之后写入
-`dead_letter_stream`（配置时）或丢弃；死信流可用 `XADD`/`XREADGROUP` 或运维脚本重放。
-Redis 6.2 以下可设 `claim_pending: false` 关闭 `XAUTOCLAIM` 回收（注意这会同时停掉
-pending 重试与 PEL 清理）。`XREADGROUP` 与 `XAUTOCLAIM` 是顺序执行的（claim 不在读取
-进行中抢占），避免取消读取后消息只进 PEL 而丢失回复。
+消费组首次创建时 `start_id` 默认 `"0"`：重放 stream 内保留历史，避免"事件已发布、消费组尚未
+创建"的启动窗口静默丢事件；handlers 是 at-least-once，必须幂等。`"$"` 是显式 opt-in（只看
+新消息，新组的重复量更低）；已有 consumer group 上该值被 Redis 忽略。`add_redis` 在 host
+启动期校验本地配置（stream/group/broadcast_channel/start_id/max_len/read_count/block_ms/
+claim_idle_ms/max_deliveries/dead_letter_stream；URL 只解析、不联网），失败即 host 启动失败。
+
+失败事件默认重投 5 次（`max_deliveries`，按 `XPENDING` 的 delivery count 计数；**解析失败
+按传输错误处理**，不会把投递次数当 0），之后写入 `dead_letter_stream`（配置时）或丢弃并记
+`error` 日志；不可解析的 entry 按 raw id `XACK`（不让坏 entry 毒化 PEL）；死信流可用
+`XADD`/`XREADGROUP` 或运维脚本重放。Redis 6.2 以下可设 `claim_pending: false` 关闭
+`XAUTOCLAIM` 回收（注意这会同时停掉 pending 重试与 PEL 清理）。`XREADGROUP` 与
+`XAUTOCLAIM` 是顺序执行的（claim 不在读取进行中抢占），避免取消读取后消息只进 PEL 而丢失回复。
+
+保留上限、无死信流时的丢弃指标、保留事件与混布升级等**已知边界**见
+[known-boundaries.md](../../design/known-boundaries.md)（C1-02…C1-05 / C3-03 / C4-01 / C4-03）。
 
 消费者对**阻塞读使用独立连接**（无 response timeout，连接由 consumer 持有并自动重连）：
 `block_ms` 是服务端阻塞窗口，不会占用缓存/发布/健康检查共用的多路复用连接，也不需要为了
-它调大 `command_timeout`。`add_redis` 同时把连接与 consumer 注册进 DI（`Arc<RedisConnection>`、
-`Arc<RedisEventConsumer>`），运维代码直接 resolve 后重放死信：
+它调大 `command_timeout`。`add_redis` 同时把连接与 consumer 注册进 DI（解析
+`RedisConnection` / `RedisEventConsumer` 得到对应的 `Arc<...>`），运维代码直接 resolve 后
+重放死信：
 
 ```rust
-use std::sync::Arc;
 use webx_redis::RedisEventConsumer;
 
-let consumer = host.provider().get::<Arc<RedisEventConsumer>>()?;
+let consumer = host.provider().get::<RedisEventConsumer>()?;
 let replayed = consumer.replay_dead_letter(100).await?;
 ```
 

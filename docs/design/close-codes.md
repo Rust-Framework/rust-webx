@@ -2,7 +2,7 @@
 
 > 本文是 rust-webx 长连接**终止语义**的权威落点：WebSocket close frame code、SSE
 > `StreamEnd`、HTTP 连接排空三者如何对应，以及应用侧应依据哪个类型分支。
-> 前前基线 2.9.0，当前基线 2.9.2；HTTP `problem+json` 的稳定错误码见
+> N-2 基线 2.9.0，当前基线 2.9.2；HTTP `problem+json` 的稳定错误码见
 > [error-codes.md](error-codes.md)。
 
 ---
@@ -19,7 +19,7 @@
 
 `CloseReason` 是**非 exhaustive** 的：2.x 新增原因不会破坏下游 `match`。
 `code()` 返回 `Option<u16>`，为将来只存在于进程内、不写关闭帧的原因保留加性空间；
-前前每个原因都有 wire code。
+当前每个原因都有 wire code。
 
 ## 2. WebSocket 关闭原因与 wire code
 
@@ -102,6 +102,8 @@
 ## 6. 相关
 
 - [error-codes.md](error-codes.md)：HTTP `problem+json` 的稳定 `code` 注册表。
+- [known-boundaries.md](known-boundaries.md)：实时/续传/事件传输的运行期边界台账
+  （本文只负责终止语义与 wire code）。
 - [优雅关闭与可观测性](../rust-webx/11-production/graceful-shutdown.md)：排空预算与部署清单。
 - 源码：[`crates/core/src/realtime.rs`](../../crates/core/src/realtime.rs)、
   [`crates/core/src/hosted.rs`](../../crates/core/src/hosted.rs)、

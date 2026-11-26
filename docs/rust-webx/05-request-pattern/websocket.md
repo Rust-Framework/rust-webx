@@ -369,7 +369,8 @@ impl IEventRequest for MyRealtimeEvent {
   （一种事件模型，两种投递类）。
 - `IEventPublisher::broadcast` 的默认实现 **fail-closed**（返回 `Error::di`）：传输没有声明
   广播能力时，发布广播事件直接报错，而不是静默退化成只到一个节点。
-- 框架保留两个广播事件，各只允许一个框架 handler（重复注册会双投递）：
+- 框架保留两个广播事件，各只允许一个框架 handler：应用对它们写 `#[handler]` 会在 host 启动期
+  被拒绝（`validate_reserved_event_handlers`，错误带事件名与 handler 名），避免静默替换 DI 桥接：
 
 | 事件 | 事件名 | 语义 |
 |---|---|---|
@@ -395,7 +396,8 @@ impl IEventRequest for MyRealtimeEvent {
   调用方（handler）决定是否失败请求；实时扇出场景通常记日志并依赖客户端重连补拉。
 - 需要“不丢”时不要指望广播：业务消息先**持久化**（DB / outbox），再用续传日志
   （`IRealtimeEventStore`）回放；广播只负责在线节点的实时投递。可靠性边界见
-  [IM 实时硬化设计](../../design/im-hardening.md) 与[多实例实时部署](../11-production/realtime-cluster.md)。
+  [IM 实时硬化设计](../../design/im-hardening.md)、[多实例实时部署](../11-production/realtime-cluster.md)
+  与 [known-boundaries.md](../../design/known-boundaries.md)。
 
 ## 连接级限流与背压
 
@@ -407,10 +409,14 @@ impl IEventRequest for MyRealtimeEvent {
 | `max_messages_per_second` | 0（不限） | 回 `rate_limited` 错误帧 + close `1008`，连接关闭 |
 | `max_bytes_per_second` | 0（不限） | 同上 |
 | `outbound_queue` + `on_queue_full` | 64 深，`Drop` | `Drop`：丢弃并计入 `dropped_outbound`；`Disconnect`：发送失败并关闭 |
+| `write_timeout` | 10s（`None` = 一直等） | 单帧写出超时（对端停止读取/代理挂起）→ 写端放弃并结束会话，避免 writer task 与连接槽位泄漏 |
 | `idle_timeout` | `None` | 关闭连接（close `1001`） |
 | `max_connection_lifetime` | `None` | 绝对生命周期到点关闭（close `1001`，reason `connection lifetime exceeded`）；入站流量不会续期 |
 | `close_at_token_expiry` | `false` | 升级令牌的 `exp` 到点即关闭（close `1008`，reason `access token expired`）；与 `max_connection_lifetime` 取较早者 |
 | `session_revalidation` | `None`（关闭） | 每隔该间隔复查升级凭据；已吊销 → close `1008`（`SessionRevoked`），瞬时存储错误只记录并在下轮重试 |
+
+`WebSocketLimits` 没有 `subscription` 字段：续传日志的 `subscription` 是**独立的有界字符串**
+（非空、≤512 bytes、不含控制字符，违规 typed `400`），见[断线续传与回放](#断线续传与回放)。
 
 ```rust
 use std::time::Duration;
@@ -524,18 +530,30 @@ let targeted = close_user_connections(
 | `IRealtimeEventStore` | 端口：`append` / `resume` / `latest_cursor`，可换 Redis Stream、PG 表等共享实现 |
 | `InMemoryRealtimeEventStore` | 默认实现：每 subscription 保留 1024 条（`RealtimeEventStoreLimits` 可配 `max_age`） |
 
-存在 WebSocket 路由时 host 自动注册默认（进程内）实现在连接作用域里；多实例部署用
+`subscription` 是**有界**路由键：非空、≤512 bytes、不含控制字符，违规在 `append`/`resume`
+处返回 typed `400`（不是静默截断）。
+
+存在 WebSocket 路由时，host 把默认（进程内）实现注册为 **root singleton**：连接作用域通过
+`connection.context().resolve::<dyn IRealtimeEventStore>()` 会向上解析到它（同一 Host 的会话
+共享同一个 store，不是连接作用域级实例）。多实例部署用
 `HostBuilder::use_realtime_event_store(Arc<dyn IRealtimeEventStore>)` 换成共享实现
 （例如 `use_realtime_event_store(Arc::new(RedisRealtimeEventStore::new(connection)))`）。
 
 2.9.2 起 `rust-webx-redis` 提供共享实现 `RedisRealtimeEventStore`：每个 subscription 两个 key
-（`seq` 用 `INCR` 分配游标、`log` 是显式 ID 的 Stream），`append` = `INCR` + `XADD` + 精确条数
-裁剪（同一 Lua 脚本内原子完成），`resume` / `latest_cursor` 与内存实现同语义。要点：
+（`seq` 用 `INCR` 分配游标、`log` 是显式 ID 的 Stream），`append` = `INCR` + `XADD` +
+**近似**条数裁剪（`XTRIM MAXLEN ~`，同一 Lua 脚本内原子完成），`resume` / `latest_cursor`
+与内存实现同语义。要点：
 
 - 游标仍是 `u64`：Stream ID 的毫秒段就是全局单调 `event_id`，多实例共享同一游标，端口契约不变；
-- 只支持**条数**保留（`max_events`）；`max_age` 在 Redis 实现中启动即拒绝（fail-closed），
-  需要时间保留时用 PG 表实现同一端口；
+- 物理保留只按**条数**（`max_events`，默认 1024，`MAXLEN ~` 近似裁剪）；`max_age` 是
+  `RedisRealtimeEventStore::with_max_age(Duration)` 提供的**逻辑回放窗口**（`resume` 过滤
+  超窗事件并置 `truncated=true`，不是启动拒绝，也不改变物理保留）；`with_max_age` 是 store
+  builder，不经 `RedisRealtimeEventStoreOptions`/`appsettings`；
+- 框架**不内置 PG 实现**：需要持久/按时间保留时由应用实现同一端口（见台账 C2-01）；
 - 共享日志解决“跨节点续传”，不负责在线投递——见[多实例实时部署](../11-production/realtime-cluster.md)。
+
+续传的完整边界（保留语义、resume 体量上限、`latest_cursor` 失败语义、PG 实现缺口）见
+[known-boundaries.md](../../design/known-boundaries.md)。
 
 ```rust
 struct ChatHandler;
@@ -586,15 +604,23 @@ presence 判断不再由业务自己数连接。
 
 1. **`IOnlinePresence`（推荐，计数权威）**：宿主把 `IPresenceObserver` 的 first/last 转移映射到
    `user:` / `tenant:` scope（`use_online_presence` 负责桥接与 TTL/3 心跳，内部类型不进入
-   公开 API）；多实例传入 `Arc::new(RedisOnlinePresence::new(connection))`（每个 scope 一个
-   ZSET，score = 过期时刻）。节点崩溃后成员在 TTL 内过期，不会留下幽灵在线。
+   公开 API）；多实例传入 `Arc::new(RedisOnlinePresence::new(connection))`（每个 scope 两个
+   key：ZSET 存稳定身份 `[user_id, connection_id, node_id]` + 过期时刻，HASH 存
+   `PresenceMember` 载荷；操作是原子 Lua，跨节点/重启的 `leave`/`touch` 生效，
+   `max_members_per_scope` 满时 join 返回可重试 503）。节点崩溃后成员在 TTL 内过期，不会留下
+   幽灵在线。
+   **计数口径**：宿主桥接把 `node_id` 当 connection slot，即每个 `(user, node)` 一个成员；
+   `IOnlinePresence::count` 是**成员数，不是唯一用户数**（同一用户多设备在同一节点只算 1）。
 2. **房间 scope 由业务显式维护**：`PresenceScope::room("...")` 的成员归属业务数据模型，
    框架不自动跟踪 room membership；业务在 join/leave 房间时自行 `join`/`leave`。
 3. **节点内扇出仍用 `IConnectionRegistry`**：注册表的 user/room 索引是节点局部的；
    `RealtimeMetrics.realtime_connections_active` 始终是**本节点**计数，全局在线数读
-   `IOnlinePresence::count`（或监控端按实例求和）。
+   `IOnlinePresence::count`（或监控端按实例求和；注意 count 是成员数而非用户数）。
 4. **没有共享 store 时**退回旧路径：应用在 `IPresenceObserver` 里写共享 Redis/DB，或把
    `PresenceTransition` 当事件发布（最终一致，只适合展示型 presence，不能用于计费或写权限判断）。
+
+身份、成员列表（全量、无分页）、秒级 TTL、心跳并发与旧数据升级窗口等边界见
+[known-boundaries.md](../../design/known-boundaries.md)（C1-06…C1-08 / C3-04 / C3-05 / C4-02）。
 
 装配与容量建议见[多实例实时部署](../11-production/realtime-cluster.md)。
 
@@ -644,10 +670,22 @@ pre-accept 钩子 fail-closed 默认拒绝，失败 → 403；session + bidi str
 
 ## 当前边界
 
-- 已支持自定义会话 Handler、连接作用域、消息即请求、升级鉴权与帧绑定错误、进程内注册表/房间扇出/presence、连接级背压与限流、连接级绝对生命周期（含令牌过期）、断线续传契约与事件日志、按 user/room/tenant 的在线数、presence 原子转移（first/last）、`realtime_*` 指标；
-- 2.9.2 新增：事件投递类（`EventDelivery::Competing`/`Broadcast`）与广播类框架事件（`RealtimeFanoutEvent`/`RealtimeUserFanoutEvent`）、共享续传日志 `RedisRealtimeEventStore`、`IOnlinePresence` 端口与内存/Redis 实现 + 宿主桥接/心跳、连接凭据复查（`with_session_revalidation`，校验器是宿主内部实现）与 `SessionRevoked`（close `1008`）、`close_user_connections`、浏览器 Cookie + CSRF + Origin 接入配方；
-- 默认仍是进程内：事件日志/在线数/`IEventPublisher` 默认都在进程内，多实例按[多实例实时部署](../11-production/realtime-cluster.md)换共享实现；
-- 广播是 at-most-once，不保证跨节点顺序；Kafka 适配器不支持广播（显式报错）；需要可靠投递用持久化 + 续传/outbox；
-- 跨节点「立即踢线」不存在：吊销靠共享会话存储 + 复查周期生效（最长窗口 = 复查间隔）；API Key 凭据本版不做运行期复查；
-- room membership 由业务维护（框架不自动跨节点跟踪）；非浏览器客户端在启用 CORS 白名单的部署里必须显式 `use_websocket_origins(Vec::new())`；
+完整台账（含证据、影响与验收）见 [known-boundaries.md](../../design/known-boundaries.md)。
+使用 WebSocket 时最容易踩的几条：
+
+- 默认实现全部在进程内：事件日志 / 在线数 / `IEventPublisher`；多实例按
+  [多实例实时部署](../11-production/realtime-cluster.md)换共享实现（C3-06）；
+- 广播投递 at-most-once、不保证跨节点顺序；Kafka 适配器不支持广播（显式报错）；可靠投递用
+  持久化 + 续传/outbox（C2-03 / C3-06）；
+- Redis 续传物理保留是**条数**（`MAXLEN ~` 近似裁剪），`max_age` 只是逻辑回放窗口；框架不
+  提供 PG 实现，持久/时间保留需实现端口（C1-01 / C2-01）；
+- presence `count` 是成员数（每 `(user, node)` 一个），不是唯一用户数；`members()` 全量返回、
+  TTL 为整数秒（C3-04 / C3-05）；
+- 混跑 2.9.1/2.9.2 时广播类跨节点扇出不完整，需全量升级或暂停扇出（C4-01）；
+- 跨节点「立即踢线」不存在：吊销靠共享会话存储 + 复查周期生效（最长窗口 = 复查间隔）；
+  API Key 凭据本版不做运行期复查（C3-06）；
+- room membership 由业务维护（框架不自动跨节点跟踪）；非浏览器客户端在启用 CORS 白名单的
+  部署里必须显式 `use_websocket_origins(Vec::new())`；
+- 保留事件（`webx.realtime.fanout` / `webx.realtime.user-fanout`）只能由框架 handler 消费：
+  应用对它们写 `#[handler]` 会在 host 启动期失败（C1-09）；
 - 非文本/二进制控制帧（Ping/Pong）不进入业务层。

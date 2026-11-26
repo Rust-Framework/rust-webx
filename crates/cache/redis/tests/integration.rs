@@ -553,7 +553,7 @@ async fn unregistered_event_is_acked_not_left_pending() {
 }
 
 #[tokio::test]
-async fn start_id_zero_replays_an_event_published_before_consumption() {
+async fn default_start_id_replays_an_event_published_before_consumption() {
     init_tracing();
     let Ok(url) = std::env::var("WEBX_REDIS_URL") else {
         return;
@@ -573,7 +573,6 @@ async fn start_id_zero_replays_an_event_published_before_consumption() {
         stream: source.clone(),
         group: group.clone(),
         consumer: format!("webx-replay-consumer-{suffix}"),
-        start_id: "0".to_string(),
         block_ms: 100,
         ..RedisEventsOptions::default()
     };
@@ -599,7 +598,7 @@ async fn start_id_zero_replays_an_event_published_before_consumption() {
                 .await
                 .unwrap_or(redis::Value::Nil);
             panic!(
-                "start_id=0 did not replay the pre-consumer event: xlen={} pending={:?} groups={groups:?}",
+                "the default start_id did not replay the pre-consumer event: xlen={} pending={:?} groups={groups:?}",
                 xlen(&mut raw, &source).await,
                 pending_count(&mut raw, &source, &group).await
             );

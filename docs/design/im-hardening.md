@@ -71,7 +71,9 @@ pub enum EventDelivery {
 | `RealtimeFanoutEvent { room, payload }` | `webx.realtime.fanout` | Broadcast | 写本节点 `room_connections` |
 | `RealtimeUserFanoutEvent { user_id, payload }`（新增） | `webx.realtime.user-fanout` | Broadcast | 写本节点 `user_connections` |
 
-两个事件仍各只允许一个框架 handler（重复注册会双投递，文档与测试锁定）。
+两个事件仍各只允许一个框架 handler：保留事件由 host 启动校验
+（`validate_reserved_event_handlers`），应用对它们写 `#[handler]` 会让 host 构建**直接失败**
+（错误带事件名与 handler 名），避免静默替换 DI 桥接导致跨节点扇出丢失。
 
 ### 2.3 适配器矩阵（发布前必须逐项实现或明确「不支持」）
 
@@ -97,6 +99,8 @@ pub enum EventDelivery {
 
 ### 3.1 `RedisRealtimeEventStore`（`crates/cache/redis`）
 
+> 本节边界的权威台账：[known-boundaries.md](known-boundaries.md) C1-01 / C1-02 / C1-03 / C2-01。
+
 - 每个 subscription 两个 key：`{prefix}:{subscription}:seq`（`INCR` 分配游标）与
   `{prefix}:{subscription}:log`（Stream，显式 ID `{event_id}-0`）；
 - `append` = 单个 Lua 脚本原子完成 `INCR` + `XADD` 显式 ID `{event_id}-0` + `XTRIM MAXLEN ~`（多节点并发时拆成多条命令会因 Stream ID 不递增而失败）；`resume` = 从 `({cursor}` 起 `XRANGE`；
@@ -104,10 +108,23 @@ pub enum EventDelivery {
   （首个保留事件 id > cursor+1 即视为被保留策略淘汰）；
 - 游标仍为 `u64`：Stream ID 的毫秒段就是全局单调 `event_id`，因此多实例共享同一游标，无需改
   `IRealtimeEventStore` 契约；
-- 只支持条数保留（`max_events`）；`max_age` 在 Redis 实现中**启动时拒绝**（fail-closed），
-  需要时间保留时用 PG 表实现同一端口。
+- 物理保留只支持**条数**（`max_events`，`XTRIM MAXLEN ~` 近似裁剪）；`max_age` 通过
+  `RedisRealtimeEventStore::with_max_age(Duration)` 提供**逻辑回放窗口**：`resume` 过滤
+  `now - created_at > max_age` 的事件并置 `truncated=true`，全部被过滤时 `next_cursor`
+  前进；`latest_cursor` 仍跟随物理保留。`with_max_age` 是 store builder，**不经**
+  `RedisRealtimeEventStoreOptions`/`appsettings`；
+- 框架不提供 PG 实现：需要持久/按时间保留时由应用实现同一端口（见
+  [known-boundaries.md](known-boundaries.md) C2-01）；
+- 事件传输（同一 `add_redis`）的消费组 `start_id` 默认 `"0"`：组首次创建时重放 stream 保留
+  历史，避免"事件已发布、消费组尚未创建"的启动窗口丢事件；handlers 是 at-least-once，必须
+  幂等；`"$"` 为显式 opt-in。配置在 host 启动期校验（本地、不联网），失败即启动失败（同批
+  校验 stream/group/start_id/max_len/read_count/block_ms/claim_idle_ms/max_deliveries/
+  dead_letter_stream）——见 [known-boundaries.md](known-boundaries.md) C1-02 / C1-03。
 
 ### 3.2 `IOnlinePresence` 端口（`crates/core/src/realtime/presence.rs`）
+
+> 本节边界的权威台账：[known-boundaries.md](known-boundaries.md) C1-06 / C1-07 / C1-08 /
+> C3-04 / C3-05。计数口径与宿主桥接一致：**`count` 是成员数，不是唯一用户数**。
 
 ```rust
 pub struct PresenceScope(String); // user:/tenant:/room: + 自定义前缀
@@ -124,11 +141,18 @@ pub trait IOnlinePresence: Send + Sync {
 ```
 
 - 内存实现 `InMemoryOnlinePresence`：`HashMap<scope, HashMap<member, expiry>>`，读写时按 TTL 清理；
-- Redis 实现 `RedisOnlinePresence`：每个 scope 一个 ZSET（score = 过期时刻），读时
-  `ZREMRANGEBYSCORE` 清理，`ZCARD` 计数；TTL 由应用/宿主心跳续期；
+- Redis 实现 `RedisOnlinePresence`：每个 scope **两个 key**——ZSET（member = 稳定身份 JSON
+  数组 `[user_id, connection_id, node_id]`，score = 过期时刻）与 HASH
+  `{prefix}:members:{scope}`（field = 身份，value = `PresenceMember` JSON，保存 `joined_at`）。
+  join/leave/touch/members/count 各是单个 Lua 脚本（内含批量过期清理），`join` 的容量检查与
+  写入在同一脚本原子完成（满 → 可重试 503，不写成员状态）；身份不含 join 戳，跨节点/重启的
+  `leave`/`touch` 能命中同一成员。TTL 由应用/宿主心跳续期；
 - **宿主桥接**：`HostBuilder::use_online_presence(store)` 注册 store、内置
   `内部桥接器`（把 `IPresenceObserver` 的 first/last 映射到 `user:` / `tenant:` scope）
-  与 `内部心跳服务` 后台服务（按 TTL/3 续期本节点成员）。桥接器以 **(user, node)** 为成员身份：同一用户在同一节点的多设备合并为一条在线记录（设备清单归本地注册表）；节点崩溃后成员在 TTL 内过期；
+  与 `内部心跳服务` 后台服务（按 TTL/3 续期本节点成员，**32 路有界并发** touch）。桥接器以
+  `node_id` 作为 connection slot，即每个 **(user, node)** 一个成员：同一用户在同一节点的多设备
+  合并为一条在线记录（设备清单归本地注册表）；`count` 因此是成员数而非唯一用户数；节点崩溃后
+  成员在 TTL 内过期；
 - 房间 scope 由业务显式调用（`room:{id}`），框架不自动跟踪 room membership（注册表的 room
   索引是节点局部的，跨节点权威归属业务数据模型）。
 
@@ -138,7 +162,9 @@ pub trait IOnlinePresence: Send + Sync {
    Pub/Sub / NATS 广播 subject / Rabbit fanout）；
 2. 在线态：`use_online_presence(Arc::new(RedisOnlinePresence::...))`；
 3. 续传：`use_realtime_event_store(Arc::new(RedisRealtimeEventStore::...))`；
-4. 吊销：共享 `ISessionStore`/`ISessionRepository` + `WebSocketLimits::with_session_revalidation`。
+4. 吊销：共享 `ISessionStore`/`ISessionRepository` + `WebSocketLimits::with_session_revalidation`；
+5. 升级顺序：广播扇出要求全量升级到 2.9.2（混跑时扇出不完整）；presence 旧数据在 ≤1 TTL 内
+   收敛。两者见 [known-boundaries.md](known-boundaries.md) C4-01 / C4-02。
 
 ## 4. D3：移动推送（P3）
 

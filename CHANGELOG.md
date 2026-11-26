@@ -3,6 +3,64 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [Unreleased] — 已知边界收敛（尚未发版）
+
+> 边界台账（唯一权威）：[docs/design/known-boundaries.md](docs/design/known-boundaries.md)
+
+### English
+
+**Behavior changes (next release, migration noted):**
+
+- **Redis event transport** — `RedisEventsOptions::start_id` now defaults to `"0"`: a newly created
+  consumer group replays the retained stream history, so an event published after the process
+  starts but before the group exists is no longer silently skipped. Handlers are at-least-once and
+  must be idempotent; set `start_id = "$"` explicitly to keep "new messages only". `add_redis` now
+  validates the local Redis/event configuration in a hosted service **before the host accepts
+  requests** (URL parse plus stream/group/start-id/tuning checks; no network I/O), so a typo fails
+  startup instead of looping in the background consumer.
+- **Redis realtime store `max_age`** — additive `RedisRealtimeEventStore::with_max_age(Duration)`:
+  `resume` applies a logical replay window (`now - created_at > max_age` is dropped and reported as
+  `truncated`), while physical memory remains bounded by `max_events` (`XTRIM MAXLEN ~`). There is no
+  framework PG realtime implementation; applications that need durable time-based retention
+  implement `IRealtimeEventStore`. Count retention is still the only physical retention.
+- **Redis presence** — the ZSET member is now a stable identity `[user_id, connection_id, node_id]`
+  and the member payload (including `joined_at`) lives in a per-scope HASH; join/leave/touch/purge
+  run as atomic Lua scripts. Cross-node/restart `leave`/`touch` now address the same member, the
+  capacity check cannot overshoot, and expiry clears both keys. 2.9.2's JSON-member data stays
+  readable and converges within one TTL; during a mixed-version window the new nodes are
+  authoritative (`docs/design/known-boundaries.md` C4-02).
+- **Reserved realtime fan-out events** — host construction now fails closed when an application
+  `#[handler]` subscribes to `RealtimeFanoutEvent`/`RealtimeUserFanoutEvent`; previously the
+  inventory registration could replace the framework DI bridge and silently stop cross-node fan-out.
+- **Redis consumer robustness** — entries with an unreadable event/payload are acknowledged by their
+  raw id (no PEL poisoning); an unparseable `XPENDING` reply is a visible transport error instead of
+  being treated as "0 deliveries"; malformed subscription/member/event key components now fail with
+  a typed validation error. Presence heartbeats refresh owned members in bounded-concurrency chunks.
+- **`PresenceMember::key()`** — the rendered identity is now length-prefixed so an id containing the
+  delimiter cannot collide with a different `(user, connection, node)` triple.
+
+### 简体中文
+
+- **Redis 事件传输**：`RedisEventsOptions::start_id` 默认改为 `"0"`（新消费组重放保留历史，避免
+  组创建前发布的事件被静默跳过；handler 需幂等；显式设 `"$"` 可保持只看新消息）。`add_redis`
+  现在在 host 启动期（接受请求前）由 hosted service 校验本地配置（URL 解析 + stream/group/
+  start_id/调优参数），配置笔误直接启动失败，而不是在后台重连循环里静默重试。
+- **Redis 续传 `max_age`**：新增 `RedisRealtimeEventStore::with_max_age(Duration)` 逻辑回放窗口
+  （过期事件在 `resume` 被过滤并置 `truncated`），物理内存仍由 `max_events`（`XTRIM MAXLEN ~`）
+  封顶；框架不提供 PG 实现，需要持久/墙钟级时间保留时实现 `IRealtimeEventStore`。
+- **Redis presence**：ZSET member 改为稳定身份 `[user_id, connection_id, node_id]`，成员载荷
+  （含 `joined_at`）存 per-scope HASH；join/leave/touch/purge 原子 Lua。跨节点/重启的
+  leave/touch 可命中同一成员，容量检查不越界，过期同时清理两个 key。2.9.2 的 JSON member 可读，
+  ≤1 个 TTL 收敛；混布期以新节点为准（`docs/design/known-boundaries.md` C4-02）。
+- **保留实时扇出事件**：应用对 `RealtimeFanoutEvent`/`RealtimeUserFanoutEvent` 写 `#[handler]`
+  时 host 构建失败（此前 inventory 注册可能替换框架 DI 桥接、静默停止跨节点扇出）。
+- **Redis 消费者健壮性**：坏 entry 按 raw id XACK（不再毒化 PEL）；`XPENDING` 解析失败是可见
+  传输错误（不再当 0 次投递）；非法 subscription/member/event key 组件是 typed 校验错误；
+  presence 心跳按有界并发批量续期。
+- **`PresenceMember::key()`**：渲染身份改为长度前缀，包含分隔符的 id 不会再与另一个
+  `(user, connection, node)` 三元组碰撞。
+
+
 ## [2.9.2] — 2026-11-25 — IM 实时硬化（加性补丁）
 
 > 设计权威：[docs/design/im-hardening.md](docs/design/im-hardening.md)

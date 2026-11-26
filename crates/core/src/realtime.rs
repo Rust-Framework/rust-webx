@@ -27,7 +27,7 @@ pub use event_store::{
     IRealtimeEventStore, InMemoryRealtimeEventStore, RealtimeEvent, RealtimeEventStoreLimits,
     ResumeFrame, ResumeRequest,
 };
-pub use fanout::{RealtimeFanoutEvent, RealtimeUserFanoutEvent};
+pub use fanout::{validate_reserved_event_handlers, RealtimeFanoutEvent, RealtimeUserFanoutEvent};
 pub use metrics::{RealtimeMetrics, RealtimeMetricsSnapshot};
 pub use presence::{
     IOnlinePresence, InMemoryOnlinePresence, OnlinePresenceLimits, PresenceMember, PresenceScope,

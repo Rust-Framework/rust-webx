@@ -1,7 +1,7 @@
 # 兼容性政策（SemVer、N-2 升级、锁步版本）
 
-> 基线：rust-webx 2.9.1。门禁在 `.github/workflows/ci.yml` 的 `semver`、`upgrade`、
-> `lint`（内部版本钉）三个 job。
+> 当前发布 rust-webx 2.9.2；SemVer 门禁基线 v2.9.1。门禁在 `.github/workflows/ci.yml` 的
+> `semver`、`upgrade`、`lint`（内部版本钉）三个 job。
 
 ## 1. 三条承诺
 
@@ -280,6 +280,9 @@ rust-ef 发布后、给 rust-webx 打 tag 前，执行 `cargo update -p rust-ef 
 | 观测 | 指标名与标签（`http_requests_total`、`realtime_*`、`media_*`）、`/metrics` 文本格式 |
 | 配置 | `AppOptions` 键名、`APP__Section__Key` 覆盖规则、`Jwt.SecretFile` 优先级 |
 | 端口 | `IObjectStore`/`IMediaPlaneAdapter` 方法语义、`RealtimeFanoutEvent` 事件名 |
+
+运行期边界（广播 at-most-once、Redis 续传只按条数物理保留、presence 计数口径等）不属于
+`behavior change` 承诺范围，唯一台账见 [known-boundaries.md](known-boundaries.md)。
 
 ## 7. LTS 与发布检查单
 

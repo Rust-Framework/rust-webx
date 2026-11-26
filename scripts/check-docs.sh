@@ -123,7 +123,14 @@ else:
             f"docs INDEX.json version is {docs_version}, workspace version is {version}"
         )
     changelog = (root / "CHANGELOG.md").read_text(encoding="utf-8")
-    heading = re.search(r"^## \[([^\]]+)\]", changelog, re.MULTILINE)
+    # A leading `## [Unreleased]` section is allowed: work merged after the last
+    # published release records its changes there until the next version bump,
+    # and the version-agreement gate compares the first *released* heading.
+    heading = None
+    for candidate in re.finditer(r"^## \[([^\]]+)\]", changelog, re.MULTILINE):
+        if candidate.group(1).lower() != "unreleased":
+            heading = candidate
+            break
     if not heading:
         errors.append("CHANGELOG.md has no `## [version]` heading")
     elif heading.group(1) != version:

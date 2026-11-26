@@ -102,7 +102,8 @@ check_workspace_version() {
 #      carry a crates.io requirement next to the path (`=X.Y.Z`);
 #   3. `docs/rust-webx/INDEX.json` (`meta.version`);
 #   4. the workspace-version comments in `README.md` / `README.zh-CN.md`;
-#   5. the top `## [x.y.z]` heading of `CHANGELOG.md` (date kept).
+#   5. the first released `## [x.y.z]` heading of `CHANGELOG.md` (date kept;
+#      a leading `## [Unreleased]` section is preserved for the next release notes).
 # `scripts/check-docs.sh` enforces 1/3/5 agreement, so a bump that misses one
 # of them would fail the release preflight.
 # The `rust-ef` reference adapters under `examples/adapters/` are unpublished:
@@ -123,7 +124,18 @@ bump_version() {
         sed -i -E "s/(\"version\": \")[^\"]+\"/\1$NEW_VERSION\"/" docs/rust-webx/INDEX.json
         sed -i -E "s/(# workspace root \()v[0-9]+\.[0-9]+\.[0-9]+\)/\1v$NEW_VERSION)/" README.md
         sed -i -E "s/(# workspace 根 \()v[0-9]+\.[0-9]+\.[0-9]+\)/\1v$NEW_VERSION)/" README.zh-CN.md
-        sed -i -E "0,/^## \[[^]]+\]/s//## [$NEW_VERSION]/" CHANGELOG.md
+        # Rename the first *released* heading; an optional `## [Unreleased]`
+        # section stays untouched until it has a version.
+        awk -v v="$NEW_VERSION" '
+            BEGIN { renamed = 0 }
+            /^## \[/ {
+                if (!renamed && $0 !~ /^## \[Unreleased\]/) {
+                    sub(/^## \[[^]]+\]/, "## [" v "]")
+                    renamed = 1
+                }
+            }
+            { print }
+        ' CHANGELOG.md > CHANGELOG.md.tmp && mv CHANGELOG.md.tmp CHANGELOG.md
     fi
 }
 

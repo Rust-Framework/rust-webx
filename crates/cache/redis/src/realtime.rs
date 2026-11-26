@@ -15,9 +15,11 @@
 //! cursor were already evicted by retention).
 //!
 //! Redis Streams cannot enforce a **time** retention bound atomically with the
-//! append, so this adapter supports **count retention only**; use the
-//! PostgreSQL-backed implementation of the same port when time-based retention
-//! is required.
+//! append, so physical retention is **count-only** (`XTRIM MAXLEN ~` bounds
+//! memory). [`RedisRealtimeEventStore::with_max_age`] adds a **logical** replay
+//! window on top: [`IRealtimeEventStore::resume`] drops events older than the
+//! window and reports the resulting hole as `truncated`, while retained entries
+//! (and [`IRealtimeEventStore::latest_cursor`]) still follow count retention.
 //!
 //! ```no_run
 //! use std::sync::Arc;
@@ -39,6 +41,7 @@
 //! ```
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -143,12 +146,14 @@ return {first_ms or false, last_ms or false, seq or false, entries}
 /// The store is safe to share across nodes: the event id comes from a Redis
 /// `INCR`, so a resume cursor is meaningful on every instance. Timestamps for
 /// [`RealtimeEvent::created_at_unix_secs`] come from the injected [`IClock`]
-/// (deterministic tests inject `TestClock`); they are diagnostics only and do
-/// not drive retention.
+/// (deterministic tests inject `TestClock`); they only drive the optional
+/// [`with_max_age`](Self::with_max_age) replay window — physical retention is
+/// count-based.
 pub struct RedisRealtimeEventStore {
     connection: Arc<RedisConnection>,
     options: RedisRealtimeEventStoreOptions,
     clock: Arc<dyn IClock>,
+    max_age: Option<Duration>,
 }
 
 impl RedisRealtimeEventStore {
@@ -175,7 +180,26 @@ impl RedisRealtimeEventStore {
             connection,
             options,
             clock,
+            max_age: None,
         }
+    }
+
+    /// Replay only events appended within the last `max_age` (logical window).
+    ///
+    /// Uses the injected [`IClock`] and mirrors `InMemoryRealtimeEventStore`: an
+    /// event is outside the window when `now - created_at > max_age` in whole
+    /// seconds. `resume` then drops it and reports `truncated = true`, the same
+    /// signal as physical retention eviction, so a reconnecting client knows to
+    /// re-sync from state. When the window empties the replay range,
+    /// `next_cursor` advances to the newest known event instead of stalling.
+    ///
+    /// The window is **logical only**: retained entries are still bounded by
+    /// [`RedisRealtimeEventStoreOptions::max_events`], which is what limits Redis
+    /// memory, and [`IRealtimeEventStore::latest_cursor`] keeps following that
+    /// retained history. `None` (the default) replays every retained event.
+    pub fn with_max_age(mut self, max_age: Duration) -> Self {
+        self.max_age = Some(max_age);
+        self
     }
 
     /// Retention/prefix options (tests).
@@ -203,6 +227,52 @@ impl RedisRealtimeEventStore {
             .manager()
             .await
             .map_err(|error| Error::status(503, format!("redis unavailable: {error}")))
+    }
+
+    /// Build the [`ResumeFrame`] from one atomic snapshot view.
+    ///
+    /// Split out of [`IRealtimeEventStore::resume`] so the retention/window
+    /// decisions stay unit-testable without a broker.
+    fn resume_frame(
+        &self,
+        subscription: String,
+        cursor: u64,
+        first_retained: Option<u64>,
+        latest_retained: Option<u64>,
+        seq_fallback: Option<u64>,
+        events: Vec<RealtimeEvent>,
+    ) -> ResumeFrame {
+        // `latest_retained` is the newest retained id; once retention emptied the
+        // stream, the sequence key is the newest id ever assigned. A cursor ahead
+        // of that came from another store epoch: report a gap and restart from the
+        // latest known id instead of stalling forever.
+        let last_assigned = latest_retained.or(seq_fallback).unwrap_or(0);
+        let ahead = cursor > last_assigned;
+        let (events, window_evicted_through) =
+            filter_window(events, self.clock.now_unix(), self.max_age);
+        // An event dropped by the time window is a logical retention gap: report
+        // it like a physically evicted event so the client re-syncs from state,
+        // and let the cursor advance past it.
+        let evicted_through =
+            evicted_through(first_retained, last_assigned).max(window_evicted_through.unwrap_or(0));
+        let truncated = ahead
+            || window_evicted_through.is_some()
+            || is_truncated(cursor, first_retained, last_assigned);
+        let next_cursor = if ahead {
+            last_assigned
+        } else {
+            next_cursor(
+                cursor,
+                events.last().map(|event| event.event_id),
+                evicted_through,
+            )
+        };
+        ResumeFrame {
+            subscription,
+            events: if ahead { Vec::new() } else { events },
+            next_cursor,
+            truncated,
+        }
     }
 }
 
@@ -251,30 +321,14 @@ impl IRealtimeEventStore for RedisRealtimeEventStore {
         let (first_retained, latest_retained, seq_fallback, events_reply) =
             parse_resume_reply(&value);
         let events = parse_events(&events_reply, &request.subscription);
-
-        // `latest_retained` is the newest retained id; once retention emptied the
-        // stream, the sequence key is the newest id ever assigned. A cursor ahead
-        // of that came from another store epoch: report a gap and restart from the
-        // latest known id instead of stalling forever.
-        let last_assigned = latest_retained.or(seq_fallback).unwrap_or(0);
-        let ahead = cursor > last_assigned;
-        let evicted_through = evicted_through(first_retained, last_assigned);
-        let truncated = ahead || is_truncated(cursor, first_retained, last_assigned);
-        let next_cursor = if ahead {
-            last_assigned
-        } else {
-            next_cursor(
-                cursor,
-                events.last().map(|event| event.event_id),
-                evicted_through,
-            )
-        };
-        Ok(ResumeFrame {
-            subscription: request.subscription,
-            events: if ahead { Vec::new() } else { events },
-            next_cursor,
-            truncated,
-        })
+        Ok(self.resume_frame(
+            request.subscription,
+            cursor,
+            first_retained,
+            latest_retained,
+            seq_fallback,
+            events,
+        ))
     }
 
     async fn latest_cursor(&self, subscription: &str) -> u64 {
@@ -358,6 +412,33 @@ fn evicted_through(first_retained: Option<u64>, last_assigned: u64) -> u64 {
         Some(first) => first.saturating_sub(1),
         None => last_assigned,
     }
+}
+
+/// Split replayed events into the ones still inside the `max_age` window and the
+/// highest id the window dropped (`None` = nothing dropped).
+///
+/// Mirrors `InMemoryRealtimeEventStore::prune`: a whole-second age strictly
+/// greater than `max_age` is outside the window.
+fn filter_window(
+    events: Vec<RealtimeEvent>,
+    now_unix_secs: u64,
+    max_age: Option<Duration>,
+) -> (Vec<RealtimeEvent>, Option<u64>) {
+    let Some(max_age) = max_age else {
+        return (events, None);
+    };
+    let max_age = max_age.as_secs();
+    let mut retained = Vec::with_capacity(events.len());
+    let mut dropped_through = None;
+    for event in events {
+        if now_unix_secs.saturating_sub(event.created_at_unix_secs) > max_age {
+            dropped_through =
+                Some(dropped_through.map_or(event.event_id, |id: u64| id.max(event.event_id)));
+        } else {
+            retained.push(event);
+        }
+    }
+    (retained, dropped_through)
 }
 
 /// Cursor the client should present on the next reconnect.
@@ -484,6 +565,7 @@ fn value_str(value: &redis::Value) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use webx_core::time::TestClock;
 
     fn test_connection() -> Arc<RedisConnection> {
         Arc::new(RedisConnection::new(
@@ -495,6 +577,30 @@ mod tests {
 
     fn store() -> RedisRealtimeEventStore {
         RedisRealtimeEventStore::new(test_connection())
+    }
+
+    fn timestamped_event(event_id: u64, created_at_unix_secs: u64) -> RealtimeEvent {
+        RealtimeEvent {
+            event_id,
+            subscription: "room-1".to_string(),
+            payload: format!("event-{event_id}"),
+            created_at_unix_secs,
+        }
+    }
+
+    fn store_with_clock(
+        clock: Arc<TestClock>,
+        max_age: Option<Duration>,
+    ) -> RedisRealtimeEventStore {
+        let store = RedisRealtimeEventStore::with_clock(
+            test_connection(),
+            RedisRealtimeEventStoreOptions::default(),
+            clock,
+        );
+        match max_age {
+            Some(max_age) => store.with_max_age(max_age),
+            None => store,
+        }
     }
 
     fn entry(id: &str, payload: &str, created_at: &str) -> redis::Value {
@@ -622,6 +728,120 @@ mod tests {
         assert_eq!(evicted_through(Some(7), 0), 6);
         assert_eq!(evicted_through(None, 7), 7);
         assert_eq!(evicted_through(Some(1), 0), 0);
+    }
+
+    #[test]
+    fn the_max_age_window_defaults_to_disabled_and_is_additive() {
+        let store = store();
+        assert!(store.max_age.is_none(), "count retention stays the default");
+        assert_eq!(store.options().max_events, DEFAULT_REALTIME_MAX_EVENTS);
+        assert_eq!(store.options().prefix, DEFAULT_REALTIME_PREFIX);
+
+        let store = store.with_max_age(Duration::from_secs(60));
+        assert_eq!(store.max_age, Some(Duration::from_secs(60)));
+        assert_eq!(
+            store.options().max_events,
+            DEFAULT_REALTIME_MAX_EVENTS,
+            "the window must not alter the options struct"
+        );
+    }
+
+    #[test]
+    fn the_max_age_window_filters_the_replay_range() {
+        let clock = Arc::new(TestClock::from_unix(1_700_000_000));
+        let now = clock.now_unix();
+        let store = store_with_clock(Arc::clone(&clock), Some(Duration::from_secs(60)));
+        let events = vec![
+            timestamped_event(1, now - 120),
+            timestamped_event(2, now - 30),
+            timestamped_event(3, now),
+        ];
+        let frame = store.resume_frame("room-1".to_string(), 0, Some(1), Some(3), None, events);
+        assert_eq!(
+            frame
+                .events
+                .iter()
+                .map(|event| event.event_id)
+                .collect::<Vec<_>>(),
+            vec![2, 3],
+            "only events inside the window may replay"
+        );
+        assert!(frame.truncated, "a dropped event after the cursor is a gap");
+        assert_eq!(frame.next_cursor, 3);
+
+        // Exactly `max_age` old is still inside the window (strictly-greater
+        // boundary, matching `InMemoryRealtimeEventStore::prune`).
+        let events = vec![timestamped_event(4, now - 60)];
+        let frame = store.resume_frame("room-1".to_string(), 3, Some(4), Some(4), None, events);
+        assert_eq!(frame.events.len(), 1);
+        assert!(!frame.truncated);
+
+        // Without a window the same snapshot replays in full.
+        let store = store_with_clock(Arc::clone(&clock), None);
+        let events = vec![
+            timestamped_event(1, now - 120),
+            timestamped_event(2, now - 30),
+            timestamped_event(3, now),
+        ];
+        let frame = store.resume_frame("room-1".to_string(), 0, Some(1), Some(3), None, events);
+        assert_eq!(frame.events.len(), 3);
+        assert!(!frame.truncated);
+    }
+
+    #[test]
+    fn an_entirely_expired_window_advances_the_cursor_instead_of_stalling() {
+        let clock = Arc::new(TestClock::from_unix(1_700_000_000));
+        let now = clock.now_unix();
+        let store = store_with_clock(Arc::clone(&clock), Some(Duration::ZERO));
+        // A zero-second window drops every event that completed a whole second.
+        let events = vec![timestamped_event(4, now - 1), timestamped_event(5, now - 1)];
+        let frame = store.resume_frame("room-1".to_string(), 0, Some(4), Some(5), None, events);
+        assert!(frame.events.is_empty());
+        assert!(frame.truncated);
+        assert_eq!(
+            frame.next_cursor, 5,
+            "the cursor must pass the dropped range"
+        );
+    }
+
+    #[test]
+    fn a_cursor_past_the_expired_range_is_not_reported_as_a_gap() {
+        let clock = Arc::new(TestClock::from_unix(1_700_000_000));
+        let now = clock.now_unix();
+        let store = store_with_clock(Arc::clone(&clock), Some(Duration::from_secs(60)));
+
+        // The expired retained prefix is before the cursor and nothing new
+        // arrived: caught up, not truncated.
+        let frame = store.resume_frame("room-1".to_string(), 7, Some(4), Some(7), None, Vec::new());
+        assert!(frame.events.is_empty());
+        assert!(!frame.truncated);
+        assert_eq!(frame.next_cursor, 7);
+
+        // A newer in-window event replays without claiming a gap.
+        let events = vec![timestamped_event(7, now - 10)];
+        let frame = store.resume_frame("room-1".to_string(), 6, Some(4), Some(7), None, events);
+        assert_eq!(frame.events.len(), 1);
+        assert!(!frame.truncated);
+        assert_eq!(frame.next_cursor, 7);
+    }
+
+    #[test]
+    fn the_injected_clock_drives_the_window() {
+        let clock = Arc::new(TestClock::from_unix(1_700_000_000));
+        let now = clock.now_unix();
+        let store = store_with_clock(Arc::clone(&clock), Some(Duration::from_secs(60)));
+        let snapshot = || vec![timestamped_event(1, now - 60)];
+
+        let open = store.resume_frame("room-1".to_string(), 0, Some(1), Some(1), None, snapshot());
+        assert_eq!(open.events.len(), 1, "the event starts at the window edge");
+        assert!(!open.truncated);
+
+        clock.advance(Duration::from_secs(1));
+        let closed =
+            store.resume_frame("room-1".to_string(), 0, Some(1), Some(1), None, snapshot());
+        assert!(closed.events.is_empty(), "advancing time closes the window");
+        assert!(closed.truncated);
+        assert_eq!(closed.next_cursor, 1);
     }
 
     #[tokio::test]

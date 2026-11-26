@@ -202,7 +202,7 @@ impl RedisEventConsumer {
         let parsed = parse_entries(&entries);
         for entry in parsed.malformed {
             tracing::warn!(
-                entry = %entry,
+                entry = %String::from_utf8_lossy(&entry),
                 stream = dead_letter,
                 "skipping malformed dead-letter entry during replay"
             );
@@ -565,12 +565,18 @@ async fn claim_pending(
 async fn ack_malformed(
     connection: &mut redis::aio::ConnectionManager,
     options: &RedisEventsOptions,
-    ids: &[String],
+    ids: &[Vec<u8>],
 ) -> Result<()> {
     for id in ids {
-        xack(connection, options, id).await?;
+        redis::cmd("XACK")
+            .arg(&options.stream)
+            .arg(&options.group)
+            .arg(id.as_slice())
+            .query_async::<i64>(connection)
+            .await
+            .map_err(|error| transport_error("redis XACK (malformed entry) failed", error))?;
         tracing::warn!(
-            entry = %id,
+            entry = %String::from_utf8_lossy(id),
             "redis event entry is malformed; acked so it cannot poison the PEL"
         );
     }
@@ -606,7 +612,12 @@ async fn pending_delivery_count(
         .query_async(connection)
         .await
         .map_err(|error| transport_error("redis XPENDING failed", error))?;
-    Ok(parse_pending_count(&value))
+    parse_pending_count(&value).ok_or_else(|| {
+        transport_error(
+            "redis XPENDING reply could not be parsed",
+            format!("entry {id} delivery count is unknown"),
+        )
+    })
 }
 
 async fn xadd_dead_letter(
@@ -644,8 +655,10 @@ async fn xadd_dead_letter(
 struct ParsedEntries {
     messages: Vec<(String, EventMessage)>,
     /// Entries whose id was readable but whose event/payload fields were not;
-    /// they are acked so a malformed entry cannot poison the PEL.
-    malformed: Vec<String>,
+    /// they are acked so a malformed entry cannot poison the PEL. The raw id
+    /// bytes are kept: an id that is not valid UTF-8 must still be addressable
+    /// by XACK.
+    malformed: Vec<Vec<u8>>,
 }
 
 impl ParsedEntries {
@@ -697,9 +710,14 @@ fn parse_claim_reply(value: &redis::Value) -> (ParsedEntries, Vec<String>, Strin
     (entries, deleted_ids, next_cursor)
 }
 
-fn parse_pending_count(value: &redis::Value) -> u64 {
+/// Delivery count from an `XPENDING` range reply.
+///
+/// `None` means the reply shape was not understood: callers must treat that as
+/// a transport error. Returning `0` there would make a poison entry look like a
+/// first delivery forever and never reach `max_deliveries`.
+fn parse_pending_count(value: &redis::Value) -> Option<u64> {
     let redis::Value::Array(parts) = value else {
-        return 0;
+        return None;
     };
     // With an explicit `start end count` range, Redis returns the entry list
     // directly: `[[id, consumer, idle_ms, delivery_count], ...]`. The summary
@@ -709,14 +727,16 @@ fn parse_pending_count(value: &redis::Value) -> u64 {
     } else {
         match parts.get(3) {
             Some(redis::Value::Array(entries)) => entries,
-            _ => return 0,
+            _ => return None,
         }
     };
+    // An empty list is a valid "no pending entry" reply (the entry was already
+    // acked by another consumer): report zero, not an error.
     let Some(redis::Value::Array(first)) = entries.first() else {
-        return 0;
+        return Some(0);
     };
     // The delivery count is always the last element of the entry.
-    first.last().and_then(value_u64).unwrap_or(0)
+    first.last().and_then(value_u64)
 }
 
 fn value_u64(value: &redis::Value) -> Option<u64> {
@@ -734,11 +754,13 @@ fn parse_entries(entries: &[redis::Value]) -> ParsedEntries {
         let redis::Value::Array(parts) = entry else {
             continue;
         };
-        let Some(id) = parts.first().and_then(value_str) else {
+        // The raw id is needed for XACK even when it is not valid UTF-8.
+        let Some(id) = parts.first().and_then(value_bytes) else {
             continue;
         };
+        let id_text = String::from_utf8_lossy(&id).into_owned();
         let Some(redis::Value::Array(fields)) = parts.get(1) else {
-            parsed.malformed.push(id.to_string());
+            parsed.malformed.push(id);
             continue;
         };
 
@@ -758,9 +780,9 @@ fn parse_entries(entries: &[redis::Value]) -> ParsedEntries {
             (Some(event_name), Some(payload)) => {
                 parsed
                     .messages
-                    .push((id.to_string(), EventMessage::new(event_name, payload)));
+                    .push((id_text, EventMessage::new(event_name, payload)));
             }
-            _ => parsed.malformed.push(id.to_string()),
+            _ => parsed.malformed.push(id),
         }
     }
     parsed
@@ -836,7 +858,7 @@ mod tests {
         ]);
         let parsed = parse_entries(&[malformed]);
         assert!(parsed.messages.is_empty());
-        assert_eq!(parsed.malformed, vec!["3-0".to_string()]);
+        assert_eq!(parsed.malformed, vec![b"3-0".to_vec()]);
     }
 
     #[test]
@@ -847,7 +869,7 @@ mod tests {
             Value::Int(10),
             Value::Int(4),
         ])]);
-        assert_eq!(parse_pending_count(&reply), 4);
+        assert_eq!(parse_pending_count(&reply), Some(4));
 
         // Summary form (`XPENDING key group`) keeps entries at index 3.
         let summary = Value::Array(vec![
@@ -859,7 +881,7 @@ mod tests {
                 Value::BulkString(b"4".to_vec()),
             ])]),
         ]);
-        assert_eq!(parse_pending_count(&summary), 4);
+        assert_eq!(parse_pending_count(&summary), Some(4));
     }
 
     #[test]

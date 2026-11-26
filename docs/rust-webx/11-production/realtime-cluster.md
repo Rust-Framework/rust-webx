@@ -19,7 +19,7 @@
       │             │             │
       └────── 共享基础设施 ────────┘
         · IRealtimeEventStore（Redis Streams 续传日志）
-        · IOnlinePresence（Redis ZSET 在线态 + 心跳 TTL）
+        · IOnlinePresence（Redis 身份 ZSET + 成员 HASH 在线态 + 心跳 TTL）
         · ISessionStore / ISessionRepository（jti / Cookie 会话吊销）
         · IEventPublisher 广播通道（Redis Pub/Sub、NATS 广播 subject、Rabbit fanout）
 ```
@@ -94,8 +94,9 @@ Host::builder()
 - 两个 Redis 实现都只是端口实现：直接用宿主已有的 `use_realtime_event_store` /
   `use_online_presence` 装配，没有额外注册动词，也没有第二套状态模型；
 - `add_redis` 会把共享的 `Arc<RedisConnection>` 注册为 singleton：续传日志/在线态实现可以直接
-  `host.provider().get::<Arc<RedisConnection>>()` 复用，避免每个端口再建连接；事件消费者的阻塞读
-  使用它自己的独立连接（无 response timeout），不与缓存/发布/健康检查共用；
+  用 `host.provider().get::<RedisConnection>()`（返回 `Arc<RedisConnection>`）复用，避免每个
+  端口再建连接；事件消费者的阻塞读使用它自己的独立连接（无 response timeout），不与
+  缓存/发布/健康检查共用；
 - `use_online_presence` 的内部接线不需要业务参与：`IPresenceObserver` 的原子 first/last 转移被
   映射到 `user:<id>` / `tenant:<id>` scope，心跳按 TTL 的三分之一续期（默认 TTL 60s）；
 - 两个 Redis 实现各有默认 key 前缀（续传 `webx:rt`、在线态 `webx:presence`），与缓存的
@@ -146,25 +147,46 @@ resume  = 从 ({cursor} 起 XRANGE；latest_cursor = XREVRANGE COUNT 1
   并发追加不会交错，resume 看到的最老/最新 id 与回放范围来自同一快照，不会被并发的 `XTRIM`
   漏报 gap；sequence key 被误删/回档时脚本从 Stream top 自愈，下一次 append 继续（首次失败
   返回可重试 503）；顺序是**每个 subscription 内单调**，不是跨 subscription 的墙钟顺序；
-- 只支持**条数**保留（`max_events`）：Redis 实现没有暴露 `max_age` 映射（Streams 无法原子地
-  按时间裁剪），需要按时间保留时用 PG 表实现同一端口；
+- 物理保留只按**条数**（`max_events`）：Redis 实现用 `XTRIM MAXLEN ~` 近似裁剪（Streams
+  无法原子地按时间裁剪）。`max_age` 通过 `RedisRealtimeEventStore::with_max_age(Duration)`
+  提供**逻辑回放窗口**：`resume` 过滤 `now - created_at > max_age` 的事件并置
+  `truncated=true`（全被过滤时游标前进），`latest_cursor` 仍跟随物理保留；`with_max_age`
+  是 store builder，不经 `RedisRealtimeEventStoreOptions`/`appsettings`。框架**不提供 PG
+  实现**：需要持久/按时间保留时由应用实现同一端口（见
+  [known-boundaries.md](../../design/known-boundaries.md) C1-01 / C2-01）；
 - `truncated=true` 表示游标之后的事件已被保留策略淘汰，客户端必须按快照重建，不能继续增量；
 - 写入侧 `append` 与消息广播放在同一处（同一业务事务之外），由共享 store 负责 id 与顺序；
   跨节点投递仍由广播通道完成——续传日志只回答“游标之后还有什么”。
 
+续传的体量上限（`resume` 受 `max_events` 限制、无额外分页）、`latest_cursor` 失败返回 0、
+PG 实现缺口等边界见 [known-boundaries.md](../../design/known-boundaries.md) C3-01 / C3-02 / C2-01。
+
 ## 6. 在线态与心跳
+
+Redis 实现每个 scope 用**两个 key**（`RedisOnlinePresence`）：
+
+```text
+{prefix}:scope:{scope}     ZSET：member = 稳定身份 JSON 数组 [user_id, connection_id, node_id]，score = 过期时刻
+{prefix}:members:{scope}   HASH：field = 身份，value = PresenceMember JSON（含 joined_at）
+```
 
 | 项 | 语义 |
 |---|---|
 | scope | `user:<id>` / `tenant:<id>` 由宿主桥接；`room:<id>` 由业务显式 `join`/`leave`（框架不自动跟踪房间成员） |
-| member | 每个 **(user, node)** 一个成员：同一用户多设备在同一节点合并为一条在线记录；设备清点仍用本节点注册表 |
+| member | 身份 = `(user_id, connection_id, node_id)`。宿主桥接把 `node_id` 当 connection slot，即每个 **(user, node)** 一个成员：同一用户多设备在同一节点合并为一条在线记录；设备清点仍用本节点注册表。**`count` 是成员数，不是唯一用户数** |
 | TTL | 默认 60s（`use_online_presence_with` 可调），心跳每 TTL/3 续期；节点崩溃后成员在 TTL 内过期，不留永久幽灵在线 |
-| 实现 | 内存实现（单进程/测试）；Redis 实现每 scope 一个 ZSET（member = `PresenceMember` JSON，score = 过期时刻），每次操作先按分数清理过期成员、`ZCARD` 计数；`touch` 用 `ZADD XX`，过期后心跳**不会复活**成员 |
-| 校验 | 空 scope / 零 TTL 是 typed 校验错误；两种实现都按 `max_members_per_scope` 有界（内存默认 10 万；Redis 可配），满时返回可重试 503 而不是无限增长 |
+| 原子性 | join/leave/touch/members/count 各是**单个 Lua 脚本**，共享批量过期清理（256/批，ZSET 与 HASH 同步清理）；`join` 的容量检查与写入在同一脚本（满 → 可重试 503 且不写成员状态）；`touch` 用 `ZADD XX`，过期后心跳**不会复活**成员、也不重写 `joined_at`；身份不含 join 戳，跨节点/重启的 `leave`/`touch` 命中同一成员 |
+| 心跳 | 宿主每 TTL/3 对本节点成员续期，**32 路有界并发** touch；单个失败只记日志、下一轮重试 |
+| 校验 | 空 scope / 零 TTL / 超过 512B 或含控制字符的身份组件是 typed `400`；两种实现都按 `max_members_per_scope` 有界（内存默认 10 万；Redis 可配），满时返回可重试 503 而不是无限增长 |
+| 旧数据 | 兼容读取 2.9.2 旧 JSON member；旧条目随 TTL 在 ≤1 TTL 内收敛（升级窗口见 [known-boundaries.md](../../design/known-boundaries.md) C4-02） |
 
-用法：全局在线数读 `IOnlinePresence::count`，成员列表读 `members`（按 user/connection 排序）；
-**不要**用各节点 `realtime_connections_active` 相加来判断用户是否在线（连接数与在线用户不是一回事）。
+用法：全局在线数读 `IOnlinePresence::count`（**成员数**口径），成员列表读 `members`（**全量
+返回**、按 user/connection 排序、无分页）；**不要**用各节点 `realtime_connections_active`
+相加来判断用户是否在线（连接数、成员数与唯一用户数都不是一回事）。
 房间在线态由业务在 join/leave 房间时调用 `PresenceScope::room(...)` 的 `join/leave/touch`。
+
+presence 的完整边界（身份、容量、分页、秒级 TTL、心跳并发、旧数据升级窗口）见
+[known-boundaries.md](../../design/known-boundaries.md) C1-06…C1-08 / C3-04 / C3-05 / C4-02。
 
 ## 7. 吊销复查与滚动升级
 
@@ -188,7 +210,11 @@ resume  = 从 ({cursor} 起 XRANGE；latest_cursor = XREVRANGE COUNT 1
 - 客户端重连到新实例，带 `ResumeRequest { subscription, cursor }` 从共享日志续传；
 - `close_at_token_expiry` 与 `max_connection_lifetime` 决定连接的最长寿命，升级窗口内客户端
   会按 close code 重新认证（策略见
-  [客户端重连策略](../05-request-pattern/websocket.md#客户端重连策略)）。
+  [客户端重连策略](../05-request-pattern/websocket.md#客户端重连策略)）；
+- **混跑约束**：2.9.1 与 2.9.2 节点同时在线时，广播类事件（`RealtimeFanoutEvent` /
+  `RealtimeUserFanoutEvent`）的跨节点扇出**不完整且不报错**——必须先全量升级，或在升级窗口
+  暂停跨节点扇出（见 [known-boundaries.md](../../design/known-boundaries.md) C4-01）；
+  presence 旧数据在 ≤1 TTL 内收敛（C4-02）。
 
 ## 8. 指标、readiness 与告警
 
@@ -217,13 +243,20 @@ resume  = 从 ({cursor} 起 XRANGE；latest_cursor = XREVRANGE COUNT 1
 - 广播每事件 = 1 次 broker 发布 + 每节点一次派发与本地扇出，不随节点数放大消息体；
 - 保留策略决定 Redis Stream 内存：`max_events` 按 subscription 计，热门房间要单独评估。
 
-已知边界（不夸大）：
+已知边界（摘要；完整台账、证据与验收见
+[known-boundaries.md](../../design/known-boundaries.md)）：
 
-- 广播 **at-most-once**，不重投，跨节点不保证顺序；可靠投递用持久化 + 续传 / outbox；
-- Kafka 适配器不支持广播（显式报错），不提供“伪 fanout”；
-- 跨节点吊销有复查窗口，不是秒级即时；API Key 凭据本版不做运行期复查；
-- room membership 与「谁该收到」属业务数据模型，框架只维护节点本地注册表与显式 presence scope；
-- Redis 共享实现在单节点客户端上（Cluster/Sentinel 需独立适配器），`max_age` 保留不支持。
+- 广播 **at-most-once**，不重投，跨节点不保证顺序；可靠投递用持久化 + 续传 / outbox（C3-06）；
+- Kafka 适配器不支持广播（显式报错），不提供“伪 fanout”（C2-03）；
+- 跨节点吊销有复查窗口，不是秒级即时；API Key 凭据本版不做运行期复查（C3-06）；
+- room membership 与「谁该收到」属业务数据模型，框架只维护节点本地注册表与显式 presence
+  scope；presence `count` 是成员数（每 (user, node) 一个），`members()` 全量、TTL 整数秒
+  （C3-04 / C3-05）；
+- Redis 共享实现是单节点客户端：Cluster/Sentinel 需独立适配器，presence 的双 key Lua 脚本
+  在 Cluster 下还需 hash tag（C2-02）；
+- Redis 续传物理保留只按条数，`max_age` 是逻辑回放窗口，框架不提供 PG 实现
+  （C1-01 / C2-01）；
+- 混跑 2.9.1/2.9.2 时广播类跨节点扇出不完整（C4-01）；presence 旧数据 ≤1 TTL 收敛（C4-02）。
 
 ## 10. 相关
 

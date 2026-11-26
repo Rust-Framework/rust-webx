@@ -1603,6 +1603,12 @@ impl HostBuilder {
     }
 
     fn prepare(mut self) -> Result<PreparedHost> {
+        // A `#[handler]` impl for the reserved realtime fan-out events would
+        // replace the framework's DI bridge (inventory wins over DI in
+        // `dispatch_event_handlers`), silently disabling cross-node fan-out.
+        // Reject that at build time instead of losing frames at runtime.
+        webx_core::realtime::validate_reserved_event_handlers()?;
+
         // Initialize structured logging based on app mode.
         // This is idempotent —subsequent calls are no-ops.
         let env_filter = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into());

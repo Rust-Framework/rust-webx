@@ -43,6 +43,7 @@ mod health;
 mod options;
 mod presence;
 mod realtime;
+mod validation;
 
 pub use advisory_lock::RedisAdvisoryLock;
 pub use cache::RedisCache;
@@ -57,7 +58,7 @@ use std::sync::Arc;
 
 use rust_dix::{IServiceResolverExt, ServiceCollection};
 use webx_core::cache::IDistributedCache;
-use webx_core::hosted::BackgroundServiceSpec;
+use webx_core::hosted::{BackgroundServiceSpec, HostedServiceSpec};
 use webx_core::locking::IAdvisoryLock;
 use webx_core::mediator::{EventDispatcher, IEventPublisher};
 use webx_core::route::ext::IServiceCollectionExt;
@@ -93,6 +94,15 @@ impl RedisServiceCollectionExt for ServiceCollection {
         // deployment (shared resume log / presence) resolve it instead of opening
         // a second one.
         let mut services = self.instance::<RedisConnection>(Arc::clone(&connection));
+
+        // Validate local options before any worker starts; the host awaits
+        // hosted services before accepting requests, so a typo fails startup.
+        let validation_options = options.clone();
+        services = services.add_hosted_service(HostedServiceSpec::with_factory(move |_| {
+            Arc::new(validation::RedisOptionsValidation::new(
+                validation_options.clone(),
+            ))
+        }));
 
         if options.cache_enabled {
             let cache = Arc::new(RedisCache::new(Arc::clone(&connection), &options));
@@ -208,6 +218,7 @@ mod tests {
         let events = options.events.clone().expect("events enabled by default");
         assert!(events.consumer_enabled);
         assert_eq!(events.stream, "webx:events");
+        assert_eq!(events.start_id, "0");
         assert!(events.broadcast_channel.is_empty());
         assert_eq!(
             events.effective_broadcast_channel(),

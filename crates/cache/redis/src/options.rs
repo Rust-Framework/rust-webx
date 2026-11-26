@@ -10,6 +10,11 @@ use serde::{Deserialize, Serialize};
 /// The same connection is shared by the distributed cache and the event
 /// transport. Bind it from configuration with `add_options::<RedisOptions>("Redis")`
 /// or build it in code with [`RedisOptions::new`].
+///
+/// `add_redis` validates these options at host startup (before the first
+/// request is accepted) and fails the start with a typed error instead of
+/// silently running a misconfigured cache/consumer; the checks are local, they
+/// never connect to Redis.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RedisOptions {
@@ -101,6 +106,22 @@ impl RedisOptions {
         Duration::from_secs(self.command_timeout_seconds.max(1))
     }
 
+    /// Validate local configuration (no network I/O).
+    ///
+    /// The URL is parsed but not dialed; a typo therefore fails host startup
+    /// with an actionable message instead of the first cache/health call.
+    pub(crate) fn validate(&self) -> std::result::Result<(), String> {
+        if self.url.trim().is_empty() {
+            return Err("url must not be empty".to_string());
+        }
+        redis::Client::open(self.url.as_str())
+            .map_err(|error| format!("url is not a valid Redis URL: {error}"))?;
+        if let Some(events) = &self.events {
+            events.validate()?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn default_ttl(&self) -> Option<Duration> {
         (self.default_ttl_seconds > 0).then(|| Duration::from_secs(self.default_ttl_seconds))
     }
@@ -141,9 +162,14 @@ pub struct RedisEventsOptions {
     pub group: String,
     /// Consumer name. Empty = `webx-<pid>-<random>`; set it explicitly for dashboards.
     pub consumer: String,
-    /// First stream id used when the consumer group is created (`$` = only new
-    /// messages, `0` = replay everything retained). Ignored once the group
-    /// exists.
+    /// First stream id used when the consumer group is created.
+    ///
+    /// `"0"` (default) replays everything still retained, so an event published
+    /// between process start and the consumer's first `XREADGROUP` is not
+    /// silently skipped; handlers are at-least-once and must be idempotent.
+    /// `"$"` keeps only messages published after the group is created (lower
+    /// duplicate volume for brand-new groups over a stream that already has
+    /// history). Ignored once the group exists.
     pub start_id: String,
     /// Pub/Sub channel broadcast-class events are published to / consumed from.
     ///
@@ -179,7 +205,7 @@ impl Default for RedisEventsOptions {
             stream: "webx:events".to_string(),
             group: "webx".to_string(),
             consumer: String::new(),
-            start_id: "$".to_string(),
+            start_id: "0".to_string(),
             broadcast_channel: String::new(),
             consumer_enabled: true,
             max_len: 100_000,
@@ -227,9 +253,159 @@ impl RedisEventsOptions {
         let token = RandomState::new().build_hasher().finish();
         format!("webx-{}-{token:016x}", std::process::id())
     }
+
+    /// Validate local configuration (no network I/O).
+    ///
+    /// A malformed stream/group id or an out-of-range tuning value currently
+    /// fails deep inside a background reconnect loop; catching it at host
+    /// startup turns a silent, permanent retry into one actionable error.
+    pub(crate) fn validate(&self) -> std::result::Result<(), String> {
+        validate_key("events.stream", &self.stream)?;
+        validate_key("events.group", &self.group)?;
+        if !self.consumer.trim().is_empty() {
+            validate_key("events.consumer", &self.consumer)?;
+        }
+        if !self.broadcast_channel.trim().is_empty() {
+            validate_key("events.broadcast_channel", &self.broadcast_channel)?;
+        }
+        validate_start_id(&self.start_id)?;
+        if self.max_len == 0 {
+            return Err("events.max_len must be at least 1 event".to_string());
+        }
+        if self.read_count == 0 {
+            return Err("events.read_count must be at least 1".to_string());
+        }
+        if self.block_ms < 100 {
+            return Err("events.block_ms must be at least 100ms".to_string());
+        }
+        if self.claim_idle_ms == 0 {
+            return Err("events.claim_idle_ms must be at least 1ms".to_string());
+        }
+        if self.claim_pending && self.max_deliveries == 0 {
+            return Err(
+                "events.max_deliveries must be at least 1 when claim_pending is enabled"
+                    .to_string(),
+            );
+        }
+        if !self.dead_letter_stream.trim().is_empty() {
+            validate_key("events.dead_letter_stream", &self.dead_letter_stream)?;
+            if self.dead_letter_stream.trim() == self.stream.trim() {
+                return Err(
+                    "events.dead_letter_stream must differ from events.stream (replay would loop)"
+                        .to_string(),
+                );
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Default broadcast channel for `stream` (`"<stream>:broadcast"`).
 pub(crate) fn derived_broadcast_channel(stream: &str) -> String {
     format!("{stream}:broadcast")
+}
+
+/// Validate a Redis key/channel option: non-blank, bounded, printable.
+fn validate_key(name: &str, value: &str) -> std::result::Result<(), String> {
+    if value.trim().is_empty() {
+        return Err(format!("{name} must not be empty"));
+    }
+    if value.len() > 512 {
+        return Err(format!("{name} must be at most 512 bytes"));
+    }
+    if value.chars().any(char::is_control) {
+        return Err(format!("{name} must not contain control characters"));
+    }
+    Ok(())
+}
+
+/// `start_id` must be `$`, `0`, or a Redis stream id (`<ms>` / `<ms>-<seq>`).
+fn validate_start_id(value: &str) -> std::result::Result<(), String> {
+    let value = value.trim();
+    if value == "$" || value == "0" {
+        return Ok(());
+    }
+    let (millis, sequence) = match value.split_once('-') {
+        Some((millis, sequence)) => (millis, Some(sequence)),
+        None => (value, None),
+    };
+    let all_digits = |text: &str| !text.is_empty() && text.chars().all(|ch| ch.is_ascii_digit());
+    if all_digits(millis) && sequence.map(all_digits).unwrap_or(true) {
+        return Ok(());
+    }
+    Err("events.start_id must be \"$\", \"0\", or a stream id such as \"0-0\"".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_start_id_replays_retained_events() {
+        assert_eq!(RedisEventsOptions::default().start_id, "0");
+        RedisEventsOptions::default()
+            .validate()
+            .expect("defaults are valid");
+    }
+
+    #[test]
+    fn invalid_event_options_are_rejected_with_actionable_messages() {
+        let blank_stream = RedisEventsOptions {
+            stream: "  ".to_string(),
+            ..RedisEventsOptions::default()
+        };
+        assert!(blank_stream.validate().unwrap_err().contains("stream"));
+
+        let bad_start = RedisEventsOptions {
+            start_id: "latest".to_string(),
+            ..RedisEventsOptions::default()
+        };
+        assert!(bad_start.validate().unwrap_err().contains("start_id"));
+
+        let zero_deliveries = RedisEventsOptions {
+            max_deliveries: 0,
+            ..RedisEventsOptions::default()
+        };
+        assert!(zero_deliveries
+            .validate()
+            .unwrap_err()
+            .contains("max_deliveries"));
+
+        let looping_dlq = RedisEventsOptions {
+            dead_letter_stream: "webx:events".to_string(),
+            ..RedisEventsOptions::default()
+        };
+        assert!(looping_dlq
+            .validate()
+            .unwrap_err()
+            .contains("dead_letter_stream"));
+    }
+
+    #[test]
+    fn valid_start_ids_are_accepted() {
+        for start_id in ["$", "0", "0-0", "1700000000000", "42-7"] {
+            let options = RedisEventsOptions {
+                start_id: start_id.to_string(),
+                ..RedisEventsOptions::default()
+            };
+            options
+                .validate()
+                .unwrap_or_else(|error| panic!("start_id {start_id:?} rejected: {error}"));
+        }
+    }
+
+    #[test]
+    fn redis_options_validate_url_and_nested_events() {
+        RedisOptions::new("redis://127.0.0.1:6379")
+            .validate()
+            .expect("valid URL");
+        assert!(RedisOptions::new("not a url").validate().is_err());
+        assert!(RedisOptions::new("")
+            .with_events(RedisEventsOptions {
+                stream: String::new(),
+                ..RedisEventsOptions::default()
+            })
+            .validate()
+            .is_err());
+    }
 }

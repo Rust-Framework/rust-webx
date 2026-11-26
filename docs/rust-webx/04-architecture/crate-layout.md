@@ -40,6 +40,11 @@ Cargo **包名**带连字符，Rust **导入名**用下划线库名。两者不�
 | `rust-webx-h3` | `webx_h3` | 可选 HTTP/3 监听传输（QUIC + rustls + h3；不进伞 crate，默认构建不链接） |
 | `rust-webx-build` | `webx` | 构建期（`build-dependencies`） |
 
+> 共享契约 crate `rust-core`（`rust_core`）不在 `crates/` 下：`AppError`/`Result`、
+> `PagedRequest`/`PagedResult`、`KeysetRequest`/`CursorPage`、`OperationResult`、`IPatchable`
+> 等由它定义；`webx_core::error` / `::pagination` / `::keyset` / `::operation` / `::persistence`
+> 只是**历史模块路径的重导出**（自 2.9.1 起），不要在 webx 侧找第二份定义。
+
 > 与 ORM/数据库耦合的持久化参考适配器（`examples/adapters/{ai,auth,idempotency,outbox,payment}/ef`）
 > **不在上表**：它们 `publish = false`，不是可依赖的包，只供复制。
 
@@ -51,7 +56,9 @@ workspace。应用代码只依赖 `crates/` 下的包。
 
 ## core — 契约层
 
-`rust-webx-core` 定义所有公开 trait，**不依赖** hyper、tokio 或任何 HTTP 实现。
+`rust-webx-core` 定义框架公开 trait 与绑定/运行时辅助类型，**不依赖** hyper、tokio 或任何
+HTTP 实现；其中 `error` / `error_codes` / `pagination` / `keyset` / `operation` /
+`persistence` 是 `rust-core` 共享契约的重导出（定义在 `rust-core`，不是本 crate）。
 
 设计意图：
 - 第三方可基于 core trait 编写可插拔组件
@@ -66,7 +73,7 @@ workspace。应用代码只依赖 `crates/` 下的包。
 | 认证/安全 | `auth`, `security`, `idempotency`, `locking`, `secrets` | `IClaims`, `IAuthenticationScheme`, `IDynamicAuthorizer`, `IdentityUser` / `RequestUser`, `ISessionStore`, `IPasswordHasher`, `IIdempotencyStore`, `IAdvisoryLock` |
 | 实时/通知 | `realtime`, `push`, `notifications`, `stream` | `IRealtimeEventStore`, `IOnlinePresence`, `IConnectionRegistry`, `WebSocketLimits`, `IPushSender`, `IEmailSender` / `ISmsSender`, `SseResult` |
 | 配置/可观测 | `config`, `options_monitor`, `metrics`, `localization`, `time`, `error` | `AppOptions`, `IOptionsMonitor`, `IMeter`, `IStringLocalizer`, `IClock`, `Error` |
-| 数据/分页 | `cache`, `pagination`, `keyset`, `operation`, `form`, `validation`, `storage`, `media` | `IDistributedCache`, `PagedRequest` / `PagedResult`, `KeysetRequest` / `CursorPage`, `OperationResult`, 表单/校验/存储/媒体端口 |
+| 数据/分页 | `cache`（端口） + `rust_core::{pagination, keyset, operation, persistence}` 的重导出 | `IDistributedCache`；`PagedRequest`/`PagedResult`、`KeysetRequest`/`CursorPage`、`OperationResult`/`IPatchable` 定义在 **rust-core**，`webx_core` 重导出历史路径 |
 
 ## host — 运行时层
 

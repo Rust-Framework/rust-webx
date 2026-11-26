@@ -79,13 +79,14 @@ impl IRequestHandler<GetUserRequest, UserDto> for GetUserHandler { ... }
 |---------|----------|
 | `String`, `UserDto`, `Vec<T>` 等（`Serialize`） | 200 + JSON body |
 | `()` | 204 No Content，空 body |
-| `PagedResult<T>` | 200 + `{items, total, page, page_size, total_pages}` |
+| `PagedResult<T>` | 200 + `{success, status, message, items, total}`（扁平页信封，无请求回声字段） |
 | `OperationResult<T>` | 200 + `{success, status, message, result}` |
 | `OperationResult` | 200 + `{success, status, message}` |
 | `Response` | Handler 返回 `IActionResult`（文件、自定义状态码/头/body） |
 
-`PagedResult<T>` 与 `OperationResult` 是框架随附的两个业务 DTO 信封：列表用前者，
-更新/删除/状态流转等操作结果用后者，业务模块不必再各自定义 `{success, status, message}`。
+`PagedResult<T>` 与 `OperationResult` 是框架随附的两个业务 DTO 信封（类型定义在
+`rust-core`，由 `webx`/`webx_core` 重导出）：列表用前者，更新/删除/状态流转等操作结果用后者，
+业务模块不必再各自定义 `{success, status, message}`。
 
 ```rust
 #[put("/users/{id}")]
@@ -102,8 +103,8 @@ impl IRequestHandler<UpdateUserRequest, OperationResult<UserDto>> for UpdateUser
 `OperationResult` 的 `status` 是**业务状态码**（错误码、流程状态，含义由业务定义），
 不是 HTTP 状态码；HTTP 状态仍由框架决定——正常返回 `200` + 信封 JSON，
 `Err(webx::Error)` 仍写 `problem+json`（见[错误处理](error-handling.md)）。构造器：
-`ok` / `ok_with_status` / `failed` / `success` / `success_with_status`；不带泛型的
-`OperationResult` 没有 `result` 成员。结果常在业务执行过程中才确定，因此创建后可以继续调整：
+`success(message)` / `failed(status, message)`，以及 `with_status` / `with_message` /
+`with_result`；不带泛型的 `OperationResult` 没有 `result` 成员。结果常在业务执行过程中才确定，因此创建后可以继续调整：
 `with_status` / `with_message` / `with_result`（把无数据信封升级为带 `result` 的形态），
 或直接给公开字段赋值。
 

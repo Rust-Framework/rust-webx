@@ -1,5 +1,9 @@
 # 分页编程模型（契约精简版）
 
+> 类型归属：`PagedRequest` / `PagedResult` / `KeysetRequest` / `CursorPage` /
+> `OperationResult` 自 2.9.1 起定义在 **`rust-core` 0.1**；`webx_core::pagination` / `::keyset` /
+> `::operation` 是历史路径重导出。本页保留设计理由，权威类型与构造器以 rust-core/rustdoc 为准。
+>
 > 输入 `PagedRequest`、输出 `PagedResult<T>`，但两者都精简到**只保留服务端才知道的信息**：
 > 请求侧去掉手工归一（`from_parts`），响应侧去掉请求回声（`page`/`page_size`/`total_pages`）。
 > 端点收敛成一条链：`query.order_by…().to_page(&paging, Model::from)`。

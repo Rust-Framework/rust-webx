@@ -1,10 +1,11 @@
-//! N-2 upgrade smoke application for the rust-webx 2.9.2 release.
+//! N-2 upgrade smoke application for the rust-webx 2.9.3 release.
 //!
-//! This file is compiled twice in CI: against the published `rust-webx 2.9.0`
-//! (the N-2 release for 2.9.2) and against the current workspace path. It may
+//! This file is compiled twice in CI: against the published `rust-webx 2.9.1`
+//! (the N-2 release for 2.9.3) and against the current workspace path. It may
 //! only use APIs that exist in both releases; `HostBuilder::configure`'s
-//! options setter and `Error`'s constructors changed in the documented 2.9.1
-//! breaking release, so this file deliberately avoids them.
+//! options setter, `Error`'s constructors and `PagedRequest::from_parts` changed
+//! in the documented 2.9.1 breaking release, so this file deliberately avoids
+//! them.
 
 use webx::*;
 

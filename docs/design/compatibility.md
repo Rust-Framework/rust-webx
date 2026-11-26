@@ -1,6 +1,6 @@
 # 兼容性政策（SemVer、N-2 升级、锁步版本）
 
-> 当前发布 rust-webx 2.9.2；SemVer 门禁基线 v2.9.1。门禁在 `.github/workflows/ci.yml` 的
+> 当前发布 rust-webx 2.9.3；SemVer 门禁基线 v2.9.2。门禁在 `.github/workflows/ci.yml` 的
 > `semver`、`upgrade`、`lint`（内部版本钉）三个 job。
 
 ## 1. 三条承诺
@@ -34,31 +34,35 @@
    （`examples/adapters/*` 全部 `publish = false`）：它们是参考实现，可复制不可依赖
    （见 [端口与适配器归属](integrations.md)）。
 3. **N-2 源码兼容**：同一份只使用 N-2 稳定 API 的应用源码，必须能同时编译
-   针对 N-2 发布 `rust-webx = "=2.9.0"`（2.9.2 的 N-2）与当前工作区路径。
+   针对 N-2 发布 `rust-webx = "=2.9.1"`（2.9.3 的 N-2）与当前工作区路径。
+
+**补丁政策**：补丁版本（`x.y.z`）原则上只修 bug/安全问题——不删除或改名公开 API、不改默认值
+与语义。任何例外必须同批在 CHANGELOG 标注 `behavior change`、给出迁移说明，并登记到 §3 与 §7
+检查单。2.9.1 是已登记的破坏性补丁；**2.9.3 是已登记的行为变更补丁**（见 §3 第 7 条）。
 
 ## 2. 门禁
 
 ### semver（对上一发布）
 
 ```text
-cargo semver-checks --package rust-webx-core   --baseline-rev v2.9.1
-cargo semver-checks --package rust-webx-engine --baseline-rev v2.9.1
-cargo semver-checks --package rust-webx-host   --baseline-rev v2.9.1
-cargo semver-checks --package rust-webx        --baseline-rev v2.9.1
+cargo semver-checks --package rust-webx-core   --baseline-rev v2.9.2
+cargo semver-checks --package rust-webx-engine --baseline-rev v2.9.2
+cargo semver-checks --package rust-webx-host   --baseline-rev v2.9.2
+cargo semver-checks --package rust-webx        --baseline-rev v2.9.2
 ```
 
 例外：`constructible_struct_adds_field = "allow"`（见 §3），以及 2.8.0 幂等值类型的
 `struct_marked_non_exhaustive` / `enum_marked_non_exhaustive = "allow"`（同见 §3），
-2.9.1 限流枚举/通知端口改名的两条 `allow` 已在 2.9.2 删除：semver baseline 前移到 v2.9.1，
-这些 2.9.1 例外不再参与门禁，只在 §3 留档。
+2.9.1 限流枚举/通知端口改名的两条 `allow` 已在 2.9.2 删除：semver baseline 当时前移到
+v2.9.1（2.9.3 起为 v2.9.2），这些 2.9.1 例外不再参与门禁，只在 §3 留档。
 
 ### upgrade（N-2 源码兼容）
 
 `testing/upgrade-smoke/src/main.rs` 只用 N-2 稳定 API，分别在两个独立 workspace 编译。
-N-2 基线随当前版本滚动：2.9.2 的 N-2 是 **rust-webx 2.9.0**（下一个 minor 发布时同步前移）。
+N-2 基线随当前版本滚动：2.9.3 的 N-2 是 **rust-webx 2.9.1**（下一个 minor 发布时同步前移）。
 
 ```text
-testing/upgrade-smoke/stable/Cargo.toml   → rust-webx = "=2.9.0"（固定 2.9.0 全套）
+testing/upgrade-smoke/stable/Cargo.toml   → rust-webx = "=2.9.1"（固定 2.9.1 全套）
 testing/upgrade-smoke/current/Cargo.toml  → rust-webx = { path = "../../../crates/webx" }
 ```
 
@@ -102,10 +106,11 @@ testing/upgrade-smoke/current/Cargo.toml  → rust-webx = { path = "../../../cra
 `Features (workspace --all-features)` 在 linux 上把整棵工作区的每个 target 用全特性跑一遍，
 两处互补而不是互相替代。
 
-## 3. 已知例外：幂等值类型的新增字段与 `#[non_exhaustive]`（配置 section / `IdempotentResponse`）、2.9.1 通知端口改名、`EmailMessage` 新字段、限流枚举新变体
+## 3. 已知例外：幂等值类型的新增字段与 `#[non_exhaustive]`（配置 section / `IdempotentResponse`）、2.9.1 通知端口改名、`EmailMessage` 新字段、限流枚举新变体、2.9.3 行为变更
 
 `constructible_struct_adds_field`、`struct_marked_non_exhaustive` 与
-`enum_marked_non_exhaustive` 设为 `allow`，覆盖以下已文档化的 2.8.0 变更：
+`enum_marked_non_exhaustive` 设为 `allow`，覆盖以下已文档化的 2.8.0 变更；第 7 条不靠 lint
+`allow`，按 §1 补丁政策登记：
 
 1. **配置 section**（`ServerSection`、`JwtSection`、`IdempotencySection` …）是 serde DTO：
    文档化构造路径是 `Default` + `appsettings.json` / `APP__*`，不是结构体字面量。
@@ -159,6 +164,32 @@ testing/upgrade-smoke/current/Cargo.toml  → rust-webx = { path = "../../../cra
 
 6. **2.9.2 加性补丁的字段（结构体字面量构造受影响）**：`WebSocketLimits` 新增 `session_revalidation`（用 `Default` + `.with_session_revalidation(d)` 构造）；`RedisEventsOptions` / `NatsOptions` / `RabbitMqOptions` 新增广播通道字段（serde 默认值，配置绑定属加性；字面量构造请用 `Default` + `with_*`）。本版不删除 API、不改默认行为，不需要迁移；`constructible_struct_adds_field` 的全局允许已在根 `Cargo.toml` 登记。
 
+7. **2.9.3 行为变更补丁的登记**：`cargo-semver-checks` 对 v2.9.2 只报告新增项（不改签名），
+   涉及**运行期默认行为、启动校验口径与内部数据布局**，因此不新增 lint `allow`，而是按
+   §1 补丁政策登记、在 CHANGELOG 标 `behavior change` 并给迁移说明。逐项：
+   - **`RedisEventsOptions::start_id` 默认值 `"$"` → `"0"`**：新建 consumer group 时重放
+     stream 保留历史，避免"事件已发布、消费组尚未创建"的启动窗口丢事件。既有 group 上该值被
+     Redis 忽略；需要"只看新消息"时显式设 `"$"`。迁移：确认 handler 幂等（at-least-once），
+     边界与运维窗口见 [known-boundaries.md](known-boundaries.md) C1-02 / C4-03。
+   - **保留实时扇出事件 handler 启动 fail-closed**：应用对 `RealtimeFanoutEvent` /
+     `RealtimeUserFanoutEvent` 写 `#[handler]` 时，host **构建期失败**（此前 inventory 注册
+     可能静默替换框架 DI 桥接、导致跨节点扇出丢失）。迁移：删除自定义保留事件 handler，
+     自定义跨节点事件改用独立 `IEventRequest` 类型；**不要手工 DI 注册**保留事件的
+     `IEventHandler`——它不在该 inventory 校验范围内，会与框架 DI handler 同时执行（双投递，
+     见 C1-09）。
+   - **`add_redis` 启动校验的分类**：只对**确实无法工作的配置**硬失败（URL 空/不可解析、
+     `events.stream`/`events.group` 为空、`start_id` 非法且含首尾空白或数字段溢出 `u64`）；
+     2.9.2 会 clamp 的数值（`max_len`/`read_count`/`block_ms`/`claim_idle_ms`/
+     `max_deliveries = 0`）继续接受、只 warn，`dead_letter_stream == stream` 也只 warn
+     （死信禁用）——升级不会因为一句可 clamp 的配置直接启动失败（见 C1-03）。
+   - **`PresenceMember::key()` 格式变更**：由裸分隔符拼接改为长度前缀身份编码（id 内含分隔符
+     不再与另一个三元组碰撞）。它只承诺同一身份稳定，**不承诺跨版本字面格式**；把 `key()`
+     当展示串或持久化键的应用需自行迁移（见 C1-11）。
+   - **Redis presence key 布局迁移**：ZSET member 由整段 `PresenceMember` JSON 改为稳定身份
+     `[user_id, connection_id, node_id]`，成员载荷（含 `joined_at`）移入
+     `{prefix}:members:{scope}` HASH。2.9.2 旧 JSON member 仍可读，升级窗口 ≤1 TTL 收敛，
+     见 [known-boundaries.md](known-boundaries.md) C1-10 / C4-02。
+
 需要保持字面量构造的结构体（如 `ProblemDetails`）由
 `crates/webx/tests/api_stability_test.rs` 锁定字段集合。
 
@@ -185,7 +216,9 @@ let blogs = ctx.set::<Blog>().query().to_list().await?;
 | 持久层错误 → `AppError` | 不需要额外 crate；用 `rust-ef` 2.9.1 的 `From<EFError> for AppError` |
 | 持久化 `Idempotency-Key` store | 框架端口 `IIdempotencyStore`；持久化实现由下游提供，参考适配器 `examples/adapters/idempotency/ef`（非发布，可复制） |
 
-配对发布：先 rust-ef 2.9.1、后 rust-webx 2.9.1；workspace 依赖写 `rust-ef = "2.6"`
+配对发布：2.9.1 时是 **rust-ef 2.9.1 → rust-webx 2.9.1**（历史顺序）；当前 2.9.3 仍按
+`rust-ef` 2.9.1 配对验证，发布顺序为 **rust-ef 2.9.1 → rust-webx 2.9.3**（2.9.3 补丁不改
+ORM 依赖）。workspace 依赖写 `rust-ef = "2.6"`
 （semver 范围，已含 2.9.x，本版按 2.9.1 验证），不收紧为精确 pin——否则在 ORM 发布前
 `Cargo.lock` 不可解析。
 
@@ -229,7 +262,8 @@ host 写入日志。新增 rust-ef 变体走同一隐藏 500 分支，升级依�
 
 ### 配对验证（pairing verified）的证据边界
 
-发布顺序是 **rust-ef 2.9.1 → rust-webx 2.9.1**（见上）。发布前用本地 rust-ef
+发布顺序：2.9.1 时为 **rust-ef 2.9.1 → rust-webx 2.9.1**；当前 2.9.3 为
+**rust-ef 2.9.1 → rust-webx 2.9.3**（见上）。发布前用本地 rust-ef
 checkout 做编译级配对验证：
 
 ```bash
@@ -284,22 +318,31 @@ rust-ef 发布后、给 rust-webx 打 tag 前，执行 `cargo update -p rust-ef 
 运行期边界（广播 at-most-once、Redis 续传只按条数物理保留、presence 计数口径等）不属于
 `behavior change` 承诺范围，唯一台账见 [known-boundaries.md](known-boundaries.md)。
 
+2.9.3 登记的行为变更（§3 第 7 条）只涉及 Redis 适配器默认值、保留事件装配与 presence
+内部 key 布局，不改上表的公开语义面；升级窗口见
+[known-boundaries.md](known-boundaries.md) C4。
+
 ## 7. LTS 与发布检查单
 
 - 支持窗口：当前 minor 全程支持；N-1、N-2 只接收安全与关键缺陷修复。
 - LTS 分支：每个 stable major 的最后一个 minor 建 `lts/<major>.<minor>`，维护 12 个月，
   只接受 backport 的安全/文档/兼容修复。
-- 补丁版本只修 bug/安全问题，不删 API、不改默认值、不改语义（**2.9.1 是已登记的
-  破坏性补丁**，见 §1；此后恢复该规则）。
+- 补丁版本原则上只修 bug/安全问题，不删 API、不改默认值、不改语义。已登记的例外：
+  **2.9.1 是破坏性补丁**（见 §1）；**2.9.3 是行为变更补丁**（§3 第 7 条：`start_id`
+  默认值、保留事件 handler fail-closed、presence 身份/key 布局），均有迁移说明。
 - 跨 minor 升级零代码改动（N-2 冒烟门禁）；跨 major 提供迁移指南与弃用窗口。
 
 ```text
 □ CI 全绿（tests/clippy/fmt/MSRV/audit/dedup/features/docs/coverage/benches/alloc/semver/realdb/brokers/examples/upgrade）
 □ CHANGELOG 含迁移说明（弃用/行为变更）
-□ 配对 ORM 已先行发布（rust-ef x.y.z → rust-webx x.y.z；`rust-ef = "2.6"` 范围覆盖 2.9.x，不收紧为精确 pin）
+□ 行为变更已登记（§3 + CHANGELOG `behavior change`）并有升级窗口口径：2.9.3 的 `start_id`
+  默认值、保留事件 handler fail-closed、presence 身份/key 布局（窗口见 known-boundaries C4）
+□ 启动校验只对不可工作配置硬失败：2.9.2 可运行的 clamp 数值（`max_len`/`read_count`/`block_ms`/
+  `claim_idle_ms`/`max_deliveries = 0`）保持可用（仅 warn），`dead_letter_stream == stream` 仅 warn
+□ 配对 ORM 已先行发布（rust-ef x.y.z → rust-webx x.y.z；当前 rust-ef 2.9.1 → rust-webx 2.9.3；`rust-ef = "2.6"` 范围覆盖 2.9.x，不收紧为精确 pin）
 □ 配对验证已跑：`RUST_EF_PATH=… bash scripts/check-pairing-rust-ef.sh`（或 CI `pairing` job）通过，证据边界见 §4
 □ semver-checks 对上一发布通过（例外仅 §3）
-□ N-2 冒烟通过（testing/upgrade-smoke；2.9.2 的 N-2 = rust-webx 2.9.0）
+□ N-2 冒烟通过（testing/upgrade-smoke；2.9.3 的 N-2 = rust-webx 2.9.1）
 □ cargo audit 0 漏洞（根 + `examples/adapters/Cargo.lock` 两个 lockfile）+ 依赖重复基线通过 + 内部版本钉一致
 □ LTS backport 只含安全/关键缺陷修复
 ```
@@ -310,7 +353,7 @@ rust-ef 发布后、给 rust-webx 打 tag 前，执行 `cargo update -p rust-ef 
 `api_stability_test` 锁定文档化构造路径；指定负责人与移除检查项。
 
 ```text
-cargo semver-checks --package rust-webx-host --baseline-rev v2.7.0
+cargo semver-checks --package rust-webx-host --baseline-rev v2.9.2
 cargo build --manifest-path testing/upgrade-smoke/stable/Cargo.toml
 cargo build --manifest-path testing/upgrade-smoke/current/Cargo.toml
 ```

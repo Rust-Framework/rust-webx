@@ -18,8 +18,10 @@
 //! The ZSET member is the JSON encoding of `[user_id, connection_id, node_id]`.
 //! JSON arrays are delimiter-safe (`user|with|pipes` cannot collide with
 //! another triple) and stable: the join stamp is **not** part of the identity, so
-//! a `leave`/`touch` built from a fresh [`PresenceMember`] addresses the member
-//! joined by any node or by an earlier process. `joined_at_unix_secs` is stored
+//! a `leave`/`touch` built from a fresh [`PresenceMember`] addresses a member
+//! joined by another node when the `(user_id, connection_id, node_id)` triple
+//! matches. The host's node id is per-process, so after a restart the old entry
+//! is no longer addressable and expires by TTL. `joined_at_unix_secs` is stored
 //! only in the HASH payload, which is why `members` can round-trip it.
 //!
 //! # Atomicity and expiry
@@ -287,10 +289,11 @@ impl From<StoredMember> for PresenceMember {
 
 /// Redis sorted-set-backed [`IOnlinePresence`].
 ///
-/// Safe to share across nodes, processes and restarts: the stable identity and
-/// the shared ZSET/HASH are the only state, so there is no process-local index
-/// to lose. The TTL is refreshed by the application or the host presence
-/// heartbeat.
+/// Safe to share across nodes: the stable identity and the shared ZSET/HASH
+/// are the only state, so there is no process-local index to lose. Mutations
+/// address the exact `(user_id, connection_id, node_id)` triple; the host's node
+/// id is per-process, so entries left by a crashed/restarted process expire by
+/// TTL. The TTL is refreshed by the application or the host presence heartbeat.
 pub struct RedisOnlinePresence {
     connection: Arc<RedisConnection>,
     options: RedisOnlinePresenceOptions,

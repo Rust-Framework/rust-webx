@@ -9,7 +9,7 @@ release. `scripts/check-crate-layout.py` enforces both directions.
 |---|---|---|
 | `alloc-probe` | Measures the framework allocation tax against a bare-hyper floor (`compare <requests> <tax-budget>`). It needs a `GlobalAlloc` wrapper, which the framework crates forbid. | PR CI `alloc` job; evidence in [`docs/design/alloc-budget.md`](../docs/design/alloc-budget.md) |
 | `contract-tests` | Reusable behavior-contract suites for framework ports (`IObjectStore`, `IMediaPlaneAdapter`, `IEventPublisher`). Adapter crates depend on it as a dev-dependency. | PR CI tests of the adapters and of this crate |
-| `upgrade-smoke` | N-2 source-compatibility smoke: the same app compiled against the previous-but-one published release (`rust-webx = "=2.7.0"` for the 2.9 line) and against the current workspace path. | PR CI `upgrade` job; policy in [`docs/design/compatibility.md`](../docs/design/compatibility.md) |
+| `upgrade-smoke` | N-2 source-compatibility smoke: the same app compiled against the previous-but-one published release (`rust-webx = "=2.9.1"` for the 2.9.3 line) and against the current workspace path. | PR CI `upgrade` job; policy in [`docs/design/compatibility.md`](../docs/design/compatibility.md) |
 | `load-probe` | End-to-end load harness: the same requests over a real socket against a `rust-webx` host and a bare-hyper service, reporting req/s and p50/p90/p99 plus the framework tax. | Manual/release evidence (see [`load-probe/README.md`](load-probe/README.md)); shared CI runners are too noisy for an absolute throughput gate |
 
 Rules for this directory:

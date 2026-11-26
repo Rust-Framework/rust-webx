@@ -7,10 +7,12 @@
 
 ```toml
 [dependencies]
-rust-webx = "2.9.1"
+rust-webx = "2.9"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 ```
+
+当前发布 **2.9.3**；写 `"2.9"`（semver 范围）即可随 2.9.x 补丁滚动，家族 crate 由框架内部锁步。
 
 Argon2 默认启用（`password-argon2` feature）；无需自己写哈希。
 

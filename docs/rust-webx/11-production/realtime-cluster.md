@@ -110,18 +110,10 @@ Host::builder()
 
 实时扇出使用**广播投递类**（`EventDelivery::Broadcast`）：`IMediator::publish` 自动调用
 `IEventPublisher::broadcast`，适配器把事件路由到广播通道。竞争投递（领域事件、任务）语义不变。
-
-| 传输 | 注册入口 | 广播实现 | 语义 / 注意 |
-|---|---|---|---|
-| 进程内 | `add_mediator()` 默认 | 同一有界队列（单进程即全节点） | 仅单实例 |
-| Redis | `add_redis(RedisOptions)` | Pub/Sub 频道（默认 `<stream>:broadcast`） | 广播 at-most-once、无持久化；竞争投递仍是 Streams at-least-once |
-| NATS | `add_nats(NatsOptions)` | 独立广播 subject（默认 `<subject>.broadcast`，**无 queue group**） | `queue_group` 只作用于竞争投递；可用 `with_broadcast_subject` 覆盖 |
-| RabbitMQ | `add_rabbitmq(RabbitMqOptions)` | fanout exchange（默认 `<exchange>.broadcast`）+ 每节点独占/自动删除队列 | 每节点各自的队列随连接消失；可用 `with_broadcast_exchange` 覆盖 |
-| Kafka | `add_kafka(KafkaOptions)` | **不支持**：`broadcast` 保持 fail-closed 显式报错 | 不假装“每节点收到”；需要跨节点扇出请换传输或改用共享状态方案 |
-
-完整能力矩阵（含持久化/重试/顺序边界）见
-[broker 能力矩阵](../../design/broker-capability-matrix.md)；投递类与失败语义见
-[投递类与跨节点扇出](../05-request-pattern/websocket.md#投递类与跨节点扇出)。
+各传输的广播实现、失败模式与顺序边界以
+[broker 能力矩阵](../../design/broker-capability-matrix.md) §2 为唯一权威（Redis Pub/Sub、
+NATS 广播 subject、RabbitMQ fanout 支持广播；**Kafka 不支持广播**、保持 fail-closed）。
+投递类的 API 形状见[投递类与跨节点扇出](../05-request-pattern/websocket.md#投递类与跨节点扇出)。
 
 选择建议：
 
@@ -147,19 +139,17 @@ resume  = 从 ({cursor} 起 XRANGE；latest_cursor = XREVRANGE COUNT 1
   并发追加不会交错，resume 看到的最老/最新 id 与回放范围来自同一快照，不会被并发的 `XTRIM`
   漏报 gap；sequence key 被误删/回档时脚本从 Stream top 自愈，下一次 append 继续（首次失败
   返回可重试 503）；顺序是**每个 subscription 内单调**，不是跨 subscription 的墙钟顺序；
-- 物理保留只按**条数**（`max_events`）：Redis 实现用 `XTRIM MAXLEN ~` 近似裁剪（Streams
-  无法原子地按时间裁剪）。`max_age` 通过 `RedisRealtimeEventStore::with_max_age(Duration)`
-  提供**逻辑回放窗口**：`resume` 过滤 `now - created_at > max_age` 的事件并置
-  `truncated=true`（全被过滤时游标前进），`latest_cursor` 仍跟随物理保留；`with_max_age`
-  是 store builder，不经 `RedisRealtimeEventStoreOptions`/`appsettings`。框架**不提供 PG
-  实现**：需要持久/按时间保留时由应用实现同一端口（见
-  [known-boundaries.md](../../design/known-boundaries.md) C1-01 / C2-01）；
+- 物理保留只按**条数**（`max_events`）：Redis 实现用 `XTRIM MAXLEN ~` 近似裁剪。
+  `RedisRealtimeEventStore::with_max_age(Duration)` 只是**逻辑回放窗口**（`resume` 过滤超窗
+  事件并置 `truncated=true`，不改变物理内存，是 store builder、不经 options/appsettings）；
+  框架**不提供 PG 实现**，需要持久/按时间保留时由应用实现同一端口。完整语义见
+  [known-boundaries.md](../../design/known-boundaries.md) C1-01 / C2-01；
 - `truncated=true` 表示游标之后的事件已被保留策略淘汰，客户端必须按快照重建，不能继续增量；
 - 写入侧 `append` 与消息广播放在同一处（同一业务事务之外），由共享 store 负责 id 与顺序；
   跨节点投递仍由广播通道完成——续传日志只回答“游标之后还有什么”。
 
-续传的体量上限（`resume` 受 `max_events` 限制、无额外分页）、`latest_cursor` 失败返回 0、
-PG 实现缺口等边界见 [known-boundaries.md](../../design/known-boundaries.md) C3-01 / C3-02 / C2-01。
+续传的体量上限（`resume` 受 `max_events` 限制、无额外分页）与 `latest_cursor` 失败返回 0
+见 [known-boundaries.md](../../design/known-boundaries.md) C3-01 / C3-02。
 
 ## 6. 在线态与心跳
 
@@ -173,16 +163,12 @@ Redis 实现每个 scope 用**两个 key**（`RedisOnlinePresence`）：
 | 项 | 语义 |
 |---|---|
 | scope | `user:<id>` / `tenant:<id>` 由宿主桥接；`room:<id>` 由业务显式 `join`/`leave`（框架不自动跟踪房间成员） |
-| member | 身份 = `(user_id, connection_id, node_id)`。宿主桥接把 `node_id` 当 connection slot，即每个 **(user, node)** 一个成员：同一用户多设备在同一节点合并为一条在线记录；设备清点仍用本节点注册表。**`count` 是成员数，不是唯一用户数** |
+| member | 身份 = `(user_id, connection_id, node_id)`，宿主桥接把 `node_id` 当 connection slot，即每个 **(user, node)** 一个成员：同一用户多设备在同一节点合并为一条在线记录。**`count` 是成员数，不是唯一用户数**（C3-05） |
 | TTL | 默认 60s（`use_online_presence_with` 可调），心跳每 TTL/3 续期；节点崩溃后成员在 TTL 内过期，不留永久幽灵在线 |
-| 原子性 | join/leave/touch/members/count 各是**单个 Lua 脚本**，共享批量过期清理（256/批，ZSET 与 HASH 同步清理）；`join` 的容量检查与写入在同一脚本（满 → 可重试 503 且不写成员状态）；`touch` 用 `ZADD XX`，过期后心跳**不会复活**成员、也不重写 `joined_at`；身份不含 join 戳，跨节点/重启的 `leave`/`touch` 命中同一成员 |
-| 心跳 | 宿主每 TTL/3 对本节点成员续期，**32 路有界并发** touch；单个失败只记日志、下一轮重试 |
-| 校验 | 空 scope / 零 TTL / 超过 512B 或含控制字符的身份组件是 typed `400`；两种实现都按 `max_members_per_scope` 有界（内存默认 10 万；Redis 可配），满时返回可重试 503 而不是无限增长 |
-| 旧数据 | 兼容读取 2.9.2 旧 JSON member；旧条目随 TTL 在 ≤1 TTL 内收敛（升级窗口见 [known-boundaries.md](../../design/known-boundaries.md) C4-02） |
+| 原子性与升级 | join/leave/touch/members/count 是原子 Lua；容量上限、并发心跳、身份校验与旧数据兼容等实现细节/验收见 [known-boundaries.md](../../design/known-boundaries.md) C1-06…C1-11 / C4-02 |
 
 用法：全局在线数读 `IOnlinePresence::count`（**成员数**口径），成员列表读 `members`（**全量
-返回**、按 user/connection 排序、无分页）；**不要**用各节点 `realtime_connections_active`
-相加来判断用户是否在线（连接数、成员数与唯一用户数都不是一回事）。
+返回**、无分页）；**不要**用各节点 `realtime_connections_active` 相加来判断用户是否在线。
 房间在线态由业务在 join/leave 房间时调用 `PresenceScope::room(...)` 的 `join/leave/touch`。
 
 presence 的完整边界（身份、容量、分页、秒级 TTL、心跳并发、旧数据升级窗口）见
@@ -194,7 +180,8 @@ presence 的完整边界（身份、容量、分页、秒级 TTL、心跳并发�
 
 1. 登出 / 全端下线 → 删除共享 `ISessionStore` 的 `jti` 或共享 `ISessionRepository` 的会话；
 2. 各节点按 `WebSocketLimits::with_session_revalidation(interval)` 复查本地连接凭据；
-   已吊销 → close `1008`（`CloseReason::SessionRevoked`）；
+   已吊销 → close `1008`（`CloseReason::SessionRevoked`；原因与 wire code 的权威表见
+   [close-codes.md](../../design/close-codes.md) §2）；
 3. 复查周期就是吊销生效的**最长窗口**，生产推荐 10–30s；
 4. 瞬时存储错误**不会**关闭连接（记日志、下轮重试）；存储长期不可用会推迟吊销生效，
    用 readiness 告警兜住。
@@ -211,19 +198,19 @@ presence 的完整边界（身份、容量、分页、秒级 TTL、心跳并发�
 - `close_at_token_expiry` 与 `max_connection_lifetime` 决定连接的最长寿命，升级窗口内客户端
   会按 close code 重新认证（策略见
   [客户端重连策略](../05-request-pattern/websocket.md#客户端重连策略)）；
-- **混跑约束**：2.9.1 与 2.9.2 节点同时在线时，广播类事件（`RealtimeFanoutEvent` /
+- **混跑约束**：`≤2.9.1` 与 `≥2.9.2` 节点同时在线时，广播类事件（`RealtimeFanoutEvent` /
   `RealtimeUserFanoutEvent`）的跨节点扇出**不完整且不报错**——必须先全量升级，或在升级窗口
   暂停跨节点扇出（见 [known-boundaries.md](../../design/known-boundaries.md) C4-01）；
-  presence 旧数据在 ≤1 TTL 内收敛（C4-02）。
+  presence 旧数据在 ≤1 TTL 内收敛（C4-02，2.9.3 起身份/布局有变）。
 
 ## 8. 指标、readiness 与告警
 
 - `/metrics` 的 `realtime_*` 指标（`realtime_connections_active`、`closes{code}`、
   `messages_*`、`dropped_total`、`rate_limited_total`、dispatch 直方图）都是**本节点**计数；
   全局数字按实例求和，或读共享在线态（见 [指标（IMeter）](metrics.md)）；
-- 共享依赖（Redis/NATS/RabbitMQ）的就绪由应用接 `IHealthCheck`：用异步探针
-  （`add_health_check_async` / `_with_timeout`，每项独立超时）检查连接与一次轻量命令，
-  失败让 readiness 返回 503；`add_redis` 已为同一连接注册 Redis 探针；
+- 共享依赖（Redis/NATS/RabbitMQ）的就绪由应用接 `IHealthCheck`：异步探针用
+  `add_health_check(HealthCheckSpec::async_check(probe).timeout(d))`（每项独立超时）检查连接与
+  一次轻量命令，失败让 readiness 返回 503；`add_redis` 已为同一连接注册 Redis 探针；
   只装配实时状态（`use_realtime_event_store` / `use_online_presence`）而没有 `add_redis` 时，
   需自己补一条 Redis health check；
   **liveness 不要依赖传递依赖**，否则 Redis 抖动会引发全量重启；
@@ -246,17 +233,15 @@ presence 的完整边界（身份、容量、分页、秒级 TTL、心跳并发�
 已知边界（摘要；完整台账、证据与验收见
 [known-boundaries.md](../../design/known-boundaries.md)）：
 
-- 广播 **at-most-once**，不重投，跨节点不保证顺序；可靠投递用持久化 + 续传 / outbox（C3-06）；
-- Kafka 适配器不支持广播（显式报错），不提供“伪 fanout”（C2-03）；
-- 跨节点吊销有复查窗口，不是秒级即时；API Key 凭据本版不做运行期复查（C3-06）；
-- room membership 与「谁该收到」属业务数据模型，框架只维护节点本地注册表与显式 presence
-  scope；presence `count` 是成员数（每 (user, node) 一个），`members()` 全量、TTL 整数秒
-  （C3-04 / C3-05）；
-- Redis 共享实现是单节点客户端：Cluster/Sentinel 需独立适配器，presence 的双 key Lua 脚本
-  在 Cluster 下还需 hash tag（C2-02）；
-- Redis 续传物理保留只按条数，`max_age` 是逻辑回放窗口，框架不提供 PG 实现
-  （C1-01 / C2-01）；
-- 混跑 2.9.1/2.9.2 时广播类跨节点扇出不完整（C4-01）；presence 旧数据 ≤1 TTL 收敛（C4-02）。
+- 广播 **at-most-once**、不重投、不保证跨节点顺序；Kafka 不支持广播；可靠投递用持久化 +
+  续传 / outbox，跨节点吊销只有复查窗口（C2-03 / C3-06）。
+- 实现边界：Redis 续传物理保留只按条数、`max_age` 只是逻辑回放窗口、无 PG 实现
+  （C1-01 / C2-01）；presence `count` 是成员数、`members()` 全量、TTL 整数秒
+  （C3-04 / C3-05）；API Key 凭据本版不做运行期复查（C3-06）。
+- Redis 共享实现是单节点客户端：Cluster/Sentinel 需独立适配器（presence 双 key Lua 在
+  Cluster 下还需 hash tag，C2-02）。
+- 升级窗口：`≤2.9.1` 与 `≥2.9.2` 混跑时广播类跨节点扇出不完整（C4-01）；presence 旧数据
+  ≤1 TTL 收敛（C4-02）。
 
 ## 10. 相关
 

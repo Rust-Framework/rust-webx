@@ -15,7 +15,7 @@
     "demoUrl": "",
     "featured": true,
     "sortOrder": 1,
-    "version": "2.9.2",
+    "version": "2.9.3",
     "language": "zh-CN",
     "author": "Start",
     "logo": "logo.svg",
@@ -847,7 +847,7 @@
         {
           "id": "16-migration",
           "title": "迁移指南",
-          "subtitle": "版本升级、ASP.NET Core 与 Axum / Actix 迁移",
+          "subtitle": "版本升级（当前 2.9.3）、ASP.NET Core 与 Axum / Actix 迁移",
           "sections": [
             {
               "id": "upgrade-to-2.5",
@@ -859,7 +859,7 @@
             {
               "id": "upgrade-to-2.9.1",
               "title": "升级到 2.9.1（破坏性补丁）",
-              "summary": "2.9.0 → 2.9.1：Error 载体、分页、嵌套绑定、raw 排序、组合根动词、webx_ef 删除、*-ef 移出发布序列与 outbox 拆分",
+              "summary": "2.9.0 → 2.9.1：Error 载体、分页、嵌套绑定、raw 排序、组合根动词、webx_ef 删除、*-ef 移出发布序列与 outbox 拆分；2.9.2 加性 / 2.9.3 行为变更见本章版本与升级路径",
               "readingTime": 18,
               "difficulty": "intermediate"
             },

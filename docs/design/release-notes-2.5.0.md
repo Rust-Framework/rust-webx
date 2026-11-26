@@ -1,5 +1,10 @@
 # rust-webx 2.5.0 发布说明
 
+> **历史文档（2026-11 存档）**：本文记录 2.5.0 发布时的状态，不是当前契约。2.9.1 已删除
+> `init_jwt_secret` / `jwt_secret()` 兼容层并完成契约迁移；当前版本、兼容政策与边界以
+> `CHANGELOG.md`、[compatibility.md](compatibility.md) 与
+> [known-boundaries.md](known-boundaries.md) 为准。
+
 > 发布日期：2026-11-21。2.5.0 是 2.x 线上的**加性发布**：在 2.1 的公开 API 之上
 > 增加运行信任、实时执行模型、认证体系、消息/缓存适配器与 AI 网关能力。
 > 只使用 2.1 API 的应用升级依赖即可，无需改代码（N-2 门禁覆盖）。
@@ -28,7 +33,8 @@
 ## 3. 兼容性
 
 - 旧 `Jwt.Secret` + HS256 配置、无 `jti` 的旧 token 继续可用；
-- `init_jwt_secret` / `jwt_secret()` 仍可用但已 deprecated，下一个 major 删除；
+- `init_jwt_secret` / `jwt_secret()` 仍可用但已 deprecated，下一个 major 删除（**历史记录：
+  2.9.1 已随兼容层一并删除，未等到下一个 major**，见 [compatibility.md](compatibility.md) §1）；
 - bcrypt 哈希不直接被 Argon2 hasher 接受：在下次成功校验后重哈希，或保留自定义 legacy hasher；
 - 事件发布改为异步：事件 DTO 需要 `Serialize`/`Deserialize`，事件处理器需要 `#[handler]` 或显式 DI；
 - 详情见 `auth-migration-2.5.md` 与 `compatibility.md`。

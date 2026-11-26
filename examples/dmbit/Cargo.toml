@@ -23,14 +23,14 @@ documentation = "https://docs.rs/rust-webx"
 
 [workspace.dependencies]
 # Framework crates (this repository).
-rust-webx-core = { version = "=2.9.2", path = "../../crates/core" }
-rust-webx-host = { version = "=2.9.2", path = "../../crates/host" }
-rust-webx-engine = { version = "=2.9.2", path = "../../crates/engine" }
-rust-webx-macros = { version = "=2.9.2", path = "../../crates/macros" }
-rust-webx = { version = "=2.9.2", path = "../../crates/webx" }
-rust-webx-spa = { version = "=2.9.2", path = "../../crates/spa" }
-rust-webx-build = { version = "=2.9.2", path = "../../crates/build" }
-rust-webx-openapi = { version = "=2.9.2", path = "../../crates/openapi" }
+rust-webx-core = { version = "=2.9.3", path = "../../crates/core" }
+rust-webx-host = { version = "=2.9.3", path = "../../crates/host" }
+rust-webx-engine = { version = "=2.9.3", path = "../../crates/engine" }
+rust-webx-macros = { version = "=2.9.3", path = "../../crates/macros" }
+rust-webx = { version = "=2.9.3", path = "../../crates/webx" }
+rust-webx-spa = { version = "=2.9.3", path = "../../crates/spa" }
+rust-webx-build = { version = "=2.9.3", path = "../../crates/build" }
+rust-webx-openapi = { version = "=2.9.3", path = "../../crates/openapi" }
 
 # Dmbit sub-crates.
 dmbit-contracts = { version = "0.1.0", path = "contracts" }

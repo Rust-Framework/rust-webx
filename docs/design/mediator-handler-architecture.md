@@ -27,25 +27,41 @@ broker consumer ──EventMessage::to_wire/from_wire──▶ EventDispatcher �
 
 - `IMediator::publish` 是 fire-and-forget：编码 `EventMessage` 后交给 `IEventPublisher`，
   不等待、不返回订阅者错误；慢订阅者不能拖慢发布请求。
+- **投递类**：事件通过 `IEventRequest::delivery()` 声明 `EventDelivery::{Competing, Broadcast}`
+  （默认 `Competing`），`IMediator::publish` 据此分派到 `IEventPublisher::publish` /
+  `IEventPublisher::broadcast`；框架事件 `RealtimeFanoutEvent`、`RealtimeUserFanoutEvent` 是
+  广播类。各适配器的广播能力与语义以 [broker 能力矩阵](broker-capability-matrix.md) §2 为权威，
+  不支持广播的适配器保持 `broadcast` 默认 **fail-closed**（显式错误，不静默降级单节点）。
 - 默认 `InMemoryEventPublisher` 是有界队列 + 后台 drain；队列满返回可重试 503。
 - `EventMessage` 是唯一跨进程帧（version byte + name + payload）；适配器只负责传输，
   不复制 dispatch/序列化。
-- `#[handler]` / `#[handler(inject)]` 在 `impl IEventHandler<T>` 上生成事件注册；
-  无本地注册的事件是 logged no-op，避免 at-least-once 传输无限重投。
+- `#[handler]` / `#[handler(inject)]` 在 `impl IEventHandler<T>` 上生成事件注册。无本地注册时
+  发布侧与消费侧不同：InMemory 的 `publish`/`broadcast` 返回 `di` 错误（**fail-closed**，
+  不是 no-op）；broker 消费端遇到无本地注册的事件是 logged no-op（避免 at-least-once
+  传输无限重投）。
 
 ## 3. 实时扇出
 
-- 连接注册表（`IConnectionRegistry`）是进程内连接/用户/房间/presence 的唯一来源。
-- 跨节点扇出发布 `RealtimeFanoutEvent`，各节点的框架 handler 写入本节点房间连接；
-  不新增第二套 pub/sub 端口。
+- **两份状态，职责不同**：连接注册表（`IConnectionRegistry`）是**节点进程内**连接/用户/房间
+  索引的唯一来源；跨节点共享在线态走 `IOnlinePresence` 端口（`InMemoryOnlinePresence` /
+  `RedisOnlinePresence`，由 `HostBuilder::use_online_presence` 装配），host 桥接把
+  `IPresenceObserver` 的 first/last 映射到 `user:`/`tenant:` scope 并心跳续期 TTL。
+  `IOnlinePresence::count` 是**成员数**，不是唯一用户数；`room:` scope 由业务显式 join/leave
+  （口径见 [known-boundaries.md](known-boundaries.md) C3-05）。
+- 跨节点扇出发布 `RealtimeFanoutEvent`（房间）或 `RealtimeUserFanoutEvent`（用户定向），
+  各节点的框架 handler 写入本节点房间/用户连接；不新增第二套 pub/sub 端口。保留事件 handler
+  由 host 启动期校验：应用写 `#[handler]` 会让构建失败；**手工 DI 注册**不在校验范围，会与
+  框架 DI handler 同时执行（双投递），保留事件一律不要手工注册
+  （见 [known-boundaries.md](known-boundaries.md) C1-09）。
 - 实时指标由热路径原子收集器汇总，`export_to(&dyn IMeter)` 在 scrape 时导出增量。
 
 ## 4. 端口复用矩阵
 
 | 能力 | 复用的既有机制 | 结论 |
 |---|---|---|
-| 连接注册表 | 无既有等价物 | 新端口；房间/用户/presence 唯一来源 |
-| 跨节点扇出 | `IEventPublisher` + `EventDispatcher` + `EventMessage` | 收敛为 `RealtimeFanoutEvent`，不引入 `IPubSub` |
+| 连接注册表 | 无既有等价物 | 新端口；节点本地房间/用户索引唯一来源 |
+| 跨节点扇出 | `IEventPublisher` + `EventDispatcher` + `EventMessage` | 两种投递类；`RealtimeFanoutEvent`/`RealtimeUserFanoutEvent` 为 Broadcast，不引入 `IPubSub` |
+| 共享在线态 | `IPresenceObserver` + 后台服务 + `IConnectionRegistry` | `IOnlinePresence` 端口：内存/Redis 实现；节点本地 registry 不替代共享在线态 |
 | 实时指标 | `IMeter` | 热路径收集器 + scrape 导出 |
 | 消息即请求 | `IMediator::send` + `#[handler]` + typed pipeline | 复用，无第二套 dispatch |
 | 信令/TURN | 无既有等价物 | 类型 + 凭据算法，core 只承载契约 |
@@ -68,4 +84,4 @@ broker consumer ──EventMessage::to_wire/from_wire──▶ EventDispatcher �
 - `event_bus_test`：发布语义、Handler 隔离、broker 替换、consumer 路由；
 - 四个 broker 适配器的 `tests/integration.rs` 跑共享 `EventTransportContract`；
 - `websocket_*` / `realtime_*` / `test_host_test` 覆盖实时与进程内分发；
-- `cargo-semver-checks` 对 `v2.7.0` 通过（core/engine/host/webx）。
+- `cargo-semver-checks` 对 `v2.9.2` 通过（core/engine/host/webx）。

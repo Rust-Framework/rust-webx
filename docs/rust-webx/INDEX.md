@@ -1,149 +1,214 @@
 # rust-webx 开发者手册 · 目录
 
-> 面向使用 rust-webx 框架的开发者 · 渐进式披露 · 深入浅出
+> 面向使用 rust-webx 框架的开发者 · 渐进式披露 · 深入浅出 · 当前发布 **2.9.3**
+>
+> 本页与 `INDEX.json` 的 102 节一一对应；mdBook 侧边栏由
+> `scripts/gen-mdbook-summary.py` 从同一份 `INDEX.json` 生成，不在这里重复维护。
 
----
-
-## 开篇
-
-| 文档 | 说明 |
-|------|------|
-| [前言](FOREWORD.md) | 本书定位、读者画像、阅读路径 |
+[前言](./FOREWORD.md)
 
 ---
 
 ## 第一部分 · 入门与认知
 
-### [第一章 认识 rust-webx](01-introduction/INDEX.md)
+### [第一章 认识 Rust Web Framework](./01-introduction/INDEX.md)
 
-- [什么是 rust-webx](01-introduction/what-is-rust-webx.md)
-- [适用场景与边界](01-introduction/who-should-use.md)
-- [生态与 Crate 全景](01-introduction/ecosystem-overview.md)
+> 框架定位、适用场景与生态全景
 
-### [第二章 快速上手](02-quickstart/INDEX.md)
+- [什么是 Rust Web Framework](./01-introduction/what-is-rust-webx.md)
+- [适用场景与边界](./01-introduction/who-should-use.md)
+- [生态与 Crate 全景](./01-introduction/ecosystem-overview.md)
 
-- [创建项目与依赖](02-quickstart/create-project.md)
-- [Hello World 详解](02-quickstart/hello-world.md)
-- [第一个 CRUD API](02-quickstart/first-crud.md)
-- [运行、调试与验证](02-quickstart/run-and-debug.md)
+### [第二章 快速上手](./02-quickstart/INDEX.md)
+
+> 从零搭建第一个可运行的 WebApi 项目
+
+- [创建项目与依赖](./02-quickstart/create-project.md)
+- [Hello World 详解](./02-quickstart/hello-world.md)
+- [第一个 CRUD API](./02-quickstart/first-crud.md)
+- [运行、调试与验证](./02-quickstart/run-and-debug.md)
 
 ---
 
 ## 第二部分 · 设计思想与架构
 
-### [第三章 设计理念与哲学](03-philosophy/INDEX.md)
+### [第三章 设计理念与哲学](./03-philosophy/INDEX.md)
 
-- [核心设计原则](03-philosophy/design-principles.md)
-- [ASP.NET Core 的启发](03-philosophy/aspnet-inspiration.md)
-- [Rust 惯用法与类型安全](03-philosophy/rust-idioms.md)
-- [渐进式披露与框架边界](03-philosophy/progressive-disclosure.md)
+> 从 ASP.NET Core 到 Rust 的类型安全实践
 
-### [第四章 架构全景](04-architecture/INDEX.md)
+- [核心设计原则](./03-philosophy/design-principles.md)
+- [ASP.NET Core 的启发](./03-philosophy/aspnet-inspiration.md)
+- [Rust 惯用法与类型安全](./03-philosophy/rust-idioms.md)
+- [渐进式披露与框架边界](./03-philosophy/progressive-disclosure.md)
 
-- [Crate 分层结构](04-architecture/crate-layout.md)
-- [请求生命周期](04-architecture/request-lifecycle.md)
-- [分层模型与依赖方向](04-architecture/layering-model.md)
-- [编译时扫描机制](04-architecture/compile-time-scan.md)
+### [第四章 架构全景](./04-architecture/INDEX.md)
+
+> Crate 分层、请求生命周期与编译时扫描
+
+- [Crate 分层结构](./04-architecture/crate-layout.md)
+- [请求生命周期](./04-architecture/request-lifecycle.md)
+- [分层模型与依赖方向](./04-architecture/layering-model.md)
+- [编译时扫描机制](./04-architecture/compile-time-scan.md)
 
 ---
 
 ## 第三部分 · 核心开发模式
 
-### [第五章 请求即端点](05-request-pattern/INDEX.md)
+### [第五章 请求即端点](./05-request-pattern/INDEX.md)
 
-- [IRequest 与 IRequestHandler](05-request-pattern/irequest-irequesthandler.md)
-- [路由宏详解](05-request-pattern/route-macros.md)
-- [Handler 注册策略](05-request-pattern/handler-registration.md)
-- [参数绑定与序列化](05-request-pattern/parameter-binding.md)
-- [用户身份与多租户](05-request-pattern/user-identity.md)
-- [文件上传与下载](05-request-pattern/file-upload-download.md)
-- [错误处理与 ProblemDetails](05-request-pattern/error-handling.md)
+> IRequest、路由宏与参数绑定
 
-### [第六章 DI 与生命周期](06-di-lifecycle/INDEX.md)
+- [IRequest 与 IRequestHandler](./05-request-pattern/irequest-irequesthandler.md)
+- [路由宏详解](./05-request-pattern/route-macros.md)
+- [Handler 注册策略](./05-request-pattern/handler-registration.md)
+- [参数绑定与序列化](./05-request-pattern/parameter-binding.md)
+- [声明式校验（#[validate]）](./05-request-pattern/validation.md)
+- [用户身份与多租户](./05-request-pattern/user-identity.md)
+- [文件上传与下载](./05-request-pattern/file-upload-download.md)
+- [错误处理与 ProblemDetails](./05-request-pattern/error-handling.md)
+- [统一分页（offset / keyset）](./05-request-pattern/pagination.md)
+- [流式响应（SSE）](./05-request-pattern/streaming-sse.md)
+- [WebSocket 会话](./05-request-pattern/websocket.md)
+- [请求体流式读取](./05-request-pattern/request-body-streaming.md)
 
-- [ServiceCollection 与服务注册](06-di-lifecycle/service-collection.md)
-- [依赖注入模式](06-di-lifecycle/injection-patterns.md)
-- [IHostedService 后台服务](06-di-lifecycle/hosted-services.md)
-- [模块系统与 inject 宏](06-di-lifecycle/module-system.md)
+### [第六章 DI 与生命周期](./06-di-lifecycle/INDEX.md)
 
-### [第七章 中间件管道](07-middleware/INDEX.md)
+> ServiceCollection、注入模式与后台服务
 
-- [管道模型与执行顺序](07-middleware/pipeline-model.md)
-- [内置中间件一览](07-middleware/built-in-middleware.md)
-- [自定义中间件](07-middleware/custom-middleware.md)
-- [中间件编排策略](07-middleware/ordering-strategy.md)
+- [ServiceCollection 与服务注册](./06-di-lifecycle/service-collection.md)
+- [依赖注入模式](./06-di-lifecycle/injection-patterns.md)
+- [IHostedService 后台服务](./06-di-lifecycle/hosted-services.md)
+- [模块系统与 inject 宏](./06-di-lifecycle/module-system.md)
 
-### [第八章 中介者与事件](08-mediator-events/INDEX.md)
+### [第七章 中间件管道](./07-middleware/INDEX.md)
 
-- [IMediator 请求调度](08-mediator-events/mediator-pattern.md)
-- [IPipelineBehavior 拦截链](08-mediator-events/pipeline-behaviors.md)
-- [事件发布与订阅](08-mediator-events/event-pub-sub.md)
+> 管道模型、内置中间件与自定义扩展
+
+- [管道模型与执行顺序](./07-middleware/pipeline-model.md)
+- [内置中间件一览](./07-middleware/built-in-middleware.md)
+- [自定义中间件](./07-middleware/custom-middleware.md)
+- [中间件编排策略](./07-middleware/ordering-strategy.md)
+
+### [第八章 中介者与事件](./08-mediator-events/INDEX.md)
+
+> IMediator 调度、管道行为与事件发布
+
+- [IMediator 请求调度](./08-mediator-events/mediator-pattern.md)
+- [IPipelineBehavior 拦截链](./08-mediator-events/pipeline-behaviors.md)
+- [事件发布与订阅](./08-mediator-events/event-pub-sub.md)
 
 ---
 
 ## 第四部分 · 安全、配置与生产
 
-### [第九章 认证与授权](09-auth-security/INDEX.md)
+### [第九章 认证与授权](./09-auth-security/INDEX.md)
 
-- [JWT Bearer 认证](09-auth-security/jwt-authentication.md)
-- [资源授权与实例级归属](09-auth-security/resource-authorization.md)
-- [authorize 宏与声明式授权](09-auth-security/authorize-macro.md)
-- [令牌签发、会话吊销与口令哈希](09-auth-security/token-session-password.md)
-- [安全最佳实践](09-auth-security/security-best-practices.md)
+> JWT/API Key/Cookie、资源授权与安全实践
 
-### [第十章 配置与环境](10-configuration/INDEX.md)
+- [认证快速上手](./09-auth-security/quickstart.md)
+- [JWT Bearer 认证](./09-auth-security/jwt-authentication.md)
+- [Cookie 会话与 CSRF](./09-auth-security/cookie-session.md)
+- [OpenID Connect 登录](./09-auth-security/oidc.md)
+- [OAuth 2.0 社交登录](./09-auth-security/oauth2-social.md)
+- [TOTP 与恢复码](./09-auth-security/mfa.md)
+- [密钥轮换与应急 Runbook](./09-auth-security/key-rotation-runbook.md)
+- [DPoP 发送方约束令牌](./09-auth-security/dpop.md)
+- [WebAuthn/Passkey](./09-auth-security/webauthn.md)
+- [Token Introspection/Revocation](./09-auth-security/introspection.md)
+- [mTLS 客户端证书](./09-auth-security/mtls.md)
+- [API Key 认证](./09-auth-security/api-key-auth.md)
+- [资源授权与实例级归属](./09-auth-security/resource-authorization.md)
+- [authorize 宏与声明式授权](./09-auth-security/authorize-macro.md)
+- [令牌签发、会话吊销与口令哈希](./09-auth-security/token-session-password.md)
+- [密钥存储](./09-auth-security/secret-store.md)
+- [安全最佳实践](./09-auth-security/security-best-practices.md)
 
-- [appsettings.json 配置体系](10-configuration/appsettings.md)
-- [AppMode 与环境切换](10-configuration/app-modes.md)
-- [自定义配置节](10-configuration/custom-options.md)
+### [第十章 配置与环境](./10-configuration/INDEX.md)
 
-### [第十一章 生产级能力](11-production/INDEX.md)
+> appsettings、AppMode 与自定义配置节
 
-- [CORS、TLS 与健康检查](11-production/cors-tls-health.md)
-- [缓存与速率限制](11-production/caching-rate-limit.md)
-- [OpenAPI 与 SPA 托管](11-production/openapi-spa.md)
-- [文件服务的生产部署](11-production/file-serving.md)
-- [优雅关闭与可观测性](11-production/graceful-shutdown.md)
+- [appsettings.json 配置体系](./10-configuration/appsettings.md)
+- [AppMode 与环境切换](./10-configuration/app-modes.md)
+- [自定义配置节](./10-configuration/custom-options.md)
+
+### [第十一章 生产级能力](./11-production/INDEX.md)
+
+> CORS、TLS、缓存、OpenAPI 与优雅关闭
+
+- [CORS、TLS 与健康检查](./11-production/cors-tls-health.md)
+- [缓存与速率限制](./11-production/caching-rate-limit.md)
+- [分布式锁与租约](./11-production/advisory-lock.md)
+- [请求级幂等](./11-production/idempotency.md)
+- [配额与预扣-结算](./11-production/quota.md)
+- [用量计量与账本](./11-production/usage-metering.md)
+- [模型目录与路由](./11-production/model-routing.md)
+- [韧性：重试、熔断与舱壁](./11-production/resilience.md)
+- [指标（IMeter）](./11-production/metrics.md)
+- [目录热替换](./11-production/hot-config.md)
+- [配置热更新](./11-production/live-options.md)
+- [精确响应缓存](./11-production/response-cache.md)
+- [OpenAI 兼容端点](./11-production/openai-compatible-endpoint.md)
+- [OpenAPI 与 SPA 托管](./11-production/openapi-spa.md)
+- [文件服务的生产部署](./11-production/file-serving.md)
+- [优雅关闭与可观测性](./11-production/graceful-shutdown.md)
+- [多实例实时部署（扇出、在线态与吊销复查）](./11-production/realtime-cluster.md)
 
 ---
 
 ## 第五部分 · 工程化与进阶
 
-### [第十二章 项目组织与职责划分](12-project-structure/INDEX.md)
+### [第十二章 项目组织与职责划分](./12-project-structure/INDEX.md)
 
-- [推荐目录结构](12-project-structure/directory-layout.md)
-- [职责归属与边界](12-project-structure/responsibility-division.md)
-- [Contracts / Handlers / Domain 分层](12-project-structure/contracts-handlers-domain.md)
-- [测试策略](12-project-structure/testing-strategy.md)
+> 目录结构、分层边界与测试策略
 
-### [第十三章 扩展与自定义封装](13-extensibility/INDEX.md)
+- [推荐目录结构](./12-project-structure/directory-layout.md)
+- [职责归属与边界](./12-project-structure/responsibility-division.md)
+- [Contracts / Handlers / Domain 分层](./12-project-structure/contracts-handlers-domain.md)
+- [测试策略](./12-project-structure/testing-strategy.md)
 
-- [自定义组件封装](13-extensibility/custom-components.md)
-- [自定义 Endpoint](13-extensibility/custom-endpoints.md)
-- [样式与约定封装](13-extensibility/style-patterns.md)
-- [第三方库集成](13-extensibility/third-party-integration.md)
-- [端口与适配器（下游接入）](13-extensibility/integrations.md)
-- [支付](13-extensibility/payments.md)
+### [第十三章 扩展与自定义封装](./13-extensibility/INDEX.md)
 
-### [第十四章 最佳实践](14-best-practices/INDEX.md)
+> 组件封装、Endpoint 扩展与第三方集成
 
-- [常见陷阱与排查](14-best-practices/common-pitfalls.md)
-- [性能优化技巧](14-best-practices/performance-tips.md)
-- [AI 友好开发模式](14-best-practices/ai-friendly-development.md)
-- [代码审查清单](14-best-practices/code-review-checklist.md)
+- [自定义组件封装](./13-extensibility/custom-components.md)
+- [自定义 Endpoint](./13-extensibility/custom-endpoints.md)
+- [样式与约定封装](./13-extensibility/style-patterns.md)
+- [第三方库集成](./13-extensibility/third-party-integration.md)
+- [移动推送（IPushSender）](./13-extensibility/push-notifications.md)
+- [端口与适配器（下游接入）](./13-extensibility/integrations.md)
+- [出站 HTTP（rust-webx-client）](./13-extensibility/outbound-http.md)
+- [错误响应写入器](./13-extensibility/error-writers.md)
+- [Mock 上游](./13-extensibility/mock-upstream.md)
+- [支付（Stripe/支付宝/微信/PayPal/Adyen/Square）](./13-extensibility/payments.md)
+- [事务性 outbox](./13-extensibility/outbox.md)
+
+### [第十四章 最佳实践](./14-best-practices/INDEX.md)
+
+> 避坑指南、性能优化与 AI 友好开发
+
+- [常见陷阱与排查](./14-best-practices/common-pitfalls.md)
+- [性能优化技巧](./14-best-practices/performance-tips.md)
+- [AI 友好开发模式](./14-best-practices/ai-friendly-development.md)
+- [代码审查清单](./14-best-practices/code-review-checklist.md)
 
 ---
 
 ## 第六部分 · 案例与迁移
 
-### [第十五章 案例研究：Docbit](15-case-study/INDEX.md)
+### [第十五章 案例研究：Docbit](./15-case-study/INDEX.md)
 
-- [Docbit 项目概览](15-case-study/docbit-overview.md)
-- [架构与模块划分](15-case-study/docbit-architecture.md)
-- [可复用的模式提炼](15-case-study/docbit-patterns.md)
+> 作品集站点的架构与可复用模式
 
-### [第十六章 迁移指南](16-migration/INDEX.md)
+- [Docbit 项目概览](./15-case-study/docbit-overview.md)
+- [架构与模块划分](./15-case-study/docbit-architecture.md)
+- [可复用的模式提炼](./15-case-study/docbit-patterns.md)
 
-- [从 ASP.NET Core 迁移](16-migration/from-aspnet-core.md)
-- [从 Axum / Actix 迁移](16-migration/from-axum-actix.md)
-- [概念对照表](16-migration/concept-mapping.md)
+### [第十六章 迁移指南](./16-migration/INDEX.md)
+
+> 版本升级（当前 2.9.3）、ASP.NET Core 与 Axum / Actix 迁移
+
+- [升级到 2.5（2.x 加性演进）](./16-migration/upgrade-to-2.5.md)
+- [升级到 2.9.1（破坏性补丁）](./16-migration/upgrade-to-2.9.1.md)
+- [从 ASP.NET Core 迁移](./16-migration/from-aspnet-core.md)
+- [从 Axum / Actix 迁移](./16-migration/from-axum-actix.md)
+- [概念对照表](./16-migration/concept-mapping.md)

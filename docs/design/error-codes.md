@@ -2,8 +2,8 @@
 
 > rust-webx 的 `application/problem+json` 中 `code` 扩展成员的权威契约：
 > 有哪些稳定码、HTTP 状态与 `retryable` 的对应关系、problem `type` URI 的约定，
-> 以及新增码必须同步哪些位置。N-2 基线 2.9.0，当前基线 2.9.2；长连接关闭码见
-> [close-codes.md](close-codes.md)。
+> 以及新增码必须同步哪些位置。当前 2.9.3，N-2 = 2.9.1（版本政策见
+> [compatibility.md](compatibility.md)）；长连接关闭码见 [close-codes.md](close-codes.md)。
 
 ---
 

@@ -1,7 +1,7 @@
 # 传输端口（Transport Port）设计
 
 > 面向维护者与架构评审：engine 与线上协议之间的接缝怎么切、为什么这样切、边界在哪。
-> N-2 基线 rust-webx 2.9.0，当前基线 2.9.2。约束来自 [框架设计准则](framework-constitution.md)（P1 一个关注点
+> 当前 2.9.3，N-2 = 2.9.1（版本政策见 [compatibility.md](compatibility.md)）。约束来自 [框架设计准则](framework-constitution.md)（P1 一个关注点
 > 一种写法、P9 端口而非插件、P10 小核大生态）与 [兼容性政策](compatibility.md)（2.x 只做加性变更）。
 > 应用公开面（`IHttpContext`/`IRequest`/中间件/DI/配置/错误）保持不变；HTTP/3 是**可选 crate**
 > `rust-webx-h3`，默认构建不链接 QUIC。当前请求生命周期以

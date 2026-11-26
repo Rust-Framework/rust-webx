@@ -96,7 +96,7 @@ async fn handle(&mut self, req: CreateUserRequest) -> ActionResult<UserDto> {
 | 返回值 | 含义 |
 |--------|------|
 | `Ok(())` | 已入队 / 已交给 broker；处理器稍后执行 |
-| `Err` | 事件**未被接受**：无本地注册、队列已满（可重试 503）、broker 不可用 |
+| `Err` | 事件**未被接受**：队列已满（可重试 503）、broker 不可用，或 InMemory 传输没有本地 `#[handler]` 注册（fail-closed，不是 no-op，见 [known-boundaries.md](../../design/known-boundaries.md) C3-07） |
 
 处理器失败只记录日志，不会出现在 `publish` 的返回值里。
 
@@ -122,7 +122,7 @@ async fn handle(&mut self, req: CreateUserRequest) -> ActionResult<UserDto> {
 | `events_published_total` | 被传输层接受的事件数 |
 | `events_publish_failed_total` | 编码失败、队列满、broker 不可用等未被接受的事件数 |
 | `events_dispatch_failed_total` | 至少一个 Handler 失败/panic 的派发次数 |
-| `events_dropped_no_handler_total` | 无订阅者、按 no-op 丢弃的事件数 |
+| `events_dropped_no_handler_total` | 消费者侧无本地 `#[handler]` 注册、按 no-op 丢弃的事件数（InMemory 发布侧无本地注册是 fail-closed 报错，见 [known-boundaries.md](../../design/known-boundaries.md) C3-07） |
 | `events_dead_lettered_total` | 持久化适配器写入死信目的地的事件数（当前为 Redis） |
 | `events_consumer_reconnects_total` | broker 消费者重连尝试次数 |
 
@@ -148,12 +148,12 @@ rust-webx-kafka = "2.9"       # Kafka 单分区事件（参考/起步适配器�
 
 ### 投递语义对照
 
-| 适配器 | 传输 | 投递语义 | 消费模型 |
-|--------|------|----------|----------|
-| `rust-webx-redis` | Redis Streams（`XADD` / `XREADGROUP`） | **at-least-once**：处理器返回后才 `XACK`；消费者崩溃留下的 pending 由 `XAUTOCLAIM` 认领；失败超过 `max_deliveries` 后进 `dead_letter_stream` 或丢弃，`XAUTOCLAIM` 的 deleted ids 自动 `XACK` | consumer group 内多实例分摊；stream 用 `MAXLEN ~` 封顶；组首次创建时 `start_id` 默认 `"0"`（重放 stream 内保留历史，handlers 需幂等），`"$"` 为显式 opt-in（只看新消息） |
-| `rust-webx-nats` | core NATS | **at-most-once**：断连或没有订阅者即丢 | 默认每个订阅者都收到；`with_queue_group` 后组内负载均衡 |
-| `rust-webx-rabbitmq` | AMQP topic exchange + **quorum queue** | **at-least-once**：publisher confirm + 手动 ack，处理器失败 requeue；broker 的 `x-delivery-limit`（默认 5）到顶后死信（配置了 DLX）或丢弃，不会无限重投 | 同队列竞争消费（需要每个服务各收一份时用不同队列名）；`prefetch` 控制未确认上限；需 RabbitMQ 3.8+，需幂等 |
-| `rust-webx-kafka` | Kafka（纯 Rust `rskafka`） | 单分区 follower；分区内有序；**不做 consumer-group offset 提交**，重启从 `start_offset` 重新开始 | 一个适配器消费一个分区（`with_partition`）；参考/起步实现 |
+四个适配器的投递语义（at-least-once / at-most-once、死信、顺序、广播能力）以
+[broker 能力矩阵](../../design/broker-capability-matrix.md) 为唯一权威，这里只保留选型要点：
+Redis Streams 竞争投递 at-least-once（处理器返回后才 `XACK`，pending 由 `XAUTOCLAIM` 认领）；
+NATS core 尽力而为（断连或没有订阅者即丢）；RabbitMQ quorum queue 有界重试（`x-delivery-limit`
+到顶后死信或丢弃）；Kafka 单分区 follower，**只做竞争投递**、不做 consumer-group offset 提交。
+`publish()` 调用点与 handler 写法不随适配器变化。
 
 ### Redis Streams
 
@@ -175,10 +175,11 @@ Host::builder()
 ```
 
 消费组首次创建时 `start_id` 默认 `"0"`：重放 stream 内保留历史，避免"事件已发布、消费组尚未
-创建"的启动窗口静默丢事件；handlers 是 at-least-once，必须幂等。`"$"` 是显式 opt-in（只看
-新消息，新组的重复量更低）；已有 consumer group 上该值被 Redis 忽略。`add_redis` 在 host
-启动期校验本地配置（stream/group/broadcast_channel/start_id/max_len/read_count/block_ms/
-claim_idle_ms/max_deliveries/dead_letter_stream；URL 只解析、不联网），失败即 host 启动失败。
+创建"的启动窗口静默丢事件；handlers 是 at-least-once，必须幂等，`"$"` 是显式 opt-in（只看
+新消息）。已有 consumer group 上该值被 Redis 忽略；`add_redis` 在 host 启动期校验本地配置
+（stream/group/broadcast_channel/start_id/max_len/read_count/block_ms/claim_idle_ms/
+max_deliveries/dead_letter_stream；URL 只解析、不联网），失败即 host 启动失败。
+行为变更与升级影响见 [known-boundaries.md](../../design/known-boundaries.md) C1-02 / C1-03 / C4-03。
 
 失败事件默认重投 5 次（`max_deliveries`，按 `XPENDING` 的 delivery count 计数；**解析失败
 按传输错误处理**，不会把投递次数当 0），之后写入 `dead_letter_stream`（配置时）或丢弃并记
@@ -187,7 +188,7 @@ claim_idle_ms/max_deliveries/dead_letter_stream；URL 只解析、不联网）�
 `XAUTOCLAIM` 回收（注意这会同时停掉 pending 重试与 PEL 清理）。`XREADGROUP` 与
 `XAUTOCLAIM` 是顺序执行的（claim 不在读取进行中抢占），避免取消读取后消息只进 PEL 而丢失回复。
 
-保留上限、无死信流时的丢弃指标、保留事件与混布升级等**已知边界**见
+保留上限、无死信流时的丢弃指标、保留事件与混跑升级等**已知边界**见
 [known-boundaries.md](../../design/known-boundaries.md)（C1-02…C1-05 / C3-03 / C4-01 / C4-03）。
 
 消费者对**阻塞读使用独立连接**（无 response timeout，连接由 consumer 持有并自动重连）：
@@ -270,12 +271,9 @@ consumer-group offset 提交**，重启时按 `start_offset` 重新开始（`Lat
 
 ## 投递类：竞争还是广播
 
-事件到达订阅端的方式由**事件类型**声明（`IEventRequest::delivery()`，默认竞争）：
-
-| 投递类 | 语义 | 典型用途 |
-|---|---|---|
-| `EventDelivery::Competing`（默认） | 每个 broker 消费组/队列恰好一个消费者收到 | 领域事件、任务等“只做一次”的副作用 |
-| `EventDelivery::Broadcast` | 每个节点都收到一份 | 实时房间/用户扇出、跨节点缓存失效、控制消息 |
+事件到达订阅端的方式由**事件类型**声明（`IEventRequest::delivery()`，默认 `Competing`）：
+`Competing` = 每个 broker 消费组/队列恰好一个消费者收到（领域事件、任务等“只做一次”的
+副作用）；`Broadcast` = 每个节点都收到一份（实时扇出、跨节点缓存失效、控制消息）。
 
 ```rust
 impl IEventRequest for CacheInvalidatedEvent {
@@ -283,10 +281,11 @@ impl IEventRequest for CacheInvalidatedEvent {
 }
 ```
 
-`IMediator::publish` 按 `T::delivery()` 自动分派到 `IEventPublisher::publish` 或
-`IEventPublisher::broadcast`，事件编码、`EventDispatcher`、handler 注册都不变。
-`broadcast` 的默认实现 **fail-closed**：传输未声明广播能力时直接报错，而不是静默退化为
-“只到一个节点”（Kafka 适配器即明确不支持广播）。适配器实现与失败语义见
+`IMediator::publish` 按 `T::delivery()` 自动分派到 `IEventPublisher::publish` / `broadcast`，
+事件编码、`EventDispatcher`、handler 注册都不变。`broadcast` 的 trait 默认实现
+**fail-closed**：传输未声明广播能力时直接报错，而不是静默退化为“只到一个节点”。
+各适配器的广播实现与失败语义以 [broker 能力矩阵](../../design/broker-capability-matrix.md) §2
+为唯一权威；投递类的 API 形状见
 [WebSocket · 投递类与跨节点扇出](../05-request-pattern/websocket.md#投递类与跨节点扇出)。
 
 ## 跨节点实时扇出（复用同一传输）

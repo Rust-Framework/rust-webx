@@ -25,6 +25,9 @@ async-trait = "0.1"
 > **包名 vs 导入名**：`Cargo.toml` 里写包名 `rust-webx`，代码里 `use webx::*;`。
 > 各子 crate 的完整对照表见 [Crate 分层结构](../04-architecture/crate-layout.md)。
 
+当前发布 **2.9.3**；`"2.9"` 是 semver 范围（框架家族内部锁步，不需要精确钉到补丁号），
+补丁升级与迁移摘要见[第十六章 迁移指南](../16-migration/INDEX.md)，N-2 源码兼容基线为 2.9.1。
+
 若在本仓库内开发，使用 path 依赖：
 
 ```toml

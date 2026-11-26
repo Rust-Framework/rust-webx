@@ -256,43 +256,43 @@ impl RedisEventsOptions {
 
     /// Validate local configuration (no network I/O).
     ///
-    /// A malformed stream/group id or an out-of-range tuning value currently
-    /// fails deep inside a background reconnect loop; catching it at host
-    /// startup turns a silent, permanent retry into one actionable error.
+    /// Only configurations that genuinely cannot work fail startup: a blank
+    /// stream/group, an invalid start id or an unparseable URL. Values that
+    /// 2.9.2 silently clamped (`max_len`, `read_count`, `block_ms`,
+    /// `claim_idle_ms`, `max_deliveries`) keep working and produce a warning:
+    /// turning them into a boot failure would break an upgrade without any code
+    /// change. The runtime clamp remains the source of truth.
     pub(crate) fn validate(&self) -> std::result::Result<(), String> {
-        validate_key("events.stream", &self.stream)?;
-        validate_key("events.group", &self.group)?;
-        if !self.consumer.trim().is_empty() {
-            validate_key("events.consumer", &self.consumer)?;
-        }
-        if !self.broadcast_channel.trim().is_empty() {
-            validate_key("events.broadcast_channel", &self.broadcast_channel)?;
-        }
+        validate_required_key("events.stream", &self.stream)?;
+        validate_required_key("events.group", &self.group)?;
+        warn_key("events.consumer", &self.consumer);
+        warn_key("events.broadcast_channel", &self.broadcast_channel);
         validate_start_id(&self.start_id)?;
         if self.max_len == 0 {
-            return Err("events.max_len must be at least 1 event".to_string());
+            tracing::warn!("events.max_len=0 is clamped to 1 event by the consumer");
         }
         if self.read_count == 0 {
-            return Err("events.read_count must be at least 1".to_string());
+            tracing::warn!("events.read_count=0 is clamped to 1 entry per read");
         }
         if self.block_ms < 100 {
-            return Err("events.block_ms must be at least 100ms".to_string());
+            tracing::warn!(
+                block_ms = self.block_ms,
+                "events.block_ms is clamped to 100ms"
+            );
         }
         if self.claim_idle_ms == 0 {
-            return Err("events.claim_idle_ms must be at least 1ms".to_string());
+            tracing::warn!("events.claim_idle_ms=0 is clamped while claiming pending entries");
         }
         if self.claim_pending && self.max_deliveries == 0 {
-            return Err(
-                "events.max_deliveries must be at least 1 when claim_pending is enabled"
-                    .to_string(),
+            tracing::warn!(
+                "events.max_deliveries=0 is clamped to 1; a handler failure would dead-letter immediately"
             );
         }
         if !self.dead_letter_stream.trim().is_empty() {
-            validate_key("events.dead_letter_stream", &self.dead_letter_stream)?;
+            warn_key("events.dead_letter_stream", &self.dead_letter_stream);
             if self.dead_letter_stream.trim() == self.stream.trim() {
-                return Err(
-                    "events.dead_letter_stream must differ from events.stream (replay would loop)"
-                        .to_string(),
+                tracing::warn!(
+                    "events.dead_letter_stream equals events.stream; dead-lettering is disabled"
                 );
             }
         }
@@ -305,23 +305,38 @@ pub(crate) fn derived_broadcast_channel(stream: &str) -> String {
     format!("{stream}:broadcast")
 }
 
-/// Validate a Redis key/channel option: non-blank, bounded, printable.
-fn validate_key(name: &str, value: &str) -> std::result::Result<(), String> {
+/// A required Redis key/channel option: non-blank (otherwise no command can work).
+fn validate_required_key(name: &str, value: &str) -> std::result::Result<(), String> {
     if value.trim().is_empty() {
         return Err(format!("{name} must not be empty"));
     }
-    if value.len() > 512 {
-        return Err(format!("{name} must be at most 512 bytes"));
-    }
-    if value.chars().any(char::is_control) {
-        return Err(format!("{name} must not contain control characters"));
-    }
+    warn_key(name, value);
     Ok(())
 }
 
+/// A key/name that works on the wire but is suspicious: warn, keep 2.9.2 behavior.
+fn warn_key(name: &str, value: &str) {
+    if value.len() > 512 {
+        tracing::warn!(
+            option = name,
+            bytes = value.len(),
+            "{name} is longer than 512 bytes"
+        );
+    }
+    if value.chars().any(char::is_control) {
+        tracing::warn!(option = name, "{name} contains control characters");
+    }
+}
+
 /// `start_id` must be `$`, `0`, or a Redis stream id (`<ms>` / `<ms>-<seq>`).
+///
+/// Redis rejects surrounding whitespace and stream ids whose numeric parts
+/// exceed `u64`; accepting them here would keep the old "background loop retries
+/// forever" failure mode the startup check is meant to remove.
 fn validate_start_id(value: &str) -> std::result::Result<(), String> {
-    let value = value.trim();
+    if value != value.trim() {
+        return Err("events.start_id must not have leading/trailing whitespace".to_string());
+    }
     if value == "$" || value == "0" {
         return Ok(());
     }
@@ -329,8 +344,8 @@ fn validate_start_id(value: &str) -> std::result::Result<(), String> {
         Some((millis, sequence)) => (millis, Some(sequence)),
         None => (value, None),
     };
-    let all_digits = |text: &str| !text.is_empty() && text.chars().all(|ch| ch.is_ascii_digit());
-    if all_digits(millis) && sequence.map(all_digits).unwrap_or(true) {
+    let valid_part = |text: &str| !text.is_empty() && text.parse::<u64>().is_ok();
+    if valid_part(millis) && sequence.map(valid_part).unwrap_or(true) {
         return Ok(());
     }
     Err("events.start_id must be \"$\", \"0\", or a stream id such as \"0-0\"".to_string())
@@ -362,23 +377,38 @@ mod tests {
         };
         assert!(bad_start.validate().unwrap_err().contains("start_id"));
 
-        let zero_deliveries = RedisEventsOptions {
-            max_deliveries: 0,
+        let whitespace_start = RedisEventsOptions {
+            start_id: " 0 ".to_string(),
             ..RedisEventsOptions::default()
         };
-        assert!(zero_deliveries
+        assert!(whitespace_start
             .validate()
             .unwrap_err()
-            .contains("max_deliveries"));
+            .contains("whitespace"));
 
-        let looping_dlq = RedisEventsOptions {
-            dead_letter_stream: "webx:events".to_string(),
+        let overflow_start = RedisEventsOptions {
+            start_id: "18446744073709551616".to_string(), // u64::MAX + 1
             ..RedisEventsOptions::default()
         };
-        assert!(looping_dlq
+        assert!(overflow_start.validate().is_err());
+    }
+
+    #[test]
+    fn clamped_tuning_values_do_not_fail_startup() {
+        // 2.9.2 silently clamped these; 2.9.3 must not turn an upgrade into a
+        // boot failure. The runtime clamp remains authoritative.
+        let clamped = RedisEventsOptions {
+            max_len: 0,
+            read_count: 0,
+            block_ms: 0,
+            claim_idle_ms: 0,
+            max_deliveries: 0,
+            dead_letter_stream: "webx:events".to_string(), // equals stream: disabled, not fatal
+            ..RedisEventsOptions::default()
+        };
+        clamped
             .validate()
-            .unwrap_err()
-            .contains("dead_letter_stream"));
+            .expect("clamped/inert values stay accepted");
     }
 
     #[test]

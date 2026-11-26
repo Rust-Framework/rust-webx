@@ -505,7 +505,7 @@ async fn ensure_group(
         .arg("CREATE")
         .arg(&options.stream)
         .arg(&options.group)
-        .arg(&options.start_id)
+        .arg(options.start_id.trim())
         .arg("MKSTREAM")
         .query_async::<String>(connection)
         .await;
@@ -719,9 +719,15 @@ fn parse_pending_count(value: &redis::Value) -> Option<u64> {
     let redis::Value::Array(parts) = value else {
         return None;
     };
-    // With an explicit `start end count` range, Redis returns the entry list
-    // directly: `[[id, consumer, idle_ms, delivery_count], ...]`. The summary
-    // form (`XPENDING key group`) wraps the same list at index 3.
+    // The `start end count` range form returns `[]` when the id is no longer in
+    // the PEL (another consumer acked it): that is a valid "zero deliveries"
+    // reply, not an unparseable one.
+    if parts.is_empty() {
+        return Some(0);
+    }
+    // Otherwise Redis returns the entry list directly:
+    // `[[id, consumer, idle_ms, delivery_count], ...]`. The summary form
+    // (`XPENDING key group`) wraps the same list at index 3.
     let entries: &[redis::Value] = if matches!(parts.first(), Some(redis::Value::Array(_))) {
         parts
     } else {
@@ -859,6 +865,15 @@ mod tests {
         let parsed = parse_entries(&[malformed]);
         assert!(parsed.messages.is_empty());
         assert_eq!(parsed.malformed, vec![b"3-0".to_vec()]);
+    }
+
+    #[test]
+    fn empty_xpending_range_reply_means_zero_deliveries() {
+        assert_eq!(
+            parse_pending_count(&Value::Array(Vec::new())),
+            Some(0),
+            "an acked entry is no longer in the PEL; that is not a parse error"
+        );
     }
 
     #[test]

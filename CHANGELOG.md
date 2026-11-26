@@ -3,21 +3,28 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
-## [Unreleased] — 已知边界收敛（尚未发版）
+## [2.9.3] — 2026-11-26 — 已知边界收口补丁
 
 > 边界台账（唯一权威）：[docs/design/known-boundaries.md](docs/design/known-boundaries.md)
 
 ### English
 
-**Behavior changes (next release, migration noted):**
+**Boundary-closure patch.** No public API is removed and the published crate set is unchanged
+(30 `rust-webx` crates at 2.9.3); `cargo-semver-checks` against v2.9.2 reports additions only
+(`RedisRealtimeEventStore::with_max_age`, `validate_reserved_event_handlers`). The patch closes
+the silent-failure boundaries recorded in the ledger and includes the documented behavior
+changes below; migration notes are in `docs/design/compatibility.md` §3/§7 and
+`docs/design/known-boundaries.md` C4.
 
 - **Redis event transport** — `RedisEventsOptions::start_id` now defaults to `"0"`: a newly created
   consumer group replays the retained stream history, so an event published after the process
   starts but before the group exists is no longer silently skipped. Handlers are at-least-once and
   must be idempotent; set `start_id = "$"` explicitly to keep "new messages only". `add_redis` now
   validates the local Redis/event configuration in a hosted service **before the host accepts
-  requests** (URL parse plus stream/group/start-id/tuning checks; no network I/O), so a typo fails
-  startup instead of looping in the background consumer.
+  requests** (URL parse, stream/group/start-id; no network I/O), so a configuration that cannot work
+  fails startup instead of looping in the background consumer. Values 2.9.2 silently clamped
+  (`max_len`, `read_count`, `block_ms`, `claim_idle_ms`, `max_deliveries`) stay accepted and log a
+  warning, so an upgrade does not turn a running deployment into a boot failure.
 - **Redis realtime store `max_age`** — additive `RedisRealtimeEventStore::with_max_age(Duration)`:
   `resume` applies a logical replay window (`now - created_at > max_age` is dropped and reported as
   `truncated`), while physical memory remains bounded by `max_events` (`XTRIM MAXLEN ~`). There is no
@@ -25,10 +32,11 @@ All notable changes to **rust-webx** are documented in this file.
   implement `IRealtimeEventStore`. Count retention is still the only physical retention.
 - **Redis presence** — the ZSET member is now a stable identity `[user_id, connection_id, node_id]`
   and the member payload (including `joined_at`) lives in a per-scope HASH; join/leave/touch/purge
-  run as atomic Lua scripts. Cross-node/restart `leave`/`touch` now address the same member, the
-  capacity check cannot overshoot, and expiry clears both keys. 2.9.2's JSON-member data stays
-  readable and converges within one TTL; during a mixed-version window the new nodes are
-  authoritative (`docs/design/known-boundaries.md` C4-02).
+  run as atomic Lua scripts. Mutations address that exact triple (the join stamp is not part of the
+  identity), the capacity check cannot overshoot, and expiry clears both keys. The host's node id is
+  per-process, so a restart leaves the old entry to expire by TTL rather than addressing it again.
+  2.9.2's JSON-member data stays readable and converges within one TTL; during a mixed-version
+  window the new nodes are authoritative (`docs/design/known-boundaries.md` C4-02).
 - **Reserved realtime fan-out events** — host construction now fails closed when an application
   `#[handler]` subscribes to `RealtimeFanoutEvent`/`RealtimeUserFanoutEvent`; previously the
   inventory registration could replace the framework DI bridge and silently stop cross-node fan-out.
@@ -38,20 +46,33 @@ All notable changes to **rust-webx** are documented in this file.
   a typed validation error. Presence heartbeats refresh owned members in bounded-concurrency chunks.
 - **`PresenceMember::key()`** — the rendered identity is now length-prefixed so an id containing the
   delimiter cannot collide with a different `(user, connection, node)` triple.
+- **Realtime boundary guards/tests** — the new behavior is covered by the `realtime_max_age`,
+  `presence_identity`, `validation` and `reserved_event_handler_test` suites, plus the Redis broker
+  integration tests; the authoritative inventory (with alternatives for the `C2` adapter gaps) is
+  `docs/design/known-boundaries.md`.
 
 ### 简体中文
 
+**已知边界收口补丁。** 不删除公开 API，发布 crate 数量仍为 30 个（统一 2.9.3）；
+`cargo-semver-checks` 对 v2.9.2 只应报告新增项（`RedisRealtimeEventStore::with_max_age`、
+`validate_reserved_event_handlers`）。本补丁闭合台账里会“静默丢/静默错”的边界，并含下列
+已登记的行为变更（迁移说明见下）。升级注意：`docs/design/compatibility.md` §3/§7 与
+`docs/design/known-boundaries.md` C4。
+
 - **Redis 事件传输**：`RedisEventsOptions::start_id` 默认改为 `"0"`（新消费组重放保留历史，避免
   组创建前发布的事件被静默跳过；handler 需幂等；显式设 `"$"` 可保持只看新消息）。`add_redis`
-  现在在 host 启动期（接受请求前）由 hosted service 校验本地配置（URL 解析 + stream/group/
-  start_id/调优参数），配置笔误直接启动失败，而不是在后台重连循环里静默重试。
+  现在在 host 启动期（接受请求前）由 hosted service 校验本地配置（URL 解析、stream/group/
+  start_id），**无法工作的配置**启动失败，而不是在后台重连循环里静默重试；2.9.2 会 clamp 的
+  数值（`max_len`/`read_count`/`block_ms`/`claim_idle_ms`/`max_deliveries`）保持可用并告警，
+  避免升级把运行中的配置变成启动失败。
 - **Redis 续传 `max_age`**：新增 `RedisRealtimeEventStore::with_max_age(Duration)` 逻辑回放窗口
   （过期事件在 `resume` 被过滤并置 `truncated`），物理内存仍由 `max_events`（`XTRIM MAXLEN ~`）
   封顶；框架不提供 PG 实现，需要持久/墙钟级时间保留时实现 `IRealtimeEventStore`。
 - **Redis presence**：ZSET member 改为稳定身份 `[user_id, connection_id, node_id]`，成员载荷
-  （含 `joined_at`）存 per-scope HASH；join/leave/touch/purge 原子 Lua。跨节点/重启的
-  leave/touch 可命中同一成员，容量检查不越界，过期同时清理两个 key。2.9.2 的 JSON member 可读，
-  ≤1 个 TTL 收敛；混布期以新节点为准（`docs/design/known-boundaries.md` C4-02）。
+  （含 `joined_at`）存 per-scope HASH；join/leave/touch/purge 原子 Lua。变更按该三元组精确寻址
+  （join 时间戳不是身份的一部分），容量检查不越界，过期同时清理两个 key；host 的 node_id 是
+  每进程生成，进程重启后旧条目按 TTL 过期而非被重新寻址。2.9.2 的 JSON member 可读，≤1 个 TTL
+  收敛；混布期以新节点为准（`docs/design/known-boundaries.md` C4-02）。
 - **保留实时扇出事件**：应用对 `RealtimeFanoutEvent`/`RealtimeUserFanoutEvent` 写 `#[handler]`
   时 host 构建失败（此前 inventory 注册可能替换框架 DI 桥接、静默停止跨节点扇出）。
 - **Redis 消费者健壮性**：坏 entry 按 raw id XACK（不再毒化 PEL）；`XPENDING` 解析失败是可见
@@ -59,6 +80,9 @@ All notable changes to **rust-webx** are documented in this file.
   presence 心跳按有界并发批量续期。
 - **`PresenceMember::key()`**：渲染身份改为长度前缀，包含分隔符的 id 不会再与另一个
   `(user, connection, node)` 三元组碰撞。
+- **验收与台账**：上述行为由 `realtime_max_age`、`presence_identity`、`validation`、
+  `reserved_event_handler_test` 与真实 broker 集成测试覆盖；`C2` 适配器缺口与替代路径见
+  `docs/design/known-boundaries.md`。
 
 
 ## [2.9.2] — 2026-11-25 — IM 实时硬化（加性补丁）

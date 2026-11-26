@@ -9,6 +9,8 @@
 #   ./publish.sh --do         # Publish all crates
 #   ./publish.sh --do --ver X # Bump version to X and publish
 #   ./publish.sh --check      # Check only (cargo publish --dry-run)
+#   ./publish.sh --ver X.Y.Z  # Bump (requires a CHANGELOG [Unreleased] section; the
+#                             # release also bumps examples/*/Cargo.toml pins)
 #
 # Crates are published from the root workspace (`crates/**`) only. The `rust-ef`
 # reference adapters live in a separate, unpublished workspace
@@ -102,13 +104,18 @@ check_workspace_version() {
 #      carry a crates.io requirement next to the path (`=X.Y.Z`);
 #   3. `docs/rust-webx/INDEX.json` (`meta.version`);
 #   4. the workspace-version comments in `README.md` / `README.zh-CN.md`;
-#   5. the first released `## [x.y.z]` heading of `CHANGELOG.md` (date kept;
-#      a leading `## [Unreleased]` section is preserved for the next release notes).
+#   5. the leading `## [Unreleased]` heading of `CHANGELOG.md`, which becomes
+#      `## [x.y.z] — <release date>` (a missing Unreleased section is an error:
+#      renaming an older release heading would silently mislabel history);
+#   6. the example workspaces under `examples/*/Cargo.toml` (docbit/dmbit/imbit/
+#      adapters), which pin the published graph with `=x.y.z` and are built with
+#      `--locked` by CI.
 # `scripts/check-docs.sh` enforces 1/3/5 agreement, so a bump that misses one
 # of them would fail the release preflight.
 # The `rust-ef` reference adapters under `examples/adapters/` are unpublished:
 # they pin the same version for the shared build, but they are not release
-# artifacts and are deliberately left out of the bump.
+# artifacts. The example workspaces (`examples/*/Cargo.toml`) still have to
+# move with the workspace version because CI builds them `--locked`.
 # Dependency lines are anchored at the start of the line and on the `rust-webx`
 # name prefix, so external requirements (`rust-dix = "1.0"`, `rust-ef = "2.6"`,
 # `tokio`, ...) are never rewritten. `Cargo.lock` files are left alone: the
@@ -124,18 +131,32 @@ bump_version() {
         sed -i -E "s/(\"version\": \")[^\"]+\"/\1$NEW_VERSION\"/" docs/rust-webx/INDEX.json
         sed -i -E "s/(# workspace root \()v[0-9]+\.[0-9]+\.[0-9]+\)/\1v$NEW_VERSION)/" README.md
         sed -i -E "s/(# workspace 根 \()v[0-9]+\.[0-9]+\.[0-9]+\)/\1v$NEW_VERSION)/" README.zh-CN.md
-        # Rename the first *released* heading; an optional `## [Unreleased]`
-        # section stays untouched until it has a version.
-        awk -v v="$NEW_VERSION" '
+        # Turn `## [Unreleased]` into the released heading. The section content
+        # is the next release's notes; absent Unreleased notes are a release
+        # error, not an invitation to rename the previous release.
+        release_date="$(date -u +%Y-%m-%d)"
+        if ! awk -v v="$NEW_VERSION" -v d="$release_date" '
             BEGIN { renamed = 0 }
-            /^## \[/ {
-                if (!renamed && $0 !~ /^## \[Unreleased\]/) {
-                    sub(/^## \[[^]]+\]/, "## [" v "]")
-                    renamed = 1
-                }
+            /^## \[Unreleased\]/ {
+                print "## [" v "] — " d
+                renamed = 1
+                next
             }
             { print }
-        ' CHANGELOG.md > CHANGELOG.md.tmp && mv CHANGELOG.md.tmp CHANGELOG.md
+            END { if (!renamed) exit 2 }
+        ' CHANGELOG.md > CHANGELOG.md.tmp; then
+            rm -f CHANGELOG.md.tmp
+            echo "  [FAIL] CHANGELOG.md has no ## [Unreleased] section to release" >&2
+            exit 1
+        fi
+        mv CHANGELOG.md.tmp CHANGELOG.md
+        for manifest in examples/*/Cargo.toml; do
+            [ -f "$manifest" ] || continue
+            sed -i -E \
+                -e "s/^version = \"2\\.9\\.[0-9]+\"/version = \"$NEW_VERSION\"/" \
+                -e "s/(rust-webx[a-z0-9-]* = \{ version = )\"=2\\.9\\.[0-9]+\"/\\1\"=$NEW_VERSION\"/" \
+                "$manifest"
+        done
     fi
 }
 

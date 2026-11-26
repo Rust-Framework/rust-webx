@@ -5,6 +5,10 @@
 > 依赖分层也从 `starters` 收敛为「框架 crate + 下游适配」。
 > 本文只列**源码迁移动作**；逐条证据与设计见 `docs/design/app-error-migration.md`、
 > `pagination-model.md`、`api-convergence.md`、`integrations.md`。
+>
+> **后续补丁**：2.9.2 为加性补丁（不改默认行为），2.9.3 为行为变更补丁（Redis `start_id`
+> 默认、保留扇出事件 fail-closed、presence 身份/布局）——两者都不需要重做本文的源码迁移；
+> 升级摘要与指针见[本章 INDEX](INDEX.md)。
 
 ## 1. 错误载体：`webx::Error = rust_core::AppError`
 

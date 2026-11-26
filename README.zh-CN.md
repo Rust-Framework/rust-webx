@@ -29,6 +29,7 @@
 - [可选传输适配器](#可选传输适配器)
 - [示例应用](#示例应用)
 - [快速开始](#快速开始)
+- [开发](#开发)
 - [生产就绪能力](#生产就绪能力)
 - [环境变量](#环境变量)
 - [异常映射](#异常映射)
@@ -72,7 +73,7 @@ rust-webx **不是** 全栈 UI 框架（可搭配任意前端）、**不是** OR
 | | 组合式 HTTP 工具包（`axum`、`actix-web`、`poem`、`rocket`） | rust-webx |
 |---|---|---|
 | 代码单元 | 路由处理函数 + 提取器（extractor） | 一个「本身就是端点」的请求类型（`IRequest<R>`）+ 它的 Handler |
-| 仍需自己写 | 路由树、DI/State 方案、错误→响应转换、校验与 OpenAPI 选型 | 一套约定覆盖全部：`#[handler]`、`#[fromclaim]`、`#[validate]`、`#[authorize]`、`map_ef_error` |
+| 仍需自己写 | 路由树、DI/State 方案、错误→响应转换、校验与 OpenAPI 选型 | 一套约定覆盖全部：`#[handler]`、`#[fromclaim]`、`#[validate]`、`#[authorize]`，边界错误直接 `?`（`From<EFError>` / `From<RdiError>` 在各自 crate 实现） |
 | 注册方式 | 手写路由注册，或自己再加一层宏 | 路由与 Handler 元数据编译期（`inventory`）收集，`Host::build()` 一次装配 |
 | 应用级能力 | 自带（BYO） | 认证/会话/Passkey、限流、幂等、outbox、实时、支付、OpenAPI、健康检查均为端口 |
 | 逃生通道 | — | Handler 就是普通 Rust；中间件与 after 钩子拿到 `&mut dyn IHttpContext`，HTTP 层始终可达 |
@@ -92,14 +93,14 @@ rust-webx 是刻意「有主见」的：它不追求做最小的路由库。如�
 - **事务性 outbox** — `rust-webx-outbox` 提供端口、基于租约的 `OutboxDispatcher`（经 `EventDispatcher`：退避/死信/保留期）与 `InMemoryOutbox` 默认实现，`add_outbox` 注册。同事务入队属于数据适配：EF 参考实现在 `examples/adapters/outbox/ef`（`add_outbox_ef`，非发布）。
 - **面向 IM 规模的实时能力** — 一套事件模型、两种投递类（`EventDelivery::Competing` / `Broadcast`）：`RealtimeFanoutEvent` / `RealtimeUserFanoutEvent` 通过同一 `IEventPublisher` 跨节点扇出（Redis Pub/Sub、NATS 广播 subject、RabbitMQ fanout exchange），`RedisRealtimeEventStore` 共享续传日志，`IOnlinePresence`（含 Redis 实现与宿主心跳桥接）共享在线态，`WebSocketLimits::with_session_revalidation` 在 JWT/Cookie 会话被撤销后关闭实时连接（close `1008`）。见[多实例实时部署](docs/rust-webx/11-production/realtime-cluster.md)。
 - **移动推送** — `IPushSender` 三态裁决（`Accepted`/`TokenInvalid`/`Retryable`），死亡 token 不会被当成服务器错误；`HostBuilder::use_push` 接入 APNs（`rust-webx-apns`）或 FCM（`rust-webx-fcm`），`InMemoryPushSender` 供测试捕获。见[推送指南](docs/rust-webx/13-extensibility/push-notifications.md)。
-- **端口而非 starters** — 每个基础设施能力都是一个端口（`IIdempotencyStore`、`IOutbox`、`ISessionStore`、`IObjectStore`、`IMeter`、`IAdvisoryLock`、`IEmailSender` …），并带零配置的内存/no-op 默认实现。实体、表和数据/逻辑适配归下游服务：在业务 crate 实现端口，或复制 `examples/adapters/` 里的非发布参考实现，并跑 `testing/contract-tests` 的端口契约。见 [端口与适配器](docs/rust-webx/13-extensibility/integrations.md)。
+- **端口而非 starters** — 每个基础设施能力都是一个端口（`IIdempotencyStore`、`IOutbox`、`ISessionStore`、`IObjectStore`、`IMeter`、`IAdvisoryLock`、`IEmailSender` …）：要么自带零配置内存默认实现（`IIdempotencyStore`、`IOutbox`、`IObjectStore`、`IMeter`、`IAdvisoryLock`），要么**刻意没有默认实现**（通知与推送发送器）——缺适配器会在启动期以 DI 错误失败，而不是静默 no-op。实体、表和数据/逻辑适配归下游服务：在业务 crate 实现端口，或复制 `examples/adapters/` 里的非发布参考实现，并跑 `testing/contract-tests` 的端口契约。见 [端口与适配器](docs/rust-webx/13-extensibility/integrations.md)。
 - **端点元数据服务** — `IEndpointCatalog` 在运行时暴露全部端点（`all()` / `localized()`），权限同步、管理导航与 OpenAPI 共用一份元数据。
 - **本地化** — `#[display]` / `#[description]` / `#[category]` 存资源键，全局 `Culture.Default` 决定语言；支持 JSON 资源文件或 `include_str!` 嵌入。
 - **开箱即用的生产能力** — 优雅关闭、动态健康检查、安全响应头、请求 ID、CORS、TLS、速率限制、压缩、OpenAPI + SPA 托管。
 - **启动期聚合校验** — `HostBuilder::try_build` 一次性按 section+key 排序列出全部非法配置（保留 Production fail-closed 守卫），不再“报第一个错就退出”。
 - **Wire 级测试基座与 fuzz 语料** — `TestHost::connect_wire()` 用进程内双端管道直接跑真实 HTTP/1.1 keep-alive、h2c、SSE 字节与畸形请求（不绑端口）；独立 `fuzz/` cargo-fuzz workspace 覆盖 cursor/config/ClientInfo/ProblemDetails/密文解析。见 [test-host.md](docs/design/test-host.md) 与 [stability-gates.md](docs/design/stability-gates.md)。
 - **稳定的观测契约** — `webx.http` span 树（request/auth/route/handler/binding/response）与 `webx.connection` 打开/关闭事件；span/事件名与字段作为兼容性契约写入 [observability-contract.md](docs/design/observability-contract.md)。
-- **关闭原因与错误码注册表** — `CloseReason`、`IConnection::close_reason()`、`ShutdownToken::is_draining()` 统一 WebSocket/SSE 停机语义；22 条按登记错误码（`ERROR_CODES`）与关闭码表防止 `problem+json` 的 `code` 与 close frame 漂移。见 [close-codes.md](docs/design/close-codes.md) 与 [error-codes.md](docs/design/error-codes.md)。
+- **关闭原因与错误码注册表** — `CloseReason`、`IConnection::close_reason()`、`ShutdownToken::is_draining()` 统一 WebSocket/SSE 停机语义；23 条登记错误码（`ERROR_CODES`）与关闭码表防止 `problem+json` 的 `code` 与 close frame 漂移。见 [close-codes.md](docs/design/close-codes.md) 与 [error-codes.md](docs/design/error-codes.md)。
 - **准入不变量指标** — `/metrics` 暴露 active/capacity 比例、不变量违规 gauge 与停机 gauge，permit/wait 记账泄漏无需调试器即可发现。
 
 - **文件上传与下载** — `multipart/form-data` 以类型化 `FormFile` 绑定（流式接收、按阈值落盘、大小受控）；下载提供对齐 ASP.NET Core 的结果类型（`FileResult::path` / `::stream` / `::seekable_stream`、`ContentResult`），自带 `Content-Disposition`、`ETag`、`Last-Modified` 与 `Range`。
@@ -159,7 +160,7 @@ rust-webx 是刻意「有主见」的：它不追求做最小的路由库。如�
 
 ```
 rust-webx/
-├── Cargo.toml                 # workspace 根 (v2.9.2) — 只含已发布的运行时 crate
+├── Cargo.toml                 # workspace 根 — 只含已发布的运行时 crate
 ├── crates/
 │   ├── core/                  # rust-webx-core  — trait 与配置，重导出 rust-core 契约
 │   ├── engine/                # rust-webx-engine — 执行引擎：worker 池、直接分发
@@ -415,6 +416,34 @@ docker compose -f examples/docbit/docker-compose.yml --env-file examples/docbit/
 # → http://localhost:8100
 ```
 
+## 开发
+
+在仓库根运行完整测试套件：
+
+```bash
+cargo test --workspace --no-fail-fast
+```
+
+### 磁盘占用（Windows 大 checkout）
+
+`target/` 是可丢弃的，但 Cargo 从不删除属于旧指纹的产物，因此每次完整重建（工具链升级、
+`Cargo.lock` 更新、`RUSTFLAGS` 变化、切换 feature 组合）都会把上一整代产物留在磁盘上。
+[`Cargo.toml`](Cargo.toml) 的 dev/test profile 让**新**构建保持精简（依赖不生成 debug info、
+workspace crate 只生成行表、关闭 incremental）。若 `target/` 已经变大，先查看、再回收：
+
+```powershell
+.\scripts\clean-target.ps1              # 报告大小，不修改任何文件
+.\scripts\clean-target.ps1 -Incremental # 只删 incremental 编译缓存
+.\scripts\clean-target.ps1 -All         # cargo clean（所有产物都可重建）
+```
+
+调试或快速编辑会话可只对当前 shell 覆盖已提交的 profile：
+
+```powershell
+$env:CARGO_PROFILE_DEV_DEBUG = '2'             # workspace crate 完整 debug info
+$env:CARGO_PROFILE_DEV_INCREMENTAL = 'true'    # 重新开启增量编译
+```
+
 ## 生产就绪能力
 
 | 能力 | 状态 |
@@ -478,9 +507,13 @@ docker compose -f examples/docbit/docker-compose.yml --env-file examples/docbit/
 
 - **在线手册** — 全书发布在 <https://rust-framework.github.io/rust-webx/>（mdBook，中文；由 `.github/workflows/docs.yml` 从 `docs/rust-webx/` 构建）。
 - **rust-webx 开发者手册** — 位于 [`docs/rust-webx/`](docs/rust-webx/INDEX.md) 的渐进式披露书籍（16 章，中文）：入门、快速上手、架构、DI 与生命周期、中间件、中介者与事件、认证与安全、配置、生产、项目结构、扩展、最佳实践、案例研究与迁移指南。
-- **升级** — 2.9.1 是破坏性补丁（原计划的 3.0 契约迁移并入该补丁），见
-  [2.9.1 升级指南](docs/rust-webx/16-migration/upgrade-to-2.9.1.md)；2.x 加性演进线见
-  [2.5 升级指南](docs/rust-webx/16-migration/upgrade-to-2.5.md)。
+- **升级** — 2.9.1 是破坏性补丁（原计划的 3.0 契约迁移并入该补丁）；2.9.2 是加性 IM 硬化
+  （无需迁移）；2.9.3 是边界收口补丁，其已登记行为变更（保留扇出事件上的 `#[handler]` 使
+  host 构建失败——不要手工注册；Redis `start_id` 默认 `"0"`；Redis presence key 布局）见
+  [compatibility.md](docs/design/compatibility.md) §3，升级窗口见
+  [known-boundaries.md](docs/design/known-boundaries.md) C4。2.x 加性演进线见
+  [2.5 升级指南](docs/rust-webx/16-migration/upgrade-to-2.5.md)；2.9.1 逐条改动见
+  [2.9.1 升级指南](docs/rust-webx/16-migration/upgrade-to-2.9.1.md)。
 - **rust-ef 参考** — ORM 手册随 [`rust-ef`](https://crates.io/crates/rust-ef) crate 维护（见其 [docs.rs](https://docs.rs/rust-ef) 文档），`docbit` 示例使用。
 - `docbit` 参考应用也把这些文档作为实时网站提供（`GET /api/docs/rust-webx/...`）。Monorepo 开发时 `DocService` 按 slug 实时解析 sibling 仓库文档，无需将 sibling 文档复制到 `rust-webx/docs/`；standalone 发布时 `examples/docbit/publish.*` 在打包时从源仓库复制文档进 bundle。可通过 `RUST_FRAMEWORK_ROOT` 显式指定 monorepo 根目录。
 

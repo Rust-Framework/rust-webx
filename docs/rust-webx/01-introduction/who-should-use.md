@@ -59,7 +59,12 @@ Host::builder()
 
 ### WebSocket 为主的应用
 
-当前版本以 HTTP/JSON 为核心。WebSocket 需自行集成，非框架一等公民。
+WebSocket 是**一等能力**：`use_websocket` / `use_websocket_request`、连接注册表、presence
+（`IPresenceObserver` / `IOnlinePresence`）、断线续传（`IRealtimeEventStore`）与令牌过期 /
+会话吊销复查都由框架端口与默认实现提供。**多实例**部署需要额外装配共享状态（续传日志、在线态、
+会话吊销、支持广播的事件传输）；单实例零外部依赖。见
+[WebSocket 会话](../05-request-pattern/websocket.md) 与
+[多实例实时部署](../11-production/realtime-cluster.md)。
 
 ### 多进程微服务编排
 

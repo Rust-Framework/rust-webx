@@ -1,7 +1,7 @@
 # 下游能力缺口处置结论
 
 > 来源：下游 RXStudio 的 `docs/design/upstream-framework-gaps.md`（基于 rust-webx 2.6.0 /
-> rust-ef 2.6.0 / rust-dix 1.0.0 的落地反馈）。处置基线：rust-webx 2.9.2 / rust-ef 2.9.1 /
+> rust-ef 2.6.0 / rust-dix 1.0.0 的落地反馈）。处置基线：rust-webx 2.9.3 / rust-ef 2.9.1 /
 > rust-dix 1.1.0；运行期边界台账见 [known-boundaries.md](known-boundaries.md)，本页不重复其细节。
 >
 > 本页是**处置结论**，不是手册：每项只保留判定、落点与边界；实现细节在代码、rustdoc 与
@@ -71,7 +71,9 @@
   复用 `IEventPublisher` + broker 适配器），再建一个 pub/sub 端口会形成第二套跨进程模型。
   下游要的可靠性（`event_id`/`sequence`、断线回放）由 #2 的 `IRealtimeEventStore` 与续传帧承担。
 - **#2 续传是日志回放，不是第二套 pub/sub**：`IRealtimeEventStore` 只回答"游标之后还有哪些事件"，
-  跨节点投递仍由事件传输完成；共享实现（Redis Stream/PG 表）负责多实例回放。
+  跨节点投递仍由事件传输完成；共享实现负责多实例回放：Redis Stream 实现已交付
+  （`RedisRealtimeEventStore`）；PG 表需应用实现 `IRealtimeEventStore`，框架不提供
+  （见 [known-boundaries.md](known-boundaries.md) C2-01）。
 - **#9/#10 授权边界**：框架执行端点声明规则（静态 + 动态）；资源实例的归属判断依赖应用数据模型，
   只能留在 Handler。框架补 owner/tenant 校验 helper，但不提供 `IResourceAuthorizer` 与权限目录，
   避免第二套权限模型。

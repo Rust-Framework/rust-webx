@@ -1,7 +1,12 @@
 # IM 实时硬化（2.9.2）：事件广播、共享实时状态、推送、连接吊销与浏览器接入
 
-> 状态：设计权威（2.9.2，加性发布）。基线 2.9.1。落地项必须同批交付实现、测试、手册与
-> CHANGELOG；本页只保留决策、API 形态、适配器语义与验收边界，不复制手册正文。
+> **文档性质：2.9.2 设计历史 + 决策背景**。本页记录 2.9.2 的原始设计与验收口径，保留原文以便
+> 回溯；2.9.3 起的边界修复（`start_id` 默认值、`max_age` 逻辑回放窗口、presence 稳定身份 +
+> HASH、保留事件 handler 启动校验）以 [known-boundaries.md](known-boundaries.md) 为唯一权威，
+> 本页行为描述与之冲突时以台账为准。
+>
+> 基线：2.9.1（设计时）。落地项当时必须同批交付实现、测试、手册与 CHANGELOG；本页只保留
+> 决策、API 形态、适配器语义与验收边界，不复制手册正文。
 >
 > 来源：2.9.1 的 IM/音视频能力评估列出的 5 个必须先处理的坑（见
 > [`../rust-webx/05-request-pattern/websocket.md`](../rust-webx/05-request-pattern/websocket.md)
@@ -73,19 +78,18 @@ pub enum EventDelivery {
 
 两个事件仍各只允许一个框架 handler：保留事件由 host 启动校验
 （`validate_reserved_event_handlers`），应用对它们写 `#[handler]` 会让 host 构建**直接失败**
-（错误带事件名与 handler 名），避免静默替换 DI 桥接导致跨节点扇出丢失。
+（错误带事件名与 handler 名），避免静默替换 DI 桥接导致跨节点扇出丢失。该校验只覆盖
+`#[handler]` 的 inventory 注册；**手工 DI 注册**保留事件的 `IEventHandler` 不在检查范围，
+会与框架 DI handler 同时执行（双投递），因此保留事件一律不要手工注册。
 
-### 2.3 适配器矩阵（发布前必须逐项实现或明确「不支持」）
+### 2.3 适配器矩阵（摘要，权威在 broker 能力矩阵）
 
-| 适配器 | 竞争投递 | 广播投递 | 说明 |
-|---|---|---|---|
-| InMemory | 有界队列单 worker | 同一队列（单进程 = 全节点） | 默认实现，无外部依赖 |
-| Redis | Streams consumer group（现状） | **Pub/Sub 频道**（`broadcast_channel`，默认 `<stream>:broadcast`） | 广播 at-most-once，符合实时扇出语义 |
-| NATS | 现状：`queue_group` 配置决定 | **独立广播 subject**（`broadcast_subject`，默认 `<subject>.broadcast`，无 queue group） | core NATS 广播语义 |
-| RabbitMQ | quorum queue 竞争消费（现状） | **fanout exchange + 每节点独占/自动删除队列**（`broadcast_exchange`，默认 `<exchange>.broadcast`） | 每节点各自声明一个随机会话队列 |
-| Kafka | 单分区 follower（现状） | **不支持**：返回显式错误并在矩阵登记 | 无 consumer group；不假装支持 |
-
-`docs/design/broker-capability-matrix.md` 增加「投递类」列，并与适配器测试一一对应。
+各适配器（含 core 的 InMemory 默认）的完整投递类、语义与失败模式以
+[broker-capability-matrix.md](broker-capability-matrix.md) §2 为唯一权威，本页不再复制表格：
+Redis 走 Pub/Sub 广播频道（`broadcast_channel`）、NATS 走独立广播 subject
+（`broadcast_subject`，无 queue group）、RabbitMQ 走 fanout exchange
+（`broadcast_exchange`，每节点独占 auto-delete 队列）；Kafka 单分区 follower 没有广播原语，
+`broadcast` 保持 trait 默认 fail-closed 并登记为不支持。
 
 ### 2.4 失败语义
 
@@ -117,9 +121,11 @@ pub enum EventDelivery {
   [known-boundaries.md](known-boundaries.md) C2-01）；
 - 事件传输（同一 `add_redis`）的消费组 `start_id` 默认 `"0"`：组首次创建时重放 stream 保留
   历史，避免"事件已发布、消费组尚未创建"的启动窗口丢事件；handlers 是 at-least-once，必须
-  幂等；`"$"` 为显式 opt-in。配置在 host 启动期校验（本地、不联网），失败即启动失败（同批
-  校验 stream/group/start_id/max_len/read_count/block_ms/claim_idle_ms/max_deliveries/
-  dead_letter_stream）——见 [known-boundaries.md](known-boundaries.md) C1-02 / C1-03。
+  幂等；`"$"` 为显式 opt-in。配置在 host 启动期校验（本地、不联网）：只对**无法工作的配置**
+  硬失败（URL 空/不可解析、`events.stream`/`group` 为空、`start_id` 非法含首尾空白/溢出 `u64`）；
+  2.9.2 会 clamp 的数值（`max_len`/`read_count`/`block_ms`/`claim_idle_ms`/`max_deliveries = 0`）
+  与 `dead_letter_stream == stream` 只 warn 并保持可用——见
+  [known-boundaries.md](known-boundaries.md) C1-02 / C1-03。
 
 ### 3.2 `IOnlinePresence` 端口（`crates/core/src/realtime/presence.rs`）
 
@@ -145,8 +151,9 @@ pub trait IOnlinePresence: Send + Sync {
   数组 `[user_id, connection_id, node_id]`，score = 过期时刻）与 HASH
   `{prefix}:members:{scope}`（field = 身份，value = `PresenceMember` JSON，保存 `joined_at`）。
   join/leave/touch/members/count 各是单个 Lua 脚本（内含批量过期清理），`join` 的容量检查与
-  写入在同一脚本原子完成（满 → 可重试 503，不写成员状态）；身份不含 join 戳，跨节点/重启的
-  `leave`/`touch` 能命中同一成员。TTL 由应用/宿主心跳续期；
+  写入在同一脚本原子完成（满 → 可重试 503，不写成员状态）；身份不含 join 戳，`leave`/`touch`
+  按三元组值寻址、不再依赖进程内索引；但 host 桥接的 `node_id` 是**每进程**
+  `node-<pid>-<启动毫秒>-<序号>`，进程重启后旧成员不可寻址、按 TTL 过期。TTL 由应用/宿主心跳续期；
 - **宿主桥接**：`HostBuilder::use_online_presence(store)` 注册 store、内置
   `内部桥接器`（把 `IPresenceObserver` 的 first/last 映射到 `user:` / `tenant:` scope）
   与 `内部心跳服务` 后台服务（按 TTL/3 续期本节点成员，**32 路有界并发** touch）。桥接器以
@@ -163,8 +170,9 @@ pub trait IOnlinePresence: Send + Sync {
 2. 在线态：`use_online_presence(Arc::new(RedisOnlinePresence::...))`；
 3. 续传：`use_realtime_event_store(Arc::new(RedisRealtimeEventStore::...))`；
 4. 吊销：共享 `ISessionStore`/`ISessionRepository` + `WebSocketLimits::with_session_revalidation`；
-5. 升级顺序：广播扇出要求全量升级到 2.9.2（混跑时扇出不完整）；presence 旧数据在 ≤1 TTL 内
-   收敛。两者见 [known-boundaries.md](known-boundaries.md) C4-01 / C4-02。
+5. 升级顺序：广播扇出要求 ≥2.9.2 全量升级——**≤2.9.1 与 ≥2.9.2 混跑**时扇出不完整，
+   **2.9.2 → 2.9.3 可滚动**；presence 的 2.9.2 旧数据到 2.9.3 新格式在 ≤1 TTL 内收敛。
+   两者见 [known-boundaries.md](known-boundaries.md) C4-01 / C4-02。
 
 ## 4. D3：移动推送（P3）
 

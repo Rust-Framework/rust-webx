@@ -387,6 +387,41 @@ impl OutboundRequest {
         Ok(self)
     }
 
+    // ── Read accessors (fake clients, middleware, logging) ────────────────
+
+    /// The request method.
+    pub fn method(&self) -> &Method {
+        &self.method
+    }
+
+    /// The request path / absolute URL, exactly as passed to the constructor.
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    /// Headers in insertion order; a later duplicate wins when the request is
+    /// sent, matching [`Self::header`].
+    pub fn headers(&self) -> &[(String, String)] {
+        &self.headers
+    }
+
+    /// The buffered request body, when the request is not streamed.
+    ///
+    /// `None` for a streamed body: it cannot be inspected without consuming it.
+    pub fn body_bytes(&self) -> Option<&[u8]> {
+        match &self.body {
+            BodySource::Bytes(bytes) => Some(bytes),
+            BodySource::Stream(_) => None,
+        }
+    }
+
+    /// The per-request timeout override, when one was set.
+    ///
+    /// Named `request_timeout` because [`Self::timeout`] is the builder setter.
+    pub fn request_timeout(&self) -> Option<Duration> {
+        self.timeout
+    }
+
     /// Override this client's request (header) deadline.
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
@@ -395,6 +430,9 @@ impl OutboundRequest {
 }
 
 /// The port applications depend on; tests can register a mock implementation.
+///
+/// A fake returns a buffered [`OutboundResponse`] built with
+/// [`OutboundResponse::from_bytes`] instead of opening a socket.
 #[async_trait]
 pub trait IHttpClient: Send + Sync {
     /// The registry name, e.g. `"openai"`.
@@ -442,15 +480,62 @@ impl OutboundResponse {
     pub fn is_success(&self) -> bool {
         (200..300).contains(&self.status)
     }
+
+    /// Build a fully buffered response (tests, caches, adapters, replay).
+    ///
+    /// Headers are validated: an illegal name or value returns
+    /// [`HttpClientError::InvalidRequest`]. The body has no inter-frame
+    /// deadline, and [`ResponseStream::collect`] still enforces its limit.
+    pub fn from_bytes(
+        status: u16,
+        headers: Vec<(String, String)>,
+        body: impl Into<Bytes>,
+    ) -> Result<Self, HttpClientError> {
+        let mut map = HeaderMap::with_capacity(headers.len());
+        for (name, value) in headers {
+            let name = HeaderName::from_bytes(name.as_bytes()).map_err(|error| {
+                HttpClientError::InvalidRequest(format!("invalid header name: {error}"))
+            })?;
+            let value = HeaderValue::from_str(&value).map_err(|error| {
+                HttpClientError::InvalidRequest(format!("invalid header value: {error}"))
+            })?;
+            map.append(name, value);
+        }
+        Ok(Self {
+            status,
+            version: http::Version::HTTP_11,
+            headers: map,
+            body: ResponseStream::from_bytes(body),
+        })
+    }
+}
+
+/// Where a [`ResponseStream`]'s bytes come from: a live upstream body or an
+/// in-memory buffer supplied by [`ResponseStream::from_bytes`].
+enum ResponseBody {
+    Http(Incoming),
+    Buffered(Bytes),
 }
 
 /// A chunked upstream body.
 pub struct ResponseStream {
-    inner: Incoming,
+    inner: ResponseBody,
     read_timeout: Option<Duration>,
 }
 
 impl ResponseStream {
+    /// Build from bytes already read into memory (tests, caches, adapters).
+    ///
+    /// The buffered stream yields the whole body as one chunk and has no
+    /// inter-frame deadline (`read_timeout` is `None`); [`collect`](Self::collect)
+    /// still enforces its limit.
+    pub fn from_bytes(bytes: impl Into<Bytes>) -> Self {
+        Self {
+            inner: ResponseBody::Buffered(bytes.into()),
+            read_timeout: None,
+        }
+    }
+
     /// Collect the whole body, failing above `limit` bytes.
     ///
     /// Use a small limit for error bodies and a deliberate one for JSON
@@ -464,6 +549,23 @@ impl ResponseStream {
             out.extend_from_slice(&chunk);
         }
         Ok(out.freeze())
+    }
+
+    /// Collect the whole body as UTF-8 text, failing above `limit` bytes.
+    pub async fn text(self, limit: usize) -> Result<String, HttpClientError> {
+        let bytes = self.collect(limit).await?;
+        String::from_utf8(bytes.into())
+            .map_err(|error| HttpClientError::Body(format!("response body is not UTF-8: {error}")))
+    }
+
+    /// Collect and deserialize the whole body as JSON, failing above `limit` bytes.
+    pub async fn json<T: serde::de::DeserializeOwned>(
+        self,
+        limit: usize,
+    ) -> Result<T, HttpClientError> {
+        let bytes = self.collect(limit).await?;
+        serde_json::from_slice(&bytes)
+            .map_err(|error| HttpClientError::Body(format!("invalid JSON response body: {error}")))
     }
 
     /// Stream raw body chunks.
@@ -487,22 +589,29 @@ impl ResponseStream {
     }
 
     async fn next_data(&mut self) -> Result<Option<Bytes>, HttpClientError> {
-        loop {
-            let frame = match self.read_timeout {
-                Some(deadline) => timeout(deadline, self.inner.frame())
-                    .await
-                    .map_err(|_| HttpClientError::Timeout(deadline))?,
-                None => self.inner.frame().await,
-            };
-
-            let Some(frame) = frame else {
-                return Ok(None);
-            };
-            let frame = frame.map_err(|error| HttpClientError::Body(error.to_string()))?;
-            if let Ok(data) = frame.into_data() {
-                return Ok(Some(data));
+        let read_timeout = self.read_timeout;
+        match &mut self.inner {
+            ResponseBody::Buffered(buffer) => {
+                let chunk = std::mem::take(buffer);
+                Ok(if chunk.is_empty() { None } else { Some(chunk) })
             }
-            // Trailers and other non-data frames carry no body bytes.
+            ResponseBody::Http(incoming) => loop {
+                let frame = match read_timeout {
+                    Some(deadline) => timeout(deadline, incoming.frame())
+                        .await
+                        .map_err(|_| HttpClientError::Timeout(deadline))?,
+                    None => incoming.frame().await,
+                };
+
+                let Some(frame) = frame else {
+                    return Ok(None);
+                };
+                let frame = frame.map_err(|error| HttpClientError::Body(error.to_string()))?;
+                if let Ok(data) = frame.into_data() {
+                    return Ok(Some(data));
+                }
+                // Trailers and other non-data frames carry no body bytes.
+            },
         }
     }
 }
@@ -695,7 +804,7 @@ impl IHttpClient for HttpClient {
             version: parts.version,
             headers: parts.headers,
             body: ResponseStream {
-                inner: body,
+                inner: ResponseBody::Http(body),
                 read_timeout: self.options.read_timeout,
             },
         })

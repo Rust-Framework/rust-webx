@@ -172,3 +172,34 @@ let client = HttpClient::new("public", HttpClientOptions {
 体积上限、非 2xx、`traceparent` 注入、hop-by-hop 剥离、`CONNECT` 代理隧道与自定义根证书；
 `crates/webx/tests/http_client_wiring_test.rs` 覆盖 `HostBuilder::add_http_client` 的 DI 装配
 （`IHttpClientFactory` 按名解析）。
+
+### 测试用伪造响应
+
+`OutboundResponse` 的正常构造路径依赖一条活体响应流，所以 fake `IHttpClient` 过去只能返回传输
+错误，测不到「上游返回了 4xx/畸形 JSON」这类分支。现在可以直接造出完整响应：
+
+```rust
+use webx_client::testing::ok_response;
+use webx_client::{OutboundResponse, ResponseStream};
+
+// 200 + application/json 的最简假响应（status/header 是静态值，不会失败）
+let response = ok_response(r#"{"ok":true}"#);
+
+// 任意 status / headers / body；非 2xx 仍是正常响应，不是错误
+let response = OutboundResponse::from_bytes(
+    429,
+    vec![("retry-after".to_string(), "3".to_string())],
+    br#"{"error":"rate_limited"}"#.to_vec(),
+)?;
+
+// 只要一条响应体流（分片 body 的替代品）
+let body = ResponseStream::from_bytes(b"data: {}\n\n".to_vec());
+```
+
+- `from_bytes` 只在 header 名/值非法时返回 `InvalidRequest`；`status` 不参与判定。
+- 缓冲流把整个 body 作为**一个** chunk 交付、没有帧间 `read_timeout`；但 `collect(limit)` 的
+  语义与真实路径**完全相同**：超过 `limit` 返回 `HttpClientError::BodyTooLarge`，
+  `text(limit)` / `bytes()` / `sse()` 也走同一套解析。
+- `ok_response(body)` 固定 `200` + `application/json`，适合 fake `IHttpClient` 的默认分支。
+- 需要真实网络语义（连接、超时、TLS、分片）时用 [Mock 上游](mock-upstream.md)。
+- 覆盖见 `crates/client/tests/buffered_response_test.rs`。

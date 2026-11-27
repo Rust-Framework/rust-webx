@@ -86,6 +86,7 @@ impl IRequestHandler<CreateOrderRequest, OrderView> for CreateOrderHandler {
 | `tenant_id` | `tenant_id` / `tenant` | 租户标识，单租户应用为空串 |
 | `roles` | `roles` | 角色数组 |
 | `permissions` | `permissions` | 权限数组 |
+| `client_id` | `client_id` / `azp` | OAuth 客户端标识；空串表示没有该 claim。用于审计/按客户端分策略，**不是**权限来源 |
 
 辅助方法：
 

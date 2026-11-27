@@ -85,14 +85,14 @@
 
 ## rust-ef 侧残留（本仓不可修，已上报）
 
-- **provider 把驱动/传输失败压成 `EFError::Query`，到应用边界就是 400。** rust-ef 2.9.0 只在
-  唯一约束上做类型化提升；`map_pg_error` 在 `as_db_error()` 为 `None`（连接被重置、驱动超时）时
-  返回 `EFError::query`，`map_sqlx_error` 对非 `Database` 变体（`SqlxError::Io`/`PoolClosed`/
-  `PoolTimedOut`）同样返回 `EFError::query`，SQLite 的 `Prepare error`/`Row read error` 也一样
-  （`rust-ef-postgres/src/error_map.rs:45`、`rust-ef-mysql/src/error_map.rs:44`、
-  `rust-ef-sqlite/src/sync_ops.rs:93`）。`Query` 在 webx 边界按契约映射为 400，因此"查询途中断线"
-  会被当成客户端数据错误。**正确修法在 rust-ef**：驱动/传输失败归 `EFError::Connection`，编码/解码
-  失败归 `EFError::TypeConversion`，`Query` 只留给真正的语句生成/投影形状错误（那才是 500 类）。
+- **2.9.1 已修好的部分**：`From<EFError> for AppError` 在 rust-ef 内按结构化诊断分类瞬态——
+  SQLSTATE `08`/`40`/`57P0*`、SQLite `busy`/`locked` 扩展码、MySQL `1205`/`1213` → 可重试 `503`；
+  `Io`/`PoolClosed`/`PoolTimedOut`/`WorkerCrashed`/`OutOfMemory` 归 `EFError::Connection`（500，
+  不再被当成客户端数据错误）。
+- **仍残留（需 rust-ef 修）**：少数无法分类的驱动错误仍落 `EFError::Query`，而 `Query` 在 webx 边界
+  按契约映射为 400——`rust-ef-sqlite/src/sync_ops.rs` 把 `ErrorCode::Unknown`、
+  `rust-ef-mysql/src/error_map.rs` 把 `InvalidArgument` 归 `Query`。正确修法在 rust-ef：
+  无法分类的驱动失败归 `Connection`（或新增 `Driver` 分类），`Query` 只留给语句生成/投影形状错误。
   webx 侧无法区分，应用侧更无法区分，故不在应用重写。
 
 ## HTTP/3 依赖与 WebTransport 结论

@@ -2,7 +2,7 @@
 
 > 面向使用 rust-webx 框架的开发者 · 渐进式披露 · 深入浅出 · 当前发布 **2.9.3**
 >
-> 本页与 `INDEX.json` 的 102 节一一对应；mdBook 侧边栏由
+> 本页与 `INDEX.json` 的 103 节一一对应；mdBook 侧边栏由
 > `scripts/gen-mdbook-summary.py` 从同一份 `INDEX.json` 生成，不在这里重复维护。
 
 [前言](./FOREWORD.md)
@@ -110,6 +110,7 @@
 - [Cookie 会话与 CSRF](./09-auth-security/cookie-session.md)
 - [OpenID Connect 登录](./09-auth-security/oidc.md)
 - [OAuth 2.0 社交登录](./09-auth-security/oauth2-social.md)
+- [OAuth2 client credentials（服务账号取 token）](./09-auth-security/client-credentials.md)
 - [TOTP 与恢复码](./09-auth-security/mfa.md)
 - [密钥轮换与应急 Runbook](./09-auth-security/key-rotation-runbook.md)
 - [DPoP 发送方约束令牌](./09-auth-security/dpop.md)

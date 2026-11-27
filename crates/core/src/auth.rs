@@ -247,6 +247,13 @@ pub struct IdentityUser {
     pub name: String,
     /// Email address (`email` claim), empty when the token has none.
     pub email: String,
+    /// OAuth 2.0 client identifier (`client_id`, falling back to `azp`).
+    ///
+    /// Empty when the token carries neither claim. Additive: it identifies the
+    /// client the credential was issued to (audit, per-client policy), it is not
+    /// a permission source.
+    #[serde(default)]
+    pub client_id: String,
     /// Tenant identifier (`tenant_id` / `tenant`).
     ///
     /// The **empty string means "no tenant claim"** — tokens from single-tenant
@@ -267,11 +274,29 @@ impl IdentityUser {
     /// Absent `name` / `email` / `tenant_id` claims become empty strings, so an
     /// empty [`IdentityUser::tenant_id`] means "the principal carries no tenant
     /// claim" rather than a tenant literally named `""`.
+    ///
+    /// The client identifier reads the `client_id` claim and falls back to
+    /// `azp` (RFC 7519 "authorized party", as used by OIDC providers); an
+    /// empty claim counts as absent.
     pub fn from_claims(claims: &dyn IClaims) -> Self {
         Self {
             id: claims.subject().to_string(),
             name: claims.get_username().unwrap_or_default().to_string(),
             email: claims.get_email().unwrap_or_default().to_string(),
+            client_id: claims
+                .claims()
+                .get("client_id")
+                .map(String::as_str)
+                .filter(|client_id| !client_id.is_empty())
+                .or_else(|| {
+                    claims
+                        .claims()
+                        .get("azp")
+                        .map(String::as_str)
+                        .filter(|azp| !azp.is_empty())
+                })
+                .unwrap_or_default()
+                .to_string(),
             tenant_id: claims.get_tenantid().unwrap_or_default().to_string(),
             roles: claims.roles().to_vec(),
             permissions: claims.permissions().to_vec(),

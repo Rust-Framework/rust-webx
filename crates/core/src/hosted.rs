@@ -29,7 +29,7 @@
 //! }
 //! ```
 //!
-//! Register it with `add_background_service_with` / `add_background_service`;
+//! Register it with `add_background_service(BackgroundServiceSpec::…)`;
 //! the host starts it together with the hosted services and **cancels the token
 //! on shutdown**, so the loop leaves `delay` at once instead of finishing a long
 //! sleep.
@@ -186,7 +186,7 @@ pub async fn delay(ct: &CancellationToken, duration: Duration) -> bool {
 ///   30s shutdown window.
 ///
 /// It is automatically a [`BackgroundService`], so
-/// `add_background_service_with` / `add_background_service` accept it as-is.
+/// `add_background_service(BackgroundServiceSpec::…)` accepts it as-is.
 #[async_trait::async_trait]
 pub trait PeriodicBackgroundService: Send + Sync + 'static {
     /// How long to wait between ticks.

@@ -4,7 +4,7 @@
 
 | 端口 | 作用 | 框架默认实现 | 注册方式 |
 |------|------|--------------|----------|
-| `ITokenIssuer` | 由 claims 签发 token | `JwtTokenIssuer`（HS256） | `use_authentication()` 自动注册（读 `Jwt.Secret` / `Jwt.ExpirationMinutes`） |
+| `ITokenIssuer` | 由 claims 签发 token | `JwtTokenIssuer`（HS256；配 `Jwt.Signing` 时 RS256/ES256/PS256） | `use_authentication()` 自动注册（读 `Jwt.Secret` / `Jwt.Signing` / `Jwt.ExpirationMinutes`） |
 | `ISessionStore` | 按 `jti` 吊销/查询 token | `InMemorySessionStore`（可选） | `HostBuilder::use_session_store(...)` |
 | `IPasswordHasher` | PHC 口令哈希/校验/升级 | `Argon2PasswordHasher`（Argon2id） | Host 启动自动注册；`use_password_hasher(...)` 替换/改参 |
 
@@ -38,7 +38,7 @@ issued.jti                 // 存 session 表，供登出吊销
 issued.expires_at_unix_secs // 注意单位：Unix 秒（Travel 侧毫秒字段要 ×1000）
 ```
 
-- `JwtTokenIssuer` **只支持 HS256**（与本框架 `JwtAuth` 的 `Validation::default()` 对齐）。RSA/EC 需要自定义 `ITokenIssuer` 且同时替换验签 handler，不支持混用。
+- `JwtTokenIssuer` 默认用 HS256；配置 `Jwt.Signing` 后同一端口改签非对称 token（RS256/ES256/PS256，带 `alg`+`kid`，见 [JWT Bearer 认证](jwt-authentication.md) 的「非对称签发与 JWKS 发布」），业务代码不变。自行实现 `ITokenIssuer` 时仍需同时安排验签来源（`Jwks`/`JwksSources`），不支持的组合是启动错误而不是静默降级。
 - 想改寿命而不改代码：`Jwt.ExpirationMinutes` 或 `APP__Jwt__ExpirationMinutes`；`0` 回退 60。
 
 ### 自定义 `ITokenIssuer` 如何拿到最终密钥
@@ -91,7 +91,7 @@ Host::builder()
 session_store.revoke(&issued.jti).await?;
 ```
 
-持久化实现只需实现 trait（`revoke` / `is_revoked`，可选 `revoke_all_for_subject`）：
+持久化实现只需实现 trait（`revoke` / `is_revoked`，可选 `revoke_all_for_subject` / `revoke_by_refresh_family`）：
 
 - 未注册 store 或 token 无 `jti`：不查吊销，按 `exp` 兜底（与 1.1 行为一致）。
 - store 查询报错：请求失败（fail-closed），不会「无法证明未吊销却放行」。
@@ -169,16 +169,22 @@ let rotated = refresh.rotate(&presented).await?; // 旧 token 立即失效
 拿回被重放的 `family_id`，才能把**对应的 session**一起置为 revoked：
 
 ```rust
-use webx::RotateOutcome;
+use webx::{RotateOutcome, revoke_session_and_family};
 
 match refresh.rotate_outcome(&presented).await? {
     RotateOutcome::Rotated(issued) => {
         // 返回 issued.token
     }
     RotateOutcome::Reused { family_id } => {
-        // family 已由 rotate_outcome 撤销；按业务关联撤销配对 session，
-        // 避免已泄露的 access token 活到自然过期。
-        revoke_paired_session(&family_id).await?;
+        // family 已由 rotate_outcome 撤销；再按 family_id 撤销绑定到它的会话，
+        // 避免已泄露的 access token 活到自然过期（细节见 4.1）。
+        let outcome = revoke_session_and_family(
+            refresh.store(),
+            Some(&session_store), // Arc<dyn ISessionStore>；未注册吊销时传 None
+            &family_id,
+        )
+        .await?;
+        let _ = outcome.sessions_revoked; // None = 会话存储不支持 family 映射（501）
         // 统一 401
     }
     RotateOutcome::Expired | RotateOutcome::Revoked | RotateOutcome::Invalid => {
@@ -197,6 +203,41 @@ match refresh.rotate_outcome(&presented).await? {
 - `InMemoryRefreshTokenStore` 只适合单进程；多实例复制参考适配器 `examples/adapters/auth/ef`
   （`publish = false`，不随框架发布）的 `EfRefreshTokenStore`（`auth_refresh_tokens` 表、条件更新 +
   事务实现同一原子语义），改成自己的包名后注册。
+
+### 4.1 refresh reuse 的配对撤销
+
+reuse 被检测到后，refresh family 已经死了，但**已签发的 access token 仍按自己的 `exp` 有效**。
+`revoke_session_and_family` 把「撤销 refresh family」与「撤销绑定到该 family 的会话」合成一个入口：
+
+```rust
+use webx::{ISessionStore, revoke_session_and_family};
+
+let result = revoke_session_and_family(
+    refresh.store(),      // &Arc<dyn IRefreshTokenStore>
+    Some(&session_store), // Option<&Arc<dyn ISessionStore>>；未注册吊销时传 None
+    family_id,
+)
+.await?;
+
+result.refresh_tokens_revoked; // 本次改判为 revoked 的 refresh token 数（重试时为 0）
+result.sessions_revoked;       // Some(n) = 存储支持映射；None = 无 store 或存储声明不具备该能力
+```
+
+- **顺序固定**：先 `revoke_family`（必须成功），再 `revoke_by_refresh_family`。refresh token 是能不断换出
+  access token 的凭证，不能因为会话侧失败而把它留着。
+- 会话侧是否支持"按 family 撤销"由**显式能力**决定：`ISessionStore::supports_refresh_family_revocation()`
+  （默认 `false`）。助手在 `false` 时跳过会话半程、返回 `sessions_revoked = None` 并 `tracing::warn!`；
+  声明 `true` 后调用 `revoke_by_refresh_family`，**任何错误（包括 501）原样上抛**——绝不把真实故障
+  伪装成"能力缺失"。family 撤销幂等，所以整个助手可安全重试。
+- 想补齐会话半程：给 store 建 `refresh_family_id` 索引，覆盖 `revoke_by_refresh_family`（返回实际撤销数）
+  并让 `supports_refresh_family_revocation` 返回 `true`。`InMemorySessionStore` 不保留该索引，因此默认
+  `false`；自定义包装器（包括 `CachedSessionStore`，它已转发这两个方法）包装 `dyn ISessionStore` 时
+  要显式转发能力声明，否则助手会按"不支持"跳过会话半程。
+- `family_id` 空白 → `400 validation_failed`（不会退化成 500），且在任何 I/O 之前返回。
+- 日志只允许出现 `family_id`，**不要**打印 refresh token / secret。
+- **边界**：会话撤销生效之前，已经签发的 access token 仍能通过验签直到 `exp`（`is_revoked` 按 `jti`
+  查，只对登记过的会话生效）。把 access token 寿命压到分钟级，并在认证中间件注册 `ISessionStore`
+  （`use_session_store`），才能把窗口压到「下一次请求」。这在多实例部署下还受实例间存储可见性影响。
 
 ## 5. 登录防护：策略、防枚举、限流与并发闸门
 

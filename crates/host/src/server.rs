@@ -23,7 +23,7 @@ use webx_core::security::{ISessionStore, ITokenIssuer};
 
 use crate::auth::{AuthenticationMiddleware, JwtScheme};
 use crate::auth_cookie::SESSION_COOKIE_SCHEME_NAME;
-use crate::auth_jwt::{JwtAuth, JwtSecret, JwtTokenIssuer, JwtValidation};
+use crate::auth_jwt::{JwtAuth, JwtKeySet, JwtSecret, JwtTokenIssuer, JwtValidation};
 use crate::cors::{CorsConfig, CorsMiddleware};
 use crate::csrf::{CsrfConfig, CsrfMiddleware};
 use crate::endpoint::{StaticHtmlEndpoint, StaticJsonEndpoint, StubEndpoint};
@@ -41,6 +41,19 @@ use webx_spa::{EmbeddedAssets, SpaMiddleware, SpaSource};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+
+/// The only entry of `values`, when the list holds exactly one.
+///
+/// A one-element `Jwt.Issuers` / `Jwt.Audiences` list is the multi-value
+/// spelling of the single-value key, so the host's own minted token carries the
+/// same claim either way. A longer list cannot name the host itself, and picking
+/// one entry would be a guess.
+fn single_entry(values: &[String]) -> Option<String> {
+    match values {
+        [value] => Some(value.clone()),
+        _ => None,
+    }
+}
 
 /// Returns true when the JWT secret is missing, too short, or a known placeholder.
 fn is_weak_jwt_secret(secret: &str) -> bool {
@@ -1707,7 +1720,32 @@ impl HostBuilder {
         // registered: an empty `JwtSecret` would let a custom issuer sign with
         // `""`, which is the failure mode this registration exists to prevent.
         if !options.jwt.secret.trim().is_empty() {
+            // A PEM block is a public key or private key, never HMAC material.
+            // Pasting a public key here would let anyone holding it mint HS256
+            // tokens, so this is a startup error rather than a warning.
+            if options.jwt.secret.trim_start().starts_with("-----BEGIN") {
+                return Err(Error::di(
+                    "Jwt.Secret must be random HMAC material, not a PEM key: a public key in this \
+                     field would let anyone forge HS256 tokens (use Jwt.Signing for asymmetric \
+                     signing)"
+                        .to_string(),
+                ));
+            }
             svc = svc.instance(Arc::new(JwtSecret::new(options.jwt.secret.clone())));
+        }
+        // F1: `Jwt.Signing` is loaded once, before application registrations, so
+        // an application factory can resolve the same key set the host signs
+        // with. Loading is fail-closed: a bad algorithm, key id, key file or
+        // permission aborts startup instead of signing with a broken key.
+        let jwt_key_set: Option<Arc<JwtKeySet>> = match options.jwt.signing.as_ref() {
+            Some(signing) => Some(Arc::new(JwtKeySet::from_section(
+                signing,
+                &options.jwt.retired_signing_keys,
+            )?)),
+            None => None,
+        };
+        if let Some(keys) = &jwt_key_set {
+            svc = svc.instance(Arc::clone(keys));
         }
         // The explicit event transport is registered before application
         // registrations run, so `add_mediator()` sees it and does not replace
@@ -1785,8 +1823,11 @@ impl HostBuilder {
         // issuer (added above) wins over this default. The lifetime comes from
         // `Jwt.ExpirationMinutes` (PascalCase in appsettings, default 60); `0`
         // falls back to the default instead of minting already-expired tokens.
-        if self.auth_enabled && !options.jwt.secret.trim().is_empty() {
-            let secret = options.jwt.secret.clone();
+        //
+        // F1: with `Jwt.Signing` configured the default issuer signs
+        // asymmetrically (RS256/ES256/PS256) with the local key set; without it
+        // the HS256 path is unchanged.
+        if self.auth_enabled && (jwt_key_set.is_some() || !options.jwt.secret.trim().is_empty()) {
             let lifetime_minutes = match options.jwt.expiration_minutes {
                 0 => 60,
                 minutes => minutes,
@@ -1794,19 +1835,48 @@ impl HostBuilder {
             let lifetime = Duration::from_secs(lifetime_minutes.saturating_mul(60));
             // The default issuer must mint the same `iss`/`aud` the verifier
             // requires; otherwise enabling either check would reject every
-            // token this host itself issues.
-            let issuer_claim = options.jwt.issuer.clone();
-            let audience_claim = options.jwt.audience.clone();
-            svc = svc.try_add_singleton::<dyn ITokenIssuer>(move |_| {
-                let mut issuer = JwtTokenIssuer::from_secret(secret.as_bytes(), lifetime);
-                if let Some(issuer_claim) = issuer_claim.clone() {
-                    issuer = issuer.with_issuer(issuer_claim);
-                }
-                if let Some(audience_claim) = audience_claim.clone() {
-                    issuer = issuer.with_audience(audience_claim);
-                }
-                Arc::new(issuer)
+            // token this host itself issues. F2: `Issuers: [X]` is the
+            // multi-value spelling of `Issuer: X`, so a one-element list is the
+            // same claim. A longer list cannot name the host itself unless
+            // `Jwt.Signing.Issuer` says so, so nothing is guessed.
+            let issuer_claim = options.jwt.issuer.clone().or_else(|| {
+                single_entry(&options.jwt.issuers).or_else(|| {
+                    options
+                        .jwt
+                        .signing
+                        .as_ref()
+                        .and_then(|signing| signing.issuer.clone())
+                })
             });
+            let audience_claim = options
+                .jwt
+                .audience
+                .clone()
+                .or_else(|| single_entry(&options.jwt.audiences));
+            if let Some(keys) = jwt_key_set.clone() {
+                svc = svc.try_add_singleton::<dyn ITokenIssuer>(move |_| {
+                    let mut issuer = JwtTokenIssuer::from_key_set(Arc::clone(&keys), lifetime);
+                    if let Some(issuer_claim) = issuer_claim.clone() {
+                        issuer = issuer.with_issuer(issuer_claim);
+                    }
+                    if let Some(audience_claim) = audience_claim.clone() {
+                        issuer = issuer.with_audience(audience_claim);
+                    }
+                    Arc::new(issuer)
+                });
+            } else {
+                let secret = options.jwt.secret.clone();
+                svc = svc.try_add_singleton::<dyn ITokenIssuer>(move |_| {
+                    let mut issuer = JwtTokenIssuer::from_secret(secret.as_bytes(), lifetime);
+                    if let Some(issuer_claim) = issuer_claim.clone() {
+                        issuer = issuer.with_issuer(issuer_claim);
+                    }
+                    if let Some(audience_claim) = audience_claim.clone() {
+                        issuer = issuer.with_audience(audience_claim);
+                    }
+                    Arc::new(issuer)
+                });
+            }
         }
 
         // WEBX-3: the default password hasher is a host service as well, so a
@@ -2178,30 +2248,135 @@ impl HostBuilder {
                 None => JwtValidation::from_section(&options.jwt)?,
             };
             let has_jwks = validation.jwks().is_some();
-            if !secret.is_empty() || has_jwks {
+            // F2: one remote JWKS per trusted issuer. A source list verifies
+            // asymmetric tokens without the single-source `Jwt.Jwks`.
+            let has_jwks_sources = !validation.jwks_sources().is_empty();
+            // F1: the local signing key set (loaded in `prepare`) is a host
+            // singleton, so an application registration replaces nothing and a
+            // factory can resolve it. Its self-check runs here, on the startup
+            // path, before any request is served.
+            let jwt_key_set = provider.get::<JwtKeySet>().ok();
+            if let Some(signing) = options.jwt.signing.as_ref() {
+                // No silent widening: the host must accept the algorithm it
+                // signs with, and every retired key's algorithm must remain
+                // acceptable or the old tokens could never verify.
+                if !validation.algorithms().contains(&signing.algorithm) {
+                    return Err(Error::di(format!(
+                        "Jwt.Signing.Algorithm {} is not listed in Jwt.Algorithms; add it to \
+                         Jwt.Algorithms or change the signing key",
+                        signing.algorithm.as_str()
+                    )));
+                }
+                // A multi-issuer host cannot infer which listed issuer it is;
+                // without an explicit `Jwt.Signing.Issuer` its own tokens carry
+                // no `iss` and its own verifier rejects them.
+                match signing.issuer.as_deref().map(str::trim) {
+                    Some(self_issuer) if !self_issuer.is_empty() => {
+                        if !validation
+                            .issuers()
+                            .iter()
+                            .any(|issuer| issuer == self_issuer)
+                        {
+                            return Err(Error::di(format!(
+                                "Jwt.Signing.Issuer '{self_issuer}' is not listed in Jwt.Issuers"
+                            )));
+                        }
+                    }
+                    Some(_) => {
+                        return Err(Error::di(
+                            "Jwt.Signing.Issuer must not be blank".to_string(),
+                        ))
+                    }
+                    None if validation.issuers().len() > 1 => {
+                        tracing::warn!(
+                            issuers = validation.issuers().len(),
+                            "[Host] Jwt.Signing is configured with multiple trusted issuers but \
+                             no Jwt.Signing.Issuer; tokens signed by this host will carry no `iss` \
+                             and its own multi-issuer verifier will reject them"
+                        );
+                    }
+                    None => {}
+                }
+                for entry in &options.jwt.retired_signing_keys {
+                    if !validation.algorithms().contains(&entry.algorithm) {
+                        return Err(Error::di(format!(
+                            "Jwt.RetiredSigningKeys.Algorithm {} is not listed in Jwt.Algorithms; \
+                             its tokens could never verify",
+                            entry.algorithm.as_str()
+                        )));
+                    }
+                }
+            }
+            if let Some(keys) = &jwt_key_set {
+                // Sign a short-lived probe and verify it back through the same
+                // resolver that will verify production tokens.
+                keys.self_check()?;
+            }
+            if !secret.is_empty() || has_jwks || has_jwks_sources || jwt_key_set.is_some() {
                 let decoding_key =
                     (!secret.is_empty()).then(|| DecodingKey::from_secret(secret.as_bytes()));
-                let jwt_auth = if let Some(jwks) = validation.jwks() {
-                    let resolver = Arc::new(crate::auth_jwks::JwksResolver::from_section(jwks)?);
-                    Arc::new(JwtAuth::from_validation_with_resolver(
+                let remote_resolver: Option<Arc<dyn crate::auth_jwks::IJwtKeyResolver>> =
+                    if has_jwks_sources {
+                        // F2: each source owns one issuer's keys; a `kid`
+                        // published by more than one source fails closed
+                        // instead of guessing which issuer it belongs to.
+                        Some(Arc::new(
+                            crate::auth_jwks::MultiIssuerKeyResolver::from_sections(
+                                validation.jwks_sources(),
+                            )?,
+                        ))
+                    } else if let Some(jwks) = validation.jwks() {
+                        // An explicitly configured `Jwt.Jwks` is the trust
+                        // anchor for foreign tokens.
+                        Some(Arc::new(crate::auth_jwks::JwksResolver::from_section(
+                            jwks,
+                        )?))
+                    } else {
+                        None
+                    };
+                let local_resolver = jwt_key_set
+                    .as_ref()
+                    .map(|keys| keys.verification_resolver());
+                // F1+F2 composition: a host that signs locally *and* trusts
+                // remote sources resolves its own `kid`s first, so a partner
+                // IdP outage cannot reject self-issued tokens. Without a local
+                // key set the remote resolver is the only trust anchor; without
+                // either, the HS256 secret verifies (pre-2.9 behaviour).
+                let resolver: Option<Arc<dyn crate::auth_jwks::IJwtKeyResolver>> =
+                    match (local_resolver, remote_resolver) {
+                        (Some(local), Some(remote)) => Some(Arc::new(
+                            crate::auth_jwks::LocalFirstKeyResolver::new(local, remote),
+                        )),
+                        (Some(local), None) => Some(local),
+                        (None, Some(remote)) => Some(remote),
+                        (None, None) => None,
+                    };
+                let jwt_auth = match resolver {
+                    Some(resolver) => Arc::new(JwtAuth::from_validation_with_resolver(
                         decoding_key,
                         &validation,
                         resolver,
-                    ))
-                } else {
-                    Arc::new(JwtAuth::from_validation(
+                    )),
+                    None => Arc::new(JwtAuth::from_validation(
                         decoding_key.expect("secret is non-empty in this branch"),
                         &validation,
-                    ))
+                    )),
                 };
                 tracing::debug!(
                     algorithms = ?validation.algorithms(),
-                    issuer = ?validation.issuer(),
-                    audience = ?validation.audience(),
+                    issuers = ?validation.issuers(),
+                    audiences = ?validation.audiences(),
                     leeway_seconds = validation.leeway().as_secs(),
                     max_token_bytes = validation.max_token_bytes(),
                     invalid_token_behavior = ?validation.invalid_token_behavior(),
                     jwks = has_jwks,
+                    jwks_sources = validation.jwks_sources().len(),
+                    require_scope = validation.require_scope(),
+                    scope_claim = validation.scope_claim(),
+                    signing_key_id = jwt_key_set.as_ref().map(|keys| keys.active().key_id()),
+                    signing_algorithm = jwt_key_set
+                        .as_ref()
+                        .map(|keys| keys.active().algorithm().as_str()),
                     "[Host] JWT validation configured"
                 );
                 // WEBX-2: when the application registered an `ISessionStore`,
@@ -2222,7 +2397,8 @@ impl HostBuilder {
                 auth_schemes.push(Arc::new(JwtScheme::new(jwt_auth, session_store)));
             } else {
                 tracing::warn!(
-                    "add_authentication() enabled but neither Jwt.Secret nor Jwt.Jwks is configured. Set Jwt.Secret/JWT_SECRET or Jwt.Jwks.Url."
+                    "add_authentication() enabled but neither Jwt.Secret, Jwt.Jwks nor Jwt.Signing \
+                     is configured. Set Jwt.Secret/JWT_SECRET, Jwt.Jwks.Url or Jwt.Signing."
                 );
             }
         }

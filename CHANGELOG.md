@@ -3,6 +3,112 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
+## [Unreleased]
+
+### English
+
+**Federated authentication and machine identity (F1–F4).** Additive: no public API is removed and
+the published crate set is unchanged. The authority for the decisions, API shapes and the
+"deliberately not doing" list is `docs/design/federated-auth.md`; usage lives in the handbook pages
+linked from each item.
+
+- **Asymmetric signing + JWKS publication (F1)** — new `Jwt.Signing`
+  (`Algorithm`/`KeyId`/`PrivateKeyFile`/`PublicKeyFile`) and `Jwt.RetiredSigningKeys[]`; new
+  `JwtKeySet`/`JwtSigningKey`, `JwtTokenIssuer::from_key_set`, `JwkSet::to_json`,
+  `Jwk::from_public_key_pem`, `StaticKeyResolver::with_jwk`. The host loads the key set at startup,
+  registers `Arc<JwtKeySet>` and an asymmetric `ITokenIssuer`, and the JWKS endpoint reduces to
+  `keys.jwks().to_json()`. Boundaries: startup is fail-closed (signing algorithm missing from
+  `Jwt.Algorithms`, blank/duplicate `kid`, unreadable or non-`0600` key file, RSA < 2048, EC not
+  P-256, mismatched key pair, failed sign-then-verify self-check); rotation is a rolling deployment,
+  not runtime hot rotation; without `Jwt.Signing` the HS256 path is unchanged.
+- **Multi issuer / multi audience / scope (F2)** — new `Jwt.Issuers`, `Jwt.Audiences`,
+  `Jwt.JwksSources[{Issuer,Url,…}]`, `Jwt.RequireScope`, `Jwt.ScopeAsPermissions`,
+  `Jwt.ScopeClaim`, `Jwt.ScopeSeparator`, and `IdentityUser::client_id` (`client_id`, falling back
+  to `azp`). The scope claim is parsed for both wire forms (string/array); `RequireScope = true`
+  without any scope answers `403`, and `ScopeAsPermissions = true` merges scopes into
+  `permissions()` (deduplicated, order preserved) — the two switches are independent and both
+  default to `false`. Boundaries: `Issuer`/`Issuers`, `Audience`/`Audiences` and
+  `Jwks`/`JwksSources` are mutually exclusive; sources are resolved in declaration order and a
+  `kid` published by more than one source is a `503`, never a guess; no role, organization or
+  permission catalog.
+- **OAuth 2.0 client credentials (F3)** — new `webx::IClientCredentials` port (`ServiceToken`) and
+  `rust-webx-oauth2`'s `ClientCredentialsConfig`/`ClientCredentialsClient`
+  (`token()`/`token_for()`/`invalidate()`), `ClientSecretAuth::{Basic,Post}`, `audience`, and
+  `https://` enforcement (plaintext is accepted only for loopback hosts when `allow_private_networks`
+  is on). Tokens are cached
+  per `(scope, audience)` with early refresh and single-flight; a 4xx is `Error::di` (no retry),
+  `429`/5xx/timeout is a retryable `503`. Boundaries: the framework never injects
+  `Authorization: Bearer` and never reads the secret from the environment — the caller takes the
+  token and sets the header.
+- **External PDP client (F4)** — new `webx::{AccessCheck, AccessDecision, IAuthorizationClient}`
+  port and the `HttpAuthorizationClient` adapter (`AuthorizationHttpConfig`), registered with
+  `HostBuilder::use_authorization_client`. The wire contract is one JSON object per check
+  (`subject`, `tenant_id`, `permission`, `resource`, `context`) answered by
+  `{"decision":"allow"|"deny"}`; non-2xx, malformed or timed-out answers are a `503` fail-closed.
+  Boundaries: only `Allow` is cached (TTL 1–300 s, disabled by default); no route is wired to the
+  PDP automatically; the framework defines no permission model or roles.
+- **Buffered outbound responses for tests** — new `OutboundResponse::from_bytes(status, headers,
+  body)`, `ResponseStream::from_bytes` and `webx_client::testing::ok_response(body)`, so a fake
+  `IHttpClient` can return a real status/body instead of only a transport error. Boundaries: a
+  buffered body is delivered as one chunk with no inter-frame `read_timeout`, but `collect(limit)`
+  keeps the same size limit and `BodyTooLarge` error as the network path.
+- **Security hardening (F1–F4 audit)** — issuer-to-key binding is atomic
+  (`IJwtKeyResolver::resolve_bound`): a key resolved from one `Jwt.JwksSources` entry can only verify
+  tokens whose `iss` is that entry's issuer, and no concurrent request can drop the binding.
+  Multi-issuer trust now requires one JWKS per issuer: a shared `Jwt.Jwks`, or `HS256` together with
+  more than one `Jwt.Issuers` entry, is a startup error. `Jwt.Signing.Issuer` stamps the host's own
+  `iss` in multi-issuer deployments. `iss`/`aud`/`nbf` can no longer be injected through
+  `TokenClaims::extra`. F3/F4 requests have an end-to-end deadline (execute + body + parse), F3's
+  token cache is bounded (256 entries, FIFO), and `ISessionStore` declares
+  `supports_refresh_family_revocation()` instead of `revoke_session_and_family` inferring the
+  capability from a `501`.
+
+### 简体中文
+
+**联邦认证与机器身份（F1–F4）。** 只增不减：没有删除公开 API，发布 crate 集合不变。判定、API
+形状与"不做"清单的唯一权威是 `docs/design/federated-auth.md`；用法见每条对应的手册页。
+
+- **非对称签发 + JWKS 发布（F1）** — 新增 `Jwt.Signing`（`Algorithm`/`KeyId`/`PrivateKeyFile`/
+  `PublicKeyFile`）与 `Jwt.RetiredSigningKeys[]`；新增 `JwtKeySet`/`JwtSigningKey`、
+  `JwtTokenIssuer::from_key_set`、`JwkSet::to_json`、`Jwk::from_public_key_pem`、
+  `StaticKeyResolver::with_jwk`。host 启动期加载密钥集，注册 `Arc<JwtKeySet>` 与非对称
+  `ITokenIssuer`，JWKS 端点只是 `keys.jwks().to_json()`。边界：启动 fail-closed（签名算法不在
+  `Jwt.Algorithms`、`kid` 空白或重复、密钥文件不可读或权限非 `0600`、RSA < 2048、EC 非 P-256、
+  公私钥不匹配、签后验自检失败）；轮换是滚动部署，不是运行期热轮换；未配置 `Jwt.Signing` 时
+  HS256 路径完全不变。
+- **多 issuer / 多 audience / scope（F2）** — 新增 `Jwt.Issuers`、`Jwt.Audiences`、
+  `Jwt.JwksSources[{Issuer,Url,…}]`、`Jwt.RequireScope`、`Jwt.ScopeAsPermissions`、
+  `Jwt.ScopeClaim`、`Jwt.ScopeSeparator`，以及 `IdentityUser::client_id`（取 `client_id`，缺失回退
+  `azp`）。scope claim 两种线上形式都解析（字符串/数组）；`RequireScope = true` 且没有任何 scope →
+  403，`ScopeAsPermissions = true` 才把 scope 并入 `permissions()`（去重保序）——两个开关互相独立、
+  默认都是 `false`。边界：`Issuer`/`Issuers`、`Audience`/`Audiences`、`Jwks`/`JwksSources` 三对互斥；
+  多源按声明顺序解析，同一 `kid` 命中多个来源是 503，绝不猜归属；不建角色、组织或权限目录。
+- **OAuth 2.0 client credentials（F3）** — 新增端口 `webx::IClientCredentials`（`ServiceToken`）与
+  `rust-webx-oauth2` 的 `ClientCredentialsConfig`/`ClientCredentialsClient`
+  （`token()`/`token_for()`/`invalidate()`）、`ClientSecretAuth::{Basic,Post}`、`audience`，以及
+  `https://` 强制（只有开启 `allow_private_networks` 且目标是回环地址时才接受明文 http）。按
+  `(scope, audience)` 缓存 + 提前刷新 +
+  并发单飞；4xx → `Error::di`（不重试），429/5xx/超时 → 可重试 503。边界：框架不自动注入
+  `Authorization: Bearer`，也不从环境变量读 secret——调用方取 token 后自行加头。
+- **外部 PDP 客户端（F4）** — 新增端口 `webx::{AccessCheck, AccessDecision, IAuthorizationClient}`
+  与 HTTP 适配器 `HttpAuthorizationClient`（`AuthorizationHttpConfig`），用
+  `HostBuilder::use_authorization_client` 装配。线上契约是一条检查一个 JSON 对象
+  （`subject`/`tenant_id`/`permission`/`resource`/`context`），回
+  `{"decision":"allow"|"deny"}`；非 2xx、畸形或超时一律 503 fail-closed。边界：只缓存 `Allow`
+  （TTL 1–300 秒，默认关闭）；框架不会自动给路由挂 PDP；不定义权限模型与角色。
+- **测试可伪造出站响应** — 新增 `OutboundResponse::from_bytes(status, headers, body)`、
+  `ResponseStream::from_bytes` 与 `webx_client::testing::ok_response(body)`，fake `IHttpClient`
+  可以返回真实状态码与响应体，而不再只能返回传输错误。边界：缓冲流把 body 作为一个 chunk 交付、
+  没有帧间 `read_timeout`，但 `collect(limit)` 保留与网络路径相同的大小上限与 `BodyTooLarge`。
+- **安全硬化（F1–F4 复核）** — 来源绑定原子化：`IJwtKeyResolver::resolve_bound` 把"验签用的 key"
+  与"发布它的 `Jwt.JwksSources` issuer"一起返回，token 的 `iss` 必须等于该 issuer，并发也不能让
+  绑定被跳过。多 issuer 信任要求"每 issuer 一份 JWKS"：共享 `Jwt.Jwks`，或 `HS256` 配多个
+  `Jwt.Issuers`，都是启动失败。多 issuer 部署下用 `Jwt.Signing.Issuer` 盖本机 `iss`。
+  `iss`/`aud`/`nbf` 不能再经 `TokenClaims::extra` 注入。F3/F4 的请求有端到端 deadline
+  （execute + 读 body + 解析），F3 token 缓存有界（256 条，FIFO），`ISessionStore` 以
+  `supports_refresh_family_revocation()` 显式声明能力，`revoke_session_and_family` 不再用 `501`
+  猜测能力。
+
 ## [2.9.3] — 2026-11-26 — 已知边界收口补丁
 
 > 边界台账（唯一权威）：[docs/design/known-boundaries.md](docs/design/known-boundaries.md)

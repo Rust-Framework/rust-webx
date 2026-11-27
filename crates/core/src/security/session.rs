@@ -64,6 +64,43 @@ pub trait ISessionStore: Send + Sync {
             ),
         ))
     }
+
+    /// Whether this store supports revoking sessions by refresh family
+    /// ([`revoke_by_refresh_family`](Self::revoke_by_refresh_family)).
+    ///
+    /// Explicit capability declaration: do not infer it from the error code of
+    /// `revoke_by_refresh_family`, otherwise a real backend failure that happens
+    /// to map to the same status would be mistaken for "not supported".
+    fn supports_refresh_family_revocation(&self) -> bool {
+        false
+    }
+
+    /// Revoke every session bound to `refresh_family_id`; returns how many were
+    /// revoked.
+    ///
+    /// This is the **paired revocation** after refresh-token reuse: the refresh
+    /// family is already dead, but the access tokens minted from it stay
+    /// signature-valid until their own `exp`. A store that keeps a
+    /// `refresh_family_id` index can turn each of those sessions into a 401
+    /// immediately.
+    ///
+    /// Optional capability: the default implementation returns
+    /// `501 Not Implemented` ([`Error::status`]) instead of silently succeeding,
+    /// because a store without the index would otherwise report a completed
+    /// paired revocation when it revoked nothing. Override it when the backing
+    /// store keeps a family-to-session index — and override
+    /// [`supports_refresh_family_revocation`](Self::supports_refresh_family_revocation)
+    /// to declare that capability: callers decide whether to skip the session
+    /// half from that declaration, not from this error, because a real backend
+    /// failure can be reported with the same `501` status.
+    async fn revoke_by_refresh_family(&self, refresh_family_id: &str) -> Result<u64> {
+        Err(Error::status(
+            501,
+            format!(
+                "this ISessionStore cannot revoke sessions of refresh family '{refresh_family_id}'; override revoke_by_refresh_family"
+            ),
+        ))
+    }
 }
 
 /// Process-local [`ISessionStore`] — the dependency-free default.
@@ -78,8 +115,11 @@ pub trait ISessionStore: Send + Sync {
 ///   [`revoke_until`](ISessionStore::revoke_until) with the token's `exp` (and
 ///   [`purge_expired`](InMemorySessionStore::purge_expired) as a sweep) to keep
 ///   the map bounded.
-/// * [`ISessionStore::revoke_all_for_subject`] is not supported: the store keeps
-///   no subject index.
+/// * [`ISessionStore::revoke_all_for_subject`] and
+///   [`ISessionStore::revoke_by_refresh_family`] are not supported: the store
+///   keeps neither a subject index nor a refresh-family index, so
+///   [`supports_refresh_family_revocation`](ISessionStore::supports_refresh_family_revocation)
+///   stays `false`.
 #[derive(Debug, Default)]
 pub struct InMemorySessionStore {
     /// `jti` → absolute expiry (Unix seconds); `0` means "no expiry".
@@ -263,5 +303,28 @@ mod tests {
             "an unsupported capability is 501, not a generic 500: {err:?}"
         );
         assert_eq!(err.status_code(), 501);
+    }
+
+    #[tokio::test]
+    async fn revoke_by_refresh_family_is_not_implemented_by_default() {
+        let store = InMemorySessionStore::new();
+        assert!(
+            !store.supports_refresh_family_revocation(),
+            "the default capability declaration must match the 501 default"
+        );
+        let err = store
+            .revoke_by_refresh_family("family-1")
+            .await
+            .expect_err("the dependency-free store has no refresh-family index");
+        assert_eq!(
+            err.status_code(),
+            501,
+            "an unsupported capability is 501, never a silent success: {err:?}"
+        );
+        assert!(
+            err.public_detail()
+                .is_some_and(|detail| detail.contains("revoke_by_refresh_family")),
+            "the 501 must name the override: {err:?}"
+        );
     }
 }

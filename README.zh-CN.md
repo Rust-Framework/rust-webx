@@ -86,7 +86,7 @@ rust-webx 是刻意「有主见」的：它不追求做最小的路由库。如�
 - **编译时路由快捷键** — `#[get("/path")]`、`#[post("/path")]`、`#[put("/path")]`、`#[delete("/path")]` 一行定义完整端点。
 - **编译时自动扫描** — 通过 `inventory` 在编译时收集路由元数据，在 `Host::build()` 时自动注册。
 - **零配置 Handler 注册** — `#[handler]` 属性宏自动向 DI 容器注册 Handler。
-- **认证与授权** — JWT Bearer（HS256/RS256/ES256 + JWKS/kid）、OIDC、Cookie 会话 + CSRF、刷新令牌轮换、TOTP/WebAuthn、mTLS、DPoP、HTTP Basic、RFC 7662/7009、OAuth 2.0 社交登录（GitHub/Google/Microsoft/GitLab/Gitee/钉钉/飞书/微信/微博/QQ/抖音/支付宝/Facebook），以及声明式 `#[authorize]`。见 [10 分钟认证快速上手](docs/rust-webx/09-auth-security/quickstart.md)。
+- **认证与授权** — JWT Bearer（HS256/RS256/ES256 + JWKS/kid）、OIDC、Cookie 会话 + CSRF、刷新令牌轮换、TOTP/WebAuthn、mTLS、DPoP、HTTP Basic、RFC 7662/7009、OAuth 2.0 社交登录（GitHub/Google/Microsoft/GitLab/Gitee/钉钉/飞书/微信/微博/QQ/抖音/支付宝/Facebook），以及声明式 `#[authorize]`。机器身份另有四块：非对称 JWT 签发 + JWKS 发布（`Jwt.Signing`）、多 issuer/audience 资源服务器与 `scope` 校验、OAuth 2.0 client credentials 取机器令牌、外部 PDP 客户端——见 [JWT 与 JWKS](docs/rust-webx/09-auth-security/jwt-authentication.md)、[服务账号取 token](docs/rust-webx/09-auth-security/client-credentials.md)、[资源授权](docs/rust-webx/09-auth-security/resource-authorization.md)。快速上手见 [10 分钟认证快速上手](docs/rust-webx/09-auth-security/quickstart.md)。
 - **身份即请求字段** — `#[fromclaim] user: IdentityUser` 把认证身份（id、名称、邮箱、租户、角色）绑定为普通字段；Handler 不再解析 token。`#[fromclaim(optional)] viewer: Option<IdentityUser>` 覆盖匿名端点（匿名访问必须显式声明）。
 - **声明式校验** — 请求字段上的 `#[validate(length/range/email/custom)]` 在绑定后执行，失败汇入同一个 `400 problem+json` `errors`，并把约束同步进 OpenAPI（`minLength`/`minItems`/`minimum`/`format`）。
 - **Keyset 分页、客户端信息、实例级校验** — `KeysetRequest`/`CursorPage` 与 offset `PagedRequest`/`PagedResult` 并存；`#[fromclient] ClientInfo` 绑定对端地址与受信 `X-Forwarded-For`；`RequestUser::require_owner`/`require_same_tenant` 收敛实例级 401/403。

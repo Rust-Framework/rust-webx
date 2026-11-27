@@ -9,6 +9,7 @@
 | [Cookie 会话与 CSRF](cookie-session.md) | BFF 不透明会话、ISessionRepository、双提交 CSRF |
 | [OpenID Connect 登录](oidc.md) | discovery、PKCE、id_token 校验与会话桥 |
 | [OAuth 2.0 社交登录](oauth2-social.md) | GitHub/Google/国内平台、PKCE、userinfo → IdentityUser |
+| [OAuth2 client credentials](client-credentials.md) | 服务账号取 token、缓存/单飞、失败语义与显式 Bearer |
 | [TOTP 与恢复码](mfa.md) | RFC 6238、重放防护、恢复码、amr/acr step-up |
 | [密钥轮换与应急 Runbook](key-rotation-runbook.md) | JWT/OIDC 密钥轮换、吊销、健康与 5 分钟演练 |
 | [DPoP 发送方约束令牌](dpop.md) | RFC 9449 proof、cnf.jkt、重放防护 |

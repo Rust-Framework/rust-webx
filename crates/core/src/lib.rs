@@ -14,6 +14,7 @@
 pub mod action;
 pub mod app;
 pub mod auth;
+pub mod authorization;
 pub mod cache;
 pub mod client_info;
 pub mod config;
@@ -57,6 +58,7 @@ pub mod validation;
 pub use action::*;
 pub use app::*;
 pub use auth::*;
+pub use authorization::*;
 pub use cache::cache_ext::DistributedCacheExtensions;
 pub use cache::options::DistributedCacheEntryOptions;
 pub use cache::trait_def::{CacheError, IDistributedCache};

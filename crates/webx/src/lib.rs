@@ -27,6 +27,7 @@ pub use webx_core::auth::{
     IAuthenticationHandler, IAuthenticationScheme, IClaims, IDynamicAuthorizer, IdentityUser,
     RequestUser,
 };
+pub use webx_core::authorization::{AccessCheck, AccessDecision, IAuthorizationClient};
 pub use webx_core::cache::{
     cache_ext::DistributedCacheExtensions,
     options::DistributedCacheEntryOptions,
@@ -39,7 +40,9 @@ pub use webx_core::config::{
     bind_config, bind_root, load_appsettings, try_bind_config, try_bind_root, try_load_appsettings,
     AppOptions, AppSection, ClientInfoSection, ConfigError, ConfigSources, CorsSection,
     CultureSection, IAppOptions, IdempotencySection, InvalidTokenBehavior, JwtAlgorithm,
-    JwtSection, MetricsSection, RateLimitSection, TlsSection,
+    JwtJwksSourceSection, JwtRetiredSigningKeySection, JwtSection, JwtSigningSection,
+    MetricsSection, RateLimitSection, TlsSection, DEFAULT_JWT_SCOPE_CLAIM,
+    DEFAULT_JWT_SCOPE_SEPARATOR, MAX_JWT_TRUST_VALUES,
 };
 pub use webx_core::dispatch_runtime::DispatchRuntime;
 pub use webx_core::error::{ActionResult, Error, IErrorResponseWriter, Result};
@@ -132,10 +135,10 @@ pub use webx_core::secrets::{
     SecretRef, SecretValue, PROTECTED_SECRET_PREFIX,
 };
 pub use webx_core::security::{
-    constant_time_eq, IPasswordHasher, IRefreshTokenStore, ISessionRepository, ISessionStore,
-    ITokenIssuer, InMemoryRefreshTokenStore, InMemorySessionRepository, InMemorySessionStore,
-    IssuedToken, OneTimeSecret, OneTimeSecretState, RefreshRotation, RefreshTokenRecord,
-    RefreshTokenStatus, SessionRecord, TokenClaims,
+    constant_time_eq, IClientCredentials, IPasswordHasher, IRefreshTokenStore, ISessionRepository,
+    ISessionStore, ITokenIssuer, InMemoryRefreshTokenStore, InMemorySessionRepository,
+    InMemorySessionStore, IssuedToken, OneTimeSecret, OneTimeSecretState, RefreshRotation,
+    RefreshTokenRecord, RefreshTokenStatus, ServiceToken, SessionRecord, TokenClaims,
 };
 pub use webx_core::storage::{
     FileSystemObjectStore, IObjectStore, InMemoryObjectStore, ObjectMeta, PartEtag, RecordingMeta,
@@ -180,14 +183,17 @@ pub use webx_host::auth_cookie::{
 pub use webx_host::auth_dpop::{DpopConfig, DpopScheme, IDpopReplayStore, InMemoryDpopReplayStore};
 pub use webx_host::auth_jwks::{
     HttpJwksFetcher, IJwksFetcher, IJwtKeyResolver, Jwk, JwkSet, JwksHealthCheck, JwksResolver,
-    ResolvedJwk, StaticKeyResolver, JWKS_MAX_DOCUMENT_BYTES,
+    LocalFirstKeyResolver, MultiIssuerKeyResolver, ResolvedJwk, StaticKeyResolver,
+    JWKS_MAX_DOCUMENT_BYTES,
 };
 pub use webx_host::auth_jwt::{
     apply_jwt_secret_file, jwt_middleware, jwt_middleware_with_revocation, JwtAuth, JwtClaims,
-    JwtSecret, JwtTokenIssuer, JwtValidation, JwtValidationBuilder, DEFAULT_CLOCK_SKEW_SECONDS,
-    DEFAULT_MAX_TOKEN_BYTES, DEFAULT_TOKEN_LIFETIME, MIN_JWT_SECRET_LEN,
+    JwtKeySet, JwtSecret, JwtSigningKey, JwtTokenIssuer, JwtValidation, JwtValidationBuilder,
+    DEFAULT_CLOCK_SKEW_SECONDS, DEFAULT_MAX_TOKEN_BYTES, DEFAULT_TOKEN_LIFETIME,
+    MAX_JWT_SIGNING_KEY_ID_LEN, MIN_JWT_SECRET_LEN, MIN_RSA_SIGNING_KEY_BITS,
 };
 pub use webx_host::auth_mtls::{IMtlsIdentityResolver, MtlsScheme};
+pub use webx_host::authorization_http::{AuthorizationHttpConfig, HttpAuthorizationClient};
 pub use webx_host::authz::collect_authorizers;
 pub use webx_host::authz::AuthorizerSet;
 pub use webx_host::compression::{compress_gzip, CompressionConfig, CompressionMiddleware};
@@ -220,7 +226,10 @@ pub use webx_host::push::InMemoryPushSender;
 pub use webx_host::rate_limit::{
     token_bucket, InMemoryRateLimiter, RateLimitMiddleware, RateLimiter,
 };
-pub use webx_host::refresh::{IssuedRefreshToken, RefreshTokenService, RotateOutcome};
+pub use webx_host::refresh::{
+    revoke_session_and_family, FamilyRevocation, IssuedRefreshToken, RefreshTokenService,
+    RotateOutcome,
+};
 pub use webx_host::request_id::RequestIdMiddleware;
 pub use webx_host::request_tracing::RequestTracing;
 pub use webx_host::router::Router;

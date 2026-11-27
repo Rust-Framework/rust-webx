@@ -28,8 +28,10 @@ pub struct TokenClaims {
 
     /// Additional string claims, embedded verbatim (e.g. `tenant_id`).
     ///
-    /// The issuer owns `sub` / `jti` / `exp` / `iat`: a key collision in `extra`
-    /// must not be able to override those.
+    /// The issuer owns `sub` / `jti` / `exp` / `iat` / `iss` / `aud` / `nbf`: a
+    /// key collision in `extra` must not override them. In particular `iss` and
+    /// `aud` are stripped even when the issuer is not configured to stamp them,
+    /// so a caller cannot choose which trusted issuer a token claims to be from.
     pub extra: BTreeMap<String, String>,
 
     /// Requested lifetime. `None` means the issuer's configured default.

@@ -25,7 +25,22 @@ use tokio::net::TcpListener;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
+use crate::OutboundResponse;
+
 type MockBody = UnsyncBoxBody<Bytes, Infallible>;
+
+/// A buffered `200` response with `content-type: application/json`.
+///
+/// For fake [`IHttpClient`](crate::IHttpClient) implementations that must not
+/// open a socket. It uses a static status and header, so it cannot fail.
+pub fn ok_response(body: impl Into<Bytes>) -> OutboundResponse {
+    OutboundResponse::from_bytes(
+        200,
+        vec![("content-type".to_string(), "application/json".to_string())],
+        body,
+    )
+    .expect("static status and header are valid")
+}
 
 /// One request recorded by the mock.
 #[derive(Debug, Clone)]

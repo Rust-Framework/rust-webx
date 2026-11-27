@@ -12,6 +12,7 @@
 //! plane.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -25,6 +26,9 @@ pub struct CachedSessionStore {
     max_entries: usize,
     /// `jti` → instant until which "not revoked" may be served from cache.
     not_revoked_until: Mutex<HashMap<String, Instant>>,
+    /// Bumped by every local revocation. An in-flight `is_revoked` that read a
+    /// "not revoked" answer before the bump must not cache it afterwards.
+    revision: AtomicU64,
 }
 
 impl CachedSessionStore {
@@ -37,6 +41,7 @@ impl CachedSessionStore {
             ttl: ttl.min(Duration::from_secs(300)),
             max_entries: 100_000,
             not_revoked_until: Mutex::new(HashMap::new()),
+            revision: AtomicU64::new(0),
         }
     }
 
@@ -95,6 +100,21 @@ impl CachedSessionStore {
             .unwrap_or_else(PoisonError::into_inner)
             .remove(jti);
     }
+
+    /// Record a local revocation: bump the revision first, then drop the entry,
+    /// so a concurrent reader cannot re-insert a stale negative answer.
+    fn record_local_revocation(&self, jti: Option<&str>) {
+        self.revision.fetch_add(1, Ordering::SeqCst);
+        match jti {
+            Some(jti) => self.invalidate(jti),
+            None => {
+                self.not_revoked_until
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .clear();
+            }
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -102,13 +122,13 @@ impl ISessionStore for CachedSessionStore {
     async fn revoke(&self, jti: &str) -> Result<()> {
         self.inner.revoke(jti).await?;
         // The local caller expects the next request to see the revocation.
-        self.invalidate(jti);
+        self.record_local_revocation(Some(jti));
         Ok(())
     }
 
     async fn revoke_until(&self, jti: &str, expires_at_unix_secs: u64) -> Result<()> {
         self.inner.revoke_until(jti, expires_at_unix_secs).await?;
-        self.invalidate(jti);
+        self.record_local_revocation(Some(jti));
         Ok(())
     }
 
@@ -116,12 +136,16 @@ impl ISessionStore for CachedSessionStore {
         if self.is_cached_not_revoked(jti) {
             return Ok(false);
         }
+        let revision = self.revision.load(Ordering::SeqCst);
         let revoked = self.inner.is_revoked(jti).await?;
         if revoked {
             // A revocation is authoritative; never serve a stale "not revoked"
             // for it.
             self.invalidate(jti);
-        } else {
+        } else if self.revision.load(Ordering::SeqCst) == revision {
+            // Only cache the negative answer if no local revocation happened
+            // while the store was being read: otherwise the entry would mask
+            // a revocation for one TTL.
             self.insert(jti);
         }
         Ok(revoked)
@@ -130,10 +154,26 @@ impl ISessionStore for CachedSessionStore {
     async fn revoke_all_for_subject(&self, subject: &str) -> Result<()> {
         let result = self.inner.revoke_all_for_subject(subject).await;
         if result.is_ok() {
-            self.not_revoked_until
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .clear();
+            self.record_local_revocation(None);
+        }
+        result
+    }
+
+    fn supports_refresh_family_revocation(&self) -> bool {
+        // The cached layer must not turn a capable inner store into a
+        // "capability missing" one: the declaration is the inner store's.
+        self.inner.supports_refresh_family_revocation()
+    }
+
+    async fn revoke_by_refresh_family(&self, refresh_family_id: &str) -> Result<u64> {
+        // Forward the optional family→session capability; without this override
+        // wrapping a capable store in the cache would silently degrade every
+        // paired revocation to the trait's 501 default.
+        let result = self.inner.revoke_by_refresh_family(refresh_family_id).await;
+        if result.is_ok() {
+            // Which jti values were revoked is the inner store's knowledge, so
+            // drop the whole negative cache (same reasoning as sign-out-all).
+            self.record_local_revocation(None);
         }
         result
     }
@@ -176,6 +216,18 @@ mod tests {
                 .unwrap_or_else(PoisonError::into_inner)
                 .clear();
             Ok(())
+        }
+
+        async fn revoke_by_refresh_family(&self, _refresh_family_id: &str) -> Result<u64> {
+            self.revoked
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clear();
+            Ok(1)
+        }
+
+        fn supports_refresh_family_revocation(&self) -> bool {
+            true
         }
     }
 
@@ -254,5 +306,90 @@ mod tests {
 
         store.revoke_all_for_subject("user-1").await.unwrap();
         assert_eq!(store.cached_entries(), 0);
+    }
+
+    #[tokio::test]
+    async fn family_revocation_is_forwarded_and_clears_the_cache() {
+        let inner = Arc::new(CountingStore::default());
+        let store = CachedSessionStore::new(inner.clone(), Duration::from_secs(60));
+        assert!(!store.is_revoked("jti-a").await.unwrap());
+        assert_eq!(store.cached_entries(), 1);
+
+        // Forwarding the optional capability must not degrade to the 501 default.
+        let revoked = store.revoke_by_refresh_family("family-1").await.unwrap();
+        assert_eq!(revoked, 1);
+        assert_eq!(
+            store.cached_entries(),
+            0,
+            "an unknown set of jti values was revoked: drop the negative cache"
+        );
+    }
+
+    #[test]
+    fn refresh_family_capability_is_forwarded() {
+        let capable = Arc::new(CountingStore::default());
+        assert!(
+            CachedSessionStore::new(capable, Duration::from_secs(60))
+                .supports_refresh_family_revocation(),
+            "wrapping a capable store must not hide its capability"
+        );
+
+        let unsupported = Arc::new(webx_core::security::InMemorySessionStore::new());
+        assert!(
+            !CachedSessionStore::new(unsupported, Duration::ZERO)
+                .supports_refresh_family_revocation(),
+            "a store without a family index stays unsupported through the wrapper"
+        );
+    }
+
+    /// An `is_revoked` read that overlaps a local `revoke` must not cache its
+    /// (now stale) "not revoked" answer: that would mask the revocation for one
+    /// TTL, contradicting "a local revoke invalidates immediately".
+    #[tokio::test]
+    async fn concurrent_revoke_does_not_leave_a_negative_entry() {
+        use tokio::sync::Notify;
+
+        struct SlowNegativeStore {
+            started: Notify,
+            release: Notify,
+        }
+
+        #[async_trait::async_trait]
+        impl ISessionStore for SlowNegativeStore {
+            async fn revoke(&self, _jti: &str) -> Result<()> {
+                Ok(())
+            }
+
+            async fn is_revoked(&self, _jti: &str) -> Result<bool> {
+                self.started.notify_one();
+                self.release.notified().await;
+                Ok(false)
+            }
+        }
+
+        let inner = Arc::new(SlowNegativeStore {
+            started: Notify::new(),
+            release: Notify::new(),
+        });
+        let store = Arc::new(CachedSessionStore::new(
+            Arc::clone(&inner) as Arc<dyn ISessionStore>,
+            Duration::from_secs(60),
+        ));
+
+        let check = {
+            let store = Arc::clone(&store);
+            tokio::spawn(async move { store.is_revoked("jti-a").await })
+        };
+        inner.started.notified().await;
+        // Revoke while the store read is still in flight.
+        store.revoke("jti-a").await.expect("revoke");
+        inner.release.notify_one();
+
+        assert!(!check.await.expect("join").expect("check"));
+        assert_eq!(
+            store.cached_entries(),
+            0,
+            "a late negative entry must not mask a completed local revoke"
+        );
     }
 }

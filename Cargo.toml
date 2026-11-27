@@ -208,6 +208,8 @@ uuid = { version = "1", features = ["v4"] }
 # Payment protocol adapters: request signing (Stripe/Alipay/WeChat/Adyen/Square),
 # X.509 platform certificates (WeChat, Alipay cert mode) and Alipay cert SNs.
 rsa = { version = "0.10", features = ["pkcs1v15"] }
+# EC signing (JWT ES256 signing, WebAuthn): P-256 key parsing and SEC1 points.
+p256 = { version = "0.14", features = ["ecdsa"] }
 aes-gcm = "0.10"
 x509-cert = { version = "0.2", features = ["pem"] }
 der = "0.7"

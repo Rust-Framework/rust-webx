@@ -17,6 +17,17 @@
 //!   middleware then rejects a token whose `jti` was revoked. Revocation is
 //!   opt-in: without a store the middleware only verifies signatures.
 //!
+//! # Asymmetric signing and JWKS publication (F1)
+//!
+//! `Jwt.Signing` turns the same issuer into an RSA/EC signer: [`JwtKeySet`]
+//! loads the private key once at startup (fail-closed on a bad algorithm, key
+//! id, key file, Unix permissions, or a `PublicKeyFile` that does not match),
+//! [`JwtSigningKey`] signs with `alg` + `kid`, and [`JwtKeySet::jwks`] is the
+//! document to serve at `/.well-known/jwks.json`. Retired public keys from
+//! `Jwt.RetiredSigningKeys` keep verifying until their tokens expire, which is
+//! all a rolling `kid` rotation needs. Without `Jwt.Signing` the HS256 path is
+//! unchanged.
+//!
 //! # Secret sources (XR-2)
 //!
 //! The signing secret comes from the first non-empty of `APP__Jwt__Secret` /
@@ -65,21 +76,24 @@ use jsonwebtoken::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::ops::ControlFlow;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use webx_core::auth::{IAuthenticationHandler, IClaims};
 use webx_core::config::{
-    AppOptions, InvalidTokenBehavior, JwtAlgorithm, JwtJwksSection, JwtSection,
-    MAX_JWT_CLOCK_SKEW_SECONDS, MAX_JWT_TOKEN_BYTES,
+    AppOptions, InvalidTokenBehavior, JwtAlgorithm, JwtJwksSection, JwtJwksSourceSection,
+    JwtRetiredSigningKeySection, JwtSection, JwtSigningSection, DEFAULT_JWT_SCOPE_CLAIM,
+    DEFAULT_JWT_SCOPE_SEPARATOR, MAX_JWT_CLOCK_SKEW_SECONDS, MAX_JWT_TOKEN_BYTES,
+    MAX_JWT_TRUST_VALUES,
 };
 use webx_core::error::{Error, Result};
 use webx_core::http::IHttpContext;
 use webx_core::middleware::IMiddleware;
 use webx_core::security::{ISessionStore, ITokenIssuer, IssuedToken, TokenClaims};
 
-use crate::auth_jwks::IJwtKeyResolver;
+use crate::auth_jwks::{IJwtKeyResolver, Jwk, JwkSet, StaticKeyResolver};
 
 /// Default ceiling for an accepted compact JWT, in bytes.
 ///
@@ -102,6 +116,8 @@ pub struct JwtClaims {
     sub: String,
     roles: Vec<String>,
     permissions: Vec<String>,
+    /// OAuth 2.0 scopes extracted from the configured scope claim.
+    scopes: Vec<String>,
     /// Pre-flattened raw claims map for the `claims()` method.
     raw: HashMap<String, String>,
 }
@@ -130,8 +146,73 @@ impl JwtClaims {
             sub,
             roles: Vec::new(),
             permissions: Vec::new(),
+            scopes: Vec::new(),
             raw,
         }
+    }
+
+    /// The OAuth 2.0 scopes extracted from the configured scope claim.
+    ///
+    /// Empty until [`Self::with_scopes`] ran; [`JwtAuth`] applies it to every
+    /// token it accepts, so authenticated claims always carry them.
+    pub fn scopes(&self) -> &[String] {
+        &self.scopes
+    }
+
+    /// Read scopes out of a decoded scope claim value.
+    ///
+    /// Both wire forms are accepted:
+    ///
+    /// * RFC 6749 string — `"orders.read orders.write"`, split on `separator`;
+    /// * JSON array — `["orders.read", "orders.write"]`, as some providers send.
+    ///
+    /// Every value is trimmed, blank entries are dropped (an empty scope name
+    /// must never become a permission), and duplicates are removed in order.
+    pub fn scopes_from_claim(value: &serde_json::Value, separator: &str) -> Vec<String> {
+        let mut scopes = Vec::new();
+        let mut push = |candidate: &str| {
+            let candidate = candidate.trim();
+            if !candidate.is_empty() && !scopes.iter().any(|seen| seen == candidate) {
+                scopes.push(candidate.to_string());
+            }
+        };
+        match value {
+            serde_json::Value::String(text) => {
+                for scope in text.split(separator) {
+                    push(scope);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    if let Some(scope) = item.as_str() {
+                        push(scope);
+                    }
+                }
+            }
+            // Any other JSON type carries no scope names; the caller decides
+            // whether that is fatal (`Jwt.RequireScope`) or just empty.
+            _ => {}
+        }
+        scopes
+    }
+
+    /// Merge `scopes` into [`IClaims::permissions`].
+    ///
+    /// Scopes are appended after the token's own `permissions` claim, each one
+    /// once, so `permissions` stays the authority and order is preserved:
+    /// `permissions: ["orders.read"]` + scopes `["orders.read", "orders.write"]`
+    /// yields `["orders.read", "orders.write"]`. Scopes never enter `roles` —
+    /// an OAuth scope is not a role.
+    pub fn with_scopes(mut self, scopes: impl IntoIterator<Item = String>) -> Self {
+        for scope in scopes {
+            if !self.scopes.contains(&scope) {
+                self.scopes.push(scope.clone());
+            }
+            if !self.permissions.contains(&scope) {
+                self.permissions.push(scope);
+            }
+        }
+        self
     }
 }
 
@@ -153,6 +234,7 @@ impl From<RawClaims> for JwtClaims {
             sub: rc.sub,
             roles: rc.roles,
             permissions: rc.permissions,
+            scopes: Vec::new(),
             raw,
         }
     }
@@ -180,6 +262,7 @@ impl IClaims for JwtClaims {
             sub: self.sub.clone(),
             roles: self.roles.clone(),
             permissions: self.permissions.clone(),
+            scopes: self.scopes.clone(),
             raw: self.raw.clone(),
         })
     }
@@ -194,17 +277,24 @@ impl IClaims for JwtClaims {
 /// Built from [`JwtSection`] by [`JwtValidation::from_section`] or from code
 /// with [`JwtValidation::builder`]. Construction is **fail-closed**: an empty
 /// algorithm list, an algorithm the host cannot verify, an empty issuer or
-/// audience, an oversized clock skew, or a zero/oversized token budget is a
-/// typed error rather than a silent default.
+/// audience, a duplicated/oversized trust list, an ambiguous `Jwt.Jwks` +
+/// `Jwt.JwksSources` pair, a source bound to an issuer that is not trusted, a
+/// blank scope claim/separator, an oversized clock skew, or a zero/oversized
+/// token budget is a typed error rather than a silent default.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JwtValidation {
     algorithms: Vec<JwtAlgorithm>,
-    issuer: Option<String>,
-    audience: Option<String>,
+    issuers: Vec<String>,
+    audiences: Vec<String>,
     leeway: Duration,
     max_token_bytes: usize,
     invalid_token_behavior: InvalidTokenBehavior,
     jwks: Option<JwtJwksSection>,
+    jwks_sources: Vec<JwtJwksSourceSection>,
+    require_scope: bool,
+    scope_as_permissions: bool,
+    scope_claim: String,
+    scope_separator: String,
 }
 
 impl JwtValidation {
@@ -214,20 +304,59 @@ impl JwtValidation {
     }
 
     /// Build from the merged `Jwt` configuration section.
+    ///
+    /// A configured `Jwt.Signing` key set verifies the asymmetric algorithms
+    /// locally, and `Jwt.JwksSources` verifies them through one remote set per
+    /// issuer, so `Jwt.Jwks` is not required in either case; without them the
+    /// fail-closed rule is unchanged (asymmetric algorithms need a key source).
     pub fn from_section(section: &JwtSection) -> Result<Self> {
+        // A retired key only verifies tokens this host signed: without an active
+        // signing key it has no consumer, so a configured list is a startup
+        // error instead of a silently ignored knob.
+        if section.signing.is_none() && !section.retired_signing_keys.is_empty() {
+            return Err(Error::di(
+                "Jwt.RetiredSigningKeys requires Jwt.Signing: retired keys only verify tokens \
+                 this host signed"
+                    .to_string(),
+            ));
+        }
+        // `Issuer` and `Issuers` (likewise `Audience` and `Audiences`) are two
+        // spellings of one trust list. Accepting both would make "which one
+        // wins" a deployment bug, so the pair is a startup error.
+        if section.issuer.is_some() && !section.issuers.is_empty() {
+            return Err(Error::di(
+                "Jwt.Issuer and Jwt.Issuers are mutually exclusive; configure one of them"
+                    .to_string(),
+            ));
+        }
+        if section.audience.is_some() && !section.audiences.is_empty() {
+            return Err(Error::di(
+                "Jwt.Audience and Jwt.Audiences are mutually exclusive; configure one of them"
+                    .to_string(),
+            ));
+        }
         let mut builder = JwtValidationBuilder::default()
             .algorithms(section.algorithms.iter().copied())
             .leeway(Duration::from_secs(section.clock_skew_seconds))
             .max_token_bytes(section.max_token_bytes)
             .invalid_token_behavior(section.invalid_token_behavior)
-            .jwks(section.jwks.clone());
+            .jwks(section.jwks.clone())
+            .jwks_sources(section.jwks_sources.iter().cloned())
+            .require_scope(section.require_scope)
+            .scope_as_permissions(section.scope_as_permissions)
+            .scope_claim(section.scope_claim.clone())
+            .scope_separator(section.scope_separator.clone());
         if let Some(issuer) = &section.issuer {
             builder = builder.require_issuer(issuer.clone());
+        } else if !section.issuers.is_empty() {
+            builder = builder.require_issuers(section.issuers.iter().cloned());
         }
         if let Some(audience) = &section.audience {
             builder = builder.require_audience(audience.clone());
+        } else if !section.audiences.is_empty() {
+            builder = builder.require_audiences(section.audiences.iter().cloned());
         }
-        builder.build()
+        builder.build_inner(section.signing.is_some(), !section.jwks_sources.is_empty())
     }
 
     /// Accepted algorithms.
@@ -235,14 +364,36 @@ impl JwtValidation {
         &self.algorithms
     }
 
-    /// Required `iss`, when configured.
+    /// Required `iss`, when exactly one issuer is configured.
+    ///
+    /// Returns `None` for zero issuers (no `iss` check) **and** for several
+    /// issuers: a single-value getter must not pretend the list has one entry.
+    /// Use [`Self::issuers`] for the authoritative list.
     pub fn issuer(&self) -> Option<&str> {
-        self.issuer.as_deref()
+        match self.issuers.as_slice() {
+            [issuer] => Some(issuer.as_str()),
+            _ => None,
+        }
     }
 
-    /// Required `aud`, when configured.
+    /// Required `aud`, when exactly one audience is configured.
+    ///
+    /// Same semantics as [`Self::issuer`]; use [`Self::audiences`] for the list.
     pub fn audience(&self) -> Option<&str> {
-        self.audience.as_deref()
+        match self.audiences.as_slice() {
+            [audience] => Some(audience.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Accepted `iss` values (empty = no issuer check).
+    pub fn issuers(&self) -> &[String] {
+        &self.issuers
+    }
+
+    /// Accepted `aud` values (empty = no audience check).
+    pub fn audiences(&self) -> &[String] {
+        &self.audiences
     }
 
     /// Clock-skew allowance.
@@ -265,6 +416,31 @@ impl JwtValidation {
         self.jwks.as_ref()
     }
 
+    /// Per-issuer JWKS sources (`Jwt.JwksSources`), empty when unused.
+    pub fn jwks_sources(&self) -> &[JwtJwksSourceSection] {
+        &self.jwks_sources
+    }
+
+    /// Whether an accepted token must carry at least one scope.
+    pub fn require_scope(&self) -> bool {
+        self.require_scope
+    }
+
+    /// Whether scopes are merged into the principal's permissions.
+    pub fn scope_as_permissions(&self) -> bool {
+        self.scope_as_permissions
+    }
+
+    /// Claim that carries OAuth 2.0 scopes.
+    pub fn scope_claim(&self) -> &str {
+        &self.scope_claim
+    }
+
+    /// Separator inside a string scope claim.
+    pub fn scope_separator(&self) -> &str {
+        &self.scope_separator
+    }
+
     fn jsonwebtoken_validation(&self) -> Validation {
         // Base validation; the resolver path narrows `algorithms` to the token
         // header's algorithm after the key is resolved.
@@ -282,12 +458,14 @@ impl JwtValidation {
 
         let mut required: HashSet<String> = HashSet::new();
         required.insert("exp".to_string());
-        if let Some(issuer) = &self.issuer {
-            validation.set_issuer(&[issuer]);
+        if !self.issuers.is_empty() {
+            // `iss` must equal one of the accepted issuers (any-of).
+            validation.set_issuer(&self.issuers);
             required.insert("iss".to_string());
         }
-        if let Some(audience) = &self.audience {
-            validation.set_audience(&[audience]);
+        if !self.audiences.is_empty() {
+            // `aud` must contain one of the accepted audiences (any-of).
+            validation.set_audience(&self.audiences);
             required.insert("aud".to_string());
         }
         validation.required_spec_claims = required;
@@ -299,24 +477,34 @@ impl JwtValidation {
 #[derive(Debug, Clone)]
 pub struct JwtValidationBuilder {
     algorithms: Vec<JwtAlgorithm>,
-    issuer: Option<String>,
-    audience: Option<String>,
+    issuers: Vec<String>,
+    audiences: Vec<String>,
     leeway: Duration,
     max_token_bytes: usize,
     invalid_token_behavior: InvalidTokenBehavior,
     jwks: Option<JwtJwksSection>,
+    jwks_sources: Vec<JwtJwksSourceSection>,
+    require_scope: bool,
+    scope_as_permissions: bool,
+    scope_claim: String,
+    scope_separator: String,
 }
 
 impl Default for JwtValidationBuilder {
     fn default() -> Self {
         Self {
             algorithms: vec![JwtAlgorithm::Hs256],
-            issuer: None,
-            audience: None,
+            issuers: Vec::new(),
+            audiences: Vec::new(),
             leeway: Duration::from_secs(DEFAULT_CLOCK_SKEW_SECONDS),
             max_token_bytes: DEFAULT_MAX_TOKEN_BYTES,
             invalid_token_behavior: InvalidTokenBehavior::Anonymous,
             jwks: None,
+            jwks_sources: Vec::new(),
+            require_scope: false,
+            scope_as_permissions: false,
+            scope_claim: DEFAULT_JWT_SCOPE_CLAIM.to_string(),
+            scope_separator: DEFAULT_JWT_SCOPE_SEPARATOR.to_string(),
         }
     }
 }
@@ -328,15 +516,39 @@ impl JwtValidationBuilder {
         self
     }
 
-    /// Require the `iss` claim to equal `issuer`.
-    pub fn require_issuer(mut self, issuer: impl Into<String>) -> Self {
-        self.issuer = Some(issuer.into());
+    /// Require the `iss` claim to equal `issuer` (single-value spelling).
+    ///
+    /// Equivalent to [`Self::require_issuers`] with one element: the trust list
+    /// becomes exactly `[issuer]`.
+    pub fn require_issuer(self, issuer: impl Into<String>) -> Self {
+        self.require_issuers([issuer])
+    }
+
+    /// Replace the accepted `iss` list: a token's `iss` must equal one entry.
+    ///
+    /// An empty list means "no issuer check" (the pre-F2 behaviour). Blank,
+    /// duplicated or oversized entries are rejected by [`Self::build`].
+    pub fn require_issuers<I, S>(mut self, issuers: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.issuers = issuers.into_iter().map(Into::into).collect();
         self
     }
 
-    /// Require the `aud` claim to contain `audience`.
-    pub fn require_audience(mut self, audience: impl Into<String>) -> Self {
-        self.audience = Some(audience.into());
+    /// Require the `aud` claim to contain `audience` (single-value spelling).
+    pub fn require_audience(self, audience: impl Into<String>) -> Self {
+        self.require_audiences([audience])
+    }
+
+    /// Replace the accepted `aud` list: a token's `aud` must contain one entry.
+    pub fn require_audiences<I, S>(mut self, audiences: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.audiences = audiences.into_iter().map(Into::into).collect();
         self
     }
 
@@ -359,72 +571,182 @@ impl JwtValidationBuilder {
     }
 
     /// Remote JWKS source for asymmetric algorithms.
+    ///
+    /// Mutually exclusive with [`Self::jwks_sources`].
     pub fn jwks(mut self, jwks: Option<JwtJwksSection>) -> Self {
         self.jwks = jwks;
         self
     }
 
+    /// One remote JWKS per trusted issuer (`Jwt.JwksSources`).
+    ///
+    /// Mutually exclusive with [`Self::jwks`]. Every entry's `Issuer` must be
+    /// listed in [`Self::require_issuers`] — a source the verifier would never
+    /// accept tokens from is a configuration error, not dead configuration.
+    pub fn jwks_sources(mut self, sources: impl IntoIterator<Item = JwtJwksSourceSection>) -> Self {
+        self.jwks_sources = sources.into_iter().collect();
+        self
+    }
+
+    /// Require at least one scope on every accepted token.
+    pub fn require_scope(mut self, require_scope: bool) -> Self {
+        self.require_scope = require_scope;
+        self
+    }
+
+    /// Merge extracted scopes into the principal's permissions.
+    ///
+    /// Off by default: a foreign `scope` claim must not silently widen the
+    /// permissions the application authorizes against.
+    pub fn scope_as_permissions(mut self, scope_as_permissions: bool) -> Self {
+        self.scope_as_permissions = scope_as_permissions;
+        self
+    }
+
+    /// Claim that carries OAuth 2.0 scopes (default `scope`).
+    pub fn scope_claim(mut self, claim: impl Into<String>) -> Self {
+        self.scope_claim = claim.into();
+        self
+    }
+
+    /// Separator inside a string scope claim (default `" "`).
+    pub fn scope_separator(mut self, separator: impl Into<String>) -> Self {
+        self.scope_separator = separator.into();
+        self
+    }
+
     /// Validate cross-field constraints and produce the configuration.
     pub fn build(self) -> Result<JwtValidation> {
+        let has_jwks_sources = !self.jwks_sources.is_empty();
+        self.build_inner(false, has_jwks_sources)
+    }
+
+    /// [`Self::build`] with the two "no `Jwt.Jwks` needed" exceptions:
+    ///
+    /// * `local_signing_keys` — F1: a local `Jwt.Signing` key set verifies its
+    ///   own asymmetric tokens;
+    /// * `has_jwks_sources` — F2: `Jwt.JwksSources` supplies one remote set per
+    ///   issuer instead of the single `Jwt.Jwks`.
+    fn build_inner(
+        self,
+        local_signing_keys: bool,
+        has_jwks_sources: bool,
+    ) -> Result<JwtValidation> {
         if self.algorithms.is_empty() {
             return Err(Error::di(
                 "Jwt.Algorithms must not be empty; set at least [\"HS256\"]".to_string(),
             ));
         }
-        if self
-            .issuer
-            .as_deref()
-            .is_some_and(|issuer| issuer.trim().is_empty())
-        {
+
+        let issuers = normalize_claim_list("Jwt.Issuers", self.issuers)?;
+        let audiences = normalize_claim_list("Jwt.Audiences", self.audiences)?;
+
+        // Two sources of truth for the same keys is a startup error: `Jwks` is
+        // "one remote set", `JwksSources` is "one per issuer".
+        if self.jwks.is_some() && !self.jwks_sources.is_empty() {
             return Err(Error::di(
-                "Jwt.Issuer must not be empty when configured".to_string(),
+                "Jwt.Jwks and Jwt.JwksSources are mutually exclusive; configure one of them"
+                    .to_string(),
             ));
         }
-        if self
-            .audience
-            .as_deref()
-            .is_some_and(|audience| audience.trim().is_empty())
-        {
+        let has_jwks_sources = has_jwks_sources || !self.jwks_sources.is_empty();
+
+        // An HMAC secret is one shared key: it cannot express "issuer A may use
+        // this key, issuer B may not". Multi-issuer deployments need asymmetric
+        // keys so each source can be bound to its own key set.
+        if self.algorithms.contains(&JwtAlgorithm::Hs256) && issuers.len() > 1 {
             return Err(Error::di(
-                "Jwt.Audience must not be empty when configured".to_string(),
+                "Jwt.Algorithms must not contain HS256 with multiple Jwt.Issuers: a shared \
+                 HMAC secret cannot express per-issuer trust; drop HS256 or trust one issuer"
+                    .to_string(),
             ));
         }
+        // A single shared JWKS cannot bind its keys to more than one issuer
+        // either: `kid` is the only pre-verification routing data, so every
+        // issuer trusting the same document could claim every identity in it.
+        if self.jwks.is_some() && issuers.len() > 1 {
+            return Err(Error::di(
+                "Jwt.Jwks is one shared key set and cannot bind keys to multiple Jwt.Issuers; \
+                 configure one Jwt.JwksSources entry per issuer"
+                    .to_string(),
+            ));
+        }
+
         let has_asymmetric = self
             .algorithms
             .iter()
             .any(|algorithm| *algorithm != JwtAlgorithm::Hs256);
-        if has_asymmetric && self.jwks.is_none() {
+        if has_asymmetric && self.jwks.is_none() && !has_jwks_sources && !local_signing_keys {
             return Err(Error::di(
-                "Jwt.Algorithms contains an asymmetric algorithm but Jwt.Jwks is not configured"
+                "Jwt.Algorithms contains an asymmetric algorithm but neither Jwt.Jwks nor \
+                 Jwt.JwksSources is configured"
                     .to_string(),
             ));
         }
         if let Some(jwks) = &self.jwks {
-            if !jwks.url.starts_with("https://") {
-                return Err(Error::di(format!(
-                    "Jwt.Jwks.Url must be https:// (got '{}')",
-                    jwks.url
-                )));
-            }
-            if jwks.cache_seconds == 0 || jwks.cache_seconds > 86_400 {
-                return Err(Error::di(
-                    "Jwt.Jwks.CacheSeconds must be between 1 and 86400".to_string(),
-                ));
-            }
-            if !(100..=10_000).contains(&jwks.timeout_ms) {
-                return Err(Error::di(
-                    "Jwt.Jwks.TimeoutMs must be between 100 and 10000".to_string(),
-                ));
-            }
-            if !(1..=256).contains(&jwks.max_keys) {
-                return Err(Error::di(
-                    "Jwt.Jwks.MaxKeys must be between 1 and 256".to_string(),
-                ));
-            }
+            validate_jwks_endpoint("Jwt.Jwks", jwks)?;
         }
 
-        let issuer = normalize_claim_value("Jwt.Issuer", self.issuer)?;
-        let audience = normalize_claim_value("Jwt.Audience", self.audience)?;
+        // A source is bound to one `iss`; a source nobody trusts can never
+        // verify a token, and a free-floating key source would let an operator
+        // think a key is trusted when it is not.
+        if !self.jwks_sources.is_empty() && issuers.is_empty() {
+            return Err(Error::di(
+                "Jwt.JwksSources requires Jwt.Issuers: every source is bound to one accepted issuer"
+                    .to_string(),
+            ));
+        }
+        let mut seen_sources: HashSet<String> = HashSet::new();
+        let mut jwks_sources = Vec::with_capacity(self.jwks_sources.len());
+        for mut source in self.jwks_sources {
+            let issuer =
+                normalize_required_claim_value("Jwt.JwksSources[].Issuer", source.issuer.clone())?;
+            if !seen_sources.insert(issuer.clone()) {
+                return Err(Error::di(format!(
+                    "Jwt.JwksSources[].Issuer '{issuer}' is not unique"
+                )));
+            }
+            if !issuers.iter().any(|listed| listed == &issuer) {
+                return Err(Error::di(format!(
+                    "Jwt.JwksSources[].Issuer '{issuer}' is not listed in Jwt.Issuers; \
+                     add it there or remove the source"
+                )));
+            }
+            let endpoint = source.jwks_section();
+            validate_jwks_endpoint(&format!("Jwt.JwksSources['{issuer}']"), &endpoint)?;
+            source.issuer = issuer;
+            jwks_sources.push(source);
+        }
+
+        // The scope claim name is trimmed like every other claim name; the
+        // separator is kept verbatim (a single space is the default) but must not
+        // be empty — `split("")` would turn a scope name into characters.
+        let scope_claim = self.scope_claim.trim();
+        if scope_claim.is_empty() {
+            return Err(Error::di(
+                "Jwt.ScopeClaim must not be blank; name the claim that carries OAuth 2.0 scopes"
+                    .to_string(),
+            ));
+        }
+        if scope_claim.len() > 1024 {
+            return Err(Error::di(
+                "Jwt.ScopeClaim must be at most 1024 bytes".to_string(),
+            ));
+        }
+        let scope_claim = scope_claim.to_string();
+        if self.scope_separator.is_empty() {
+            return Err(Error::di(
+                "Jwt.ScopeSeparator must not be empty; use \" \" (the default) for space-separated \
+                 scopes"
+                    .to_string(),
+            ));
+        }
+        if self.scope_separator.len() > 1024 {
+            return Err(Error::di(
+                "Jwt.ScopeSeparator must be at most 1024 bytes".to_string(),
+            ));
+        }
+        let scope_separator = self.scope_separator;
 
         if self.leeway > Duration::from_secs(MAX_JWT_CLOCK_SKEW_SECONDS) {
             return Err(Error::di(format!(
@@ -441,12 +763,17 @@ impl JwtValidationBuilder {
 
         Ok(JwtValidation {
             algorithms: self.algorithms,
-            issuer,
-            audience,
+            issuers,
+            audiences,
             leeway: self.leeway,
             max_token_bytes: self.max_token_bytes,
             invalid_token_behavior: self.invalid_token_behavior,
             jwks: self.jwks,
+            jwks_sources,
+            require_scope: self.require_scope,
+            scope_as_permissions: self.scope_as_permissions,
+            scope_claim,
+            scope_separator,
         })
     }
 }
@@ -460,10 +787,8 @@ fn jsonwebtoken_algorithm(algorithm: JwtAlgorithm) -> Algorithm {
     }
 }
 
-fn normalize_claim_value(label: &str, value: Option<String>) -> Result<Option<String>> {
-    let Some(value) = value else {
-        return Ok(None);
-    };
+/// Trim a mandatory claim value, rejecting blank or oversized input.
+fn normalize_required_claim_value(label: &str, value: String) -> Result<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return Err(Error::di(format!(
@@ -473,7 +798,571 @@ fn normalize_claim_value(label: &str, value: Option<String>) -> Result<Option<St
     if trimmed.len() > 1024 {
         return Err(Error::di(format!("{label} must be at most 1024 bytes")));
     }
-    Ok(Some(trimmed.to_string()))
+    Ok(trimmed.to_string())
+}
+
+/// Normalize a trust list (`Jwt.Issuers` / `Jwt.Audiences`).
+///
+/// Every entry is trimmed and must be non-blank and at most 1024 bytes; the list
+/// is capped at [`MAX_JWT_TRUST_VALUES`] entries and may not repeat one. A blank
+/// entry would silently accept `iss: ""`, and a duplicate widens nothing while
+/// hiding an operator mistake — both abort startup.
+fn normalize_claim_list(label: &str, values: Vec<String>) -> Result<Vec<String>> {
+    if values.len() > MAX_JWT_TRUST_VALUES {
+        return Err(Error::di(format!(
+            "{label} must have at most {MAX_JWT_TRUST_VALUES} entries (got {})",
+            values.len()
+        )));
+    }
+    let mut normalized: Vec<String> = Vec::with_capacity(values.len());
+    for value in values {
+        let value = normalize_required_claim_value(label, value)?;
+        if normalized.contains(&value) {
+            return Err(Error::di(format!(
+                "{label} contains the duplicated entry '{value}'"
+            )));
+        }
+        normalized.push(value);
+    }
+    Ok(normalized)
+}
+
+/// `value` trimmed, or `fallback` when it is blank.
+fn default_if_blank(value: String, fallback: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        fallback.to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Enforce the shared JWKS endpoint rules (`Jwt.Jwks` and every
+/// `Jwt.JwksSources` entry): HTTPS only, bounded cache/timeout/key count.
+fn validate_jwks_endpoint(label: &str, jwks: &JwtJwksSection) -> Result<()> {
+    if !jwks.url.starts_with("https://") {
+        return Err(Error::di(format!(
+            "{label}.Url must be https:// (got '{}')",
+            jwks.url
+        )));
+    }
+    if jwks.cache_seconds == 0 || jwks.cache_seconds > 86_400 {
+        return Err(Error::di(format!(
+            "{label}.CacheSeconds must be between 1 and 86400"
+        )));
+    }
+    if !(100..=10_000).contains(&jwks.timeout_ms) {
+        return Err(Error::di(format!(
+            "{label}.TimeoutMs must be between 100 and 10000"
+        )));
+    }
+    if !(1..=256).contains(&jwks.max_keys) {
+        return Err(Error::di(format!(
+            "{label}.MaxKeys must be between 1 and 256"
+        )));
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Asymmetric signing keys (F1): JwtSigningKey / JwtKeySet
+// ---------------------------------------------------------------------------
+
+/// Maximum accepted length, in bytes, of a signing key id (`Jwt.Signing.KeyId`).
+pub const MAX_JWT_SIGNING_KEY_ID_LEN: usize = 128;
+
+/// Minimum RSA modulus size accepted for asymmetric signing, in bits.
+pub const MIN_RSA_SIGNING_KEY_BITS: usize = 2048;
+
+/// The locally configured asymmetric signing key.
+///
+/// Built from a PEM private key: the PEM is parsed by the key-type crate (not
+/// by the JWT library), which both accepts PKCS#8 / PKCS#1 / SEC1 and yields
+/// the public parameters the JWKS needs. `Debug` never prints key material.
+pub struct JwtSigningKey {
+    kid: String,
+    algorithm: JwtAlgorithm,
+    encoding_key: EncodingKey,
+    public_jwk: Jwk,
+}
+
+impl std::fmt::Debug for JwtSigningKey {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("JwtSigningKey")
+            .field("kid", &self.kid)
+            .field("algorithm", &self.algorithm)
+            .field("private_key", &"<redacted>")
+            .finish()
+    }
+}
+
+impl JwtSigningKey {
+    /// Parse a PEM private key for `algorithm` (`RS256`/`ES256`/`PS256`).
+    ///
+    /// `kid` becomes the JWT header `kid` and the JWKS entry's `kid`; it must
+    /// be non-blank, at most [`MAX_JWT_SIGNING_KEY_ID_LEN`] bytes, and free of
+    /// whitespace/control characters.
+    pub fn from_pem(
+        algorithm: JwtAlgorithm,
+        kid: impl Into<String>,
+        private_pem: &[u8],
+    ) -> Result<Self> {
+        let algorithm = require_asymmetric_algorithm("Jwt.Signing.Algorithm", algorithm)?;
+        let kid = normalize_signing_key_id("Jwt.Signing.KeyId", &kid.into())?;
+        let pem = std::str::from_utf8(private_pem).map_err(|_| {
+            Error::di("Jwt.Signing.PrivateKeyFile is not valid UTF-8 PEM".to_string())
+        })?;
+        if pem.trim().is_empty() {
+            return Err(Error::di(
+                "Jwt.Signing.PrivateKeyFile is empty; it must hold a PEM private key".to_string(),
+            ));
+        }
+
+        let (encoding_key, public_jwk) = match algorithm {
+            JwtAlgorithm::Rs256 | JwtAlgorithm::Ps256 => {
+                use rsa::pkcs8::EncodePrivateKey as _;
+
+                let private_key = rsa_private_key_from_pem(pem)?;
+                ensure_rsa_key_strength(&private_key)?;
+                let public_jwk = crate::auth_jwks::rsa_public_jwk(
+                    algorithm,
+                    &kid,
+                    &private_key.to_public_key(),
+                )?;
+                // Normalize to PKCS#8 so jsonwebtoken always sees the format it
+                // documents, whatever the operator provisioned.
+                let pkcs8 = private_key
+                    .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
+                    .map_err(|error| {
+                        Error::di(format!(
+                            "Jwt.Signing.PrivateKeyFile could not be re-encoded as PKCS#8: {error}"
+                        ))
+                    })?;
+                let encoding_key =
+                    EncodingKey::from_rsa_pem(pkcs8.as_bytes()).map_err(|error| {
+                        Error::di(format!(
+                            "Jwt.Signing.PrivateKeyFile is not a usable RSA key: {error}"
+                        ))
+                    })?;
+                (encoding_key, public_jwk)
+            }
+            JwtAlgorithm::Es256 => {
+                use p256::pkcs8::EncodePrivateKey as _;
+
+                let secret_key = p256_secret_key_from_pem(pem)?;
+                let public_jwk = crate::auth_jwks::p256_public_jwk(&kid, &secret_key.public_key())?;
+                let pkcs8 = secret_key
+                    .to_pkcs8_pem(p256::pkcs8::LineEnding::LF)
+                    .map_err(|error| {
+                        Error::di(format!(
+                            "Jwt.Signing.PrivateKeyFile could not be re-encoded as PKCS#8: {error}"
+                        ))
+                    })?;
+                let encoding_key = EncodingKey::from_ec_pem(pkcs8.as_bytes()).map_err(|error| {
+                    Error::di(format!(
+                        "Jwt.Signing.PrivateKeyFile is not a usable EC key: {error}"
+                    ))
+                })?;
+                (encoding_key, public_jwk)
+            }
+            JwtAlgorithm::Hs256 => unreachable!("rejected by require_asymmetric_algorithm"),
+        };
+
+        Ok(Self {
+            kid,
+            algorithm,
+            encoding_key,
+            public_jwk,
+        })
+    }
+
+    /// The `kid` this key signs with.
+    pub fn key_id(&self) -> &str {
+        &self.kid
+    }
+
+    /// The algorithm this key signs with.
+    pub fn algorithm(&self) -> JwtAlgorithm {
+        self.algorithm
+    }
+
+    /// The public JWK (never contains private parameters).
+    pub fn public_jwk(&self) -> Jwk {
+        self.public_jwk.clone()
+    }
+
+    /// Sign `payload` with the `alg` + `kid` header this key promises.
+    fn sign_payload(&self, payload: &serde_json::Value) -> Result<String> {
+        let mut header = Header::new(jsonwebtoken_algorithm(self.algorithm));
+        header.kid = Some(self.kid.clone());
+        encode(&header, payload, &self.encoding_key)
+            .map_err(|error| Error::internal(format!("JWT signing failed: {error}")))
+    }
+}
+
+/// Active signing key plus the retired public keys that must keep verifying.
+///
+/// Rotation is a rolling deployment: the new key is the active one, the old
+/// public keys stay in `Jwt.RetiredSigningKeys` until their tokens expire.
+pub struct JwtKeySet {
+    active: JwtSigningKey,
+    retired: Vec<Jwk>,
+}
+
+impl std::fmt::Debug for JwtKeySet {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("JwtKeySet")
+            .field("active", &self.active)
+            .field("retired", &self.retired_key_ids())
+            .finish()
+    }
+}
+
+impl JwtKeySet {
+    /// Load the key set from `Jwt.Signing` + `Jwt.RetiredSigningKeys`.
+    ///
+    /// Every rule is enforced here, at startup: algorithm support, key-id
+    /// shape, key-file readability, Unix file permissions, RSA key strength,
+    /// retired-key uniqueness, and the `PublicKeyFile` <-> private key
+    /// cross-check. Any failure is a startup error, never a degraded key set.
+    pub fn from_section(
+        signing: &JwtSigningSection,
+        retired: &[JwtRetiredSigningKeySection],
+    ) -> Result<Self> {
+        let algorithm = require_asymmetric_algorithm("Jwt.Signing.Algorithm", signing.algorithm)?;
+        let private_path = signing.private_key_file.trim();
+        if private_path.is_empty() {
+            return Err(Error::di(
+                "Jwt.Signing.PrivateKeyFile must be configured".to_string(),
+            ));
+        }
+        let private_path = Path::new(private_path);
+        verify_signing_key_file_permissions(private_path)?;
+        let private_pem = read_signing_file(private_path, "Jwt.Signing.PrivateKeyFile")?;
+
+        let active = JwtSigningKey::from_pem(algorithm, signing.key_id.clone(), &private_pem)?;
+
+        // An optional public key file is an operator cross-check, not a source
+        // of truth: it must match the private key or startup fails.
+        if let Some(public_path) = signing
+            .public_key_file
+            .as_deref()
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+        {
+            let public_pem =
+                read_signing_file(Path::new(public_path), "Jwt.Signing.PublicKeyFile")?;
+            let declared =
+                Jwk::from_public_key_pem(active.algorithm(), active.key_id(), &public_pem)?;
+            verify_public_key_matches(&active, &declared, public_path)?;
+        }
+
+        let mut seen: HashSet<String> = HashSet::new();
+        seen.insert(active.key_id().to_string());
+        let mut retired_keys = Vec::with_capacity(retired.len());
+        for entry in retired {
+            let retired_algorithm =
+                require_asymmetric_algorithm("Jwt.RetiredSigningKeys.Algorithm", entry.algorithm)?;
+            let kid = normalize_signing_key_id("Jwt.RetiredSigningKeys.KeyId", &entry.key_id)?;
+            if !seen.insert(kid.clone()) {
+                return Err(Error::di(format!(
+                    "Jwt.RetiredSigningKeys.KeyId '{kid}' is not unique"
+                )));
+            }
+            let public_path = entry.public_key_file.trim();
+            if public_path.is_empty() {
+                return Err(Error::di(format!(
+                    "Jwt.RetiredSigningKeys.PublicKeyFile must be configured for key id '{kid}'"
+                )));
+            }
+            let public_pem = read_signing_file(
+                Path::new(public_path),
+                "Jwt.RetiredSigningKeys.PublicKeyFile",
+            )?;
+            retired_keys.push(Jwk::from_public_key_pem(
+                retired_algorithm,
+                &kid,
+                &public_pem,
+            )?);
+        }
+
+        Ok(Self {
+            active,
+            retired: retired_keys,
+        })
+    }
+
+    /// The key new tokens are signed with.
+    pub fn active(&self) -> &JwtSigningKey {
+        &self.active
+    }
+
+    /// The published key set: the active key plus every retired public key.
+    pub fn jwks(&self) -> JwkSet {
+        let mut set = JwkSet::single(self.active.public_jwk());
+        set.keys.extend(self.retired.iter().cloned());
+        set
+    }
+
+    /// Verifier for every key in the set (self-issued-token closed loop).
+    pub fn verification_resolver(&self) -> Arc<dyn IJwtKeyResolver> {
+        let mut resolver = StaticKeyResolver::new();
+        for jwk in self.public_jwks() {
+            // Keys are built from parsed material, so this cannot fail; if it
+            // ever did, the key would be missing and the startup self-check
+            // would fail closed instead of signing unverifiable tokens.
+            if let Err(error) = resolver.push_jwk(jwk) {
+                tracing::error!(%error, "JWT signing key skipped by the verification resolver");
+            }
+        }
+        Arc::new(resolver)
+    }
+
+    /// Startup probe: sign with the active key, verify through
+    /// [`Self::verification_resolver`] by `kid`, and confirm the subject.
+    pub(crate) fn self_check(&self) -> Result<()> {
+        const PROBE_SUBJECT: &str = "jwt-signing-self-check";
+        let now = unix_now();
+        let token = self.active.sign_payload(&serde_json::json!({
+            "sub": PROBE_SUBJECT,
+            "iat": now,
+            "exp": now.saturating_add(60),
+        }))?;
+
+        let header = decode_header(&token).map_err(|error| {
+            Error::di(format!("Jwt.Signing startup self-check failed: {error}"))
+        })?;
+        let expected = jsonwebtoken_algorithm(self.active.algorithm());
+        if header.alg != expected || header.kid.as_deref() != Some(self.active.key_id()) {
+            return Err(Error::di(
+                "Jwt.Signing startup self-check failed: the probe token header does not match \
+                 the active key"
+                    .to_string(),
+            ));
+        }
+
+        let resolver = self.verification_resolver();
+        let key = resolve_synchronously(resolver.as_ref(), self.active.key_id(), expected)?;
+        let mut validation = Validation::new(expected);
+        validation.algorithms = vec![expected];
+        let decoded =
+            decode::<serde_json::Value>(&token, key.as_ref(), &validation).map_err(|error| {
+                Error::di(format!(
+                    "Jwt.Signing startup self-check failed to verify the probe token: {error}"
+                ))
+            })?;
+        if decoded.claims.get("sub").and_then(|value| value.as_str()) != Some(PROBE_SUBJECT) {
+            return Err(Error::di(
+                "Jwt.Signing startup self-check failed: the probe subject did not round-trip"
+                    .to_string(),
+            ));
+        }
+        tracing::debug!(
+            key_id = self.active.key_id(),
+            algorithm = self.active.algorithm().as_str(),
+            "[Auth] JWT signing key set self-check passed"
+        );
+        Ok(())
+    }
+
+    fn public_jwks(&self) -> impl Iterator<Item = &Jwk> {
+        std::iter::once(&self.active.public_jwk).chain(self.retired.iter())
+    }
+
+    fn retired_key_ids(&self) -> Vec<&str> {
+        self.retired
+            .iter()
+            .map(|jwk| jwk.kid.as_deref().unwrap_or(""))
+            .collect()
+    }
+}
+
+/// Reject `HS256` for local signing: it stays on `Jwt.Secret`.
+fn require_asymmetric_algorithm(label: &str, algorithm: JwtAlgorithm) -> Result<JwtAlgorithm> {
+    if algorithm == JwtAlgorithm::Hs256 {
+        return Err(Error::di(format!(
+            "{label} must be RS256, ES256 or PS256; HS256 signs with Jwt.Secret/Jwt.SecretFile"
+        )));
+    }
+    Ok(algorithm)
+}
+
+/// Prove that `declared` is the public half of `active`: sign once with the
+/// private key and verify that signature with the configured public key.
+fn verify_public_key_matches(
+    active: &JwtSigningKey,
+    declared: &Jwk,
+    public_path: &str,
+) -> Result<()> {
+    let probe = active.sign_payload(&serde_json::json!({
+        "sub": "jwt-signing-public-key-check",
+        "exp": unix_now().saturating_add(60),
+    }))?;
+    let Some((algorithm, decoding_key)) = declared.decoding_key() else {
+        return Err(Error::di(format!(
+            "Jwt.Signing.PublicKeyFile '{public_path}' is not a usable {} public key",
+            active.algorithm().as_str()
+        )));
+    };
+    let mut validation = Validation::new(algorithm);
+    validation.algorithms = vec![algorithm];
+    decode::<serde_json::Value>(&probe, &decoding_key, &validation).map_err(|error| {
+        Error::di(format!(
+            "Jwt.Signing.PublicKeyFile '{public_path}' does not match \
+             Jwt.Signing.PrivateKeyFile (key id '{}'): {error}",
+            active.key_id()
+        ))
+    })?;
+    Ok(())
+}
+
+/// Validate a JWT `kid` used for signing and publishing.
+fn normalize_signing_key_id(label: &str, kid: &str) -> Result<String> {
+    let trimmed = kid.trim();
+    if trimmed.is_empty() {
+        return Err(Error::di(format!("{label} must not be empty")));
+    }
+    if trimmed.len() > MAX_JWT_SIGNING_KEY_ID_LEN {
+        return Err(Error::di(format!(
+            "{label} must be at most {MAX_JWT_SIGNING_KEY_ID_LEN} bytes"
+        )));
+    }
+    if trimmed
+        .chars()
+        .any(|character| character.is_whitespace() || character.is_control())
+    {
+        return Err(Error::di(format!(
+            "{label} must not contain whitespace or control characters"
+        )));
+    }
+    Ok(trimmed.to_string())
+}
+
+/// Parse an RSA private key PEM (PKCS#8 first, then PKCS#1).
+fn rsa_private_key_from_pem(pem: &str) -> Result<rsa::PrivateKey> {
+    use rsa::pkcs8::DecodePrivateKey as _;
+
+    if let Ok(key) = rsa::PrivateKey::from_pkcs8_pem(pem) {
+        return Ok(key);
+    }
+    use rsa::pkcs1::DecodeRsaPrivateKey as _;
+    rsa::PrivateKey::from_pkcs1_pem(pem).map_err(|error| {
+        Error::di(format!(
+            "Jwt.Signing.PrivateKeyFile is not a valid RSA PKCS#8/PKCS#1 private key: {error}"
+        ))
+    })
+}
+
+/// Parse a P-256 private key PEM (PKCS#8 first, then SEC1).
+fn p256_secret_key_from_pem(pem: &str) -> Result<p256::SecretKey> {
+    use p256::pkcs8::DecodePrivateKey as _;
+
+    if let Ok(key) = p256::SecretKey::from_pkcs8_pem(pem) {
+        return Ok(key);
+    }
+    p256::SecretKey::from_sec1_pem(pem).map_err(|error| {
+        Error::di(format!(
+            "Jwt.Signing.PrivateKeyFile is not a valid P-256 PKCS#8/SEC1 private key: {error}"
+        ))
+    })
+}
+
+/// Reject an RSA key weaker than [`MIN_RSA_SIGNING_KEY_BITS`].
+fn ensure_rsa_key_strength(key: &rsa::PrivateKey) -> Result<()> {
+    use rsa::traits::PublicKeyParts as _;
+
+    let modulus = key.n().to_be_bytes();
+    let first_significant = modulus
+        .iter()
+        .position(|byte| *byte != 0)
+        .unwrap_or(modulus.len());
+    let significant = &modulus[first_significant..];
+    let bits = significant
+        .first()
+        .map(|first| significant.len() * 8 - first.leading_zeros() as usize)
+        .unwrap_or(0);
+    if bits < MIN_RSA_SIGNING_KEY_BITS {
+        return Err(Error::di(format!(
+            "Jwt.Signing.PrivateKeyFile has a {bits}-bit RSA modulus; at least \
+             {MIN_RSA_SIGNING_KEY_BITS} bits are required"
+        )));
+    }
+    Ok(())
+}
+
+/// Reject a private key file that group/other can read or write (Unix only).
+///
+/// Same guard as `Jwt.SecretFile`: anything looser than mode `0600` is refused,
+/// so a private signing key is never group/world-readable. Windows has no
+/// POSIX mode model; restrict the file to the service account there.
+#[cfg(unix)]
+fn verify_signing_key_file_permissions(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let metadata = std::fs::metadata(path).map_err(|error| {
+        Error::di(format!(
+            "Jwt.Signing.PrivateKeyFile '{}' could not be inspected: {error}",
+            path.display()
+        ))
+    })?;
+    let mode = metadata.permissions().mode();
+    if mode & 0o077 != 0 {
+        return Err(Error::di(format!(
+            "Jwt.Signing.PrivateKeyFile '{}' has mode {mode:04o}; group/other access must be \
+             removed (`chmod 600`).",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+/// Windows (and other non-Unix targets): no permission model to inspect.
+#[cfg(not(unix))]
+fn verify_signing_key_file_permissions(_path: &Path) -> Result<()> {
+    Ok(())
+}
+
+/// Read a PEM file, failing startup when it is missing or empty.
+fn read_signing_file(path: &Path, label: &str) -> Result<Vec<u8>> {
+    let bytes = std::fs::read(path).map_err(|error| {
+        Error::di(format!(
+            "{label} '{}' could not be read: {error}",
+            path.display()
+        ))
+    })?;
+    if bytes.iter().all(u8::is_ascii_whitespace) {
+        return Err(Error::di(format!(
+            "{label} '{}' is empty; provision a PEM key file",
+            path.display()
+        )));
+    }
+    Ok(bytes)
+}
+
+/// Resolve a key through an async resolver from the synchronous startup path.
+///
+/// The resolver built from a [`JwtKeySet`] is a [`StaticKeyResolver`], whose
+/// `resolve` future is ready on its first poll. A pending future would mean
+/// awaiting something that needs a runtime the startup path may not have, so
+/// it is reported as a startup error instead of being driven to completion.
+fn resolve_synchronously(
+    resolver: &dyn IJwtKeyResolver,
+    kid: &str,
+    algorithm: Algorithm,
+) -> Result<Arc<DecodingKey>> {
+    use std::task::{Context, Poll, Waker};
+
+    let mut future = std::pin::pin!(resolver.resolve(kid, algorithm));
+    let mut context = Context::from_waker(Waker::noop());
+    match future.as_mut().poll(&mut context) {
+        Poll::Ready(result) => result,
+        Poll::Pending => Err(Error::di(
+            "Jwt.Signing startup self-check could not resolve the probe key synchronously"
+                .to_string(),
+        )),
+    }
 }
 
 /// JWT-based authentication handler.
@@ -491,6 +1380,10 @@ pub struct JwtAuth {
     validation: Validation,
     max_token_bytes: usize,
     invalid_token_behavior: InvalidTokenBehavior,
+    scope_claim: String,
+    scope_separator: String,
+    require_scope: bool,
+    scope_as_permissions: bool,
 }
 
 // `JwtAuth` is shared across middleware invocations. The trait-object resolver
@@ -511,6 +1404,10 @@ impl JwtAuth {
             validation,
             max_token_bytes: DEFAULT_MAX_TOKEN_BYTES,
             invalid_token_behavior: InvalidTokenBehavior::Anonymous,
+            scope_claim: DEFAULT_JWT_SCOPE_CLAIM.to_string(),
+            scope_separator: DEFAULT_JWT_SCOPE_SEPARATOR.to_string(),
+            require_scope: false,
+            scope_as_permissions: false,
         }
     }
 
@@ -523,6 +1420,10 @@ impl JwtAuth {
             validation: validation.jsonwebtoken_validation(),
             max_token_bytes: validation.max_token_bytes,
             invalid_token_behavior: validation.invalid_token_behavior,
+            scope_claim: validation.scope_claim.clone(),
+            scope_separator: validation.scope_separator.clone(),
+            require_scope: validation.require_scope,
+            scope_as_permissions: validation.scope_as_permissions,
         }
     }
 
@@ -541,6 +1442,10 @@ impl JwtAuth {
             validation: validation.jsonwebtoken_validation(),
             max_token_bytes: validation.max_token_bytes,
             invalid_token_behavior: validation.invalid_token_behavior,
+            scope_claim: validation.scope_claim.clone(),
+            scope_separator: validation.scope_separator.clone(),
+            require_scope: validation.require_scope,
+            scope_as_permissions: validation.scope_as_permissions,
         }
     }
 
@@ -553,6 +1458,37 @@ impl JwtAuth {
     /// Override what an invalid token means.
     pub fn with_invalid_token_behavior(mut self, behavior: InvalidTokenBehavior) -> Self {
         self.invalid_token_behavior = behavior;
+        self
+    }
+
+    /// Override which claim carries scopes and how a string claim is split.
+    ///
+    /// Both values are trimmed; a blank one keeps the documented default
+    /// (`scope` / a single space) instead of matching nothing or splitting a
+    /// scope name into single characters. The configuration path
+    /// ([`JwtValidation::builder`]) is stricter and rejects blanks at startup.
+    pub fn with_scope_extraction(
+        mut self,
+        claim: impl Into<String>,
+        separator: impl Into<String>,
+    ) -> Self {
+        self.scope_claim = default_if_blank(claim.into(), DEFAULT_JWT_SCOPE_CLAIM);
+        self.scope_separator = default_if_blank(separator.into(), DEFAULT_JWT_SCOPE_SEPARATOR);
+        self
+    }
+
+    /// Require at least one scope on every accepted token (`Jwt.RequireScope`).
+    pub fn with_require_scope(mut self, require_scope: bool) -> Self {
+        self.require_scope = require_scope;
+        self
+    }
+
+    /// Merge extracted scopes into `permissions()` (`Jwt.ScopeAsPermissions`).
+    ///
+    /// Off by default: scope extraction alone never widens the permissions the
+    /// application authorizes against.
+    pub fn with_scope_as_permissions(mut self, scope_as_permissions: bool) -> Self {
+        self.scope_as_permissions = scope_as_permissions;
         self
     }
 
@@ -607,6 +1543,14 @@ impl JwtAuth {
             return self.reject("token exceeds Jwt.MaxTokenBytes");
         }
 
+        // Which issuer owns the key that verified the signature, when the
+        // resolver knows it. `JwtAuth` binds the verified key back to that
+        // issuer after decoding: a `kid` is unauthenticated routing data, so a
+        // token signed by trusted issuer B must not be able to claim issuer A's
+        // `iss`. `resolve_bound` returns the binding together with the key, so
+        // no concurrent request can invalidate it in between.
+        let mut key_issuer: Option<Arc<str>> = None;
+
         let decoded = if let Some(resolver) = &self.key_resolver {
             let header = match decode_header(token) {
                 Ok(header) => header,
@@ -627,14 +1571,15 @@ impl JwtAuth {
                 decode::<RawClaims>(token, key, &validation)
             } else {
                 let kid = header.kid.as_deref().unwrap_or("");
-                let key = match resolver.resolve(kid, header.alg).await {
+                let (key, bound_issuer) = match resolver.resolve_bound(kid, header.alg).await {
                     // A key-backend outage is not "anonymous": fail closed.
-                    Ok(key) => key,
+                    Ok(resolved) => resolved,
                     Err(error) if error.status_code() == 503 => return Err(error),
                     Err(error) => {
                         return self.reject(&format!("JWKS key resolution failed: {error}"))
                     }
                 };
+                key_issuer = bound_issuer;
                 decode::<RawClaims>(token, key.as_ref(), &validation)
             }
         } else {
@@ -653,7 +1598,23 @@ impl JwtAuth {
             }
         };
 
+        // Read the scope claim before the payload is flattened into `JwtClaims`:
+        // the raw JSON value is what distinguishes the RFC 6749 string form from
+        // an array, and the flattening would only leave its textual rendering.
+        let scope_value = token_data.claims.extra.get(&self.scope_claim).cloned();
         let claims: JwtClaims = token_data.claims.into();
+        // Issuer-to-key binding (multi-issuer resource server): when the resolver
+        // reported which `Jwt.JwksSources` entry published the verifying key, the
+        // token's `iss` must be that source's issuer. The plain `Jwt.Issuers`
+        // list stays a coarse trust list for resolvers without provenance.
+        if let Some(key_issuer) = &key_issuer {
+            let token_issuer = claims.claims().get("iss").map(String::as_str);
+            if token_issuer != Some(key_issuer.as_ref()) {
+                return self.reject(
+                    "token `iss` does not match the issuer that published the verification key",
+                );
+            }
+        }
         // A signed token without a subject must never become an authenticated
         // identity: `IdentityUser::id` would be empty and tenant/ownership
         // checks would operate on a phantom principal.
@@ -663,6 +1624,26 @@ impl JwtAuth {
         if !self.iat_is_plausible(&claims) {
             return self.reject("JWT `iat` is in the future");
         }
+
+        // OAuth 2.0 resource-server scope semantics: parse the token's scopes
+        // (required when configured) and merge them into permissions only when
+        // the operator opted in — a foreign `scope` claim must not silently
+        // widen the application's permission surface.
+        let scopes = scope_value
+            .as_ref()
+            .map(|value| JwtClaims::scopes_from_claim(value, &self.scope_separator))
+            .unwrap_or_default();
+        if scopes.is_empty() && self.require_scope {
+            // Authentic but out of scope is a 403, not a 401: retrying with the
+            // same credentials cannot help, and `InvalidTokenBehavior::Anonymous`
+            // must not turn "no scope" into "not authenticated".
+            return Err(Error::forbidden("token has no scope".to_string()));
+        }
+        let claims = if scopes.is_empty() || !self.scope_as_permissions {
+            claims
+        } else {
+            claims.with_scopes(scopes)
+        };
         Ok(Some(Box::new(claims)))
     }
 }
@@ -685,14 +1666,25 @@ fn unix_now() -> u64 {
         .unwrap_or_default()
 }
 
+/// What a [`JwtTokenIssuer`] signs with.
+enum SigningMaterial {
+    /// Shared-secret `HS256` (`Jwt.Secret` / `Jwt.SecretFile`).
+    Hs256(EncodingKey),
+    /// Local asymmetric key set (`Jwt.Signing`), which also verifies itself.
+    Asymmetric(Arc<JwtKeySet>),
+}
+
 /// JWT token issuer — the default [`ITokenIssuer`].
 ///
-/// **HS256 only.** The token is signed with `HS256` and verified by this
-/// crate's `JwtAuth`, whose `Validation::default()` also expects `HS256`, so
-/// issuer and verifier agree out of the box. Asymmetric algorithms (RSA/EC)
-/// are not supported by this type: using one requires *both* a custom
-/// [`ITokenIssuer`] and a custom [`IAuthenticationHandler`] (the host's
-/// `jwt_middleware` always verifies with `Validation::default()`).
+/// Two signing modes:
+///
+/// * [`JwtTokenIssuer::from_secret`] — `HS256` with the shared secret
+///   `Jwt.Secret` / `Jwt.SecretFile`. The token is signed with
+///   `Header::default()` and verified by `JwtAuth` with the same secret; this
+///   is the pre-F1 behaviour and stays byte-for-byte identical.
+/// * [`JwtTokenIssuer::from_key_set`] — `RS256`/`ES256`/`PS256` with the local
+///   `Jwt.Signing` private key. The header carries `alg` and `kid`, and the
+///   matching public keys are published as JWKS for other services.
 ///
 /// Mints a token carrying `sub`, `roles`, `permissions`, the caller's extra
 /// claims, and the framework-managed `jti` / `iat` / `exp`. The `jti` is what
@@ -704,12 +1696,13 @@ fn unix_now() -> u64 {
 /// ```
 ///
 /// `HostBuilder::use_authentication()` registers one from the configured
-/// `Jwt.Secret` / `Jwt.ExpirationMinutes`; register a custom [`ITokenIssuer`] in
-/// DI to replace it. `HostBuilder::register_with_options` hands the closure the
-/// final `AppOptions` (with `Jwt.SecretFile` already resolved), so a custom
-/// issuer can sign with the same key the host verifies.
+/// `Jwt.Secret` + `Jwt.ExpirationMinutes`, or from `Jwt.Signing` when that
+/// section is present; register a custom [`ITokenIssuer`] in DI to replace it.
+/// `HostBuilder::register_with_options` hands the closure the final
+/// `AppOptions` (with `Jwt.SecretFile` already resolved), so a custom issuer can
+/// sign with the same key the host verifies.
 pub struct JwtTokenIssuer {
-    encoding_key: EncodingKey,
+    material: SigningMaterial,
     default_lifetime: Duration,
     issuer: Option<String>,
     audience: Option<String>,
@@ -723,7 +1716,20 @@ impl JwtTokenIssuer {
     /// `DEFAULT_TOKEN_LIFETIME` (1 hour) is the framework default.
     pub fn from_secret(secret: impl AsRef<[u8]>, default_lifetime: Duration) -> Self {
         Self {
-            encoding_key: EncodingKey::from_secret(secret.as_ref()),
+            material: SigningMaterial::Hs256(EncodingKey::from_secret(secret.as_ref())),
+            default_lifetime,
+            issuer: None,
+            audience: None,
+        }
+    }
+
+    /// Build an asymmetric issuer from a local key set (`Jwt.Signing`).
+    ///
+    /// Tokens are signed with the active key's algorithm and carry its `kid`,
+    /// so verifiers can select the right JWKS key.
+    pub fn from_key_set(keys: Arc<JwtKeySet>, default_lifetime: Duration) -> Self {
+        Self {
+            material: SigningMaterial::Asymmetric(keys),
             default_lifetime,
             issuer: None,
             audience: None,
@@ -764,6 +1770,12 @@ impl ITokenIssuer for JwtTokenIssuer {
         for (key, value) in &claims.extra {
             payload.insert(key.clone(), serde_json::Value::String(value.clone()));
         }
+        // `iss`/`aud`/`nbf` are owned by the issuer even when no `Jwt.Issuer`/
+        // `Jwt.Audience` is configured: a caller must not be able to inject them
+        // through `extra` (a foreign `iss` changes the token's trust identity).
+        payload.remove("iss");
+        payload.remove("aud");
+        payload.remove("nbf");
         payload.insert("sub".into(), serde_json::json!(subject));
         payload.insert("roles".into(), serde_json::json!(claims.roles));
         payload.insert("permissions".into(), serde_json::json!(claims.permissions));
@@ -777,13 +1789,21 @@ impl ITokenIssuer for JwtTokenIssuer {
             payload.insert("aud".into(), serde_json::json!(audience));
         }
 
-        // `Header::default()` is `HS256` — the only algorithm this issuer
-        // promises, and the one `JwtAuth` verifies.
-        let token = encode(
-            &Header::default(),
-            &serde_json::Value::Object(payload),
-            &self.encoding_key,
-        )
+        // HS256 keeps `Header::default()` (byte-for-byte the pre-F1 token);
+        // the asymmetric path names its `alg` and `kid` so verifiers can pick
+        // the right JWKS key.
+        let claims = serde_json::Value::Object(payload);
+        let token = match &self.material {
+            SigningMaterial::Hs256(encoding_key) => {
+                encode(&Header::default(), &claims, encoding_key)
+            }
+            SigningMaterial::Asymmetric(keys) => {
+                let active = keys.active();
+                let mut header = Header::new(jsonwebtoken_algorithm(active.algorithm()));
+                header.kid = Some(active.key_id().to_string());
+                encode(&header, &claims, &active.encoding_key)
+            }
+        }
         .map_err(|error| Error::internal(format!("JWT signing failed: {error}")))?;
 
         Ok(IssuedToken {

@@ -7,7 +7,8 @@
 //! * [`HttpClient`] — a pool-backed client with timeouts and streaming
 //!   responses ([`ResponseStream`]).
 //! * [`IHttpClient`] — the port applications depend on (tests can substitute a
-//!   mock without opening sockets).
+//!   mock without opening sockets by returning
+//!   [`OutboundResponse::from_bytes`]).
 //! * [`HttpClientRegistry`] / [`IHttpClientFactory`] — named clients such as
 //!   `"openai"` and `"anthropic"`.
 //! * [`SseStream`] — decodes an upstream `text/event-stream` body without

@@ -100,6 +100,21 @@ pub enum RotateOutcome {
     Invalid,
 }
 
+/// Result of [`revoke_session_and_family`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FamilyRevocation {
+    /// Refresh tokens revoked (changed to `Revoked`) in the family.
+    pub refresh_tokens_revoked: u64,
+    /// Sessions revoked by the paired session-store call.
+    ///
+    /// `None` = no session store was supplied, or the store declares no
+    /// refresh-family capability
+    /// ([`ISessionStore::supports_refresh_family_revocation`](webx_core::security::ISessionStore::supports_refresh_family_revocation)). `Some(0)` = the
+    /// store supports the capability but nothing matched — the two are
+    /// deliberately distinguishable.
+    pub sessions_revoked: Option<u64>,
+}
+
 /// Issues and rotates refresh tokens over [`IRefreshTokenStore`].
 pub struct RefreshTokenService {
     store: Arc<dyn IRefreshTokenStore>,
@@ -349,6 +364,72 @@ impl RefreshTokenService {
         }
         Ok(removed)
     }
+}
+
+/// Revoke a refresh family **and** the sessions bound to it (paired revocation
+/// after reuse detection).
+///
+/// Order is deliberate: [`IRefreshTokenStore::revoke_family`] runs first and
+/// must succeed, because a leaked refresh token is the credential that keeps
+/// minting access tokens. Only then is the session store asked to revoke the
+/// sessions mapped to the same family.
+///
+/// Failure semantics:
+///
+/// * The session store's **capability declaration** decides the session half:
+///   when [`ISessionStore::supports_refresh_family_revocation`](webx_core::security::ISessionStore::supports_refresh_family_revocation) is `false`, the
+///   refresh family stays revoked, [`FamilyRevocation::sessions_revoked`] is
+///   `None`, and a `tracing::warn!` records the gap. This is not an error —
+///   the caller cannot do better.
+/// * When the store declares the capability, its result is taken at face value:
+///   **any** error — including a `501` — is returned as-is. Inferring
+///   "unsupported" from `501` would turn a real backend failure into a silent
+///   downgrade with a misleading success. The refresh family is already
+///   revoked, so retrying is safe (family revocation is idempotent).
+/// * A blank `family_id` is [`Error::validation`] before any I/O.
+///
+/// No lock is held across the two store calls, and only `family_id` (never a
+/// token or secret) may appear in logs.
+pub async fn revoke_session_and_family(
+    refresh: &Arc<dyn IRefreshTokenStore>,
+    sessions: Option<&Arc<dyn webx_core::security::ISessionStore>>,
+    family_id: &str,
+) -> Result<FamilyRevocation> {
+    let family_id = family_id.trim();
+    if family_id.is_empty() {
+        return Err(Error::validation(
+            "refresh family id must not be empty".to_string(),
+        ));
+    }
+
+    let refresh_tokens_revoked = refresh.revoke_family(family_id).await?;
+
+    let Some(sessions) = sessions else {
+        return Ok(FamilyRevocation {
+            refresh_tokens_revoked,
+            sessions_revoked: None,
+        });
+    };
+
+    // Declared capability, not an error code: a store that does not support the
+    // family index is skipped explicitly, while every failure of a store that
+    // does support it propagates.
+    if !sessions.supports_refresh_family_revocation() {
+        tracing::warn!(
+            family_id,
+            "ISessionStore does not support refresh-family revocation; the refresh family is revoked but its sessions are not"
+        );
+        return Ok(FamilyRevocation {
+            refresh_tokens_revoked,
+            sessions_revoked: None,
+        });
+    }
+
+    let sessions_revoked = sessions.revoke_by_refresh_family(family_id).await?;
+    Ok(FamilyRevocation {
+        refresh_tokens_revoked,
+        sessions_revoked: Some(sessions_revoked),
+    })
 }
 
 fn split_token(presented: &str) -> Result<(&str, &str)> {

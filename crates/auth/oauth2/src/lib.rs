@@ -22,14 +22,22 @@
 //! Presets cover GitHub, Google, Microsoft, GitLab, Gitee, DingTalk, Feishu
 //! and WeChat. Any other provider can be described with
 //! [`OAuth2Provider::custom`] plus the builder methods.
+//!
+//! Service-to-service calls do not use a user token: [`client_credentials`]
+//! implements the OAuth 2.0 `client_credentials` grant (RFC 6749 §4.4) with a
+//! keyed token cache, early refresh and single-flight, and fails closed.
 
 pub mod alipay;
 pub mod client;
+pub mod client_credentials;
 pub mod provider;
 
 pub use alipay::{AlipayClient, AlipayConfig, AlipayToken};
 
 pub use client::{OAuth2Authorization, OAuth2Client, OAuth2Config, OAuth2Token, OAuth2User};
+pub use client_credentials::{
+    ClientCredentialsClient, ClientCredentialsConfig, ClientSecretAuth, ServiceToken,
+};
 pub use provider::{
     ClientAuth, OAuth2Provider, TokenFields, TokenFormat, TokenRequest, UserInfoAuth,
     UserInfoRequest,

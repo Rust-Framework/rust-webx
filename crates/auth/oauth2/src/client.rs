@@ -116,6 +116,7 @@ impl OAuth2User {
             id: self.subject,
             name: self.name,
             email: self.email.unwrap_or_default(),
+            client_id: String::new(),
             tenant_id: String::new(),
             roles: Vec::new(),
             permissions: Vec::new(),

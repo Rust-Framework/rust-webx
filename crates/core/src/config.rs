@@ -7,6 +7,7 @@
 
 use crate::mode::AppMode;
 use serde::Deserialize;
+use std::fmt;
 use std::path::Path;
 
 // ---------------------------------------------------------------------------
@@ -88,7 +89,7 @@ fn default_max_connections() -> usize {
 ///    group/other permissions (`chmod 600`); a missing, unreadable, too short
 ///    or over-permissive file fails host startup instead of running with a
 ///    broken key.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[non_exhaustive]
 pub struct JwtSection {
     /// HMAC secret for signing/verifying JWT tokens.
@@ -129,6 +130,25 @@ pub struct JwtSection {
     #[serde(default, rename = "Audience")]
     pub audience: Option<String>,
 
+    /// Accepted `iss` values (multi-issuer resource server, F2).
+    ///
+    /// Mutually exclusive with [`Self::issuer`]: `Issuer` and `Issuers` are two
+    /// spellings of the same trust list, so configuring both is a startup error
+    /// instead of an undefined "which one wins".
+    ///
+    /// Every entry must be non-blank, unique and at most 1024 bytes; the list is
+    /// capped at [`MAX_JWT_TRUST_VALUES`] entries. A token whose `iss` is not in
+    /// the list is rejected.
+    #[serde(default, rename = "Issuers")]
+    pub issuers: Vec<String>,
+
+    /// Accepted `aud` values (multi-audience resource server, F2).
+    ///
+    /// Mutually exclusive with [`Self::audience`]; same entry rules as
+    /// [`Self::issuers`].
+    #[serde(default, rename = "Audiences")]
+    pub audiences: Vec<String>,
+
     /// Accepted signature algorithms. Default: `["HS256"]`.
     ///
     /// `HS256` uses the shared secret; the asymmetric algorithms require JWKS
@@ -165,11 +185,162 @@ pub struct JwtSection {
 
     /// Remote JWKS source for asymmetric verification (RFC 7517).
     ///
-    /// Required when `Algorithms` contains RSA/EC/PS algorithms. The host
-    /// fetches and caches the set, refreshes it for an unknown `kid`, and
-    /// rejects non-HTTPS or SSRF-guarded destinations at startup.
+    /// Required when `Algorithms` contains RSA/EC/PS algorithms and no local
+    /// `Signing` key set is configured. The host fetches and caches the set,
+    /// refreshes it for an unknown `kid`, and rejects non-HTTPS or
+    /// SSRF-guarded destinations at startup.
     #[serde(default, rename = "Jwks")]
     pub jwks: Option<JwtJwksSection>,
+
+    /// One remote JWKS per trusted issuer (`Jwt.JwksSources[]`, F2).
+    ///
+    /// Mutually exclusive with [`Self::jwks`]: multiple issuers need one source
+    /// each, bound by `Issuer`, which must also appear in [`Self::issuers`].
+    /// A `kid` published by more than one source is rejected at verification
+    /// time (fail-closed: the host never guesses which issuer a key belongs to).
+    #[serde(default, rename = "JwksSources")]
+    pub jwks_sources: Vec<JwtJwksSourceSection>,
+
+    /// Require at least one OAuth 2.0 `scope` on every accepted token.
+    ///
+    /// Default: `false` (scope is still merged into the principal's
+    /// permissions). When `true`, a token with no scope is answered with `403`
+    /// — the credential is authentic but does not reach any scope.
+    #[serde(default, rename = "RequireScope")]
+    pub require_scope: bool,
+
+    /// Treat token scopes as permissions (`Jwt.ScopeAsPermissions`).
+    ///
+    /// Opt-in, default `false`: without it the configured scope claim is parsed
+    /// only for [`Self::require_scope`] and never widens `permissions()`. A
+    /// foreign `scope` claim must not silently authorize endpoints the
+    /// application declares by permission name.
+    #[serde(default, rename = "ScopeAsPermissions")]
+    pub scope_as_permissions: bool,
+
+    /// Claim that carries OAuth 2.0 scopes. Default: `"scope"`.
+    ///
+    /// The value may be a space-separated string (`"orders.read orders.write"`)
+    /// or an array of strings. Blank is a startup error.
+    #[serde(default = "default_jwt_scope_claim", rename = "ScopeClaim")]
+    pub scope_claim: String,
+
+    /// Separator inside a string scope claim. Default: `" "`.
+    ///
+    /// Blank is a startup error: an empty separator would split a scope name
+    /// into single characters.
+    #[serde(default = "default_jwt_scope_separator", rename = "ScopeSeparator")]
+    pub scope_separator: String,
+
+    /// Local asymmetric signing key (F1): sign with a private key, verify with
+    /// its public half, publish it as a standard JWKS.
+    ///
+    /// Additive: when unset, the host keeps signing and verifying HS256 with
+    /// `Secret`/`SecretFile` exactly as before.
+    #[serde(default, rename = "Signing")]
+    pub signing: Option<JwtSigningSection>,
+
+    /// Previously used public keys that must keep verifying until their tokens
+    /// expire (rolling `kid` rotation). Only public halves; never used to sign.
+    #[serde(default, rename = "RetiredSigningKeys")]
+    pub retired_signing_keys: Vec<JwtRetiredSigningKeySection>,
+}
+
+impl fmt::Debug for JwtSection {
+    /// Redacts `Secret`: the HMAC key must never reach a log line through
+    /// `tracing::debug!(?options)`, a panic message or a `?options` format.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("JwtSection")
+            .field("secret", &"<redacted>")
+            .field("secret_file", &self.secret_file)
+            .field("expiration_minutes", &self.expiration_minutes)
+            .field("issuer", &self.issuer)
+            .field("audience", &self.audience)
+            .field("issuers", &self.issuers)
+            .field("audiences", &self.audiences)
+            .field("algorithms", &self.algorithms)
+            .field("clock_skew_seconds", &self.clock_skew_seconds)
+            .field("invalid_token_behavior", &self.invalid_token_behavior)
+            .field("max_token_bytes", &self.max_token_bytes)
+            .field("jwks", &self.jwks)
+            .field("jwks_sources", &self.jwks_sources)
+            .field("require_scope", &self.require_scope)
+            .field("scope_as_permissions", &self.scope_as_permissions)
+            .field("scope_claim", &self.scope_claim)
+            .field("scope_separator", &self.scope_separator)
+            .field("signing", &self.signing)
+            .field("retired_signing_keys", &self.retired_signing_keys)
+            .finish()
+    }
+}
+
+/// Local asymmetric signing key (`Jwt.Signing`).
+///
+/// The host reads the private key once at startup, derives the public JWK from
+/// it, and registers an asymmetric `ITokenIssuer`. Validation is fail-closed:
+/// a missing/blank key id, an unsupported algorithm, an unreadable key file or
+/// a public key that does not match the private key aborts startup.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[non_exhaustive]
+pub struct JwtSigningSection {
+    /// Signature algorithm. `RS256`/`ES256`/`PS256` only; `HS256` stays on
+    /// `Jwt.Secret` and is rejected here.
+    #[serde(default, rename = "Algorithm")]
+    pub algorithm: JwtAlgorithm,
+    /// JWT header `kid` and the JWKS entry's `kid`. Blank is a startup error.
+    #[serde(default, rename = "KeyId")]
+    pub key_id: String,
+    /// Path to the PKCS#8/PKCS#1/SEC1 PEM private key.
+    #[serde(default, rename = "PrivateKeyFile")]
+    pub private_key_file: String,
+    /// Optional public key file, used only to cross-check the private key.
+    #[serde(default, rename = "PublicKeyFile")]
+    pub public_key_file: Option<String>,
+    /// Optional `iss` stamped by the default issuer when signing with this key.
+    ///
+    /// Required for a multi-issuer deployment (`Jwt.Issuers` with more than one
+    /// entry): the host cannot know which listed issuer it is, so it refuses to
+    /// guess. Must appear in `Jwt.Issuers`; for a single issuer the configured
+    /// `Issuer` already wins and this key must match it when both are set.
+    #[serde(default, rename = "Issuer")]
+    pub issuer: Option<String>,
+}
+
+/// A retired (verification-only) public key (`Jwt.RetiredSigningKeys[]`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[non_exhaustive]
+pub struct JwtRetiredSigningKeySection {
+    /// JWT header `kid` this public key verifies. Must be unique.
+    #[serde(default, rename = "KeyId")]
+    pub key_id: String,
+    /// Algorithm of the tokens signed with it. May differ from the active key.
+    #[serde(default, rename = "Algorithm")]
+    pub algorithm: JwtAlgorithm,
+    /// Path to the PEM public key.
+    #[serde(default, rename = "PublicKeyFile")]
+    pub public_key_file: String,
+}
+
+impl Default for JwtSigningSection {
+    fn default() -> Self {
+        Self {
+            algorithm: JwtAlgorithm::Hs256,
+            key_id: String::new(),
+            private_key_file: String::new(),
+            public_key_file: None,
+            issuer: None,
+        }
+    }
+}
+
+impl Default for JwtRetiredSigningKeySection {
+    fn default() -> Self {
+        Self {
+            algorithm: JwtAlgorithm::Hs256,
+            key_id: String::new(),
+            public_key_file: String::new(),
+        }
+    }
 }
 
 /// Remote JSON Web Key Set (JWKS) configuration.
@@ -218,6 +389,65 @@ fn default_jwks_timeout_ms() -> u64 {
 
 fn default_jwks_max_keys() -> usize {
     32
+}
+
+/// One per-issuer remote JWKS source (`Jwt.JwksSources[]`, F2).
+///
+/// Carries the same endpoint settings as [`JwtJwksSection`] (same keys, same
+/// bounds) plus the `Issuer` the source is bound to. Validation happens in the
+/// host at startup: the `Url` must be `https://`, `CacheSeconds` must be
+/// `1..=86400`, `TimeoutMs` must be `100..=10000`, `MaxKeys` must be `1..=256`,
+/// and `Issuer` must be non-blank, unique, and listed in `Jwt.Issuers`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[non_exhaustive]
+pub struct JwtJwksSourceSection {
+    /// `iss` value this source authenticates.
+    #[serde(default, rename = "Issuer")]
+    pub issuer: String,
+    /// Absolute `https://` URL of the JWKS document.
+    #[serde(default, rename = "Url")]
+    pub url: String,
+    /// Cache lifetime of a fetched set, in seconds. Default: 300.
+    #[serde(default = "default_jwks_cache_seconds", rename = "CacheSeconds")]
+    pub cache_seconds: u64,
+    /// Per-fetch timeout, in milliseconds. Default: 2000 (bounded 100..=10000).
+    #[serde(default = "default_jwks_timeout_ms", rename = "TimeoutMs")]
+    pub timeout_ms: u64,
+    /// Maximum keys kept from one document (default 32, bounded 1..=256).
+    #[serde(default = "default_jwks_max_keys", rename = "MaxKeys")]
+    pub max_keys: usize,
+    /// Allow a JWKS on a private/loopback network (intranet IdP).
+    #[serde(default, rename = "AllowPrivateNetworks")]
+    pub allow_private_networks: bool,
+}
+
+impl Default for JwtJwksSourceSection {
+    fn default() -> Self {
+        Self {
+            issuer: String::new(),
+            url: String::new(),
+            cache_seconds: default_jwks_cache_seconds(),
+            timeout_ms: default_jwks_timeout_ms(),
+            max_keys: default_jwks_max_keys(),
+            allow_private_networks: false,
+        }
+    }
+}
+
+impl JwtJwksSourceSection {
+    /// The endpoint settings in the single-source [`JwtJwksSection`] shape.
+    ///
+    /// Lets the host reuse one fetcher/cache implementation for both spellings
+    /// instead of keeping two copies of the JWKS client configuration.
+    pub fn jwks_section(&self) -> JwtJwksSection {
+        JwtJwksSection {
+            url: self.url.clone(),
+            cache_seconds: self.cache_seconds,
+            timeout_ms: self.timeout_ms,
+            max_keys: self.max_keys,
+            allow_private_networks: self.allow_private_networks,
+        }
+    }
 }
 
 /// JWT signature algorithm accepted by the host.
@@ -276,6 +506,27 @@ pub const MAX_JWT_CLOCK_SKEW_SECONDS: u64 = 300;
 /// Upper bound for `Jwt.MaxTokenBytes` (1 MiB).
 pub const MAX_JWT_TOKEN_BYTES: usize = 1024 * 1024;
 
+/// Upper bound for the `Jwt.Issuers` / `Jwt.Audiences` entry count.
+///
+/// A trust list longer than this is a configuration mistake (or an attempt to
+/// turn the verifier into a directory); every additional entry widens what the
+/// service accepts without a matching operational reason.
+pub const MAX_JWT_TRUST_VALUES: usize = 32;
+
+/// Default claim that carries OAuth 2.0 scopes.
+pub const DEFAULT_JWT_SCOPE_CLAIM: &str = "scope";
+
+/// Default separator inside a string scope claim.
+pub const DEFAULT_JWT_SCOPE_SEPARATOR: &str = " ";
+
+fn default_jwt_scope_claim() -> String {
+    DEFAULT_JWT_SCOPE_CLAIM.to_string()
+}
+
+fn default_jwt_scope_separator() -> String {
+    DEFAULT_JWT_SCOPE_SEPARATOR.to_string()
+}
+
 fn default_jwt_clock_skew_seconds() -> u64 {
     30
 }
@@ -296,11 +547,20 @@ impl Default for JwtSection {
             expiration_minutes: default_jwt_expiration_minutes(),
             issuer: None,
             audience: None,
+            issuers: Vec::new(),
+            audiences: Vec::new(),
             algorithms: default_jwt_algorithms(),
             clock_skew_seconds: default_jwt_clock_skew_seconds(),
             invalid_token_behavior: InvalidTokenBehavior::default(),
             max_token_bytes: default_jwt_max_token_bytes(),
             jwks: None,
+            jwks_sources: Vec::new(),
+            require_scope: false,
+            scope_as_permissions: false,
+            scope_claim: default_jwt_scope_claim(),
+            scope_separator: default_jwt_scope_separator(),
+            signing: None,
+            retired_signing_keys: Vec::new(),
         }
     }
 }
@@ -1369,6 +1629,62 @@ mod tests {
         .expect("idempotency parse");
         assert_eq!(options.idempotency.ttl_seconds, 7_200);
         assert_eq!(options.idempotency.lease_seconds, 60);
+    }
+
+    #[test]
+    fn jwt_f2_sections_bind_and_default() {
+        let defaults = JwtSection::default();
+        assert!(defaults.issuers.is_empty());
+        assert!(defaults.audiences.is_empty());
+        assert!(defaults.jwks_sources.is_empty());
+        assert!(!defaults.require_scope);
+        assert_eq!(defaults.scope_claim, "scope");
+        assert_eq!(defaults.scope_separator, " ");
+
+        let options: AppOptions = serde_json::from_value(serde_json::json!({
+            "Jwt": {
+                "Issuers": ["https://id.example.com", "https://corp.example.com"],
+                "Audiences": ["travel-api", "billing-api"],
+                "RequireScope": true,
+                "ScopeClaim": "scp",
+                "ScopeSeparator": ",",
+                "JwksSources": [
+                    {
+                        "Issuer": "https://id.example.com",
+                        "Url": "https://id.example.com/.well-known/jwks.json",
+                        "CacheSeconds": 60,
+                        "TimeoutMs": 500,
+                        "MaxKeys": 4,
+                        "AllowPrivateNetworks": true
+                    }
+                ]
+            }
+        }))
+        .expect("F2 Jwt config parses");
+        assert_eq!(options.jwt.issuers.len(), 2);
+        assert_eq!(options.jwt.audiences.len(), 2);
+        assert!(options.jwt.require_scope);
+        assert_eq!(options.jwt.scope_claim, "scp");
+        assert_eq!(options.jwt.scope_separator, ",");
+        assert_eq!(options.jwt.jwks_sources.len(), 1);
+        let source = &options.jwt.jwks_sources[0];
+        assert_eq!(source.issuer, "https://id.example.com");
+        assert_eq!(source.cache_seconds, 60);
+        assert_eq!(source.timeout_ms, 500);
+        assert_eq!(source.max_keys, 4);
+        assert!(source.allow_private_networks);
+
+        // The per-issuer settings reuse the single-source shape unchanged.
+        let single = source.jwks_section();
+        assert_eq!(single.url, "https://id.example.com/.well-known/jwks.json");
+        assert_eq!(single.cache_seconds, 60);
+
+        // Endpoint defaults are the `Jwt.Jwks` defaults.
+        let bare = JwtJwksSourceSection::default();
+        assert_eq!(bare.cache_seconds, 300);
+        assert_eq!(bare.timeout_ms, 2_000);
+        assert_eq!(bare.max_keys, 32);
+        assert!(!bare.allow_private_networks);
     }
 
     #[test]

@@ -25,6 +25,7 @@
 | offset 分页模型、`PagedRequest`/`PagedResult` 形状 | [pagination.md](../rust-webx/05-request-pattern/pagination.md)（使用）+ [pagination-model.md](pagination-model.md)（设计理由） | 其它页只写字段摘要 + 链接 | 迁移页与 deprecations 校验 |
 | keyset 分页、`KeysetRequest`/`CursorPage` | [pagination.md](../rust-webx/05-request-pattern/pagination.md) | 同上 | 同上 |
 | 实时/续传/presence/Redis 边界 | [known-boundaries.md](known-boundaries.md) | 使用页保留必要行为 + 指针 | 重复权威表扫描 + 评审 |
+| 联邦认证能力判定（F1–F4）、API 形状、落地轮次与"不做"清单 | [federated-auth.md](federated-auth.md) | 手册只写用法 + 指针，不复制判定表 | 评审 + 重复权威表扫描 |
 | broker 投递语义（竞争/广播/at-least-once 等） | [broker-capability-matrix.md](broker-capability-matrix.md) | 使用页只写结论 + 链接 | 重复权威表扫描 |
 | HTTP 错误码 / WebSocket 关闭码 | [error-codes.md](error-codes.md) / [close-codes.md](close-codes.md) | 使用页引用码值 | 重复权威表扫描 |
 | 稳定指标名/标签 | [compatibility.md](compatibility.md)（稳定面）+ [metrics.md](../rust-webx/11-production/metrics.md)（用法） | 页面给示例，不复制全表 | 旧指标名扫描（`http.requests`） |

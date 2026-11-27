@@ -82,6 +82,7 @@ impl IRequestHandler<LoginRequest, LoginResponse> for LoginHandler {
 > 不要回显“邮箱不存在/密码错误”的区别，统一 401。
 >
 > 完整可编译示例：`cargo run -p rust-webx --example auth_quickstart`（演示密码 `admin123`，仅用于本地）。
+> 需要跨服务验签（非对称密钥 + JWKS 发布）时：`cargo run -p rust-webx --example asymmetric_jwt`。
 
 ## 4. 受保护端点（2 分钟）
 

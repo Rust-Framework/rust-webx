@@ -52,6 +52,9 @@ http.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "io-util", "rt-multi-thread", "time"] }
 tokio-tungstenite = { workspace = true, features = ["connect"] }
 trybuild = "1"
+# examples/asymmetric_jwt.rs: generate a demo P-256 signing key at startup.
+rcgen = "0.13"
+tempfile.workspace = true
 
 [lints]
 workspace = true

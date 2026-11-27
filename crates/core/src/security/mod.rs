@@ -9,6 +9,9 @@
 //!   opaque id in, `SessionRecord` out; logout is immediate.
 //! * [`IPasswordHasher`] — hash/verify passwords as PHC strings (Argon2id by
 //!   default).
+//! * [`IClientCredentials`] — obtain a **machine** token for a service-to-service
+//!   call (OAuth 2.0 client credentials); the implementation owns the token
+//!   cache, early refresh and single-flight, so call sites just ask for a token.
 //!
 //! Two dependency-free primitives for the security-adjacent code every
 //! application writes at least once:
@@ -38,6 +41,7 @@
 //! (`JwtTokenIssuer`, `Argon2PasswordHasher`), while the ones that need nothing
 //! live here ([`InMemorySessionStore`]).
 
+mod client_credentials;
 mod once;
 mod password;
 mod refresh;
@@ -45,6 +49,7 @@ mod session;
 mod session_repo;
 mod tokens;
 
+pub use client_credentials::{IClientCredentials, ServiceToken};
 pub use once::{constant_time_eq, OneTimeSecret, OneTimeSecretState};
 pub use password::IPasswordHasher;
 pub use refresh::{

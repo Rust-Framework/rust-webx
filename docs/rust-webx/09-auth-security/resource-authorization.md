@@ -120,11 +120,98 @@ impl IRequestHandler<GetOrderRequest, OrderDto> for GetOrderHandler {
   不需要、也不应该扩展成通用“资源授权器”。
 - 想彻底不泄露存在性时，把归属条件并进查询（如上例的 `tenant_id`），越权请求直接得到 404。
 
+## 外部 PDP（`IAuthorizationClient`）
+
+权限真相在外部策略服务（PDP）时，用端口 + 适配器，不把角色表搬进框架：
+
+| 项 | 位置 |
+|----|------|
+| 端口 | `webx::IAuthorizationClient`（`check` / `check_batch`） |
+| 入参与结果 | `webx::AccessCheck { subject, tenant_id, permission, resource, context }` → `AccessDecision::{Allow, Deny}` |
+| HTTP 适配器 | `webx::{AuthorizationHttpConfig, HttpAuthorizationClient}` |
+| 装配 | `HostBuilder::use_authorization_client(Arc<dyn IAuthorizationClient>)` |
+
+```rust
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::time::Duration;
+use webx::*;
+
+let config = AuthorizationHttpConfig::new("https://pdp.example.com/v1/check")
+    .with_bearer_token(pdp_token)                 // 可选：PDP 自己的客户端凭据
+    .with_timeout(Duration::from_secs(2))         // 100ms–10s
+    .with_max_batch(50)                           // 1–500
+    .with_cache_ttl(Duration::from_secs(30));     // 1s–300s；默认**不缓存**
+let client = Arc::new(HttpAuthorizationClient::new(config, http, clock)?);
+
+Host::builder()
+    .use_authentication()
+    .use_authorization_client(client)
+    .build();
+```
+
+线上契约：`POST` 一个对象 `{"subject","tenant_id","permission","resource","context"}`
+（缺省项为 `null`，空 `context` 为 `{}`），返回 `{"decision":"allow"}` 或 `{"decision":"deny"}`
+（大小写不敏感）。`check_batch` 是同一对象的 JSON 数组，返回**等长**数组。别的形状
+（`{"allowed":true}`、多余/缺失元素）一律按 malformed 处理，不猜。
+
+调用点在 Handler 里显式发起，Deny → 403，`Err` 交给 `?` → 503：
+
+```rust
+#[derive(Inject)]
+pub struct PayInvoiceHandler {
+    #[inject]
+    authz: Arc<dyn IAuthorizationClient>,
+}
+
+#[handler(inject)]
+#[async_trait]
+impl IRequestHandler<PayInvoiceRequest, InvoiceDto> for PayInvoiceHandler {
+    async fn handle(&mut self, req: PayInvoiceRequest) -> ActionResult<InvoiceDto> {
+        let decision = self
+            .authz
+            .check(&AccessCheck {
+                subject: req.user.id.clone(),
+                tenant_id: Some(req.user.tenant_id.clone()),
+                permission: "invoice.pay".to_string(),
+                resource: Some(req.id.to_string()),
+                context: BTreeMap::new(),
+            })
+            .await?; // PDP 不可用 → 503，fail-closed
+        if decision != AccessDecision::Allow {
+            return Err(Error::forbidden("not allowed to pay this invoice"));
+        }
+        // ...
+    }
+}
+```
+
+- `Ok(Deny)` 是正常裁决（403），`Err` 是"PDP 没能裁决"（503）——两者不能混，
+  任何失败都**不会**降级成 `Allow`。
+- 非 2xx（含 PDP 回 401/403）、超时、连接失败、响应体超 256 KiB、JSON 形状不符 → 503（可重试）。
+- 决策缓存只缓存 `Allow`：`Deny` 不缓存。**缓存的 `Allow` 在 TTL 内不会再询问 PDP**，所以撤权/禁用
+  最迟 `cache_ttl`（≤300s）后生效；需要立即生效时调用 `invalidate()` 或关闭缓存。PDP 故障期间，
+  已缓存的 `Allow` 仍会放行（TTL 缓存的固有语义），未命中时才 fail-closed。键覆盖 `subject`/`tenant`/
+  `permission`/`resource`/有序 `context`，条目上限 65536，满了按 FIFO 淘汰；`invalidate()` 清空。
+- 每次检查（execute + 读响应体 + JSON 解析）整体受 `timeout` 约束：PDP 即使先回响应头再慢滴 body，
+  也不会把一次授权检查拖过预算。
+- `check_batch` 超过 `max_batch` 是配置错误（500），不是 PDP 故障。
+- 注册是"注册端口"：框架**不会**自动给路由挂 PDP。要么 Handler 显式调用，要么在
+  `#[authorize(dynamic)]` 的 `IDynamicAuthorizer` 里转调该端口（那条路仍然拿不到路径参数）。
+- 不要建角色/权限目录：框架只声明端口与适配器，权限模型、角色层级与决策逻辑属于 PDP 侧；
+  框架也不提供决策实现。
+
+判定与边界见 [federated-auth.md](../../design/federated-auth.md)。
+
 ## 小结
 
 资源授权分两层：路由级要求写在端点旁（`#[authorize]` 静态规则，或 `#[authorize(dynamic)]`
 把声明交给 `IDynamicAuthorizer::authorize_with_declared_rules`）；实例级归属写在 Handler 里
 （`require_owner` / `require_same_tenant`）。`Host::endpoints()` 返回的 `IEndpointCatalog`
 可把端点及其 `authorization` 规则组导出给权限系统。
+
+权限真相在外部 PDP 时，第三层不是"再写一个授权器"，而是 Handler 显式调用
+`IAuthorizationClient`：Deny → 403，PDP 不可用 → 503。框架只提供端口与 HTTP 适配器，
+不定义角色/权限模型。
 
 下一节：[authorize 宏与声明式授权](authorize-macro.md)

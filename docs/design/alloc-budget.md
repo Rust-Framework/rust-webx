@@ -1,6 +1,6 @@
 # 分配预算（Allocation Budget）
 
-> 本文是原则 P4「性能是预算」在分配维度的落地口径。基线：rust-webx 2.9.3。
+> 本文是原则 P4「性能是预算」在分配维度的落地口径。基线：rust-webx 2.9.4。
 > 工具：`testing/alloc-probe`（dev-only，不发布；`crates/` 只放可发布 crate）。
 
 ## 1. 测量方法

@@ -1,7 +1,7 @@
 # 下游能力缺口处置结论
 
 > 来源：下游 RXStudio 的 `docs/design/upstream-framework-gaps.md`（基于 rust-webx 2.6.0 /
-> rust-ef 2.6.0 / rust-dix 1.0.0 的落地反馈）。处置基线：rust-webx 2.9.3 / rust-ef 2.9.1 /
+> rust-ef 2.6.0 / rust-dix 1.0.0 的落地反馈）。处置基线：rust-webx 2.9.4 / rust-ef 2.9.1 /
 > rust-dix 1.1.0；运行期边界台账见 [known-boundaries.md](known-boundaries.md)，本页不重复其细节。
 >
 > 本页是**处置结论**，不是手册：每项只保留判定、落点与边界；实现细节在代码、rustdoc 与

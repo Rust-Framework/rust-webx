@@ -12,7 +12,7 @@
 
 | 位置 | 内容 | 是否发布 |
 |---|---|---|
-| `crates/` | 框架本体（core/engine/host/macros/spa/openapi/client/webx）、领域组（ai/auth/cache/queue/payment/push/transport）、`rust-webx-outbox` | **是**（家族内部精确 pin `=2.9.3`） |
+| `crates/` | 框架本体（core/engine/host/macros/spa/openapi/client/webx）、领域组（ai/auth/cache/queue/payment/push/transport）、`rust-webx-outbox` | **是**（家族内部精确 pin `=2.9.4`） |
 | `examples/` | 三个参考应用（各自独立 workspace）与 `examples/adapters/` 参考适配器 | 否 |
 | `testing/` | `contract-tests`、`alloc-probe`、`upgrade-smoke`、`load-probe` | 否 |
 | `fuzz/` | 独立 cargo-fuzz workspace | 否 |
@@ -25,7 +25,7 @@ rust-core → rust-dix → rust-ef
     领域组各 crate（含 rust-webx-apns / rust-webx-fcm）、rust-webx-outbox
 ```
 
-- 家族内部用精确 pin（`=2.9.3`）互约束，`rust-webx-outbox` 与家族同版本；
+- 家族内部用精确 pin（`=2.9.4`）互约束，`rust-webx-outbox` 与家族同版本；
 - `rust-ef` 在应用侧保持 semver 范围（`"2.6"`），不要收紧成精确 pin（如 `=2.9.1`），否则 ORM 发布前 lockfile 不可解析；
 - `examples/adapters/*` 全部 `publish = false`，**不进入发布序列**，也不参与 semver 检查；
 - `scripts/check-publish-order.py` 校验 `publish.sh` / `publish.yml` 与 workspace 成员顺序一致；

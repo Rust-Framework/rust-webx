@@ -3,7 +3,7 @@
 All notable changes to **rust-webx** are documented in this file.
 
 
-## [Unreleased]
+## [2.9.4] — 2026-11-27 — 联邦认证与机器身份（F1–F4）+ 安全硬化
 
 ### English
 
@@ -62,6 +62,10 @@ linked from each item.
   token cache is bounded (256 entries, FIFO), and `ISessionStore` declares
   `supports_refresh_family_revocation()` instead of `revoke_session_and_family` inferring the
   capability from a `501`.
+  **Behavior change:** `iss`/`aud`/`nbf` can no longer be injected through `TokenClaims::extra`; a
+  shared `Jwt.Jwks` with several `Jwt.Issuers`, or `HS256` with several issuers, is a startup error;
+  duplicate `(kid, alg)` entries inside one JWKS document are rejected with `503`. Registered in
+  `docs/design/compatibility.md` §3 item 8.
 
 ### 简体中文
 
@@ -108,6 +112,9 @@ linked from each item.
   （execute + 读 body + 解析），F3 token 缓存有界（256 条，FIFO），`ISessionStore` 以
   `supports_refresh_family_revocation()` 显式声明能力，`revoke_session_and_family` 不再用 `501`
   猜测能力。
+  **行为变更：** `iss`/`aud`/`nbf` 不能再经 `TokenClaims::extra` 注入；共享 `Jwt.Jwks` 配多个
+  `Jwt.Issuers`、或 `HS256` 配多个 issuer，都是启动失败；同一 JWKS 文档内重复 `(kid, alg)` 以
+  `503` 拒绝。登记见 `docs/design/compatibility.md` §3 第 8 条。
 
 ## [2.9.3] — 2026-11-26 — 已知边界收口补丁
 

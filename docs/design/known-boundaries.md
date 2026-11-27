@@ -72,7 +72,7 @@
 ## 验收命令
 
 ```bash
-# 文档门禁（必须输出 ok，版本 2.9.3）
+# 文档门禁（必须输出 ok，版本 2.9.4）
 "C:\Program Files\Git\bin\bash.exe" scripts/check-docs.sh
 python scripts/check-publish-order.py
 

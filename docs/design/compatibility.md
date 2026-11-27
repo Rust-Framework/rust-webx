@@ -1,6 +1,6 @@
 # 兼容性政策（SemVer、N-2 升级、锁步版本）
 
-> 当前发布 rust-webx 2.9.3；SemVer 门禁基线 v2.9.2。门禁在 `.github/workflows/ci.yml` 的
+> 当前发布 rust-webx 2.9.4；SemVer 门禁基线 v2.9.3。门禁在 `.github/workflows/ci.yml` 的
 > `semver`、`upgrade`、`lint`（内部版本钉）三个 job。
 
 ## 1. 三条承诺
@@ -34,35 +34,36 @@
    （`examples/adapters/*` 全部 `publish = false`）：它们是参考实现，可复制不可依赖
    （见 [端口与适配器归属](integrations.md)）。
 3. **N-2 源码兼容**：同一份只使用 N-2 稳定 API 的应用源码，必须能同时编译
-   针对 N-2 发布 `rust-webx = "=2.9.1"`（2.9.3 的 N-2）与当前工作区路径。
+   针对 N-2 发布 `rust-webx = "=2.9.2"`（2.9.4 的 N-2）与当前工作区路径。
 
 **补丁政策**：补丁版本（`x.y.z`）原则上只修 bug/安全问题——不删除或改名公开 API、不改默认值
 与语义。任何例外必须同批在 CHANGELOG 标注 `behavior change`、给出迁移说明，并登记到 §3 与 §7
-检查单。2.9.1 是已登记的破坏性补丁；**2.9.3 是已登记的行为变更补丁**（见 §3 第 7 条）。
+检查单。2.9.1 是已登记的破坏性补丁；**2.9.3 是已登记的行为变更补丁**（见 §3 第 7 条）；
+**2.9.4 是加性能力 + 安全硬化补丁**（见 §3 第 8 条）。
 
 ## 2. 门禁
 
 ### semver（对上一发布）
 
 ```text
-cargo semver-checks --package rust-webx-core   --baseline-rev v2.9.2
-cargo semver-checks --package rust-webx-engine --baseline-rev v2.9.2
-cargo semver-checks --package rust-webx-host   --baseline-rev v2.9.2
-cargo semver-checks --package rust-webx        --baseline-rev v2.9.2
+cargo semver-checks --package rust-webx-core   --baseline-rev v2.9.3
+cargo semver-checks --package rust-webx-engine --baseline-rev v2.9.3
+cargo semver-checks --package rust-webx-host   --baseline-rev v2.9.3
+cargo semver-checks --package rust-webx        --baseline-rev v2.9.3
 ```
 
 例外：`constructible_struct_adds_field = "allow"`（见 §3），以及 2.8.0 幂等值类型的
 `struct_marked_non_exhaustive` / `enum_marked_non_exhaustive = "allow"`（同见 §3），
 2.9.1 限流枚举/通知端口改名的两条 `allow` 已在 2.9.2 删除：semver baseline 当时前移到
-v2.9.1（2.9.3 起为 v2.9.2），这些 2.9.1 例外不再参与门禁，只在 §3 留档。
+v2.9.1（2.9.3 起为 v2.9.2，2.9.4 起为 v2.9.3），这些 2.9.1 例外不再参与门禁，只在 §3 留档。
 
 ### upgrade（N-2 源码兼容）
 
 `testing/upgrade-smoke/src/main.rs` 只用 N-2 稳定 API，分别在两个独立 workspace 编译。
-N-2 基线随当前版本滚动：2.9.3 的 N-2 是 **rust-webx 2.9.1**（下一个 minor 发布时同步前移）。
+N-2 基线随当前版本滚动：2.9.4 的 N-2 是 **rust-webx 2.9.2**（下一个 minor 发布时同步前移）。
 
 ```text
-testing/upgrade-smoke/stable/Cargo.toml   → rust-webx = "=2.9.1"（固定 2.9.1 全套）
+testing/upgrade-smoke/stable/Cargo.toml   → rust-webx = "=2.9.2"（固定 2.9.2 全套）
 testing/upgrade-smoke/current/Cargo.toml  → rust-webx = { path = "../../../crates/webx" }
 ```
 
@@ -193,6 +194,22 @@ testing/upgrade-smoke/current/Cargo.toml  → rust-webx = { path = "../../../cra
 需要保持字面量构造的结构体（如 `ProblemDetails`）由
 `crates/webx/tests/api_stability_test.rs` 锁定字段集合。
 
+8. **2.9.4 加性能力 + 安全硬化补丁的登记**：`cargo-semver-checks` 对 v2.9.3 只报告新增项
+   （`JwtKeySet`/`JwtSigningKey`、`Jwt.JwksSources` 等配置字段、`IClientCredentials`、
+   `IAuthorizationClient`、`ISessionStore::supports_refresh_family_revocation`、
+   `IJwtKeyResolver::resolve_bound`，全部带默认实现或为 serde 字段）。三项运行期收紧按 §1
+   补丁政策登记（CHANGELOG 标 `behavior change`）：
+   - **`TokenClaims::extra` 不再能注入 `iss`/`aud`/`nbf`**：这三个 claim 由 issuer 拥有，即使
+     未配置 `Jwt.Issuer`/`Jwt.Audience` 也会被剥离。迁移：不要通过 `extra` 传这些键；需要
+     `iss` 时用 `Jwt.Signing.Issuer`（多 issuer）或自定义 `ITokenIssuer`。
+   - **多 issuer 配置的启动校验收紧**：`Jwt.Jwks`（单份共享 JWKS）与多值 `Jwt.Issuers` 同配，
+     或 `Jwt.Algorithms` 含 `HS256` 且 `Jwt.Issuers` 多值，现在**启动失败**（此前能启动但无法
+     表达 per-issuer 信任）。迁移：每个 issuer 配一条 `Jwt.JwksSources`，并使用非对称签名。
+   - **JWKS 文档内重复 `(kid, alg)` → 503**（此前取第一个匹配）：轮换期同一 `kid` 的双 key 必须
+     改用新 `kid`；多 key 文档里的空 `kid` 条目被跳过。
+   其余为纯加性：F1 非对称签发/JWKS 发布、F2 多 issuer/scope、F3 client credentials、F4 PDP
+   端口与安全硬化（F3 缓存上界、F3/F4 端到端 deadline、F1/F2 来源绑定）。
+
 ## 4. 边界约定：rust-ef 错误映射
 
 `rust-ef` 是 Web 无关的 ORM：2.6 起它不再提供 `webx` feature，也不依赖 `rust-webx`。
@@ -216,8 +233,8 @@ let blogs = ctx.set::<Blog>().query().to_list().await?;
 | 持久层错误 → `AppError` | 不需要额外 crate；用 `rust-ef` 2.9.1 的 `From<EFError> for AppError` |
 | 持久化 `Idempotency-Key` store | 框架端口 `IIdempotencyStore`；持久化实现由下游提供，参考适配器 `examples/adapters/idempotency/ef`（非发布，可复制） |
 
-配对发布：2.9.1 时是 **rust-ef 2.9.1 → rust-webx 2.9.1**（历史顺序）；当前 2.9.3 仍按
-`rust-ef` 2.9.1 配对验证，发布顺序为 **rust-ef 2.9.1 → rust-webx 2.9.3**（2.9.3 补丁不改
+配对发布：2.9.1 时是 **rust-ef 2.9.1 → rust-webx 2.9.1**（历史顺序）；当前 2.9.4 仍按
+`rust-ef` 2.9.1 配对验证，发布顺序为 **rust-ef 2.9.1 → rust-webx 2.9.4**（2.9.4 不改
 ORM 依赖）。workspace 依赖写 `rust-ef = "2.6"`
 （semver 范围，已含 2.9.x，本版按 2.9.1 验证），不收紧为精确 pin——否则在 ORM 发布前
 `Cargo.lock` 不可解析。
@@ -262,8 +279,8 @@ host 写入日志。新增 rust-ef 变体走同一隐藏 500 分支，升级依�
 
 ### 配对验证（pairing verified）的证据边界
 
-发布顺序：2.9.1 时为 **rust-ef 2.9.1 → rust-webx 2.9.1**；当前 2.9.3 为
-**rust-ef 2.9.1 → rust-webx 2.9.3**（见上）。发布前用本地 rust-ef
+发布顺序：2.9.1 时为 **rust-ef 2.9.1 → rust-webx 2.9.1**；当前 2.9.4 为
+**rust-ef 2.9.1 → rust-webx 2.9.4**（见上）。发布前用本地 rust-ef
 checkout 做编译级配对验证：
 
 ```bash
@@ -329,20 +346,23 @@ rust-ef 发布后、给 rust-webx 打 tag 前，执行 `cargo update -p rust-ef 
   只接受 backport 的安全/文档/兼容修复。
 - 补丁版本原则上只修 bug/安全问题，不删 API、不改默认值、不改语义。已登记的例外：
   **2.9.1 是破坏性补丁**（见 §1）；**2.9.3 是行为变更补丁**（§3 第 7 条：`start_id`
-  默认值、保留事件 handler fail-closed、presence 身份/key 布局），均有迁移说明。
+  默认值、保留事件 handler fail-closed、presence 身份/key 布局）；**2.9.4 是加性能力 +
+  安全硬化补丁**（§3 第 8 条：`extra` 不能注入 `iss`/`aud`/`nbf`、多 issuer 配置收紧、
+  JWKS 重复 `kid` 拒绝），均有迁移说明。
 - 跨 minor 升级零代码改动（N-2 冒烟门禁）；跨 major 提供迁移指南与弃用窗口。
 
 ```text
 □ CI 全绿（tests/clippy/fmt/MSRV/audit/dedup/features/docs/coverage/benches/alloc/semver/realdb/brokers/examples/upgrade）
 □ CHANGELOG 含迁移说明（弃用/行为变更）
 □ 行为变更已登记（§3 + CHANGELOG `behavior change`）并有升级窗口口径：2.9.3 的 `start_id`
-  默认值、保留事件 handler fail-closed、presence 身份/key 布局（窗口见 known-boundaries C4）
+  默认值、保留事件 handler fail-closed、presence 身份/key 布局（窗口见 known-boundaries C4）；
+  2.9.4 的 `extra` 保留 claim 剥离、多 issuer 启动收紧、JWKS 重复 `kid` 拒绝（§3 第 8 条）
 □ 启动校验只对不可工作配置硬失败：2.9.2 可运行的 clamp 数值（`max_len`/`read_count`/`block_ms`/
   `claim_idle_ms`/`max_deliveries = 0`）保持可用（仅 warn），`dead_letter_stream == stream` 仅 warn
-□ 配对 ORM 已先行发布（rust-ef x.y.z → rust-webx x.y.z；当前 rust-ef 2.9.1 → rust-webx 2.9.3；`rust-ef = "2.6"` 范围覆盖 2.9.x，不收紧为精确 pin）
+□ 配对 ORM 已先行发布（rust-ef x.y.z → rust-webx x.y.z；当前 rust-ef 2.9.1 → rust-webx 2.9.4；`rust-ef = "2.6"` 范围覆盖 2.9.x，不收紧为精确 pin）
 □ 配对验证已跑：`RUST_EF_PATH=… bash scripts/check-pairing-rust-ef.sh`（或 CI `pairing` job）通过，证据边界见 §4
 □ semver-checks 对上一发布通过（例外仅 §3）
-□ N-2 冒烟通过（testing/upgrade-smoke；2.9.3 的 N-2 = rust-webx 2.9.1）
+□ N-2 冒烟通过（testing/upgrade-smoke；2.9.4 的 N-2 = rust-webx 2.9.2）
 □ cargo audit 0 漏洞（根 + `examples/adapters/Cargo.lock` 两个 lockfile）+ 依赖重复基线通过 + 内部版本钉一致
 □ LTS backport 只含安全/关键缺陷修复
 ```
@@ -353,7 +373,7 @@ rust-ef 发布后、给 rust-webx 打 tag 前，执行 `cargo update -p rust-ef 
 `api_stability_test` 锁定文档化构造路径；指定负责人与移除检查项。
 
 ```text
-cargo semver-checks --package rust-webx-host --baseline-rev v2.9.2
+cargo semver-checks --package rust-webx-host --baseline-rev v2.9.3
 cargo build --manifest-path testing/upgrade-smoke/stable/Cargo.toml
 cargo build --manifest-path testing/upgrade-smoke/current/Cargo.toml
 ```

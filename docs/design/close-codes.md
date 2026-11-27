@@ -2,7 +2,7 @@
 
 > 本文是 rust-webx 长连接**终止语义**的权威落点：WebSocket close frame code、SSE
 > `StreamEnd`、HTTP 连接排空三者如何对应，以及应用侧应依据哪个类型分支。
-> 当前 2.9.3，N-2 = 2.9.1（版本政策见 [compatibility.md](compatibility.md)）；
+> 当前 2.9.4，N-2 = 2.9.2（版本政策见 [compatibility.md](compatibility.md)）；
 > HTTP `problem+json` 的稳定错误码见 [error-codes.md](error-codes.md)。
 
 ---

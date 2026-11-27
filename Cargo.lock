@@ -3110,7 +3110,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3145,7 +3145,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-ai"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -3164,7 +3164,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-ai-gateway"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -3182,7 +3182,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-apns"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "async-trait",
  "jsonwebtoken",
@@ -3196,7 +3196,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-build"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "brotli",
  "mime_guess",
@@ -3206,7 +3206,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-client"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3241,7 +3241,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-core"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3266,7 +3266,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-engine"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3297,7 +3297,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-fcm"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "async-trait",
  "jsonwebtoken",
@@ -3311,7 +3311,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-h3"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3338,7 +3338,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-host"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -3390,7 +3390,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-kafka"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -3407,7 +3407,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-macros"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3416,7 +3416,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-mfa"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "data-encoding",
  "getrandom 0.4.3",
@@ -3430,7 +3430,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-nats"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "async-nats",
  "async-trait",
@@ -3448,7 +3448,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-oauth2"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -3469,7 +3469,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-oidc"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -3492,7 +3492,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-openapi"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "inventory",
  "rust-webx-core",
@@ -3501,7 +3501,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-outbox"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "async-trait",
  "inventory",
@@ -3516,7 +3516,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-pay"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3536,7 +3536,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-pay-adyen"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3557,7 +3557,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-pay-alipay"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -3584,7 +3584,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-pay-paypal"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -3604,7 +3604,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-pay-square"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -3625,7 +3625,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-pay-stripe"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3649,7 +3649,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-pay-wechatpay"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -3673,7 +3673,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-rabbitmq"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -3691,7 +3691,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-redis"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -3711,7 +3711,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-spa"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "async-trait",
  "brotli",
@@ -3724,7 +3724,7 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-webauthn"
-version = "2.9.3"
+version = "2.9.4"
 dependencies = [
  "base64 0.22.1",
  "ciborium",

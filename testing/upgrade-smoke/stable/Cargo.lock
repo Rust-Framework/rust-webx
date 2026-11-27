@@ -1207,9 +1207,9 @@ dependencies = [
 
 [[package]]
 name = "rust-webx"
-version = "2.9.1"
+version = "2.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50b01dbc8178420c0cabf59bbf18c04c880a407b55c509b3ffd5635b9ada9295"
+checksum = "51bb2c78b580b9bd6648c57cfb546021c576ce44cb7b3a1fda59fb3494d93325"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1232,9 +1232,9 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-client"
-version = "2.9.1"
+version = "2.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7d7d433f0f53fd3c28cc05a927e51655d2e55237d98372fa9c2caecf496e202"
+checksum = "9676a65110d08d6b08090b5fde6e228b7c606b28a416d2216309e47a628065d7"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1257,9 +1257,9 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-core"
-version = "2.9.1"
+version = "2.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6da9f80941363b88adb0e782a32eead4470b2357912ee12c61bf956d9e14b662"
+checksum = "ab26e932e4ef440dbf7a58e0749bf19e5f36df981d7ca576bc1b73a113f78220"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1284,9 +1284,9 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-engine"
-version = "2.9.1"
+version = "2.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6a67f08136bfbb4a562911ed52ab62dc8e293150be1e9a132a0461a1205b9cb"
+checksum = "3da74fcf38e71d7b24c1d71511d118d496829bdc001083c8ea17d4b90a3b41bc"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1314,9 +1314,9 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-host"
-version = "2.9.1"
+version = "2.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f7a71c84096888e2164282f58c61fda068afda6ec0bd84b110db1711fc4a82b"
+checksum = "b4f8ae9b1c3a6d0f58b3cb3d3a392beff1e51eb2c80d0f4ff30ecaae60cbd9fa"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -1361,9 +1361,9 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-macros"
-version = "2.9.1"
+version = "2.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bdaa5871c8bbf88c5ae720fd3f63c8235ad5ed0a0f220b89ced48b1535ea45c0"
+checksum = "23a32cb683cc44c72bc3b1b9be04be9d682fa576417fc2daadfd2fe6ab73c898"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1372,9 +1372,9 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-openapi"
-version = "2.9.1"
+version = "2.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4a59425ff40866ccf2ab3758f55f841f104b0b8bb13f24f26d11c492a36e847"
+checksum = "b032e4c02810a66ff75475e912fd13bd59c571662e2b9c4900c26a522deee427"
 dependencies = [
  "inventory",
  "rust-webx-core",
@@ -1383,9 +1383,9 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-outbox"
-version = "2.9.1"
+version = "2.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b641d85a940b9c023a9cd219c09c219336d9450bc201c0a53a1edfea4d82b7a"
+checksum = "6589778ea4661671cf04b3ea5ff424eb41cf2cdf430b82d52de683a0b01bdf4f"
 dependencies = [
  "async-trait",
  "rust-dix",
@@ -1397,9 +1397,9 @@ dependencies = [
 
 [[package]]
 name = "rust-webx-spa"
-version = "2.9.1"
+version = "2.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "290fcd3b2e18dbe458e4a3b10e0a2eb4b426d474b4e1c6a90cd8fcfa606128fb"
+checksum = "427cf9741f4faff290a0c6a4b1cdeb821b5af550198d389114b54a72a52528fc"
 dependencies = [
  "async-trait",
  "brotli-decompressor",
